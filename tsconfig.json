@@ -1,0 +1,19 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./apps/web" },
+    { "path": "./apps/api" },
+    { "path": "./packages/ui" },
+    { "path": "./packages/shared" },
+    { "path": "./packages/database" },
+    { "path": "./packages/ai" },
+    { "path": "./packages/orchestration" },
+    { "path": "./packages/memory" },
+    { "path": "./packages/terminal" },
+    { "path": "./packages/git" },
+    { "path": "./workers/indexing" },
+    { "path": "./workers/embeddings" },
+    { "path": "./workers/snapshots" },
+    { "path": "./workers/usage" }
+  ]
+}

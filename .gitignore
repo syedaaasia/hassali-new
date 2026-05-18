@@ -7,9 +7,9 @@ coverage/
 .cache/
 .git/
 *.log
+*.tsbuildinfo
 .env
 .env.local
 .env.production
 package-lock.json
-pnpm-lock.yaml
 yarn.lock
