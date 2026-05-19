@@ -10,8 +10,10 @@
     "typecheck": "next typegen && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.72",
     "@clerk/nextjs": "^6.31.6",
     "@monaco-editor/react": "^4.7.0",
+    "ai": "^5.0.101",
     "clsx": "^2.1.1",
     "monaco-editor": "^0.52.2",
     "next": "^15.1.6",
