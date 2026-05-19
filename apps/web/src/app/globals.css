@@ -4,28 +4,28 @@
 
 :root {
   color-scheme: light;
-  --background: 210 20% 98%;
-  --foreground: 220 18% 13%;
-  --surface: 0 0% 100%;
-  --surface-foreground: 220 18% 13%;
-  --muted: 210 20% 94%;
-  --muted-foreground: 218 10% 42%;
-  --accent: 170 40% 42%;
-  --accent-foreground: 180 35% 96%;
-  --border: 214 18% 86%;
+  --background: 210 24% 97%;
+  --foreground: 224 16% 13%;
+  --surface: 210 18% 99%;
+  --surface-foreground: 224 16% 13%;
+  --muted: 214 18% 93%;
+  --muted-foreground: 220 10% 43%;
+  --accent: 172 46% 38%;
+  --accent-foreground: 180 35% 98%;
+  --border: 216 16% 84%;
 }
 
 .dark {
   color-scheme: dark;
-  --background: 220 16% 9%;
-  --foreground: 210 18% 92%;
-  --surface: 220 14% 12%;
-  --surface-foreground: 210 18% 92%;
-  --muted: 220 12% 17%;
-  --muted-foreground: 215 10% 66%;
-  --accent: 170 36% 44%;
+  --background: 224 15% 7%;
+  --foreground: 213 18% 91%;
+  --surface: 224 14% 10%;
+  --surface-foreground: 213 18% 91%;
+  --muted: 224 12% 15%;
+  --muted-foreground: 218 10% 65%;
+  --accent: 172 42% 44%;
   --accent-foreground: 180 35% 96%;
-  --border: 220 12% 22%;
+  --border: 224 11% 20%;
 }
 
 * {
@@ -41,4 +41,50 @@ body {
   margin: 0;
   background: hsl(var(--background));
   color: hsl(var(--foreground));
+  font-feature-settings:
+    "rlig" 1,
+    "calt" 1;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+select,
+textarea {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+::selection {
+  background: hsl(var(--accent) / 0.24);
+}
+
+::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.45);
+  border: 3px solid transparent;
+  background-clip: content-box;
 }

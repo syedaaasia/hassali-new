@@ -26,7 +26,7 @@ export function EditorPanel() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-background">
-      <div className="flex h-10 shrink-0 items-center justify-between border-b bg-surface">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b bg-surface/95">
         <div className="flex h-full min-w-0 flex-1 items-center overflow-x-auto">
           {openTabs.map((tabPath) => {
             const file = files[tabPath];
@@ -36,18 +36,26 @@ export function EditorPanel() {
             return (
               <button
                 key={tabPath}
-                className={`flex h-full min-w-32 items-center gap-2 border-r px-3 text-left text-xs ${
-                  isActive ? "bg-background text-foreground" : "text-muted-foreground"
+                className={`group relative flex h-full min-w-32 max-w-48 items-center gap-2 border-r px-3 text-left text-xs ${
+                  isActive
+                    ? "bg-background text-foreground"
+                    : "text-muted-foreground hover:bg-muted/35 hover:text-foreground"
                 }`}
                 onClick={() => openFile(tabPath)}
                 type="button"
               >
+                {isActive ? <span className="absolute inset-x-2 top-0 h-px bg-accent" /> : null}
                 <span className="truncate">{tabPath}</span>
-                {isDirty ? <span className="text-accent">●</span> : null}
+                {isDirty ? (
+                  <span
+                    aria-label={`${tabPath} has unsaved changes`}
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                  />
+                ) : null}
                 {openTabs.length > 1 ? (
                   <span
                     aria-label={`Close ${tabPath}`}
-                    className="ml-auto text-muted-foreground hover:text-foreground"
+                    className="ml-auto rounded px-1 text-muted-foreground opacity-70 hover:bg-muted hover:text-foreground group-hover:opacity-100"
                     onClick={(event) => {
                       event.stopPropagation();
                       closeFile(tabPath);
@@ -70,9 +78,11 @@ export function EditorPanel() {
           })}
         </div>
         <div className="flex h-full shrink-0 items-center gap-2 border-l px-3">
-          {hasDirtyFiles ? <span className="text-xs text-muted-foreground">Unsaved changes</span> : null}
+          {hasDirtyFiles ? (
+            <span className="hidden text-xs text-muted-foreground sm:inline">Unsaved changes</span>
+          ) : null}
           <button
-            className="rounded-md border bg-background px-2.5 py-1 text-xs text-foreground hover:bg-muted"
+            className="rounded-md border bg-background/80 px-3 py-1.5 text-xs text-foreground shadow-sm hover:bg-muted"
             onClick={saveActiveFile}
             type="button"
           >
@@ -96,6 +106,7 @@ export function EditorPanel() {
             scrollBeyondLastLine: false,
             smoothScrolling: false,
             tabSize: 2,
+            padding: { top: 16 },
             wordWrap: "on"
           }}
           path={activeFile.path}

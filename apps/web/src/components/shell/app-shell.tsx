@@ -6,11 +6,11 @@ import { TopBar } from "@/components/shell/top-bar";
 
 export function AppShell() {
   return (
-    <div className="flex h-screen min-h-[680px] flex-col overflow-hidden bg-background">
+    <div className="flex h-[100dvh] min-h-[620px] flex-col overflow-hidden bg-background text-[13px]">
       <TopBar />
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 gap-px bg-border/60">
         <LeftSidebar />
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col bg-background">
           <EditorPanel />
           <BottomPanel />
         </div>
