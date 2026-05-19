@@ -3,6 +3,7 @@
 import { create } from "zustand";
 
 export type ChatRole = "user" | "assistant";
+export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
 
 export type ChatMessage = {
   id: string;
@@ -10,17 +11,41 @@ export type ChatMessage = {
   content: string;
 };
 
+export type WorkspaceContext = {
+  activeFileContent: string;
+  activePath: string;
+  fileList: string[];
+};
+
+export type DiffProposal = {
+  id: string;
+  status: "pending" | "approved" | "rejected";
+  summary: string;
+  changes: Array<{
+    path: string;
+    summary: string;
+    proposedContent: string;
+    diffPreview: string;
+  }>;
+};
+
 type ChatState = {
   messages: ChatMessage[];
   input: string;
   model: string;
+  mode: AiMode;
   isStreaming: boolean;
+  proposal: DiffProposal | null;
   setInput: (input: string) => void;
   setModel: (model: string) => void;
-  sendMessage: () => Promise<void>;
+  setMode: (mode: AiMode) => void;
+  clearProposal: () => void;
+  markProposalApproved: () => void;
+  sendMessage: (workspaceContext: WorkspaceContext) => Promise<void>;
 };
 
 const defaultModel = "openai/gpt-4o-mini";
+const proposalMarker = "HASSALI_DIFF_PROPOSAL:";
 
 function createMessage(role: ChatRole, content: string): ChatMessage {
   return {
@@ -39,13 +64,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
   ],
   input: "",
   model: defaultModel,
+  mode: "ASK",
   isStreaming: false,
+  proposal: null,
   setInput: (input) => set({ input }),
   setModel: (model) => set({ model }),
-  sendMessage: async () => {
-    const prompt = get().input.trim();
+  setMode: (mode) => {
+    if (mode === "EXECUTE") {
+      return;
+    }
 
-    if (!prompt || get().isStreaming) {
+    set({ mode });
+  },
+  clearProposal: () => set({ proposal: null }),
+  markProposalApproved: () => set({ proposal: null }),
+  sendMessage: async (workspaceContext) => {
+    const prompt = get().input.trim();
+    const mode = get().mode;
+
+    if (!prompt || get().isStreaming || mode === "EXECUTE") {
       return;
     }
 
@@ -53,7 +90,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const assistantMessage = createMessage("assistant", "");
     const nextMessages = [...get().messages, userMessage, assistantMessage];
 
-    set({ input: "", isStreaming: true, messages: nextMessages });
+    set({ input: "", isStreaming: true, messages: nextMessages, proposal: null });
 
     try {
       const response = await fetch("/api/ai/chat", {
@@ -61,7 +98,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           messages: nextMessages
             .filter((message) => message.content.trim().length > 0)
             .map(({ role, content }) => ({ role, content })),
-          model: get().model
+          mode,
+          model: get().model,
+          workspace: {
+            activeFileContent: workspaceContext.activeFileContent,
+            activePath: workspaceContext.activePath,
+            fileList: workspaceContext.fileList
+          }
         }),
         headers: {
           "Content-Type": "application/json"
@@ -75,6 +118,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let assistantContent = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -84,6 +128,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
 
         const chunk = decoder.decode(value, { stream: true });
+        assistantContent += chunk;
 
         set((state) => ({
           messages: state.messages.map((message) =>
@@ -92,6 +137,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : message
           )
         }));
+      }
+
+      if (mode === "SUGGEST") {
+        const markerIndex = assistantContent.indexOf(proposalMarker);
+
+        if (markerIndex !== -1) {
+          const visibleContent = assistantContent.slice(0, markerIndex).trim();
+          const proposalContent = assistantContent.slice(markerIndex + proposalMarker.length).trim();
+          const parsedProposal = JSON.parse(proposalContent) as DiffProposal;
+
+          set((state) => ({
+            messages: state.messages.map((message) =>
+              message.id === assistantMessage.id
+                ? {
+                    ...message,
+                    content: visibleContent || parsedProposal.summary
+                  }
+                : message
+            ),
+            proposal: {
+              ...parsedProposal,
+              status: "pending"
+            }
+          }));
+        }
       }
     } catch {
       set((state) => ({

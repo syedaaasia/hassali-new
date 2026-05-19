@@ -15,6 +15,7 @@ type WorkspaceState = {
   activePath: string;
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
+  applyFileContent: (path: string, content: string) => void;
   updateActiveFile: (content: string) => void;
   saveActiveFile: () => void;
 };
@@ -64,6 +65,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       return {
         activePath,
         openTabs: nextTabs.length > 0 ? nextTabs : ["welcome.ts"]
+      };
+    }),
+  applyFileContent: (path, content) =>
+    set((state) => {
+      const file = state.files[path];
+
+      if (!file) {
+        return state;
+      }
+
+      return {
+        activePath: path,
+        files: {
+          ...state.files,
+          [path]: {
+            ...file,
+            content,
+            savedContent: content
+          }
+        },
+        openTabs: state.openTabs.includes(path) ? state.openTabs : [...state.openTabs, path]
       };
     }),
   updateActiveFile: (content) =>

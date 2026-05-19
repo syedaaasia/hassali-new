@@ -15,15 +15,15 @@ export function LeftSidebar() {
   const openFile = useWorkspaceStore((state) => state.openFile);
 
   return (
-    <Panel className="hidden w-60 shrink-0 flex-col border-r bg-surface/90 md:flex xl:w-64">
-      <div className="border-b px-4 py-3.5">
+    <Panel className="hidden w-60 shrink-0 flex-col border-r border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] md:flex xl:w-64">
+      <div className="border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
         <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
           Project
         </div>
         <div className="mt-1 truncate text-xs text-foreground">hassali-demo</div>
       </div>
       <div className="flex flex-1 flex-col gap-3 p-3.5">
-        <div className="rounded-lg border border-border/70 bg-background/60 p-2.5 shadow-[0_10px_32px_hsl(224_20%_4%/0.08)]">
+        <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.58)] p-2.5 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
           <div className="flex items-center justify-between px-1 pb-2 text-xs font-medium">
             <span>Workspace</span>
             <span className="text-[11px] text-muted-foreground">{Object.keys(files).length}</span>
@@ -38,8 +38,8 @@ export function LeftSidebar() {
                   key={file.path}
                   className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${
                     isActive
-                      ? "bg-muted/90 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--accent)/0.15),0_8px_22px_hsl(var(--accent)/0.08)]"
-                      : "text-muted-foreground hover:bg-muted/55 hover:text-foreground"
+                      ? "bg-[hsl(var(--gold)/0.11)] text-foreground shadow-[inset_0_0_0_1px_hsl(var(--gold)/0.18),0_10px_28px_hsl(var(--gold)/0.08)]"
+                      : "text-muted-foreground hover:bg-[hsl(var(--royal-panel-raised)/0.62)] hover:text-foreground"
                   }`}
                   onClick={() => openFile(file.path)}
                   type="button"
@@ -47,7 +47,7 @@ export function LeftSidebar() {
                   {isActive ? (
                     <span className="absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 rounded-full bg-accent" />
                   ) : null}
-                  <span className="flex h-5 w-7 shrink-0 items-center justify-center rounded border border-border/70 bg-surface/80 font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
+                  <span className="flex h-5 w-7 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel-raised)/0.68)] font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
                     {fileTypeLabels[file.path] ?? "--"}
                   </span>
                   <span className="truncate">{file.path}</span>
@@ -62,18 +62,18 @@ export function LeftSidebar() {
             })}
           </div>
         </div>
-        <div className="rounded-lg border border-border/70 bg-background/55 p-3 shadow-sm">
+        <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.48)] p-3 shadow-sm">
           <div className="flex items-center gap-2 text-xs font-medium">
-            <span className="flex h-5 w-5 items-center justify-center rounded border border-border/70 bg-surface/80 font-mono text-[10px] text-muted-foreground">
+            <span className="flex h-5 w-5 items-center justify-center rounded-md border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel-raised)/0.68)] font-mono text-[10px] text-muted-foreground">
               G
             </span>
             Git
           </div>
           <div className="mt-1 text-xs leading-5 text-muted-foreground">Status placeholder</div>
         </div>
-        <div className="rounded-lg border border-border/70 bg-background/55 p-3 shadow-sm">
+        <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.48)] p-3 shadow-sm">
           <div className="flex items-center gap-2 text-xs font-medium">
-            <span className="flex h-5 w-5 items-center justify-center rounded border border-border/70 bg-surface/80 font-mono text-[10px] text-muted-foreground">
+            <span className="flex h-5 w-5 items-center justify-center rounded-md border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel-raised)/0.68)] font-mono text-[10px] text-muted-foreground">
               /
             </span>
             Search

@@ -21,19 +21,19 @@ const configureMonacoTheme: MonacoBeforeMount = (monaco) => {
     inherit: true,
     rules: [
       { token: "comment", foreground: "7b7f8e" },
-      { token: "keyword", foreground: "d2b477" },
-      { token: "string", foreground: "94bfa8" },
-      { token: "number", foreground: "c6a477" }
+      { token: "keyword", foreground: "ff5a70" },
+      { token: "string", foreground: "48d597" },
+      { token: "number", foreground: "d94dff" }
     ],
     colors: {
-      "editor.background": "#0d0f15",
-      "editor.foreground": "#ddd7c9",
-      "editor.lineHighlightBackground": "#171a22",
-      "editorCursor.foreground": "#78ad98",
-      "editorLineNumber.foreground": "#555967",
-      "editorLineNumber.activeForeground": "#9aa09f",
-      "editor.selectionBackground": "#28483f",
-      "editor.inactiveSelectionBackground": "#1d2c2b"
+      "editor.background": "#070707",
+      "editor.foreground": "#eee6d4",
+      "editor.lineHighlightBackground": "#151515",
+      "editorCursor.foreground": "#ff3655",
+      "editorLineNumber.foreground": "#5f5b58",
+      "editorLineNumber.activeForeground": "#ff6a7f",
+      "editor.selectionBackground": "#4b1822",
+      "editor.inactiveSelectionBackground": "#261116"
     }
   });
 };
@@ -51,8 +51,8 @@ export function EditorPanel() {
   const hasDirtyFiles = Object.values(files).some((file) => file.content !== file.savedContent);
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col bg-background">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b bg-surface/90">
+    <main className="flex min-w-0 flex-1 flex-col bg-[hsl(var(--royal-black))]">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.88)]">
         <div className="flex h-full min-w-0 flex-1 items-center overflow-x-auto">
           {openTabs.map((tabPath) => {
             const file = files[tabPath];
@@ -64,14 +64,14 @@ export function EditorPanel() {
                 key={tabPath}
                 className={`group relative flex h-full min-w-36 max-w-52 items-center gap-2 border-r px-3.5 text-left text-xs ${
                   isActive
-                    ? "bg-background text-foreground shadow-[inset_0_-1px_0_hsl(var(--background))]"
-                    : "text-muted-foreground hover:bg-muted/35 hover:text-foreground"
+                    ? "bg-[hsl(var(--royal-black))] text-foreground shadow-[inset_0_-1px_0_hsl(var(--royal-black))]"
+                    : "text-muted-foreground hover:bg-[hsl(var(--royal-panel-raised)/0.45)] hover:text-foreground"
                 }`}
                 onClick={() => openFile(tabPath)}
                 type="button"
               >
                 {isActive ? (
-                  <span className="absolute inset-x-3 top-0 h-px rounded-full bg-accent shadow-[0_0_12px_hsl(var(--accent)/0.45)]" />
+                  <span className="absolute inset-x-3 top-0 h-px rounded-full bg-accent shadow-[0_0_16px_hsl(var(--accent)/0.55)]" />
                 ) : null}
                 <span className="truncate">{tabPath}</span>
                 {isDirty ? (
@@ -105,12 +105,12 @@ export function EditorPanel() {
             );
           })}
         </div>
-        <div className="flex h-full shrink-0 items-center gap-2 border-l px-3.5">
+        <div className="flex h-full shrink-0 items-center gap-2 border-l border-[hsl(var(--royal-border-soft))] px-3.5">
           {hasDirtyFiles ? (
             <span className="hidden text-xs text-muted-foreground sm:inline">Unsaved changes</span>
           ) : null}
           <button
-            className="rounded-lg border border-border/80 bg-background/75 px-3.5 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/10"
+            className="rounded-xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--royal-panel)/0.72)] px-3.5 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-[hsl(var(--royal-panel-raised))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/10"
             onClick={saveActiveFile}
             type="button"
           >
@@ -118,7 +118,7 @@ export function EditorPanel() {
           </button>
         </div>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 rounded-b-2xl bg-[hsl(var(--royal-black))]">
         <MonacoEditor
           beforeMount={configureMonacoTheme}
           height="100%"
