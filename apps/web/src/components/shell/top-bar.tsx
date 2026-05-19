@@ -1,3 +1,5 @@
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+
 const topBarItems = ["Model: Auto", "Performance: Balanced", "Usage: 0%"];
 
 export function TopBar() {
@@ -15,6 +17,18 @@ export function TopBar() {
             {item}
           </div>
         ))}
+        <div className="flex h-8 items-center rounded-md border bg-background px-2">
+          <SignedIn>
+            <UserButton afterSignOutUrl="/" />
+          </SignedIn>
+          <SignedOut>
+            <SignInButton mode="modal">
+              <button className="text-xs text-muted-foreground" type="button">
+                Account
+              </button>
+            </SignInButton>
+          </SignedOut>
+        </div>
       </div>
     </header>
   );
