@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --background: 210 20% 98%;
+  --foreground: 220 18% 13%;
+  --surface: 0 0% 100%;
+  --surface-foreground: 220 18% 13%;
+  --muted: 210 20% 94%;
+  --muted-foreground: 218 10% 42%;
+  --accent: 170 40% 42%;
+  --accent-foreground: 180 35% 96%;
+  --border: 214 18% 86%;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: 220 16% 9%;
+  --foreground: 210 18% 92%;
+  --surface: 220 14% 12%;
+  --surface-foreground: 210 18% 92%;
+  --muted: 220 12% 17%;
+  --muted-foreground: 215 10% 66%;
+  --accent: 170 36% 44%;
+  --accent-foreground: 180 35% 96%;
+  --border: 220 12% 22%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
