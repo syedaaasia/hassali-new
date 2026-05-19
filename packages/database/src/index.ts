@@ -1,1 +1,2 @@
-export const databasePackageName = "@hassali/database";
+export { createDatabaseClient, db } from "./client";
+export * from "./schema/index";
