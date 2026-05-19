@@ -45,7 +45,7 @@ export default function HomePage() {
             </Link>
             <Link
               className="rounded-md border bg-surface px-4 py-2 text-sm text-muted-foreground"
-              href="/sign-in"
+              href="/dashboard"
             >
               Continue
             </Link>

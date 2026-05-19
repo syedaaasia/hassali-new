@@ -12,8 +12,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <ClerkProvider
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
-      afterSignInUrl="/dashboard"
-      afterSignUpUrl="/dashboard"
+      signInFallbackRedirectUrl="/dashboard"
+      signUpFallbackRedirectUrl="/dashboard"
+      signInForceRedirectUrl="/dashboard"
+      signUpForceRedirectUrl="/dashboard"
     >
       <html lang="en" className="dark">
         <body className="font-sans antialiased">{children}</body>

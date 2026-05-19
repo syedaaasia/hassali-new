@@ -1,3 +1,5 @@
+"use client";
+
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 
 const topBarItems = ["Model: Auto", "Performance: Balanced", "Usage: 0%"];
