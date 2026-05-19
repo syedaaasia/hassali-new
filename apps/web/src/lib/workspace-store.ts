@@ -24,8 +24,9 @@ const initialFiles: Record<string, WorkspaceFile> = {
     path: "welcome.ts",
     language: "typescript",
     savedContent:
-      'export function welcome() {\n  return "Build calmly, ship thoughtfully.";\n}\n',
-    content: 'export function welcome() {\n  return "Build calmly, ship thoughtfully.";\n}\n'
+      'type WorkspaceMood = "calm" | "focused" | "ready";\n\nexport function createSession(mood: WorkspaceMood) {\n  return {\n    mood,\n    promise: "small steps, visible changes, no surprise edits"\n  };\n}\n',
+    content:
+      'type WorkspaceMood = "calm" | "focused" | "ready";\n\nexport function createSession(mood: WorkspaceMood) {\n  return {\n    mood,\n    promise: "small steps, visible changes, no surprise edits"\n  };\n}\n'
   },
   "workspace.json": {
     path: "workspace.json",
@@ -39,9 +40,9 @@ const initialFiles: Record<string, WorkspaceFile> = {
     path: "README.md",
     language: "markdown",
     savedContent:
-      "# Hassali.ai Workspace\n\nThis local mock workspace is client-side only for Phase 5.\n\n- Open files from the sidebar\n- Edit in Monaco\n- Save into local state\n",
+      "# Hassali.ai Workspace\n\nA quiet workspace for turning intent into working software.\n\n- Open files from the sidebar\n- Edit in Monaco\n- Save into local state\n",
     content:
-      "# Hassali.ai Workspace\n\nThis local mock workspace is client-side only for Phase 5.\n\n- Open files from the sidebar\n- Edit in Monaco\n- Save into local state\n"
+      "# Hassali.ai Workspace\n\nA quiet workspace for turning intent into working software.\n\n- Open files from the sidebar\n- Edit in Monaco\n- Save into local state\n"
   }
 };
 

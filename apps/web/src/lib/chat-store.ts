@@ -34,7 +34,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [
     createMessage(
       "assistant",
-      "Ask a focused coding question. Streaming is wired, while file edits stay approval-first later."
+      "Tell me what you want to build or understand. I will keep the response focused and careful."
     )
   ],
   input: "",

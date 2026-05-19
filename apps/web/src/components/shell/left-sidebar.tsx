@@ -15,12 +15,15 @@ export function LeftSidebar() {
   const openFile = useWorkspaceStore((state) => state.openFile);
 
   return (
-    <Panel className="hidden w-56 shrink-0 flex-col border-r bg-surface/95 md:flex xl:w-64">
-      <div className="border-b px-3.5 py-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-        Project
+    <Panel className="hidden w-60 shrink-0 flex-col border-r bg-surface/90 md:flex xl:w-64">
+      <div className="border-b px-4 py-3.5">
+        <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          Project
+        </div>
+        <div className="mt-1 truncate text-xs text-foreground">hassali-demo</div>
       </div>
-      <div className="flex flex-1 flex-col gap-3 p-3">
-        <div className="rounded-md border bg-background/70 p-2 shadow-sm">
+      <div className="flex flex-1 flex-col gap-3 p-3.5">
+        <div className="rounded-lg border border-border/70 bg-background/60 p-2.5 shadow-[0_10px_32px_hsl(224_20%_4%/0.08)]">
           <div className="flex items-center justify-between px-1 pb-2 text-xs font-medium">
             <span>Workspace</span>
             <span className="text-[11px] text-muted-foreground">{Object.keys(files).length}</span>
@@ -33,15 +36,18 @@ export function LeftSidebar() {
               return (
                 <button
                   key={file.path}
-                  className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs ${
+                  className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${
                     isActive
-                      ? "bg-muted text-foreground shadow-[inset_2px_0_0_hsl(var(--accent))]"
-                      : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                      ? "bg-muted/90 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--accent)/0.15),0_8px_22px_hsl(var(--accent)/0.08)]"
+                      : "text-muted-foreground hover:bg-muted/55 hover:text-foreground"
                   }`}
                   onClick={() => openFile(file.path)}
                   type="button"
                 >
-                  <span className="flex h-5 w-6 shrink-0 items-center justify-center rounded border bg-surface font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
+                  {isActive ? (
+                    <span className="absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 rounded-full bg-accent" />
+                  ) : null}
+                  <span className="flex h-5 w-7 shrink-0 items-center justify-center rounded border border-border/70 bg-surface/80 font-mono text-[10px] text-muted-foreground group-hover:text-foreground">
                     {fileTypeLabels[file.path] ?? "--"}
                   </span>
                   <span className="truncate">{file.path}</span>
@@ -56,16 +62,20 @@ export function LeftSidebar() {
             })}
           </div>
         </div>
-        <div className="rounded-md border bg-background/70 p-3 shadow-sm">
+        <div className="rounded-lg border border-border/70 bg-background/55 p-3 shadow-sm">
           <div className="flex items-center gap-2 text-xs font-medium">
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+            <span className="flex h-5 w-5 items-center justify-center rounded border border-border/70 bg-surface/80 font-mono text-[10px] text-muted-foreground">
+              G
+            </span>
             Git
           </div>
           <div className="mt-1 text-xs leading-5 text-muted-foreground">Status placeholder</div>
         </div>
-        <div className="rounded-md border bg-background/70 p-3 shadow-sm">
+        <div className="rounded-lg border border-border/70 bg-background/55 p-3 shadow-sm">
           <div className="flex items-center gap-2 text-xs font-medium">
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+            <span className="flex h-5 w-5 items-center justify-center rounded border border-border/70 bg-surface/80 font-mono text-[10px] text-muted-foreground">
+              /
+            </span>
             Search
           </div>
           <div className="mt-1 text-xs leading-5 text-muted-foreground">Project search placeholder</div>
