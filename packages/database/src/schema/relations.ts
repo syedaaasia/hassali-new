@@ -1,5 +1,7 @@
 import { relations } from "drizzle-orm";
 import { aiRequests } from "./ai-requests";
+import { chatMessages } from "./chat-messages";
+import { chatSessions } from "./chat-sessions";
 import { files } from "./files";
 import { projects } from "./projects";
 import { prompts } from "./prompts";
@@ -10,6 +12,8 @@ import { workspaces } from "./workspaces";
 
 export const usersRelations = relations(users, ({ many }) => ({
   aiRequests: many(aiRequests),
+  chatMessages: many(chatMessages),
+  chatSessions: many(chatSessions),
   prompts: many(prompts),
   snapshots: many(snapshots),
   usageEvents: many(usageEvents),
@@ -30,9 +34,33 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
     references: [workspaces.id]
   }),
   aiRequests: many(aiRequests),
+  chatSessions: many(chatSessions),
   files: many(files),
   prompts: many(prompts),
   snapshots: many(snapshots)
+}));
+
+export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => ({
+  messages: many(chatMessages),
+  project: one(projects, {
+    fields: [chatSessions.projectId],
+    references: [projects.id]
+  }),
+  user: one(users, {
+    fields: [chatSessions.userId],
+    references: [users.id]
+  })
+}));
+
+export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
+  session: one(chatSessions, {
+    fields: [chatMessages.sessionId],
+    references: [chatSessions.id]
+  }),
+  user: one(users, {
+    fields: [chatMessages.userId],
+    references: [users.id]
+  })
 }));
 
 export const filesRelations = relations(files, ({ one, many }) => ({

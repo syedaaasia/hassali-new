@@ -26,4 +26,18 @@ export function createDatabaseClient(connectionString = readDatabaseUrl()) {
   return drizzle(pool, { schema });
 }
 
-export const db = createDatabaseClient();
+export type DatabaseClient = ReturnType<typeof createDatabaseClient>;
+
+let cachedDatabaseClient: DatabaseClient | null = null;
+
+export function getDatabaseClient() {
+  cachedDatabaseClient ??= createDatabaseClient();
+
+  return cachedDatabaseClient;
+}
+
+export const db = new Proxy({} as DatabaseClient, {
+  get(_target, property, receiver) {
+    return Reflect.get(getDatabaseClient(), property, receiver);
+  }
+});

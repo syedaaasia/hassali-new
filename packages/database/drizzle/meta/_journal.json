@@ -8,6 +8,13 @@
       "when": 1779149951053,
       "tag": "0000_spicy_winter_soldier",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779200654860,
+      "tag": "0001_easy_franklin_richards",
+      "breakpoints": true
     }
   ]
 }

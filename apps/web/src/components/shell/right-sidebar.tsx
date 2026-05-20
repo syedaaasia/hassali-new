@@ -25,6 +25,7 @@ export function RightSidebar() {
   const mode = useChatStore((state) => state.mode);
   const isStreaming = useChatStore((state) => state.isStreaming);
   const proposal = useChatStore((state) => state.proposal);
+  const chatSessionId = useChatStore((state) => state.chatSessionId);
   const setInput = useChatStore((state) => state.setInput);
   const setModel = useChatStore((state) => state.setModel);
   const setMode = useChatStore((state) => state.setMode);
@@ -33,23 +34,26 @@ export function RightSidebar() {
   const sendMessage = useChatStore((state) => state.sendMessage);
   const files = useWorkspaceStore((state) => state.files);
   const activePath = useWorkspaceStore((state) => state.activePath);
+  const projectId = useWorkspaceStore((state) => state.projectId);
   const applyFileContent = useWorkspaceStore((state) => state.applyFileContent);
   const activeFile = files[activePath];
 
   const sendWithContext = () =>
     sendMessage({
-      activeFileContent: activeFile.content,
+      activeFileContent: activeFile?.content ?? "",
       activePath,
-      fileList: Object.keys(files)
+      chatSessionId,
+      fileList: Object.keys(files),
+      projectId
     });
 
-  const approveProposal = () => {
+  const approveProposal = async () => {
     if (!proposal) {
       return;
     }
 
     for (const change of proposal.changes) {
-      applyFileContent(change.path, change.proposedContent);
+      await applyFileContent(change.path, change.proposedContent);
     }
 
     markProposalApproved();
@@ -164,7 +168,9 @@ export function RightSidebar() {
                 </button>
                 <button
                   className="rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground shadow-[0_12px_30px_hsl(var(--accent)/0.18)] hover:opacity-90"
-                  onClick={approveProposal}
+                  onClick={() => {
+                    void approveProposal();
+                  }}
                   type="button"
                 >
                   Approve

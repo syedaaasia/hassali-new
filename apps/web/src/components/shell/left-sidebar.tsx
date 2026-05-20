@@ -12,7 +12,11 @@ const fileTypeLabels: Record<string, string> = {
 export function LeftSidebar() {
   const files = useWorkspaceStore((state) => state.files);
   const activePath = useWorkspaceStore((state) => state.activePath);
+  const error = useWorkspaceStore((state) => state.error);
+  const isLoading = useWorkspaceStore((state) => state.isLoading);
+  const projectName = useWorkspaceStore((state) => state.projectName);
   const openFile = useWorkspaceStore((state) => state.openFile);
+  const createProject = useWorkspaceStore((state) => state.createProject);
 
   return (
     <Panel className="hidden w-60 shrink-0 flex-col border-r border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] md:flex xl:w-64">
@@ -20,15 +24,43 @@ export function LeftSidebar() {
         <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
           Project
         </div>
-        <div className="mt-1 truncate text-xs text-foreground">hassali-demo</div>
+        <div className="mt-1 truncate text-xs text-foreground">
+          {projectName ?? "No project yet"}
+        </div>
       </div>
       <div className="flex flex-1 flex-col gap-3 p-3.5">
+        {!projectName ? (
+          <div className="rounded-2xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--accent)/0.08)] p-3 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
+            <div className="text-xs font-medium text-foreground">Create Project</div>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              Start a PostgreSQL-backed workspace with starter files.
+            </p>
+            <button
+              className="mt-3 rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isLoading}
+              onClick={() => {
+                void createProject("Hassali Project");
+              }}
+              type="button"
+            >
+              {isLoading ? "Creating..." : "Create Project"}
+            </button>
+            {error ? <p className="mt-2 text-xs leading-5 text-destructive">{error}</p> : null}
+          </div>
+        ) : null}
         <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.58)] p-2.5 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
           <div className="flex items-center justify-between px-1 pb-2 text-xs font-medium">
             <span>Workspace</span>
-            <span className="text-[11px] text-muted-foreground">{Object.keys(files).length}</span>
+            <span className="text-[11px] text-muted-foreground">
+              {isLoading ? "..." : Object.keys(files).length}
+            </span>
           </div>
           <div className="space-y-1">
+            {Object.keys(files).length === 0 ? (
+              <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.34)] px-2 py-3 text-xs leading-5 text-muted-foreground">
+                {isLoading ? "Loading workspace..." : "Create a project to add starter files."}
+              </div>
+            ) : null}
             {Object.values(files).map((file) => {
               const isActive = file.path === activePath;
               const isDirty = file.content !== file.savedContent;

@@ -23,6 +23,7 @@ export const files = pgTable(
     path: text("path").notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     kind: fileKind("kind").notNull().default("file"),
+    content: text("content").notNull().default(""),
     sizeBytes: integer("size_bytes").notNull().default(0),
     contentHash: varchar("content_hash", { length: 128 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

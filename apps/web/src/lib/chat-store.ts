@@ -14,7 +14,9 @@ export type ChatMessage = {
 export type WorkspaceContext = {
   activeFileContent: string;
   activePath: string;
+  chatSessionId: string | null;
   fileList: string[];
+  projectId: string | null;
 };
 
 export type DiffProposal = {
@@ -36,6 +38,15 @@ type ChatState = {
   mode: AiMode;
   isStreaming: boolean;
   proposal: DiffProposal | null;
+  chatSessionId: string | null;
+  hydrateChat: (
+    messages: Array<{
+      content: string;
+      id: string;
+      role: ChatRole;
+    }>,
+    sessionId: string | null
+  ) => void;
   setInput: (input: string) => void;
   setModel: (model: string) => void;
   setMode: (mode: AiMode) => void;
@@ -55,6 +66,43 @@ function createMessage(role: ChatRole, content: string): ChatMessage {
   };
 }
 
+function isDiffProposal(value: unknown): value is DiffProposal {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const proposal = value as DiffProposal;
+
+  return (
+    typeof proposal.id === "string" &&
+    typeof proposal.summary === "string" &&
+    Array.isArray(proposal.changes) &&
+    proposal.changes.every(
+      (change) =>
+        change &&
+        typeof change === "object" &&
+        typeof change.path === "string" &&
+        typeof change.summary === "string" &&
+        typeof change.proposedContent === "string" &&
+        typeof change.diffPreview === "string"
+    )
+  );
+}
+
+function parseDiffProposal(content: string) {
+  if (!content.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(content) as unknown;
+
+    return isDiffProposal(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [
     createMessage(
@@ -67,6 +115,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   mode: "ASK",
   isStreaming: false,
   proposal: null,
+  chatSessionId: null,
+  hydrateChat: (messages, sessionId) =>
+    set({
+      chatSessionId: sessionId,
+      messages:
+        messages.length > 0
+          ? messages.map((message) => ({
+              content: message.content,
+              id: message.id,
+              role: message.role
+            }))
+          : [
+              createMessage(
+                "assistant",
+                "Tell me what you want to build or understand. I will keep the response focused and careful."
+              )
+            ]
+    }),
   setInput: (input) => set({ input }),
   setModel: (model) => set({ model }),
   setMode: (mode) => {
@@ -98,8 +164,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           messages: nextMessages
             .filter((message) => message.content.trim().length > 0)
             .map(({ role, content }) => ({ role, content })),
+          chatSessionId: workspaceContext.chatSessionId,
           mode,
           model: get().model,
+          projectId: workspaceContext.projectId,
           workspace: {
             activeFileContent: workspaceContext.activeFileContent,
             activePath: workspaceContext.activePath,
@@ -114,6 +182,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (!response.ok || !response.body) {
         throw new Error("Unable to start assistant stream.");
+      }
+
+      const responseSessionId = response.headers.get("x-hassali-chat-session-id");
+
+      if (responseSessionId) {
+        set({ chatSessionId: responseSessionId });
       }
 
       const reader = response.body.getReader();
@@ -145,7 +219,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (markerIndex !== -1) {
           const visibleContent = assistantContent.slice(0, markerIndex).trim();
           const proposalContent = assistantContent.slice(markerIndex + proposalMarker.length).trim();
-          const parsedProposal = JSON.parse(proposalContent) as DiffProposal;
+          const parsedProposal = parseDiffProposal(proposalContent);
+
+          if (!parsedProposal) {
+            set((state) => ({
+              messages: state.messages.map((message) =>
+                message.id === assistantMessage.id
+                  ? {
+                      ...message,
+                      content:
+                        visibleContent ||
+                        "I could not turn the model response into a safe diff proposal. Try a smaller, more specific change."
+                    }
+                  : message
+              ),
+              proposal: null
+            }));
+
+            return;
+          }
 
           set((state) => ({
             messages: state.messages.map((message) =>

@@ -1,4 +1,6 @@
 export * from "./ai-requests";
+export * from "./chat-messages";
+export * from "./chat-sessions";
 export * from "./enums";
 export * from "./files";
 export * from "./projects";

@@ -1,3 +1,11 @@
+import {
+  getProject,
+  listUserWorkspaces,
+  saveChatMessage,
+  type AiMode as PersistedAiMode
+} from "@hassali/database";
+import { getCurrentDatabaseUser } from "@/lib/server/clerk-database-user";
+
 export const runtime = "nodejs";
 
 const fallbackModel = "openai/gpt-4o-mini";
@@ -14,6 +22,13 @@ type WorkspaceContext = {
   activeFileContent: string;
   activePath: string;
   fileList: string[];
+};
+
+type ChatPersistenceContext = {
+  mode: PersistedAiMode;
+  projectId: string;
+  sessionId: string | null;
+  userId: string;
 };
 
 type DiffProposal = {
@@ -85,7 +100,159 @@ function createLocalProposal(prompt: string, workspace: WorkspaceContext): DiffP
   };
 }
 
-function createProposalStream(proposal: DiffProposal) {
+function isDiffProposalPayload(value: unknown): value is Pick<DiffProposal, "summary" | "changes"> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const payload = value as Pick<DiffProposal, "summary" | "changes">;
+
+  return (
+    typeof payload.summary === "string" &&
+    Array.isArray(payload.changes) &&
+    payload.changes.every(
+      (change) =>
+        change &&
+        typeof change === "object" &&
+        typeof change.path === "string" &&
+        typeof change.summary === "string" &&
+        typeof change.proposedContent === "string" &&
+        typeof change.diffPreview === "string"
+    )
+  );
+}
+
+function parseDiffProposalContent(content: string) {
+  const trimmedContent = content.trim();
+
+  if (!trimmedContent) {
+    return null;
+  }
+
+  const fencedJsonMatch = trimmedContent.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedJsonMatch?.[1]?.trim() ?? trimmedContent;
+
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+
+    return isDiffProposalPayload(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function createResponseHeaders(sessionId?: string | null) {
+  const headers: Record<string, string> = {
+    "Cache-Control": "no-store",
+    "Content-Type": "text/plain; charset=utf-8"
+  };
+
+  if (sessionId) {
+    headers["x-hassali-chat-session-id"] = sessionId;
+  }
+
+  return headers;
+}
+
+function createTextStream(content: string, sessionId?: string | null) {
+  const encoder = new TextEncoder();
+
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(content));
+        controller.close();
+      }
+    }),
+    {
+      headers: createResponseHeaders(sessionId)
+    }
+  );
+}
+
+async function findOwnedProjectId(userId: string, projectId: string) {
+  const ownedWorkspaces = await listUserWorkspaces(userId);
+
+  for (const workspace of ownedWorkspaces) {
+    const project = await getProject({
+      projectId,
+      workspaceId: workspace.id
+    });
+
+    if (project) {
+      return project.id;
+    }
+  }
+
+  return null;
+}
+
+async function createPersistenceContext(input: {
+  mode: AiMode;
+  projectId?: string | null;
+  sessionId?: string | null;
+}) {
+  if (!input.projectId) {
+    return null;
+  }
+
+  try {
+    const user = await getCurrentDatabaseUser();
+
+    if (!user) {
+      return null;
+    }
+
+    const projectId = await findOwnedProjectId(user.id, input.projectId);
+
+    if (!projectId) {
+      return null;
+    }
+
+    return {
+      mode: input.mode,
+      projectId,
+      sessionId: input.sessionId ?? null,
+      userId: user.id
+    } satisfies ChatPersistenceContext;
+  } catch {
+    return null;
+  }
+}
+
+async function persistChatMessage(
+  context: ChatPersistenceContext | null,
+  input: {
+    content: string;
+    metadata?: Record<string, unknown>;
+    role: "user" | "assistant";
+  }
+) {
+  if (!context || input.content.trim().length === 0) {
+    return context;
+  }
+
+  try {
+    const saved = await saveChatMessage({
+      content: input.content,
+      metadata: input.metadata,
+      mode: context.mode,
+      projectId: context.projectId,
+      role: input.role,
+      sessionId: context.sessionId,
+      userId: context.userId
+    });
+
+    return {
+      ...context,
+      sessionId: saved.session.id
+    };
+  } catch {
+    return context;
+  }
+}
+
+function createProposalStream(proposal: DiffProposal, sessionId?: string | null) {
   const encoder = new TextEncoder();
   const visibleSummary =
     "I prepared a diff proposal for review. It will only apply if you approve it.\n\n";
@@ -100,24 +267,28 @@ function createProposalStream(proposal: DiffProposal) {
       }
     }),
     {
-      headers: {
-        "Cache-Control": "no-store",
-        "Content-Type": "text/plain; charset=utf-8"
-      }
+      headers: createResponseHeaders(sessionId)
     }
   );
 }
 
-function createOpenRouterTextStream(response: Response) {
+function createOpenRouterTextStream(
+  response: Response,
+  options?: {
+    onComplete?: (content: string) => Promise<void>;
+    sessionId?: string | null;
+  }
+) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const reader = response.body?.getReader();
 
   if (!reader) {
-    return createPlaceholderStream(fallbackModel);
+    return createPlaceholderStream(fallbackModel, options);
   }
 
   let buffer = "";
+  let streamedContent = "";
 
   return new Response(
     new ReadableStream({
@@ -158,6 +329,7 @@ function createOpenRouterTextStream(response: Response) {
                 const content = parsed.choices?.[0]?.delta?.content;
 
                 if (content) {
+                  streamedContent += content;
                   controller.enqueue(encoder.encode(content));
                 }
               } catch {
@@ -166,21 +338,25 @@ function createOpenRouterTextStream(response: Response) {
             }
           }
         } finally {
+          await options?.onComplete?.(streamedContent);
           controller.close();
           reader.releaseLock();
         }
       }
     }),
     {
-      headers: {
-        "Cache-Control": "no-store",
-        "Content-Type": "text/plain; charset=utf-8"
-      }
+      headers: createResponseHeaders(options?.sessionId)
     }
   );
 }
 
-function createPlaceholderStream(model: string) {
+function createPlaceholderStream(
+  model: string,
+  options?: {
+    onComplete?: (content: string) => Promise<void>;
+    sessionId?: string | null;
+  }
+) {
   const encoder = new TextEncoder();
   const chunks = [
     `Streaming placeholder active for ${model}.\n\n`,
@@ -190,28 +366,31 @@ function createPlaceholderStream(model: string) {
 
   return new Response(
     new ReadableStream({
-      start(controller) {
+      async start(controller) {
+        let content = "";
+
         for (const chunk of chunks) {
+          content += chunk;
           controller.enqueue(encoder.encode(chunk));
         }
 
+        await options?.onComplete?.(content);
         controller.close();
       }
     }),
     {
-      headers: {
-        "Cache-Control": "no-store",
-        "Content-Type": "text/plain; charset=utf-8"
-      }
+      headers: createResponseHeaders(options?.sessionId)
     }
   );
 }
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
+    chatSessionId?: unknown;
     messages?: unknown;
     mode?: unknown;
     model?: unknown;
+    projectId?: unknown;
     workspace?: unknown;
   } | null;
 
@@ -247,12 +426,54 @@ export async function POST(request: Request) {
     return Response.json({ error: "EXECUTE mode is not enabled yet." }, { status: 400 });
   }
 
+  const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
+  const requestedSessionId = typeof body?.chatSessionId === "string" ? body.chatSessionId : null;
+  let persistence = await createPersistenceContext({
+    mode,
+    projectId: requestedProjectId,
+    sessionId: requestedSessionId
+  });
+
+  persistence = await persistChatMessage(persistence, {
+    content: latestUserPrompt,
+    metadata: {
+      model,
+      workspace: {
+        activePath: workspace.activePath,
+        fileList: workspace.fileList
+      }
+    },
+    role: "user"
+  });
+
   if (mode === "SUGGEST" && !process.env.OPENROUTER_API_KEY) {
-    return createProposalStream(createLocalProposal(latestUserPrompt, workspace));
+    const proposal = createLocalProposal(latestUserPrompt, workspace);
+    const visibleSummary =
+      "I prepared a diff proposal for review. It will only apply if you approve it.";
+
+    persistence = await persistChatMessage(persistence, {
+      content: visibleSummary,
+      metadata: {
+        model,
+        proposal
+      },
+      role: "assistant"
+    });
+
+    return createProposalStream(proposal, persistence?.sessionId);
   }
 
   if (!process.env.OPENROUTER_API_KEY) {
-    return createPlaceholderStream(model);
+    return createPlaceholderStream(model, {
+      onComplete: async (content) => {
+        persistence = await persistChatMessage(persistence, {
+          content,
+          metadata: { model },
+          role: "assistant"
+        });
+      },
+      sessionId: persistence?.sessionId
+    });
   }
 
   if (mode === "SUGGEST") {
@@ -291,7 +512,24 @@ export async function POST(request: Request) {
       }>;
     };
     const content = completion.choices?.[0]?.message?.content ?? "";
-    const parsed = JSON.parse(content) as Pick<DiffProposal, "summary" | "changes">;
+    const parsed = parseDiffProposalContent(content);
+
+    if (!parsed) {
+      const fallbackContent =
+        "I could not turn the model response into a safe diff proposal. Try a smaller, more specific change and I will prepare it for review.";
+
+      persistence = await persistChatMessage(persistence, {
+        content: fallbackContent,
+        metadata: {
+          model,
+          parseError: "invalid_suggest_json"
+        },
+        role: "assistant"
+      });
+
+      return createTextStream(fallbackContent, persistence?.sessionId);
+    }
+
     const proposal: DiffProposal = {
       id: `proposal-${Date.now()}`,
       mode: "SUGGEST",
@@ -300,7 +538,16 @@ export async function POST(request: Request) {
       changes: parsed.changes
     };
 
-    return createProposalStream(proposal);
+    persistence = await persistChatMessage(persistence, {
+      content: proposal.summary,
+      metadata: {
+        model,
+        proposal
+      },
+      role: "assistant"
+    });
+
+    return createProposalStream(proposal, persistence?.sessionId);
   }
 
   const response = await fetch(openRouterChatCompletionsUrl, {
@@ -328,5 +575,14 @@ export async function POST(request: Request) {
     return Response.json({ error: "OpenRouter chat request failed." }, { status: response.status });
   }
 
-  return createOpenRouterTextStream(response);
+  return createOpenRouterTextStream(response, {
+    onComplete: async (content) => {
+      persistence = await persistChatMessage(persistence, {
+        content,
+        metadata: { model },
+        role: "assistant"
+      });
+    },
+    sessionId: persistence?.sessionId
+  });
 }

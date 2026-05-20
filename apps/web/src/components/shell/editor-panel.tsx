@@ -46,6 +46,8 @@ export function EditorPanel() {
   const closeFile = useWorkspaceStore((state) => state.closeFile);
   const updateActiveFile = useWorkspaceStore((state) => state.updateActiveFile);
   const saveActiveFile = useWorkspaceStore((state) => state.saveActiveFile);
+  const isLoading = useWorkspaceStore((state) => state.isLoading);
+  const projectName = useWorkspaceStore((state) => state.projectName);
 
   const activeFile = files[activePath];
   const hasDirtyFiles = Object.values(files).some((file) => file.content !== file.savedContent);
@@ -56,6 +58,10 @@ export function EditorPanel() {
         <div className="flex h-full min-w-0 flex-1 items-center overflow-x-auto">
           {openTabs.map((tabPath) => {
             const file = files[tabPath];
+            if (!file) {
+              return null;
+            }
+
             const isActive = tabPath === activePath;
             const isDirty = file.content !== file.savedContent;
 
@@ -111,7 +117,10 @@ export function EditorPanel() {
           ) : null}
           <button
             className="rounded-xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--royal-panel)/0.72)] px-3.5 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-[hsl(var(--royal-panel-raised))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/10"
-            onClick={saveActiveFile}
+            disabled={!activeFile}
+            onClick={() => {
+              void saveActiveFile();
+            }}
             type="button"
           >
             Save
@@ -119,30 +128,47 @@ export function EditorPanel() {
         </div>
       </div>
       <div className="min-h-0 flex-1 rounded-b-2xl bg-[hsl(var(--royal-black))]">
-        <MonacoEditor
-          beforeMount={configureMonacoTheme}
-          height="100%"
-          language={activeFile.language}
-          onChange={(value) => updateActiveFile(value ?? "")}
-          options={{
-            automaticLayout: true,
-            fontFamily:
-              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
-            fontSize: 13,
-            lineHeight: 21,
-            minimap: { enabled: false },
-            overviewRulerBorder: false,
-            renderLineHighlight: "line",
-            scrollBeyondLastLine: false,
-            smoothScrolling: false,
-            tabSize: 2,
-            padding: { top: 16 },
-            wordWrap: "on"
-          }}
-          path={activeFile.path}
-          theme="hassali-dark"
-          value={activeFile.content}
-        />
+        {activeFile ? (
+          <MonacoEditor
+            beforeMount={configureMonacoTheme}
+            height="100%"
+            language={activeFile.language}
+            onChange={(value) => updateActiveFile(value ?? "")}
+            options={{
+              automaticLayout: true,
+              fontFamily:
+                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
+              fontSize: 13,
+              lineHeight: 21,
+              minimap: { enabled: false },
+              overviewRulerBorder: false,
+              renderLineHighlight: "line",
+              scrollBeyondLastLine: false,
+              smoothScrolling: false,
+              tabSize: 2,
+              padding: { top: 16 },
+              wordWrap: "on"
+            }}
+            path={activeFile.path}
+            theme="hassali-dark"
+            value={activeFile.content}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center px-6 text-center">
+            <div className="max-w-sm rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.54)] p-5 shadow-[0_24px_80px_hsl(0_80%_3%/0.28)]">
+              <div className="text-sm font-medium text-foreground">
+                {isLoading ? "Loading workspace" : projectName ? "No file selected" : "Create a project"}
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                {isLoading
+                  ? "Restoring your latest PostgreSQL-backed workspace."
+                  : projectName
+                    ? "Choose a file from the workspace sidebar to continue."
+                    : "Start with a small set of starter files, then save edits into the database."}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
