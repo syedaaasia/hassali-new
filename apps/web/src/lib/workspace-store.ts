@@ -15,6 +15,9 @@ type WorkspacePayloadFile = {
   id: string;
   path: string;
 };
+type FilesMutationResult = {
+  files: WorkspacePayloadFile[];
+};
 
 type WorkspaceProject = {
   id: string;
@@ -57,15 +60,20 @@ type WorkspaceState = {
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
   applyFileContent: (path: string, content: string) => Promise<void>;
+  createFile: (path: string) => Promise<void>;
+  createFolder: (path: string) => Promise<void>;
   createProject: (name: string) => Promise<WorkspaceLoadResult | null>;
+  deletePath: (path: string, kind: "file" | "folder") => Promise<void>;
   hydrateWorkspace: (payload: WorkspaceLoadResult) => void;
   loadWorkspace: (projectId?: string | null) => Promise<WorkspaceLoadResult | null>;
+  renamePath: (path: string, newPath: string, kind: "file" | "folder") => Promise<void>;
   switchProject: (projectId: string) => Promise<WorkspaceLoadResult | null>;
   updateActiveFile: (content: string) => void;
   saveActiveFile: () => Promise<void>;
 };
 type WorkspaceSet = (state: Partial<WorkspaceState>) => void;
 
+export const folderPlaceholderFileName = ".hassali-folder";
 const selectedProjectStorageKey = "hassali:selected-project-id";
 type LocalStorageLike = {
   getItem: (key: string) => string | null;
@@ -104,6 +112,14 @@ function filesFromPayload(files: WorkspacePayloadFile[]) {
   );
 }
 
+function isFolderPlaceholderPath(path: string) {
+  return path.endsWith(`/${folderPlaceholderFileName}`);
+}
+
+function visibleFilePaths(files: Record<string, WorkspaceFile>) {
+  return Object.keys(files).filter((path) => !isFolderPlaceholderPath(path));
+}
+
 function isWorkspaceLoadResult(value: unknown): value is WorkspaceLoadResult {
   if (!value || typeof value !== "object") {
     return false;
@@ -118,6 +134,26 @@ function isWorkspaceLoadResult(value: unknown): value is WorkspaceLoadResult {
       (typeof payload.project.id === "string" && typeof payload.project.name === "string")) &&
     Array.isArray(payload.files) &&
     Array.isArray(payload.projects)
+  );
+}
+
+function isFilesMutationResult(value: unknown): value is FilesMutationResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const payload = value as FilesMutationResult;
+
+  return (
+    Array.isArray(payload.files) &&
+    payload.files.every(
+      (file) =>
+        file &&
+        typeof file === "object" &&
+        typeof file.id === "string" &&
+        typeof file.path === "string" &&
+        typeof file.content === "string"
+    )
   );
 }
 
@@ -151,7 +187,7 @@ function applyWorkspacePayload(
   set: WorkspaceSet
 ) {
   const files = filesFromPayload(payload.files);
-  const firstPath = Object.keys(files)[0] ?? "";
+  const firstPath = visibleFilePaths(files)[0] ?? "";
 
   writeSelectedProjectId(payload.project?.id ?? null);
 
@@ -167,6 +203,49 @@ function applyWorkspacePayload(
     projects: payload.projects,
     workspaceId: payload.workspace.id
   });
+}
+
+function applyFilesPayload(
+  filesPayload: WorkspacePayloadFile[],
+  set: WorkspaceSet,
+  get: () => WorkspaceState,
+  preferredPath?: string | null
+) {
+  const files = filesFromPayload(filesPayload);
+  const visiblePaths = visibleFilePaths(files);
+  const currentPath = get().activePath;
+  const activePath =
+    preferredPath && files[preferredPath] && !isFolderPlaceholderPath(preferredPath)
+      ? preferredPath
+      : files[currentPath] && !isFolderPlaceholderPath(currentPath)
+        ? currentPath
+        : (visiblePaths[0] ?? "");
+
+  const existingOpenTabs = get().openTabs.filter(
+    (path) => files[path] && !isFolderPlaceholderPath(path)
+  );
+  const openTabs =
+    activePath && !existingOpenTabs.includes(activePath)
+      ? [...existingOpenTabs, activePath]
+      : existingOpenTabs;
+
+  set({
+    activePath,
+    error: null,
+    files,
+    openTabs: activePath ? openTabs : [],
+    isLoading: false
+  });
+}
+
+async function readFilesMutationResponse(response: Response) {
+  const payload = (await response.json()) as unknown;
+
+  if (!isFilesMutationResult(payload)) {
+    throw new Error("File API did not return project files.");
+  }
+
+  return payload;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
@@ -198,7 +277,6 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }),
   applyFileContent: async (path, content) => {
     const { files, projectId } = get();
-    let persistedFile: WorkspacePayloadFile | null = null;
 
     if (projectId) {
       const response = await fetch("/api/workspace/files", {
@@ -214,12 +292,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         throw new Error("File persistence failed.");
       }
 
-      const payload = (await response.json()) as { file?: WorkspacePayloadFile };
-      persistedFile = payload.file ?? null;
+      const payload = await readFilesMutationResponse(response);
+      applyFilesPayload(payload.files, set, get, path);
+      return;
     }
 
     const existingFile = files[path];
-    const nextContent = persistedFile?.content ?? content;
 
     set((state) => ({
       activePath: path,
@@ -227,15 +305,79 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       files: {
         ...state.files,
         [path]: {
-          content: nextContent,
-          id: persistedFile?.id ?? existingFile?.id,
+          content,
+          id: existingFile?.id,
           language: existingFile?.language ?? languageFromPath(path),
           path,
-          savedContent: nextContent
+          savedContent: content
         }
       },
       openTabs: state.openTabs.includes(path) ? state.openTabs : [...state.openTabs, path]
     }));
+  },
+  createFile: async (path) => {
+    const { projectId } = get();
+
+    if (!projectId) {
+      set({ error: "Create a project before adding files." });
+      return;
+    }
+
+    set({ error: null, isLoading: true });
+
+    try {
+      const response = await fetch("/api/workspace/files", {
+        body: JSON.stringify({ action: "createFile", content: "", path, projectId }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        throw new Error("File creation failed.");
+      }
+
+      const payload = await readFilesMutationResponse(response);
+      applyFilesPayload(payload.files, set, get, path);
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "File creation failed.",
+        isLoading: false
+      });
+    }
+  },
+  createFolder: async (path) => {
+    const { projectId } = get();
+
+    if (!projectId) {
+      set({ error: "Create a project before adding folders." });
+      return;
+    }
+
+    set({ error: null, isLoading: true });
+
+    try {
+      const response = await fetch("/api/workspace/files", {
+        body: JSON.stringify({ action: "createFolder", path, projectId }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        throw new Error("Folder creation failed.");
+      }
+
+      const payload = await readFilesMutationResponse(response);
+      applyFilesPayload(payload.files, set, get);
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Folder creation failed.",
+        isLoading: false
+      });
+    }
   },
   createProject: async (name) => {
     set({ error: null, isLoading: true });
@@ -274,6 +416,38 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   hydrateWorkspace: (payload) => {
     applyWorkspacePayload(payload, set);
   },
+  deletePath: async (path, kind) => {
+    const { projectId } = get();
+
+    if (!projectId) {
+      set({ error: "Create a project before deleting files." });
+      return;
+    }
+
+    set({ error: null, isLoading: true });
+
+    try {
+      const response = await fetch("/api/workspace/files", {
+        body: JSON.stringify({ kind, path, projectId }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "DELETE"
+      });
+
+      if (!response.ok) {
+        throw new Error("Delete failed.");
+      }
+
+      const payload = await readFilesMutationResponse(response);
+      applyFilesPayload(payload.files, set, get);
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Delete failed.",
+        isLoading: false
+      });
+    }
+  },
   loadWorkspace: async (projectId) => {
     set({ error: null, isLoading: true });
 
@@ -299,6 +473,38 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       set({ error: "Workspace loading failed.", hasLoaded: true, isLoading: false });
 
       return null;
+    }
+  },
+  renamePath: async (path, newPath, kind) => {
+    const { projectId } = get();
+
+    if (!projectId) {
+      set({ error: "Create a project before renaming files." });
+      return;
+    }
+
+    set({ error: null, isLoading: true });
+
+    try {
+      const response = await fetch("/api/workspace/files", {
+        body: JSON.stringify({ action: "rename", kind, newPath, path, projectId }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "PATCH"
+      });
+
+      if (!response.ok) {
+        throw new Error("Rename failed.");
+      }
+
+      const payload = await readFilesMutationResponse(response);
+      applyFilesPayload(payload.files, set, get, kind === "file" ? newPath : null);
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Rename failed.",
+        isLoading: false
+      });
     }
   },
   switchProject: async (projectId) => get().loadWorkspace(projectId),
@@ -343,9 +549,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         return;
       }
 
-      const payload = (await response.json()) as { file?: WorkspacePayloadFile };
-      savedContent = payload.file?.content ?? file.content;
-      fileId = payload.file?.id ?? file.id;
+      const payload = await readFilesMutationResponse(response);
+      const savedFile = payload.files.find((workspaceFile) => workspaceFile.path === activePath);
+      savedContent = savedFile?.content ?? file.content;
+      fileId = savedFile?.id ?? file.id;
     }
 
     set((state) => ({

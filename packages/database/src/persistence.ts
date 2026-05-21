@@ -77,6 +77,11 @@ export type ChatPersistenceContextResult = {
   sessionId: string | null;
   userId: string;
 };
+export type ProjectFileListResult = Array<{
+  content: string;
+  id: string;
+  path: string;
+}>;
 
 const defaultStarterFiles: StarterFile[] = [
   {
@@ -117,6 +122,61 @@ function hashContent(content: string) {
 
 function readSizeBytes(content: string) {
   return Buffer.byteLength(content, "utf8");
+}
+
+function mapFileRows(
+  rows: Array<{
+    content: string;
+    id: string;
+    path: string;
+  }>
+): ProjectFileListResult {
+  return rows.map((file) => ({
+    content: String(file.content),
+    id: String(file.id),
+    path: String(file.path)
+  }));
+}
+
+async function findOwnedProjectForExternalUser(
+  input: { externalUserId: string; projectId: string },
+  db: Db
+) {
+  const ownedProjectResult = await db.execute<{ id: string }>(sql`
+    select projects.id
+    from projects
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+    limit 1
+  `);
+
+  return ownedProjectResult.rows[0] ?? null;
+}
+
+export async function listUserProjectFiles(
+  input: { externalUserId: string; projectId: string },
+  db: Db = getDatabaseClient()
+): Promise<ProjectFileListResult | null> {
+  const ownedProject = await findOwnedProjectForExternalUser(input, db);
+
+  if (!ownedProject) {
+    return null;
+  }
+
+  const result = await db.execute<{
+    content: string;
+    id: string;
+    path: string;
+  }>(sql`
+    select id, path, content
+    from files
+    where project_id = ${input.projectId}
+    order by path asc
+  `);
+
+  return mapFileRows(result.rows);
 }
 
 export async function getOrCreateUser(input: ClerkUserInput, db: Db = getDatabaseClient()) {
@@ -452,16 +512,13 @@ export async function saveUserProjectFileContent(
   const contentHash = hashContent(input.content);
   const name = fileNameFromPath(input.path);
   const sizeBytes = readSizeBytes(input.content);
-  const ownedProjectResult = await db.execute<{ id: string }>(sql`
-    select projects.id
-    from projects
-    inner join workspaces on workspaces.id = projects.workspace_id
-    inner join users on users.id = workspaces.owner_id
-    where projects.id = ${input.projectId}
-      and users.external_id = ${input.externalUserId}
-    limit 1
-  `);
-  const ownedProject = ownedProjectResult.rows[0];
+  const ownedProject = await findOwnedProjectForExternalUser(
+    {
+      externalUserId: input.externalUserId,
+      projectId: input.projectId
+    },
+    db
+  );
 
   if (!ownedProject) {
     return null;
@@ -513,6 +570,213 @@ export async function saveUserProjectFileContent(
   }
 
   return file;
+}
+
+export async function createUserProjectFile(
+  input: {
+    content: string;
+    externalUserId: string;
+    path: string;
+    projectId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const ownedProject = await findOwnedProjectForExternalUser(input, db);
+
+  if (!ownedProject) {
+    return null;
+  }
+
+  const nestedPathPattern = `${input.path}/%`;
+  const conflictResult = await db.execute<{ id: string }>(sql`
+    select id
+    from files
+    where project_id = ${input.projectId}
+      and (path = ${input.path} or path like ${nestedPathPattern})
+    limit 1
+  `);
+
+  if (conflictResult.rows[0]) {
+    throw new Error("A file or folder already exists at that path.");
+  }
+
+  const contentHash = hashContent(input.content);
+  const name = fileNameFromPath(input.path);
+  const sizeBytes = readSizeBytes(input.content);
+
+  await db.execute(sql`
+    insert into files (project_id, path, name, content, content_hash, size_bytes)
+    values (${input.projectId}, ${input.path}, ${name}, ${input.content}, ${contentHash}, ${sizeBytes})
+  `);
+
+  return listUserProjectFiles(input, db);
+}
+
+export async function createUserProjectFolder(
+  input: {
+    externalUserId: string;
+    folderPath: string;
+    placeholderFileName: string;
+    projectId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const ownedProject = await findOwnedProjectForExternalUser(
+    {
+      externalUserId: input.externalUserId,
+      projectId: input.projectId
+    },
+    db
+  );
+
+  if (!ownedProject) {
+    return null;
+  }
+
+  const folderPattern = `${input.folderPath}/%`;
+  const existingResult = await db.execute<{ id: string }>(sql`
+    select id
+    from files
+    where project_id = ${input.projectId}
+      and (path = ${input.folderPath} or path like ${folderPattern})
+    limit 1
+  `);
+
+  if (existingResult.rows[0]) {
+    throw new Error("A file or folder already exists at that path.");
+  }
+
+  const placeholderPath = `${input.folderPath}/${input.placeholderFileName}`;
+  const content = "";
+
+  await db.execute(sql`
+    insert into files (project_id, path, name, content, content_hash, size_bytes)
+    values (
+      ${input.projectId},
+      ${placeholderPath},
+      ${input.placeholderFileName},
+      ${content},
+      ${hashContent(content)},
+      0
+    )
+  `);
+
+  return listUserProjectFiles(
+    {
+      externalUserId: input.externalUserId,
+      projectId: input.projectId
+    },
+    db
+  );
+}
+
+export async function renameUserProjectPath(
+  input: {
+    externalUserId: string;
+    kind: "file" | "folder";
+    newPath: string;
+    path: string;
+    projectId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const ownedProject = await findOwnedProjectForExternalUser(input, db);
+
+  if (!ownedProject) {
+    return null;
+  }
+
+  const newPathPattern = `${input.newPath}/%`;
+  const conflictResult = await db.execute<{ id: string }>(sql`
+    select id
+    from files
+    where project_id = ${input.projectId}
+      and (path = ${input.newPath} or path like ${newPathPattern})
+    limit 1
+  `);
+
+  if (conflictResult.rows[0]) {
+    throw new Error("A file or folder already exists at the new path.");
+  }
+
+  if (input.kind === "file") {
+    await db.execute(sql`
+      update files
+      set
+        path = ${input.newPath},
+        name = ${fileNameFromPath(input.newPath)}
+      where project_id = ${input.projectId} and path = ${input.path}
+    `);
+
+    const updatedResult = await db.execute<{ id: string }>(sql`
+      select id
+      from files
+      where project_id = ${input.projectId} and path = ${input.newPath}
+      limit 1
+    `);
+
+    if (!updatedResult.rows[0]) {
+      throw new Error("File not found.");
+    }
+
+    return listUserProjectFiles(input, db);
+  }
+
+  const folderPattern = `${input.path}/%`;
+  const prefixStart = input.path.length + 1;
+
+  await db.execute(sql`
+    update files
+    set path = ${input.newPath} || substring(path from ${prefixStart})
+    where project_id = ${input.projectId} and path like ${folderPattern}
+  `);
+
+  const updatedFolderResult = await db.execute<{ id: string }>(sql`
+    select id
+    from files
+    where project_id = ${input.projectId} and path like ${newPathPattern}
+    limit 1
+  `);
+
+  if (!updatedFolderResult.rows[0]) {
+    throw new Error("Folder not found.");
+  }
+
+  return listUserProjectFiles(input, db);
+}
+
+export async function deleteUserProjectPath(
+  input: {
+    externalUserId: string;
+    kind: "file" | "folder";
+    path: string;
+    projectId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const ownedProject = await findOwnedProjectForExternalUser(input, db);
+
+  if (!ownedProject) {
+    return null;
+  }
+
+  if (input.kind === "file") {
+    await db.execute(sql`
+      delete from files
+      where project_id = ${input.projectId} and path = ${input.path}
+    `);
+
+    return listUserProjectFiles(input, db);
+  }
+
+  const folderPattern = `${input.path}/%`;
+
+  await db.execute(sql`
+    delete from files
+    where project_id = ${input.projectId} and path like ${folderPattern}
+  `);
+
+  return listUserProjectFiles(input, db);
 }
 
 export async function loadWorkspaceForExternalUser(
