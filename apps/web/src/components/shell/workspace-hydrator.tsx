@@ -1,25 +1,36 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useChatStore } from "@/lib/chat-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 
 export function WorkspaceHydrator() {
-  const hasLoaded = useWorkspaceStore((state) => state.hasLoaded);
   const loadWorkspace = useWorkspaceStore((state) => state.loadWorkspace);
-  const hydrateChat = useChatStore((state) => state.hydrateChat);
+  const hasStartedHydration = useRef(false);
 
   useEffect(() => {
-    if (hasLoaded) {
+    if (hasStartedHydration.current) {
       return;
     }
 
+    hasStartedHydration.current = true;
+
     void loadWorkspace().then((payload) => {
       if (payload) {
-        hydrateChat(payload.chat.messages, payload.chat.sessionId);
+        console.info("workspace chat payload", {
+          messages: payload.chat.messages.length,
+          sessionId: payload.chat.sessionId
+        });
+
+        useChatStore.getState().hydrateChat(payload.chat.messages, payload.chat.sessionId);
+
+        console.info("chat store after hydration", {
+          messages: useChatStore.getState().messages.length,
+          sessionId: useChatStore.getState().chatSessionId
+        });
       }
     });
-  }, [hasLoaded, hydrateChat, loadWorkspace]);
+  }, [loadWorkspace]);
 
   return null;
 }

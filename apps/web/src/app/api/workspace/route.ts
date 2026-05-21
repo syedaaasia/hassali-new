@@ -10,11 +10,13 @@ export async function GET() {
 
   const workspace = await loadWorkspaceForExternalUser(userId);
 
+  console.info("workspace chat response", {
+    messages: workspace.chat.messages.length,
+    sessionId: workspace.chat.sessionId
+  });
+
   return Response.json({
-    chat: {
-      messages: [],
-      sessionId: null
-    },
+    chat: workspace.chat,
     files: workspace.files,
     project: workspace.project,
     workspace: workspace.workspace ?? {

@@ -43,6 +43,15 @@ export type CreateProjectWithStarterFileResult = {
   };
 };
 export type LoadWorkspaceForExternalUserResult = {
+  chat: {
+    messages: Array<{
+      content: string;
+      id: string;
+      mode: AiMode;
+      role: ChatRole;
+    }>;
+    sessionId: string | null;
+  };
   files: Array<{
     content: string;
     id: string;
@@ -56,6 +65,13 @@ export type LoadWorkspaceForExternalUserResult = {
     id: string;
     name: string;
   } | null;
+};
+
+export type ChatPersistenceContextResult = {
+  mode: AiMode;
+  projectId: string;
+  sessionId: string | null;
+  userId: string;
 };
 
 const defaultStarterFiles: StarterFile[] = [
@@ -509,6 +525,10 @@ export async function loadWorkspaceForExternalUser(
 
   if (!user) {
     return {
+      chat: {
+        messages: [],
+        sessionId: null
+      },
       files: [],
       project: null,
       workspace: null
@@ -529,6 +549,10 @@ export async function loadWorkspaceForExternalUser(
 
   if (!workspace) {
     return {
+      chat: {
+        messages: [],
+        sessionId: null
+      },
       files: [],
       project: null,
       workspace: null
@@ -549,6 +573,10 @@ export async function loadWorkspaceForExternalUser(
 
   if (!project) {
     return {
+      chat: {
+        messages: [],
+        sessionId: null
+      },
       files: [],
       project: null,
       workspace: {
@@ -558,18 +586,52 @@ export async function loadWorkspaceForExternalUser(
     };
   }
 
-  const filesResult = await db.execute<{
-    content: string;
-    id: string;
-    path: string;
-  }>(sql`
-    select id, path, content
-    from files
-    where project_id = ${project.id}
-    order by path asc
-  `);
+  const [filesResult, sessionResult] = await Promise.all([
+    db.execute<{
+      content: string;
+      id: string;
+      path: string;
+    }>(sql`
+      select id, path, content
+      from files
+      where project_id = ${project.id}
+      order by path asc
+    `),
+    db.execute<{
+      id: string;
+    }>(sql`
+      select id
+      from chat_sessions
+      where project_id = ${project.id} and user_id = ${user.id}
+      order by created_at desc
+      limit 1
+    `)
+  ]);
+  const session = sessionResult.rows[0];
+  const messagesResult = session
+    ? await db.execute<{
+        content: string;
+        id: string;
+        mode: AiMode;
+        role: ChatRole;
+      }>(sql`
+        select id, role, content, mode
+        from chat_messages
+        where session_id = ${session.id}
+        order by created_at asc
+      `)
+    : { rows: [] };
 
   return {
+    chat: {
+      messages: messagesResult.rows.map((message) => ({
+        content: String(message.content),
+        id: String(message.id),
+        mode: message.mode,
+        role: message.role
+      })),
+      sessionId: session ? String(session.id) : null
+    },
     files: filesResult.rows.map((file) => ({
       content: String(file.content),
       id: String(file.id),
@@ -591,41 +653,85 @@ async function getOrCreateChatSession(
   db: Db
 ) {
   if (input.sessionId) {
-    const [existingSession] = await db
-      .select()
-      .from(chatSessions)
-      .where(and(eq(chatSessions.id, input.sessionId), eq(chatSessions.projectId, input.projectId)))
-      .limit(1);
+    const existingSessionResult = await db.execute<{ id: string }>(sql`
+      select id
+      from chat_sessions
+      where id = ${input.sessionId} and project_id = ${input.projectId}
+      limit 1
+    `);
+    const existingSession = existingSessionResult.rows[0];
 
     if (existingSession) {
-      return existingSession;
+      return {
+        id: String(existingSession.id)
+      };
     }
   }
 
-  const [latestSession] = await db
-    .select()
-    .from(chatSessions)
-    .where(and(eq(chatSessions.projectId, input.projectId), eq(chatSessions.userId, input.userId)))
-    .orderBy(desc(chatSessions.updatedAt))
-    .limit(1);
+  const latestSessionResult = await db.execute<{ id: string }>(sql`
+    select id
+    from chat_sessions
+    where project_id = ${input.projectId} and user_id = ${input.userId}
+    order by updated_at desc
+    limit 1
+  `);
+  const latestSession = latestSessionResult.rows[0];
 
   if (latestSession) {
-    return latestSession;
+    return {
+      id: String(latestSession.id)
+    };
   }
 
-  const [createdSession] = await db
-    .insert(chatSessions)
-    .values({
-      projectId: input.projectId,
-      userId: input.userId
-    })
-    .returning();
+  const createdSessionResult = await db.execute<{ id: string }>(sql`
+    insert into chat_sessions (project_id, user_id)
+    values (${input.projectId}, ${input.userId})
+    returning id
+  `);
+  const createdSession = createdSessionResult.rows[0];
 
   if (!createdSession) {
     throw new Error("Failed to create chat session.");
   }
 
-  return createdSession;
+  return {
+    id: String(createdSession.id)
+  };
+}
+
+export async function resolveChatPersistenceContext(
+  input: {
+    externalUserId: string;
+    mode: AiMode;
+    projectId: string;
+    sessionId?: string | null;
+  },
+  db: Db = getDatabaseClient()
+): Promise<ChatPersistenceContextResult | null> {
+  const result = await db.execute<{
+    projectId: string;
+    userId: string;
+  }>(sql`
+    select projects.id as "projectId", users.id as "userId"
+    from projects
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+    limit 1
+  `);
+  const row = result.rows[0];
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    mode: input.mode,
+    projectId: String(row.projectId),
+    sessionId: input.sessionId ?? null,
+    userId: String(row.userId)
+  };
 }
 
 export async function saveChatMessage(
@@ -648,27 +754,39 @@ export async function saveChatMessage(
     },
     db
   );
+  const metadata = JSON.stringify(input.metadata ?? {});
 
-  const [message] = await db
-    .insert(chatMessages)
-    .values({
-      content: input.content,
-      metadata: input.metadata ?? {},
-      mode: input.mode,
-      role: input.role,
-      sessionId: session.id,
-      userId: input.userId
-    })
-    .returning();
+  const messageResult = await db.execute<{ id: string }>(sql`
+    insert into chat_messages (session_id, user_id, role, mode, content, metadata)
+    values (
+      ${session.id},
+      ${input.userId},
+      ${input.role},
+      ${input.mode},
+      ${input.content},
+      ${metadata}::jsonb
+    )
+    returning id
+  `);
+  const message = messageResult.rows[0];
 
-  await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
+  await db.execute(sql`
+    update chat_sessions
+    set updated_at = now()
+    where id = ${session.id}
+  `);
 
   if (!message) {
     throw new Error("Failed to save chat message.");
   }
 
   return {
-    message,
+    message: {
+      content: input.content,
+      id: String(message.id),
+      mode: input.mode,
+      role: input.role
+    },
     session
   };
 }

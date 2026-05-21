@@ -43,6 +43,7 @@ type ChatState = {
     messages: Array<{
       content: string;
       id: string;
+      mode?: AiMode;
       role: ChatRole;
     }>,
     sessionId: string | null
@@ -64,6 +65,35 @@ function createMessage(role: ChatRole, content: string): ChatMessage {
     role,
     content
   };
+}
+
+function createGreetingMessage() {
+  return createMessage(
+    "assistant",
+    "Tell me what you want to build or understand. I will keep the response focused and careful."
+  );
+}
+
+function normalizeHydratedMessages(
+  messages: Array<{
+    content: string;
+    id: string;
+    mode?: AiMode;
+    role: ChatRole;
+  }>
+) {
+  return messages
+    .filter(
+      (message) =>
+        typeof message.id === "string" &&
+        typeof message.content === "string" &&
+        (message.role === "user" || message.role === "assistant")
+    )
+    .map((message) => ({
+      content: message.content,
+      id: message.id,
+      role: message.role
+    }));
 }
 
 function isDiffProposal(value: unknown): value is DiffProposal {
@@ -104,35 +134,27 @@ function parseDiffProposal(content: string) {
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  messages: [
-    createMessage(
-      "assistant",
-      "Tell me what you want to build or understand. I will keep the response focused and careful."
-    )
-  ],
+  messages: [createGreetingMessage()],
   input: "",
   model: defaultModel,
   mode: "ASK",
   isStreaming: false,
   proposal: null,
   chatSessionId: null,
-  hydrateChat: (messages, sessionId) =>
+  hydrateChat: (messages, sessionId) => {
+    const hydratedMessages = normalizeHydratedMessages(messages);
+
+    console.info("hydrate chat input", {
+      messages: messages.length,
+      normalizedMessages: hydratedMessages.length,
+      sessionId
+    });
+
     set({
       chatSessionId: sessionId,
-      messages:
-        messages.length > 0
-          ? messages.map((message) => ({
-              content: message.content,
-              id: message.id,
-              role: message.role
-            }))
-          : [
-              createMessage(
-                "assistant",
-                "Tell me what you want to build or understand. I will keep the response focused and careful."
-              )
-            ]
-    }),
+      messages: hydratedMessages.length > 0 ? hydratedMessages : [createGreetingMessage()]
+    });
+  },
   setInput: (input) => set({ input }),
   setModel: (model) => set({ model }),
   setMode: (mode) => {

@@ -1,10 +1,9 @@
 import {
-  getProject,
-  listUserWorkspaces,
+  resolveChatPersistenceContext,
   saveChatMessage,
   type AiMode as PersistedAiMode
 } from "@hassali/database";
-import { getCurrentDatabaseUser } from "@/lib/server/clerk-database-user";
+import { auth } from "@clerk/nextjs/server";
 
 export const runtime = "nodejs";
 
@@ -170,23 +169,6 @@ function createTextStream(content: string, sessionId?: string | null) {
   );
 }
 
-async function findOwnedProjectId(userId: string, projectId: string) {
-  const ownedWorkspaces = await listUserWorkspaces(userId);
-
-  for (const workspace of ownedWorkspaces) {
-    const project = await getProject({
-      projectId,
-      workspaceId: workspace.id
-    });
-
-    if (project) {
-      return project.id;
-    }
-  }
-
-  return null;
-}
-
 async function createPersistenceContext(input: {
   mode: AiMode;
   projectId?: string | null;
@@ -197,25 +179,32 @@ async function createPersistenceContext(input: {
   }
 
   try {
-    const user = await getCurrentDatabaseUser();
+    const { userId } = await auth();
 
-    if (!user) {
+    if (!userId) {
+      console.info("chat persistence skipped", { reason: "no_clerk_user" });
       return null;
     }
 
-    const projectId = await findOwnedProjectId(user.id, input.projectId);
-
-    if (!projectId) {
-      return null;
-    }
-
-    return {
+    const context = await resolveChatPersistenceContext({
+      externalUserId: userId,
       mode: input.mode,
-      projectId,
-      sessionId: input.sessionId ?? null,
-      userId: user.id
-    } satisfies ChatPersistenceContext;
-  } catch {
+      projectId: input.projectId,
+      sessionId: input.sessionId ?? null
+    });
+
+    console.info("chat persistence context", {
+      hasContext: Boolean(context),
+      projectId: input.projectId,
+      sessionId: context?.sessionId ?? null
+    });
+
+    return context satisfies ChatPersistenceContext | null;
+  } catch (error) {
+    console.error(
+      "chat persistence context failed",
+      error instanceof Error ? error.message : "Unknown error"
+    );
     return null;
   }
 }
@@ -229,6 +218,10 @@ async function persistChatMessage(
   }
 ) {
   if (!context || input.content.trim().length === 0) {
+    console.info("chat message persistence skipped", {
+      hasContext: Boolean(context),
+      role: input.role
+    });
     return context;
   }
 
@@ -243,11 +236,20 @@ async function persistChatMessage(
       userId: context.userId
     });
 
+    console.info("chat message saved", {
+      role: input.role,
+      sessionId: saved.session.id
+    });
+
     return {
       ...context,
       sessionId: saved.session.id
     };
-  } catch {
+  } catch (error) {
+    console.error(
+      "chat message save failed",
+      error instanceof Error ? error.message : "Unknown error"
+    );
     return context;
   }
 }
