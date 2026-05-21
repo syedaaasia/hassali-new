@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
 import { type AiMode, useChatStore } from "@/lib/chat-store";
-import { useWorkspaceStore } from "@/lib/workspace-store";
+import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
 
 const modelOptions = [
   { label: "GPT-4o mini", value: "openai/gpt-4o-mini" },
@@ -37,13 +37,16 @@ export function RightSidebar() {
   const projectId = useWorkspaceStore((state) => state.projectId);
   const applyFileContent = useWorkspaceStore((state) => state.applyFileContent);
   const activeFile = files[activePath];
+  const visibleFileList = Object.keys(files).filter(
+    (path) => !path.endsWith(`/${folderPlaceholderFileName}`)
+  );
 
   const sendWithContext = () =>
     sendMessage({
       activeFileContent: activeFile?.content ?? "",
       activePath,
       chatSessionId,
-      fileList: Object.keys(files),
+      fileList: visibleFileList,
       projectId
     });
 
@@ -148,7 +151,9 @@ export function RightSidebar() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[11px] text-foreground">{change.path}</span>
-                      <span className="text-[10px] text-muted-foreground">local only</span>
+                      <span className="rounded-full border border-[hsl(var(--royal-border-soft))] px-2 py-0.5 text-[10px] uppercase text-muted-foreground">
+                        {change.action}
+                      </span>
                     </div>
                     <p className="mt-2 text-muted-foreground">{change.summary}</p>
                     <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-[hsl(var(--royal-border-soft))] bg-black/35 p-2 font-mono text-[11px] leading-5 text-muted-foreground">

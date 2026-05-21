@@ -25,6 +25,7 @@ export type TaskPlan = {
 };
 
 export type FileChange = {
+  action: "create" | "update";
   path: string;
   summary: string;
   currentContent?: string;

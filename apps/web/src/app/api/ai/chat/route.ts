@@ -36,10 +36,21 @@ type DiffProposal = {
   status: "pending";
   summary: string;
   changes: Array<{
+    action: "create" | "update";
     path: string;
     summary: string;
     proposedContent: string;
     diffPreview: string;
+  }>;
+};
+type DiffProposalPayload = {
+  summary: string;
+  changes: Array<{
+    action: "create" | "update";
+    path: string;
+    summary: string;
+    proposedContent: string;
+    diffPreview?: string;
   }>;
 };
 
@@ -74,37 +85,88 @@ function isWorkspaceContext(value: unknown): value is WorkspaceContext {
   );
 }
 
-function createDiffPreview(path: string, proposedContent: string) {
-  return [`--- ${path}`, `+++ ${path}`, ...proposedContent.split("\n").map((line) => `+ ${line}`)].join(
-    "\n"
-  );
+function createDiffPreview(action: "create" | "update", path: string, proposedContent: string) {
+  return [
+    action === "create" ? `create ${path}` : `update ${path}`,
+    `--- ${path}`,
+    `+++ ${path}`,
+    ...proposedContent.split("\n").map((line) => `+ ${line}`)
+  ].join("\n");
 }
 
 function createLocalProposal(prompt: string, workspace: WorkspaceContext): DiffProposal {
+  const lowerPrompt = prompt.toLowerCase();
+
+  if (
+    lowerPrompt.includes("landing") ||
+    lowerPrompt.includes("html") ||
+    lowerPrompt.includes("css") ||
+    lowerPrompt.includes("javascript") ||
+    lowerPrompt.includes("js")
+  ) {
+    const changes = [
+      {
+        action: "create" as const,
+        path: "index.html",
+        summary: "Creates a small landing page structure.",
+        proposedContent:
+          '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="UTF-8" />\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>Hassali Landing</title>\n    <link rel="stylesheet" href="./styles.css" />\n  </head>\n  <body>\n    <main class="page-shell">\n      <section class="hero">\n        <p class="eyebrow">Calm software creation</p>\n        <h1>Build ideas into working software with less friction.</h1>\n        <p class="lede">A lightweight AI-native workspace for focused creators.</p>\n        <button id="start-button">Start building</button>\n      </section>\n    </main>\n    <script src="./main.js"></script>\n  </body>\n</html>\n'
+      },
+      {
+        action: "create" as const,
+        path: "styles.css",
+        summary: "Adds calm premium styling for the landing page.",
+        proposedContent:
+          ':root {\n  color-scheme: dark;\n  font-family: Inter, ui-sans-serif, system-ui, sans-serif;\n  background: #090909;\n  color: #f4efe6;\n}\n\n* {\n  box-sizing: border-box;\n}\n\nbody {\n  margin: 0;\n  min-height: 100vh;\n  background: radial-gradient(circle at top left, rgba(16, 185, 129, 0.18), transparent 32%), #090909;\n}\n\n.page-shell {\n  min-height: 100vh;\n  display: grid;\n  place-items: center;\n  padding: 48px 20px;\n}\n\n.hero {\n  max-width: 720px;\n}\n\n.eyebrow {\n  color: #d6b16d;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  font-size: 0.78rem;\n}\n\nh1 {\n  font-size: clamp(2.4rem, 7vw, 5rem);\n  line-height: 0.95;\n  margin: 0;\n}\n\n.lede {\n  color: #b8b0a4;\n  font-size: 1.1rem;\n  line-height: 1.7;\n}\n\nbutton {\n  border: 1px solid rgba(214, 177, 109, 0.45);\n  border-radius: 999px;\n  background: #d6b16d;\n  color: #111;\n  padding: 12px 18px;\n  font-weight: 700;\n}\n'
+      },
+      {
+        action: "create" as const,
+        path: "main.js",
+        summary: "Adds a tiny interaction hook for the landing page.",
+        proposedContent:
+          'const button = document.querySelector("#start-button");\n\nbutton?.addEventListener("click", () => {\n  button.textContent = "Ready when you are";\n});\n'
+      }
+    ];
+
+    return {
+      id: `proposal-${Date.now()}`,
+      mode: "SUGGEST",
+      status: "pending",
+      summary: "Create a small HTML, CSS, and JavaScript landing page.",
+      changes: changes.map((change) => ({
+        ...change,
+        diffPreview: createDiffPreview(change.action, change.path, change.proposedContent)
+      }))
+    };
+  }
+
+  const targetPath = workspace.activePath || "notes.md";
+  const action = workspace.fileList.includes(targetPath) ? "update" : "create";
   const proposedContent = `${workspace.activeFileContent.trimEnd()}\n\n// Hassali suggestion: ${prompt}\n`;
 
   return {
     id: `proposal-${Date.now()}`,
     mode: "SUGGEST",
     status: "pending",
-    summary: `Propose an update to ${workspace.activePath}.`,
+    summary: `${action === "create" ? "Create" : "Update"} ${targetPath}.`,
     changes: [
       {
-        path: workspace.activePath,
+        action,
+        path: targetPath,
         proposedContent,
         summary: "Adds a local suggestion note without changing files automatically.",
-        diffPreview: createDiffPreview(workspace.activePath, proposedContent)
+        diffPreview: createDiffPreview(action, targetPath, proposedContent)
       }
     ]
   };
 }
 
-function isDiffProposalPayload(value: unknown): value is Pick<DiffProposal, "summary" | "changes"> {
+function isDiffProposalPayload(value: unknown): value is DiffProposalPayload {
   if (!value || typeof value !== "object") {
     return false;
   }
 
-  const payload = value as Pick<DiffProposal, "summary" | "changes">;
+  const payload = value as DiffProposalPayload;
 
   return (
     typeof payload.summary === "string" &&
@@ -113,10 +175,11 @@ function isDiffProposalPayload(value: unknown): value is Pick<DiffProposal, "sum
       (change) =>
         change &&
         typeof change === "object" &&
+        (change.action === "create" || change.action === "update") &&
         typeof change.path === "string" &&
         typeof change.summary === "string" &&
         typeof change.proposedContent === "string" &&
-        typeof change.diffPreview === "string"
+        (typeof change.diffPreview === "undefined" || typeof change.diffPreview === "string")
     )
   );
 }
@@ -486,9 +549,10 @@ export async function POST(request: Request) {
             role: "system",
             content:
               `You are Hassali.ai in SUGGEST mode. Return only one JSON object with this exact shape: ` +
-              `{ "summary": string, "changes": [{ "path": string, "summary": string, "proposedContent": string, "diffPreview": string }] }. ` +
+              `{ "summary": string, "changes": [{ "path": string, "action": "create" | "update", "summary": string, "proposedContent": string }] }. ` +
+              `You may include multiple file changes. Use action "create" for new files and "update" for existing files. ` +
               `Do not use markdown. Do not mutate files. Use the provided workspace context. Active file: ${workspace.activePath}. ` +
-              `Files: ${workspace.fileList.join(", ")}. Active file content:\n${workspace.activeFileContent}`
+              `Existing project files: ${workspace.fileList.join(", ")}. Active file content:\n${workspace.activeFileContent}`
           },
           ...messages
         ],
@@ -537,7 +601,14 @@ export async function POST(request: Request) {
       mode: "SUGGEST",
       status: "pending",
       summary: parsed.summary,
-      changes: parsed.changes
+      changes: parsed.changes.map((change) => ({
+        action: change.action,
+        diffPreview:
+          change.diffPreview ?? createDiffPreview(change.action, change.path, change.proposedContent),
+        path: change.path,
+        proposedContent: change.proposedContent,
+        summary: change.summary
+      }))
     };
 
     persistence = await persistChatMessage(persistence, {

@@ -24,6 +24,7 @@ export type DiffProposal = {
   status: "pending" | "approved" | "rejected";
   summary: string;
   changes: Array<{
+    action: "create" | "update";
     path: string;
     summary: string;
     proposedContent: string;
@@ -111,6 +112,7 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       (change) =>
         change &&
         typeof change === "object" &&
+        (change.action === "create" || change.action === "update") &&
         typeof change.path === "string" &&
         typeof change.summary === "string" &&
         typeof change.proposedContent === "string" &&
