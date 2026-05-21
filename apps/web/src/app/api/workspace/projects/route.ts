@@ -1,5 +1,5 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { createProjectWithStarterFile } from "@hassali/database";
+import { createProjectWithStarterFile, loadWorkspaceForExternalUser } from "@hassali/database";
 
 export async function POST(request: Request) {
   console.info("create project started");
@@ -33,7 +33,18 @@ export async function POST(request: Request) {
       projectName
     });
 
-    return Response.json(result);
+    const workspace = await loadWorkspaceForExternalUser(userId, result.project.id);
+
+    return Response.json({
+      chat: workspace.chat,
+      files: workspace.files,
+      project: workspace.project,
+      projects: workspace.projects,
+      workspace: workspace.workspace ?? {
+        id: "",
+        name: "My Workspace"
+      }
+    });
   } catch (error) {
     console.error(
       "create project failed",

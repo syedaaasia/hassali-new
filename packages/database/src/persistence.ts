@@ -61,6 +61,10 @@ export type LoadWorkspaceForExternalUserResult = {
     id: string;
     name: string;
   } | null;
+  projects: Array<{
+    id: string;
+    name: string;
+  }>;
   workspace: {
     id: string;
     name: string;
@@ -513,6 +517,7 @@ export async function saveUserProjectFileContent(
 
 export async function loadWorkspaceForExternalUser(
   externalUserId: string,
+  selectedProjectId?: string | null,
   db: Db = getDatabaseClient()
 ): Promise<LoadWorkspaceForExternalUserResult> {
   const userResult = await db.execute<{ id: string }>(sql`
@@ -531,6 +536,7 @@ export async function loadWorkspaceForExternalUser(
       },
       files: [],
       project: null,
+      projects: [],
       workspace: null
     };
   }
@@ -555,11 +561,12 @@ export async function loadWorkspaceForExternalUser(
       },
       files: [],
       project: null,
+      projects: [],
       workspace: null
     };
   }
 
-  const projectResult = await db.execute<{
+  const projectsResult = await db.execute<{
     id: string;
     name: string;
   }>(sql`
@@ -567,9 +574,14 @@ export async function loadWorkspaceForExternalUser(
     from projects
     where workspace_id = ${workspace.id}
     order by created_at desc
-    limit 1
   `);
-  const project = projectResult.rows[0];
+  const projectSummaries = projectsResult.rows.map((project) => ({
+    id: String(project.id),
+    name: String(project.name)
+  }));
+  const project =
+    projectSummaries.find((projectSummary) => projectSummary.id === selectedProjectId) ??
+    projectSummaries[0];
 
   if (!project) {
     return {
@@ -579,6 +591,7 @@ export async function loadWorkspaceForExternalUser(
       },
       files: [],
       project: null,
+      projects: [],
       workspace: {
         id: String(workspace.id),
         name: String(workspace.name)
@@ -641,6 +654,7 @@ export async function loadWorkspaceForExternalUser(
       id: String(project.id),
       name: String(project.name)
     },
+    projects: projectSummaries,
     workspace: {
       id: String(workspace.id),
       name: String(workspace.name)

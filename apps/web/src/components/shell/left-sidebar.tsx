@@ -1,6 +1,7 @@
 "use client";
 
 import { Panel } from "@/components/ui/panel";
+import { useChatStore } from "@/lib/chat-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 
 const fileTypeLabels: Record<string, string> = {
@@ -14,9 +15,20 @@ export function LeftSidebar() {
   const activePath = useWorkspaceStore((state) => state.activePath);
   const error = useWorkspaceStore((state) => state.error);
   const isLoading = useWorkspaceStore((state) => state.isLoading);
+  const projectId = useWorkspaceStore((state) => state.projectId);
   const projectName = useWorkspaceStore((state) => state.projectName);
+  const projects = useWorkspaceStore((state) => state.projects);
   const openFile = useWorkspaceStore((state) => state.openFile);
   const createProject = useWorkspaceStore((state) => state.createProject);
+  const switchProject = useWorkspaceStore((state) => state.switchProject);
+  const hydrateChat = useChatStore((state) => state.hydrateChat);
+  const nextProjectName = projects.length === 0 ? "Hassali Project" : `Hassali Project ${projects.length + 1}`;
+
+  const hydrateProjectChat = (payload: Awaited<ReturnType<typeof createProject>>) => {
+    if (payload) {
+      hydrateChat(payload.chat.messages, payload.chat.sessionId);
+    }
+  };
 
   return (
     <Panel className="hidden w-60 shrink-0 flex-col border-r border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] md:flex xl:w-64">
@@ -29,7 +41,54 @@ export function LeftSidebar() {
         </div>
       </div>
       <div className="flex flex-1 flex-col gap-3 p-3.5">
-        {!projectName ? (
+        <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.58)] p-2.5 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
+          <div className="flex items-center justify-between px-1 pb-2 text-xs font-medium">
+            <span>Projects</span>
+            <button
+              className="rounded-lg border border-accent/35 px-2 py-1 text-[11px] text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isLoading}
+              onClick={() => {
+                void createProject(nextProjectName).then(hydrateProjectChat);
+              }}
+              type="button"
+            >
+              New
+            </button>
+          </div>
+          <div className="space-y-1">
+            {projects.length === 0 ? (
+              <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.34)] px-2 py-3 text-xs leading-5 text-muted-foreground">
+                {isLoading ? "Loading projects..." : "Create your first project."}
+              </div>
+            ) : null}
+            {projects.map((project) => {
+              const isActive = project.id === projectId;
+
+              return (
+                <button
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${
+                    isActive
+                      ? "bg-[hsl(var(--gold)/0.11)] text-foreground shadow-[inset_0_0_0_1px_hsl(var(--gold)/0.18),0_10px_28px_hsl(var(--gold)/0.08)]"
+                      : "text-muted-foreground hover:bg-[hsl(var(--royal-panel-raised)/0.62)] hover:text-foreground"
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                  disabled={isLoading || isActive}
+                  key={project.id}
+                  onClick={() => {
+                    void switchProject(project.id).then(hydrateProjectChat);
+                  }}
+                  type="button"
+                >
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel-raised)/0.68)] font-mono text-[10px] text-muted-foreground">
+                    P
+                  </span>
+                  <span className="truncate">{project.name}</span>
+                </button>
+              );
+            })}
+          </div>
+          {error ? <p className="mt-2 px-1 text-xs leading-5 text-destructive">{error}</p> : null}
+        </div>
+        {!projectName && projects.length === 0 ? (
           <div className="rounded-2xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--accent)/0.08)] p-3 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
             <div className="text-xs font-medium text-foreground">Create Project</div>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -39,7 +98,7 @@ export function LeftSidebar() {
               className="mt-3 rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isLoading}
               onClick={() => {
-                void createProject("Hassali Project");
+                void createProject(nextProjectName).then(hydrateProjectChat);
               }}
               type="button"
             >

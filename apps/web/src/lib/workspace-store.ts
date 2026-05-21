@@ -16,12 +16,9 @@ type WorkspacePayloadFile = {
   path: string;
 };
 
-type CreateProjectResult = {
-  files: WorkspacePayloadFile[];
-  project: {
-    id: string;
-    name: string;
-  };
+type WorkspaceProject = {
+  id: string;
+  name: string;
 };
 
 export type WorkspaceLoadResult = {
@@ -39,6 +36,7 @@ export type WorkspaceLoadResult = {
     id: string;
     name: string;
   } | null;
+  projects: WorkspaceProject[];
   workspace: {
     id: string;
     name: string;
@@ -54,15 +52,25 @@ type WorkspaceState = {
   isLoading: boolean;
   projectId: string | null;
   projectName: string | null;
+  projects: WorkspaceProject[];
   workspaceId: string | null;
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
   applyFileContent: (path: string, content: string) => Promise<void>;
   createProject: (name: string) => Promise<WorkspaceLoadResult | null>;
   hydrateWorkspace: (payload: WorkspaceLoadResult) => void;
-  loadWorkspace: () => Promise<WorkspaceLoadResult | null>;
+  loadWorkspace: (projectId?: string | null) => Promise<WorkspaceLoadResult | null>;
+  switchProject: (projectId: string) => Promise<WorkspaceLoadResult | null>;
   updateActiveFile: (content: string) => void;
   saveActiveFile: () => Promise<void>;
+};
+type WorkspaceSet = (state: Partial<WorkspaceState>) => void;
+
+const selectedProjectStorageKey = "hassali:selected-project-id";
+type LocalStorageLike = {
+  getItem: (key: string) => string | null;
+  removeItem: (key: string) => void;
+  setItem: (key: string, value: string) => void;
 };
 
 function languageFromPath(path: string) {
@@ -108,31 +116,57 @@ function isWorkspaceLoadResult(value: unknown): value is WorkspaceLoadResult {
     typeof payload.workspace.name === "string" &&
     (payload.project === null ||
       (typeof payload.project.id === "string" && typeof payload.project.name === "string")) &&
-    Array.isArray(payload.files)
+    Array.isArray(payload.files) &&
+    Array.isArray(payload.projects)
   );
 }
 
-function isCreateProjectResult(value: unknown): value is CreateProjectResult {
-  if (!value || typeof value !== "object") {
-    return false;
+function readSelectedProjectId() {
+  const localStorage = (globalThis as { localStorage?: LocalStorageLike }).localStorage;
+
+  if (!localStorage) {
+    return null;
   }
 
-  const payload = value as CreateProjectResult;
+  return localStorage.getItem(selectedProjectStorageKey);
+}
 
-  return (
-    typeof payload.project?.id === "string" &&
-    typeof payload.project.name === "string" &&
-    Array.isArray(payload.files) &&
-    payload.files.length > 0 &&
-    payload.files.every(
-      (file) =>
-        file &&
-        typeof file === "object" &&
-        typeof file.id === "string" &&
-        typeof file.path === "string" &&
-        typeof file.content === "string"
-    )
-  );
+function writeSelectedProjectId(projectId: string | null) {
+  const localStorage = (globalThis as { localStorage?: LocalStorageLike }).localStorage;
+
+  if (!localStorage) {
+    return;
+  }
+
+  if (projectId) {
+    localStorage.setItem(selectedProjectStorageKey, projectId);
+    return;
+  }
+
+  localStorage.removeItem(selectedProjectStorageKey);
+}
+
+function applyWorkspacePayload(
+  payload: WorkspaceLoadResult,
+  set: WorkspaceSet
+) {
+  const files = filesFromPayload(payload.files);
+  const firstPath = Object.keys(files)[0] ?? "";
+
+  writeSelectedProjectId(payload.project?.id ?? null);
+
+  set({
+    activePath: firstPath,
+    error: null,
+    files,
+    hasLoaded: true,
+    isLoading: false,
+    openTabs: firstPath ? [firstPath] : [],
+    projectId: payload.project?.id ?? null,
+    projectName: payload.project?.name ?? null,
+    projects: payload.projects,
+    workspaceId: payload.workspace.id
+  });
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
@@ -144,6 +178,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   isLoading: false,
   projectId: null,
   projectName: null,
+  projects: [],
   workspaceId: null,
   openFile: (path) =>
     set((state) => ({
@@ -220,38 +255,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
       const payload = (await response.json()) as unknown;
 
-      if (!isCreateProjectResult(payload)) {
+      if (!isWorkspaceLoadResult(payload)) {
         throw new Error("Project creation did not return persisted project files.");
       }
 
-      const files = filesFromPayload(payload.files);
-      const firstPath = Object.keys(files)[0] ?? "";
-      const workspaceId = get().workspaceId ?? "";
+      applyWorkspacePayload(payload, set);
 
-      set((state) => ({
-        activePath: firstPath,
-        error: null,
-        files,
-        hasLoaded: true,
-        isLoading: false,
-        openTabs: firstPath ? [firstPath] : [],
-        projectId: payload.project.id,
-        projectName: payload.project.name,
-        workspaceId: state.workspaceId
-      }));
-
-      return {
-        chat: {
-          messages: [],
-          sessionId: null
-        },
-        files: payload.files,
-        project: payload.project,
-        workspace: {
-          id: workspaceId,
-          name: "My Workspace"
-        }
-      };
+      return payload;
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Project creation failed.",
@@ -262,46 +272,27 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
   hydrateWorkspace: (payload) => {
-    const files = filesFromPayload(payload.files);
-    const firstPath = Object.keys(files)[0] ?? "";
-
-    set({
-      activePath: firstPath,
-      error: null,
-      files,
-      hasLoaded: true,
-      isLoading: false,
-      openTabs: firstPath ? [firstPath] : [],
-      projectId: payload.project?.id ?? null,
-      projectName: payload.project?.name ?? null,
-      workspaceId: payload.workspace.id
-    });
+    applyWorkspacePayload(payload, set);
   },
-  loadWorkspace: async () => {
+  loadWorkspace: async (projectId) => {
     set({ error: null, isLoading: true });
 
     try {
-      const response = await fetch("/api/workspace");
+      const selectedProjectId = projectId ?? readSelectedProjectId();
+      const query = selectedProjectId ? `?projectId=${encodeURIComponent(selectedProjectId)}` : "";
+      const response = await fetch(`/api/workspace${query}`);
 
       if (!response.ok) {
         throw new Error("Failed to load workspace.");
       }
 
-      const payload = (await response.json()) as WorkspaceLoadResult;
-      const files = filesFromPayload(payload.files);
-      const firstPath = Object.keys(files)[0] ?? "";
+      const payload = (await response.json()) as unknown;
 
-      set({
-        activePath: firstPath,
-        error: null,
-        files,
-        hasLoaded: true,
-        isLoading: false,
-        openTabs: firstPath ? [firstPath] : [],
-        projectId: payload.project?.id ?? null,
-        projectName: payload.project?.name ?? null,
-        workspaceId: payload.workspace.id
-      });
+      if (!isWorkspaceLoadResult(payload)) {
+        throw new Error("Workspace response was not valid.");
+      }
+
+      applyWorkspacePayload(payload, set);
 
       return payload;
     } catch {
@@ -310,6 +301,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       return null;
     }
   },
+  switchProject: async (projectId) => get().loadWorkspace(projectId),
   updateActiveFile: (content) =>
     set((state) => ({
       files: state.files[state.activePath]
