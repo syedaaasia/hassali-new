@@ -253,7 +253,7 @@ export function LeftSidebar() {
     });
 
   return (
-    <Panel className="hidden w-60 shrink-0 flex-col border-r border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] md:flex xl:w-64">
+    <Panel className="hidden w-52 shrink-0 flex-col border-r border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] md:flex xl:w-60 2xl:w-64">
       <div className="border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
         <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
           Project
@@ -262,7 +262,7 @@ export function LeftSidebar() {
           {projectName ?? "No project yet"}
         </div>
       </div>
-      <div className="flex flex-1 flex-col gap-3 p-3.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5">
         <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.58)] p-2.5 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
           <div className="flex items-center justify-between px-1 pb-2 text-xs font-medium">
             <span>Projects</span>

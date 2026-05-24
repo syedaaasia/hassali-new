@@ -32,24 +32,24 @@ type ChatPersistenceContext = {
 
 type DiffProposal = {
   id: string;
-  mode: "SUGGEST";
+  mode: "SUGGEST" | "EXECUTE";
   status: "pending";
   summary: string;
   changes: Array<{
-    action: "create" | "update";
-    path: string;
+    action: "create" | "restart_runtime" | "reload_preview" | "stop_runtime" | "update";
+    path?: string;
     summary: string;
-    proposedContent: string;
-    diffPreview: string;
+    proposedContent?: string;
+    diffPreview?: string;
   }>;
 };
 type DiffProposalPayload = {
   summary: string;
   changes: Array<{
-    action: "create" | "update";
-    path: string;
+    action: "create" | "restart_runtime" | "reload_preview" | "stop_runtime" | "update";
+    path?: string;
     summary: string;
-    proposedContent: string;
+    proposedContent?: string;
     diffPreview?: string;
   }>;
 };
@@ -94,7 +94,22 @@ function createDiffPreview(action: "create" | "update", path: string, proposedCo
   ].join("\n");
 }
 
-function createLocalProposal(prompt: string, workspace: WorkspaceContext): DiffProposal {
+function shouldRestartPreview(prompt: string) {
+  const lowerPrompt = prompt.toLowerCase();
+
+  return (
+    lowerPrompt.includes("preview") ||
+    lowerPrompt.includes("start") ||
+    lowerPrompt.includes("restart") ||
+    lowerPrompt.includes("run")
+  );
+}
+
+function createLocalProposal(
+  prompt: string,
+  workspace: WorkspaceContext,
+  mode: "SUGGEST" | "EXECUTE"
+): DiffProposal {
   const lowerPrompt = prompt.toLowerCase();
 
   if (
@@ -130,13 +145,26 @@ function createLocalProposal(prompt: string, workspace: WorkspaceContext): DiffP
 
     return {
       id: `proposal-${Date.now()}`,
-      mode: "SUGGEST",
+      mode,
       status: "pending",
-      summary: "Create a small HTML, CSS, and JavaScript landing page.",
-      changes: changes.map((change) => ({
-        ...change,
-        diffPreview: createDiffPreview(change.action, change.path, change.proposedContent)
-      }))
+      summary:
+        mode === "EXECUTE"
+          ? "Create a small static web project and prepare the preview runtime."
+          : "Create a small HTML, CSS, and JavaScript landing page.",
+      changes: [
+        ...changes.map((change) => ({
+          ...change,
+          diffPreview: createDiffPreview(change.action, change.path, change.proposedContent)
+        })),
+        ...(mode === "EXECUTE" || shouldRestartPreview(prompt)
+          ? [
+              {
+                action: "restart_runtime" as const,
+                summary: "Restart the local static preview after files are approved."
+              }
+            ]
+          : [])
+      ]
     };
   }
 
@@ -146,7 +174,7 @@ function createLocalProposal(prompt: string, workspace: WorkspaceContext): DiffP
 
   return {
     id: `proposal-${Date.now()}`,
-    mode: "SUGGEST",
+    mode,
     status: "pending",
     summary: `${action === "create" ? "Create" : "Update"} ${targetPath}.`,
     changes: [
@@ -172,14 +200,26 @@ function isDiffProposalPayload(value: unknown): value is DiffProposalPayload {
     typeof payload.summary === "string" &&
     Array.isArray(payload.changes) &&
     payload.changes.every(
-      (change) =>
-        change &&
-        typeof change === "object" &&
-        (change.action === "create" || change.action === "update") &&
-        typeof change.path === "string" &&
-        typeof change.summary === "string" &&
-        typeof change.proposedContent === "string" &&
-        (typeof change.diffPreview === "undefined" || typeof change.diffPreview === "string")
+      (change) => {
+        if (!change || typeof change !== "object" || typeof change.summary !== "string") {
+          return false;
+        }
+
+        if (
+          change.action === "restart_runtime" ||
+          change.action === "reload_preview" ||
+          change.action === "stop_runtime"
+        ) {
+          return true;
+        }
+
+        return (
+          (change.action === "create" || change.action === "update") &&
+          typeof change.path === "string" &&
+          typeof change.proposedContent === "string" &&
+          (typeof change.diffPreview === "undefined" || typeof change.diffPreview === "string")
+        );
+      }
     )
   );
 }
@@ -320,7 +360,9 @@ async function persistChatMessage(
 function createProposalStream(proposal: DiffProposal, sessionId?: string | null) {
   const encoder = new TextEncoder();
   const visibleSummary =
-    "I prepared a diff proposal for review. It will only apply if you approve it.\n\n";
+    proposal.mode === "EXECUTE"
+      ? "I prepared an execution proposal for review. Nothing runs until you approve it.\n\n"
+      : "I prepared a diff proposal for review. It will only apply if you approve it.\n\n";
   const payload = `${proposalMarker}${JSON.stringify(proposal)}`;
 
   return new Response(
@@ -487,10 +529,6 @@ export async function POST(request: Request) {
       };
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
 
-  if (mode === "EXECUTE") {
-    return Response.json({ error: "EXECUTE mode is not enabled yet." }, { status: 400 });
-  }
-
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const requestedSessionId = typeof body?.chatSessionId === "string" ? body.chatSessionId : null;
   let persistence = await createPersistenceContext({
@@ -511,10 +549,12 @@ export async function POST(request: Request) {
     role: "user"
   });
 
-  if (mode === "SUGGEST" && !process.env.OPENROUTER_API_KEY) {
-    const proposal = createLocalProposal(latestUserPrompt, workspace);
+  if ((mode === "SUGGEST" || mode === "EXECUTE") && !process.env.OPENROUTER_API_KEY) {
+    const proposal = createLocalProposal(latestUserPrompt, workspace, mode);
     const visibleSummary =
-      "I prepared a diff proposal for review. It will only apply if you approve it.";
+      mode === "EXECUTE"
+        ? "I prepared an execution proposal for review. Nothing runs until you approve it."
+        : "I prepared a diff proposal for review. It will only apply if you approve it.";
 
     persistence = await persistChatMessage(persistence, {
       content: visibleSummary,
@@ -541,16 +581,17 @@ export async function POST(request: Request) {
     });
   }
 
-  if (mode === "SUGGEST") {
+  if (mode === "SUGGEST" || mode === "EXECUTE") {
     const response = await fetch(openRouterChatCompletionsUrl, {
       body: JSON.stringify({
         messages: [
           {
             role: "system",
             content:
-              `You are Hassali.ai in SUGGEST mode. Return only one JSON object with this exact shape: ` +
-              `{ "summary": string, "changes": [{ "path": string, "action": "create" | "update", "summary": string, "proposedContent": string }] }. ` +
+              `You are Hassali.ai in ${mode} mode. Return only one JSON object with this exact shape: ` +
+              `{ "summary": string, "changes": [{ "path": string, "action": "create" | "update", "summary": string, "proposedContent": string } | { "action": "restart_runtime" | "reload_preview" | "stop_runtime", "summary": string }] }. ` +
               `You may include multiple file changes. Use action "create" for new files and "update" for existing files. ` +
+              `Only include safe runtime actions when the user asks to start, restart, reload, or stop preview. Do not include shell commands, package installs, Docker, or destructive deletes. ` +
               `Do not use markdown. Do not mutate files. Use the provided workspace context. Active file: ${workspace.activePath}. ` +
               `Existing project files: ${workspace.fileList.join(", ")}. Active file content:\n${workspace.activeFileContent}`
           },
@@ -567,7 +608,7 @@ export async function POST(request: Request) {
     });
 
     if (!response.ok) {
-      return Response.json({ error: "OpenRouter suggest request failed." }, { status: response.status });
+      return Response.json({ error: "OpenRouter proposal request failed." }, { status: response.status });
     }
 
     const completion = (await response.json()) as {
@@ -588,7 +629,7 @@ export async function POST(request: Request) {
         content: fallbackContent,
         metadata: {
           model,
-          parseError: "invalid_suggest_json"
+          parseError: "invalid_proposal_json"
         },
         role: "assistant"
       });
@@ -598,17 +639,31 @@ export async function POST(request: Request) {
 
     const proposal: DiffProposal = {
       id: `proposal-${Date.now()}`,
-      mode: "SUGGEST",
+      mode,
       status: "pending",
       summary: parsed.summary,
-      changes: parsed.changes.map((change) => ({
-        action: change.action,
-        diffPreview:
-          change.diffPreview ?? createDiffPreview(change.action, change.path, change.proposedContent),
-        path: change.path,
-        proposedContent: change.proposedContent,
-        summary: change.summary
-      }))
+      changes: parsed.changes.map((change) => {
+        if (
+          change.action === "restart_runtime" ||
+          change.action === "reload_preview" ||
+          change.action === "stop_runtime"
+        ) {
+          return {
+            action: change.action,
+            summary: change.summary
+          };
+        }
+
+        return {
+          action: change.action,
+          diffPreview:
+            change.diffPreview ??
+            createDiffPreview(change.action, change.path ?? "untitled.txt", change.proposedContent ?? ""),
+          path: change.path,
+          proposedContent: change.proposedContent,
+          summary: change.summary
+        };
+      })
     };
 
     persistence = await persistChatMessage(persistence, {

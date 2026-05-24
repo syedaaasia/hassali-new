@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
 import { type AiMode, useChatStore } from "@/lib/chat-store";
+import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
 
 const modelOptions = [
@@ -15,7 +16,7 @@ const modelOptions = [
 const modes: Array<{ label: AiMode; disabled?: boolean }> = [
   { label: "ASK" },
   { label: "SUGGEST" },
-  { label: "EXECUTE", disabled: true }
+  { label: "EXECUTE" }
 ];
 
 export function RightSidebar() {
@@ -32,6 +33,9 @@ export function RightSidebar() {
   const clearProposal = useChatStore((state) => state.clearProposal);
   const markProposalApproved = useChatStore((state) => state.markProposalApproved);
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const startPreview = useRuntimeStore((state) => state.startPreview);
+  const stopPreview = useRuntimeStore((state) => state.stopPreview);
+  const syncPreview = useRuntimeStore((state) => state.syncPreview);
   const files = useWorkspaceStore((state) => state.files);
   const activePath = useWorkspaceStore((state) => state.activePath);
   const projectId = useWorkspaceStore((state) => state.projectId);
@@ -56,14 +60,34 @@ export function RightSidebar() {
     }
 
     for (const change of proposal.changes) {
-      await applyFileContent(change.path, change.proposedContent);
+      if (
+        (change.action === "create" || change.action === "update") &&
+        change.path &&
+        typeof change.proposedContent === "string"
+      ) {
+        await applyFileContent(change.path, change.proposedContent);
+      }
+    }
+
+    for (const change of proposal.changes) {
+      if (change.action === "restart_runtime") {
+        await startPreview(projectId);
+      }
+
+      if (change.action === "reload_preview") {
+        await syncPreview(projectId);
+      }
+
+      if (change.action === "stop_runtime") {
+        await stopPreview();
+      }
     }
 
     markProposalApproved();
   };
 
   return (
-    <Panel className="hidden w-80 shrink-0 flex-col border-l border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] lg:flex 2xl:w-96">
+    <Panel className="hidden w-72 shrink-0 flex-col border-l border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] lg:flex xl:w-80 2xl:w-96">
       <div className="border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
         <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
           Assistant
@@ -135,8 +159,15 @@ export function RightSidebar() {
             >
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="font-medium text-foreground">Diff proposal</div>
+                  <div className="font-medium text-foreground">
+                    {proposal.mode === "EXECUTE" ? "Execution proposal" : "Diff proposal"}
+                  </div>
                   <div className="mt-1 text-muted-foreground">{proposal.summary}</div>
+                  {proposal.mode === "EXECUTE" ? (
+                    <div className="mt-1 text-[11px] text-accent">
+                      Approval is required before any file or preview action runs.
+                    </div>
+                  ) : null}
                 </div>
                 <span className="rounded-full border border-[hsl(var(--royal-border))] px-2 py-1 text-[10px] text-accent">
                   pending
@@ -147,18 +178,22 @@ export function RightSidebar() {
                 {proposal.changes.map((change) => (
                   <div
                     className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.42)] p-3"
-                    key={`${proposal.id}-${change.path}`}
+                    key={`${proposal.id}-${change.action}-${change.path ?? change.summary}`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[11px] text-foreground">{change.path}</span>
+                      <span className="font-mono text-[11px] text-foreground">
+                        {change.path ?? "preview runtime"}
+                      </span>
                       <span className="rounded-full border border-[hsl(var(--royal-border-soft))] px-2 py-0.5 text-[10px] uppercase text-muted-foreground">
                         {change.action}
                       </span>
                     </div>
                     <p className="mt-2 text-muted-foreground">{change.summary}</p>
-                    <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-[hsl(var(--royal-border-soft))] bg-black/35 p-2 font-mono text-[11px] leading-5 text-muted-foreground">
-                      {change.diffPreview}
-                    </pre>
+                    {change.diffPreview ? (
+                      <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-[hsl(var(--royal-border-soft))] bg-black/35 p-2 font-mono text-[11px] leading-5 text-muted-foreground">
+                        {change.diffPreview}
+                      </pre>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -203,7 +238,13 @@ export function RightSidebar() {
                 void sendWithContext();
               }
             }}
-            placeholder={mode === "SUGGEST" ? "Describe the change to propose..." : "Ask Hassali..."}
+            placeholder={
+              mode === "EXECUTE"
+                ? "Describe the safe file or preview task..."
+                : mode === "SUGGEST"
+                  ? "Describe the change to propose..."
+                  : "Ask Hassali..."
+            }
             value={input}
           />
           <div className="mt-2 flex items-center justify-between gap-2">
@@ -212,7 +253,7 @@ export function RightSidebar() {
             </span>
             <button
               className="rounded-xl border border-accent/35 bg-accent px-4 py-1.5 text-xs font-medium text-accent-foreground shadow-[0_14px_34px_hsl(var(--accent)/0.18)] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={isStreaming || input.trim().length === 0 || mode === "EXECUTE"}
+              disabled={isStreaming || input.trim().length === 0}
               type="submit"
             >
               Send

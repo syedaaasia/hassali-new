@@ -21,14 +21,15 @@ export type WorkspaceContext = {
 
 export type DiffProposal = {
   id: string;
+  mode: "SUGGEST" | "EXECUTE";
   status: "pending" | "approved" | "rejected";
   summary: string;
   changes: Array<{
-    action: "create" | "update";
-    path: string;
+    action: "create" | "restart_runtime" | "reload_preview" | "stop_runtime" | "update";
+    path?: string;
     summary: string;
-    proposedContent: string;
-    diffPreview: string;
+    proposedContent?: string;
+    diffPreview?: string;
   }>;
 };
 
@@ -109,14 +110,22 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     typeof proposal.summary === "string" &&
     Array.isArray(proposal.changes) &&
     proposal.changes.every(
-      (change) =>
-        change &&
-        typeof change === "object" &&
-        (change.action === "create" || change.action === "update") &&
-        typeof change.path === "string" &&
-        typeof change.summary === "string" &&
-        typeof change.proposedContent === "string" &&
-        typeof change.diffPreview === "string"
+      (change) => {
+        if (!change || typeof change !== "object" || typeof change.summary !== "string") {
+          return false;
+        }
+
+        if (change.action === "restart_runtime" || change.action === "reload_preview" || change.action === "stop_runtime") {
+          return true;
+        }
+
+        return (
+          (change.action === "create" || change.action === "update") &&
+          typeof change.path === "string" &&
+          typeof change.proposedContent === "string" &&
+          (typeof change.diffPreview === "undefined" || typeof change.diffPreview === "string")
+        );
+      }
     )
   );
 }
@@ -160,10 +169,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setInput: (input) => set({ input }),
   setModel: (model) => set({ model }),
   setMode: (mode) => {
-    if (mode === "EXECUTE") {
-      return;
-    }
-
     set({ mode });
   },
   clearProposal: () => set({ proposal: null }),
@@ -172,7 +177,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const prompt = get().input.trim();
     const mode = get().mode;
 
-    if (!prompt || get().isStreaming || mode === "EXECUTE") {
+    if (!prompt || get().isStreaming) {
       return;
     }
 
@@ -237,7 +242,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }));
       }
 
-      if (mode === "SUGGEST") {
+      if (mode === "SUGGEST" || mode === "EXECUTE") {
         const markerIndex = assistantContent.indexOf(proposalMarker);
 
         if (markerIndex !== -1) {

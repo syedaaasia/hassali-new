@@ -33,12 +33,22 @@ export type FileChange = {
   diffPreview: string;
 };
 
+export type RuntimeActionType = "restart_runtime" | "reload_preview" | "stop_runtime";
+
+export type RuntimeChange = {
+  action: RuntimeActionType;
+  summary: string;
+  riskLevel: "medium";
+};
+
+export type ProposalChange = FileChange | RuntimeChange;
+
 export type DiffProposal = {
   id: string;
-  mode: "SUGGEST";
+  mode: "SUGGEST" | "EXECUTE";
   status: ApprovalStatus;
   summary: string;
-  changes: FileChange[];
+  changes: ProposalChange[];
   taskPlan?: TaskPlan;
 };
 

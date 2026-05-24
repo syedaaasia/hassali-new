@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { useRuntimeStore } from "@/lib/runtime-store";
 
 export type WorkspaceFile = {
   id?: string;
@@ -248,6 +249,14 @@ async function readFilesMutationResponse(response: Response) {
   return payload;
 }
 
+function syncPreviewIfRunning(projectId: string | null) {
+  if (!projectId) {
+    return;
+  }
+
+  void useRuntimeStore.getState().syncPreview(projectId);
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   files: {},
   openTabs: [],
@@ -294,6 +303,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
       const payload = await readFilesMutationResponse(response);
       applyFilesPayload(payload.files, set, get, path);
+      syncPreviewIfRunning(projectId);
       return;
     }
 
@@ -340,6 +350,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
       const payload = await readFilesMutationResponse(response);
       applyFilesPayload(payload.files, set, get, path);
+      syncPreviewIfRunning(projectId);
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "File creation failed.",
@@ -372,6 +383,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
       const payload = await readFilesMutationResponse(response);
       applyFilesPayload(payload.files, set, get);
+      syncPreviewIfRunning(projectId);
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Folder creation failed.",
@@ -441,6 +453,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
       const payload = await readFilesMutationResponse(response);
       applyFilesPayload(payload.files, set, get);
+      syncPreviewIfRunning(projectId);
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Delete failed.",
@@ -500,6 +513,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
       const payload = await readFilesMutationResponse(response);
       applyFilesPayload(payload.files, set, get, kind === "file" ? newPath : null);
+      syncPreviewIfRunning(projectId);
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : "Rename failed.",
@@ -553,6 +567,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       const savedFile = payload.files.find((workspaceFile) => workspaceFile.path === activePath);
       savedContent = savedFile?.content ?? file.content;
       fileId = savedFile?.id ?? file.id;
+      syncPreviewIfRunning(projectId);
     }
 
     set((state) => ({
