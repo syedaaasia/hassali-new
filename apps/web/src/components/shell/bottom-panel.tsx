@@ -52,26 +52,32 @@ export function BottomPanel() {
   }, [logs]);
 
   return (
-    <footer className="hidden h-36 shrink-0 grid-cols-[minmax(0,1fr)_14rem] border-t border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.88)] text-xs lg:grid xl:grid-cols-[minmax(0,1fr)_18rem]">
-      <section className="min-w-0 border-r border-[hsl(var(--royal-border-soft))] p-3.5">
-        <div className="flex items-center justify-between gap-3">
+    <footer className="hidden h-32 shrink-0 flex-col border-t border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.88)] text-xs lg:flex">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col p-2.5">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 font-medium">
             <span className={`h-1.5 w-1.5 rounded-full ${statusTone[status]}`} />
             Runtime Terminal
           </div>
-          <button
-            className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground disabled:opacity-50"
-            disabled={logs.length === 0}
-            onClick={() => {
-              void clearLogs();
-            }}
-            type="button"
-          >
-            Clear
-          </button>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-[10px] text-muted-foreground">
+              {isLoading ? "starting..." : status}
+              {previewUrl ? ` · ${previewUrl}` : ""}
+            </span>
+            <button
+              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+              disabled={logs.length === 0}
+              onClick={() => {
+                void clearLogs();
+              }}
+              type="button"
+            >
+              Clear
+            </button>
+          </div>
         </div>
         <div
-          className="mt-3 h-[4.75rem] overflow-y-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-black/45 p-3 font-mono text-[11px] leading-5 text-muted-foreground shadow-sm"
+          className="mt-2 min-h-0 flex-1 overflow-y-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-black/45 p-2.5 font-mono text-[11px] leading-5 text-muted-foreground shadow-sm"
           ref={(node) => {
             terminalRef.current = node as ScrollableElement | null;
           }}
@@ -89,17 +95,11 @@ export function BottomPanel() {
           )}
         </div>
       </section>
-      <section className="p-3.5">
-        <div className="flex items-center gap-2 font-medium">
-          <span className={`h-1.5 w-1.5 rounded-full ${statusTone[status]}`} />
-          Runtime Status
+      {error ? (
+        <div className="border-t border-[hsl(var(--royal-border-soft))] px-2.5 py-1.5 text-[11px] text-destructive">
+          {error}
         </div>
-        <div className="mt-3 space-y-1 rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.5)] p-3 font-mono text-[11px] text-muted-foreground shadow-sm">
-          <div>status: {isLoading ? "starting..." : status}</div>
-          <div className="truncate">preview: {previewUrl ?? "not running"}</div>
-          {error ? <div className="text-destructive">error: {error}</div> : null}
-        </div>
-      </section>
+      ) : null}
     </footer>
   );
 }

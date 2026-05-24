@@ -4,25 +4,30 @@
 
 :root {
   color-scheme: light;
-  --background: 40 24% 96%;
-  --foreground: 24 18% 10%;
-  --surface: 36 24% 98%;
+  --background: 220 27% 96%;
+  --foreground: 222 26% 11%;
+  --surface: 0 0% 100%;
   --surface-foreground: 24 18% 10%;
-  --muted: 28 18% 91%;
-  --muted-foreground: 24 8% 42%;
-  --accent: 354 82% 58%;
+  --muted: 214 32% 91%;
+  --muted-foreground: 218 14% 42%;
+  --accent: 340 100% 45%;
   --accent-foreground: 0 0% 100%;
-  --border: 24 14% 78%;
-  --royal-black: 0 0% 4%;
-  --royal-surface: 24 14% 96%;
-  --royal-panel: 24 20% 98%;
-  --royal-panel-raised: 24 18% 94%;
-  --royal-border: 354 82% 52% / 0.2;
-  --royal-border-soft: 24 18% 16% / 0.12;
-  --gold: 354 82% 58%;
-  --emerald: 156 52% 45%;
+  --border: 214 18% 82%;
+  --royal-black: 220 27% 96%;
+  --royal-surface: 0 0% 100% / 0.85;
+  --royal-panel: 0 0% 100% / 0.78;
+  --royal-panel-raised: 214 32% 91%;
+  --royal-border: 340 100% 45% / 0.18;
+  --royal-border-soft: 218 22% 28% / 0.12;
+  --gold: 340 100% 45%;
+  --emerald: 184 100% 34%;
   --magenta: 316 80% 58%;
-  --cream: 40 38% 92%;
+  --cream: 220 27% 96%;
+  --light-canvas-base: #f3f5f9;
+  --light-container-card: rgba(255, 255, 255, 0.85);
+  --light-active-element: #e2e8f0;
+  --light-opera-red: #e6004c;
+  --light-rich-teal: #00a3af;
 }
 
 .dark {
@@ -46,6 +51,39 @@
   --emerald: 156 54% 50%;
   --magenta: 316 82% 58%;
   --cream: 36 20% 88%;
+  --light-canvas-base: #f3f5f9;
+  --light-container-card: rgba(255, 255, 255, 0.85);
+  --light-active-element: #e2e8f0;
+  --light-opera-red: #e6004c;
+  --light-rich-teal: #00a3af;
+}
+
+.light {
+  color-scheme: light;
+  --background: 220 27% 96%;
+  --foreground: 222 26% 11%;
+  --surface: 0 0% 100%;
+  --surface-foreground: 222 26% 11%;
+  --muted: 214 32% 91%;
+  --muted-foreground: 218 14% 42%;
+  --accent: 340 100% 45%;
+  --accent-foreground: 0 0% 100%;
+  --border: 214 18% 82%;
+  --royal-black: 220 27% 96%;
+  --royal-surface: 0 0% 100% / 0.85;
+  --royal-panel: 0 0% 100% / 0.85;
+  --royal-panel-raised: 214 32% 91%;
+  --royal-border: 340 100% 45% / 0.18;
+  --royal-border-soft: 218 22% 28% / 0.12;
+  --gold: 340 100% 45%;
+  --emerald: 184 100% 34%;
+  --magenta: 340 100% 45%;
+  --cream: 220 27% 96%;
+  --light-canvas-base: #f3f5f9;
+  --light-container-card: rgba(255, 255, 255, 0.85);
+  --light-active-element: #e2e8f0;
+  --light-opera-red: #e6004c;
+  --light-rich-teal: #00a3af;
 }
 
 * {
@@ -96,8 +134,8 @@ textarea {
 }
 
 ::-webkit-scrollbar {
-  height: 10px;
-  width: 10px;
+  height: 8px;
+  width: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -106,14 +144,14 @@ textarea {
 
 ::-webkit-scrollbar-thumb {
   background: hsl(var(--border));
-  border: 3px solid transparent;
+  border: 2px solid transparent;
   border-radius: 999px;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.45);
-  border: 3px solid transparent;
+  border: 2px solid transparent;
   background-clip: content-box;
 }
 

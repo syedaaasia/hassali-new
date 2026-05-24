@@ -24,7 +24,7 @@ export function AppShell() {
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-tl-2xl bg-background shadow-[0_0_0_1px_hsl(var(--royal-border-soft)),0_20px_80px_hsl(0_80%_3%/0.34)]">
           <RightSidebar />
         </div>
-        <div className="hidden w-[20rem] shrink-0 flex-col overflow-hidden bg-background shadow-[0_0_0_1px_hsl(var(--royal-border-soft)),0_20px_80px_hsl(0_80%_3%/0.24)] lg:flex xl:w-[23rem] 2xl:w-[26rem]">
+        <div className="hidden w-[17.5rem] shrink-0 flex-col overflow-hidden bg-background shadow-[0_0_0_1px_hsl(var(--royal-border-soft)),0_20px_80px_hsl(0_80%_3%/0.24)] lg:flex xl:w-[19.5rem] 2xl:w-[21rem]">
           <EditorPanel />
           <BottomPanel />
         </div>

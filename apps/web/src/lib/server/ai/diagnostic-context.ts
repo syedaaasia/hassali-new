@@ -168,7 +168,7 @@ function inferPromptIntent(prompt: string): PromptIntent {
   }
 
   if (
-    includesAny(promptText, ["create", "build", "generate", "new website", "landing page", "from scratch"]) &&
+    includesAny(promptText, ["create", "build", "generate", "new website", "landing page", "from scratch", "make a site", "design"]) &&
     includesAny(promptText, ["website", "landing", "html", "css", "javascript", "site"])
   ) {
     return "full_generation";

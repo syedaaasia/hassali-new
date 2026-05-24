@@ -182,6 +182,10 @@ function isEnhancementRequest(prompt: string) {
   ].some((term) => lowerPrompt.includes(term));
 }
 
+function isInvoiceRequest(prompt: string) {
+  return /\binvoice\b/i.test(prompt);
+}
+
 function contentForPath(workspace: WorkspaceContext, path: string) {
   return workspace.fileContents?.[path] ?? (workspace.activePath === path ? workspace.activeFileContent : "");
 }
@@ -199,6 +203,13 @@ function createStaticWebsiteContent(domain: DiagnosticContext["inferredDomain"])
           accent: "Fresh bouquets",
           cta: "Plan a bouquet",
           detail: "Seasonal stems, quiet arrangements, and thoughtful delivery for everyday rituals.",
+          imageAlt: "A refined bouquet arrangement with soft seasonal flowers",
+          imageMain:
+            "https://images.unsplash.com/photo-1490750967868-88aa4486c946?auto=format&fit=crop&w=1200&q=80",
+          imageSecondary:
+            "https://images.unsplash.com/photo-1487070183336-b863922373d4?auto=format&fit=crop&w=900&q=80",
+          imageTertiary:
+            "https://images.unsplash.com/photo-1526047932273-341f2a7631f9?auto=format&fit=crop&w=900&q=80",
           title: "Petal House"
         }
       : domain === "jewellery"
@@ -206,6 +217,13 @@ function createStaticWebsiteContent(domain: DiagnosticContext["inferredDomain"])
             accent: "Fine jewellery",
             cta: "View collection",
             detail: "Considered pieces with warm metals, clean silhouettes, and a softer kind of luxury.",
+            imageAlt: "Elegant gold jewellery displayed on a premium surface",
+            imageMain:
+              "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=1200&q=80",
+            imageSecondary:
+              "https://images.unsplash.com/photo-1605100804763-247f67b3557e?auto=format&fit=crop&w=900&q=80",
+            imageTertiary:
+              "https://images.unsplash.com/photo-1506630448388-4e683c67ddb0?auto=format&fit=crop&w=900&q=80",
             title: "Aurum Atelier"
           }
         : domain === "car rental"
@@ -213,12 +231,26 @@ function createStaticWebsiteContent(domain: DiagnosticContext["inferredDomain"])
               accent: "Premium car rental",
               cta: "Reserve a drive",
               detail: "A calm fleet experience for airport transfers, city days, and weekend escapes.",
+              imageAlt: "Premium car parked on a scenic road",
+              imageMain:
+                "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1200&q=80",
+              imageSecondary:
+                "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=900&q=80",
+              imageTertiary:
+                "https://images.unsplash.com/photo-1542362567-b07e54358753?auto=format&fit=crop&w=900&q=80",
               title: "Apex Reserve"
             }
           : {
               accent: "Calm web experience",
               cta: "Start exploring",
               detail: "A focused, responsive static website with clear sections and lightweight interaction.",
+              imageAlt: "Modern workspace with premium visual design",
+              imageMain:
+                "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80",
+              imageSecondary:
+                "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=900&q=80",
+              imageTertiary:
+                "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=900&q=80",
               title: "Hassali Studio"
             };
 
@@ -242,10 +274,15 @@ function createStaticWebsiteContent(domain: DiagnosticContext["inferredDomain"])
     </header>
     <main>
       <section class="hero">
-        <p class="eyebrow">${theme.accent}</p>
-        <h1>A refined digital home built to feel calm, modern, and trustworthy.</h1>
-        <p class="lede">${theme.detail}</p>
-        <a class="button" href="#contact">${theme.cta}</a>
+        <div class="hero-copy">
+          <p class="eyebrow">${theme.accent}</p>
+          <h1>A refined digital home built to feel calm, modern, and trustworthy.</h1>
+          <p class="lede">${theme.detail}</p>
+          <a class="button" href="#contact">${theme.cta}</a>
+        </div>
+        <figure class="hero-visual">
+          <img src="${theme.imageMain}" alt="${theme.imageAlt}" />
+        </figure>
       </section>
       <section class="feature-grid" id="services">
         <article>
@@ -267,6 +304,10 @@ function createStaticWebsiteContent(domain: DiagnosticContext["inferredDomain"])
       <section class="story" id="story">
         <h2>Designed with restraint.</h2>
         <p>Warm typography, soft contrast, and spacious sections create a premium first impression without heavy effects.</p>
+      </section>
+      <section class="gallery" aria-label="Visual highlights">
+        <img src="${theme.imageSecondary}" alt="${theme.accent} detail image" />
+        <img src="${theme.imageTertiary}" alt="${theme.accent} lifestyle image" />
       </section>
     </main>
     <footer id="contact">
@@ -346,8 +387,37 @@ main {
 }
 
 .hero {
-  max-width: 820px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.72fr);
+  align-items: center;
+  gap: clamp(1.4rem, 5vw, 4rem);
   padding: clamp(3rem, 10vw, 7rem) 0;
+}
+
+.hero-copy {
+  max-width: 820px;
+}
+
+.hero-visual,
+.gallery img {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 2rem;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 32px 100px rgba(0, 0, 0, 0.32);
+}
+
+.hero-visual {
+  aspect-ratio: 4 / 5;
+  margin: 0;
+}
+
+.hero-visual img,
+.gallery img {
+  display: block;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
 }
 
 .eyebrow {
@@ -421,6 +491,17 @@ article span {
   margin-top: 1rem;
 }
 
+.gallery {
+  display: grid;
+  grid-template-columns: 0.85fr 1.15fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.gallery img {
+  aspect-ratio: 16 / 11;
+}
+
 footer {
   color: #91897f;
 }
@@ -437,6 +518,11 @@ footer {
   }
 
   .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero,
+  .gallery {
     grid-template-columns: 1fr;
   }
 }
@@ -619,7 +705,7 @@ document.querySelector('[data-carousel="next"]')?.addEventListener("click", () =
 `;
 
   return [
-    ...(htmlWithCarousel !== currentHtml
+    ...(htmlWithCarousel !== currentHtml || !diagnostic.fileList.includes("index.html")
       ? [
           {
             action: diagnostic.fileList.includes("index.html") ? ("update" as const) : ("create" as const),
@@ -644,6 +730,243 @@ document.querySelector('[data-carousel="next"]')?.addEventListener("click", () =
   ];
 }
 
+function createInvoiceContent() {
+  return {
+    html: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Invoice</title>
+    <link rel="stylesheet" href="./invoice.css" />
+  </head>
+  <body>
+    <main class="invoice-page">
+      <section class="invoice">
+        <header class="invoice-header">
+          <div>
+            <p class="eyebrow">Invoice</p>
+            <h1>Professional Service Invoice</h1>
+            <p class="muted">Use the button below to print or save this invoice as a PDF.</p>
+          </div>
+          <button class="print-button" id="print-invoice" type="button">Save as PDF</button>
+        </header>
+        <section class="invoice-grid">
+          <div>
+            <h2>From</h2>
+            <p>Your Company Name</p>
+            <p>hello@example.com</p>
+          </div>
+          <div>
+            <h2>Bill To</h2>
+            <p>Client Name</p>
+            <p>client@example.com</p>
+          </div>
+          <div>
+            <h2>Invoice No.</h2>
+            <p>INV-001</p>
+          </div>
+          <div>
+            <h2>Date</h2>
+            <p>May 24, 2026</p>
+          </div>
+        </section>
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Description</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Website Design</td>
+              <td>Premium static website design and implementation.</td>
+              <td>$500.00</td>
+            </tr>
+            <tr>
+              <td>Revision</td>
+              <td>Final polish, responsive checks, and handoff.</td>
+              <td>$100.00</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2">Total</td>
+              <td>$600.00</td>
+            </tr>
+          </tfoot>
+        </table>
+        <section class="terms">
+          <h2>Payment Terms</h2>
+          <p>Payment is due within 7 days. Thank you for your business.</p>
+        </section>
+      </section>
+    </main>
+    <script src="./invoice.js"></script>
+  </body>
+</html>
+`,
+    js: `document.querySelector("#print-invoice")?.addEventListener("click", () => {
+  window.print();
+});
+`,
+    css: `:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f3f5f9;
+  color: #162033;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.invoice-page {
+  min-height: 100vh;
+  padding: clamp(1rem, 4vw, 3rem);
+}
+
+.invoice {
+  max-width: 900px;
+  margin: 0 auto;
+  border: 1px solid rgba(22, 32, 51, 0.1);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 28px 90px rgba(15, 23, 42, 0.12);
+  padding: clamp(1.5rem, 5vw, 3rem);
+}
+
+.invoice-header,
+.invoice-grid,
+tfoot tr {
+  display: grid;
+  gap: 1rem;
+}
+
+.invoice-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  border-bottom: 1px solid rgba(22, 32, 51, 0.12);
+  padding-bottom: 1.5rem;
+}
+
+.eyebrow {
+  color: #e6004c;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2rem, 6vw, 4rem);
+  letter-spacing: -0.04em;
+}
+
+h2 {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.muted,
+.terms p {
+  margin-top: 0.7rem;
+  color: #64748b;
+}
+
+.print-button {
+  border: 0;
+  border-radius: 999px;
+  background: #e6004c;
+  color: #fff;
+  cursor: pointer;
+  padding: 0.8rem 1rem;
+  font-weight: 800;
+}
+
+.invoice-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 1.5rem 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  border-radius: 18px;
+}
+
+th,
+td {
+  border-bottom: 1px solid rgba(22, 32, 51, 0.1);
+  padding: 1rem;
+  text-align: left;
+}
+
+th {
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+td:last-child,
+th:last-child {
+  text-align: right;
+}
+
+tfoot td {
+  border-bottom: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.terms {
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 720px) {
+  .invoice-header,
+  .invoice-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .invoice-page {
+    padding: 0;
+  }
+
+  .invoice {
+    border: 0;
+    box-shadow: none;
+  }
+
+  .print-button {
+    display: none;
+  }
+}
+`
+  };
+}
+
 function createLocalProposal(
   prompt: string,
   workspace: WorkspaceContext,
@@ -651,6 +974,47 @@ function createLocalProposal(
   diagnostic: DiagnosticContext
 ): DiffProposal {
   const renameRequest = detectRenameRequest(prompt);
+
+  if (mode === "EXECUTE" && isInvoiceRequest(prompt)) {
+    const invoiceContent = createInvoiceContent();
+    const files = [
+      {
+        content: invoiceContent.html,
+        path: "invoice.html",
+        summary: "Creates printable invoice wording and structure."
+      },
+      {
+        content: invoiceContent.css,
+        path: "invoice.css",
+        summary: "Styles the invoice for screen and print/PDF output."
+      },
+      {
+        content: invoiceContent.js,
+        path: "invoice.js",
+        summary: "Adds a Save as PDF button using the browser print dialog."
+      }
+    ];
+
+    return {
+      changes: files.map((file) => ({
+        action: diagnostic.fileList.includes(file.path) ? ("update" as const) : ("create" as const),
+        diffPreview: createDiffPreview(
+          diagnostic.fileList.includes(file.path) ? "update" : "create",
+          file.path,
+          file.content
+        ),
+        path: file.path,
+        proposedContent: file.content,
+        summary: file.summary
+      })),
+      id: `proposal-${Date.now()}`,
+      mode,
+      projectId: diagnostic.projectId,
+      status: "pending",
+      summary:
+        "Detected an invoice request. I will create invoice wording plus a print-ready invoice page that can be saved as PDF after approval."
+    };
+  }
 
   if (renameRequest) {
     const candidatePaths = workspace.fileList.filter((path) =>
@@ -1320,7 +1684,17 @@ export async function POST(request: Request) {
     role: "user"
   });
 
-  if ((mode === "SUGGEST" || mode === "EXECUTE") && !process.env.OPENROUTER_API_KEY) {
+  const shouldUseDeterministicProposal =
+    (mode === "SUGGEST" || mode === "EXECUTE") &&
+    (diagnostic.promptIntent === "full_generation" ||
+      isEnhancementRequest(latestUserPrompt) ||
+      Boolean(detectRenameRequest(latestUserPrompt)) ||
+      (mode === "EXECUTE" && isInvoiceRequest(latestUserPrompt)));
+
+  if (
+    (mode === "SUGGEST" || mode === "EXECUTE") &&
+    (shouldUseDeterministicProposal || !process.env.OPENROUTER_API_KEY)
+  ) {
     const proposal = createLocalProposal(latestUserPrompt, workspace, mode, diagnostic);
     const visibleSummary =
       mode === "EXECUTE"

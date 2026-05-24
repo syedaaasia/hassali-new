@@ -5,6 +5,7 @@ import { useRuntimeStore } from "@/lib/runtime-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 
 export function PreviewPanel() {
+  const files = useWorkspaceStore((state) => state.files);
   const projectId = useWorkspaceStore((state) => state.projectId);
   const error = useRuntimeStore((state) => state.error);
   const iframeVersion = useRuntimeStore((state) => state.iframeVersion);
@@ -16,9 +17,10 @@ export function PreviewPanel() {
   const stopPreview = useRuntimeStore((state) => state.stopPreview);
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
   const iframeSource = previewUrl ? `${previewUrl}?v=${iframeVersion}` : null;
+  const hasIndexHtml = Boolean(files["index.html"]);
 
   return (
-    <Panel className="hidden w-[21rem] shrink-0 flex-col border-l border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] lg:flex xl:w-[23rem] 2xl:w-[26rem]">
+    <Panel className="hidden w-[20rem] shrink-0 flex-col border-l border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] lg:flex xl:w-[22rem] 2xl:w-[24rem]">
       <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
         <div>
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
@@ -53,7 +55,7 @@ export function PreviewPanel() {
       <div className="flex items-center gap-2 border-b border-[hsl(var(--royal-border-soft))] p-3">
         <button
           className="rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isLoading || !projectId}
+          disabled={isLoading || !projectId || !hasIndexHtml}
           onClick={() => {
             void startPreview(projectId);
           }}
@@ -93,9 +95,11 @@ export function PreviewPanel() {
           />
         ) : (
           <div className="flex h-full items-center justify-center rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.5)] p-6 text-center text-xs leading-5 text-muted-foreground">
-            {projectId
-              ? "Start preview after creating an index.html project."
-              : "Create or select a project before starting preview."}
+            {!projectId
+              ? "Create or select a project before starting preview."
+              : hasIndexHtml
+                ? "Start preview when you are ready."
+                : "Preview needs index.html. Ask EXECUTE to create a static website."}
           </div>
         )}
       </div>

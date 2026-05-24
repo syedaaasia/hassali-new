@@ -1,7 +1,7 @@
 "use client";
 
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PremiumSelect } from "@/components/ui/premium-select";
 
 const modelOptions = [
@@ -14,10 +14,49 @@ const performanceOptions = [
   { label: "Low power", value: "low-power" },
   { label: "Fast", value: "fast" }
 ];
+const themeStorageKey = "hassali:theme";
+type ThemeMode = "dark" | "light";
+type BrowserGlobal = {
+  document?: {
+    documentElement: {
+      classList: {
+        toggle: (className: string, force?: boolean) => void;
+      };
+    };
+  };
+  localStorage?: {
+    getItem: (key: string) => string | null;
+    setItem: (key: string, value: string) => void;
+  };
+};
+
+function applyTheme(theme: ThemeMode) {
+  const classList = (globalThis as BrowserGlobal).document?.documentElement.classList;
+
+  classList?.toggle("dark", theme === "dark");
+  classList?.toggle("light", theme === "light");
+}
 
 export function TopBar() {
   const [model, setModel] = useState("auto");
   const [mode, setMode] = useState("balanced");
+  const [theme, setTheme] = useState<ThemeMode>("dark");
+
+  useEffect(() => {
+    const savedTheme = (globalThis as BrowserGlobal).localStorage?.getItem(themeStorageKey);
+    const nextTheme: ThemeMode = savedTheme === "light" ? "light" : "dark";
+
+    setTheme(nextTheme);
+    applyTheme(nextTheme);
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme: ThemeMode = theme === "dark" ? "light" : "dark";
+
+    setTheme(nextTheme);
+    applyTheme(nextTheme);
+    (globalThis as BrowserGlobal).localStorage?.setItem(themeStorageKey, nextTheme);
+  };
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.88)] px-4 shadow-[0_1px_0_hsl(var(--gold)/0.08)] backdrop-blur-xl">
@@ -49,6 +88,13 @@ export function TopBar() {
           <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_12px_hsl(var(--accent)/0.55)]" />
           Usage 0%
         </div>
+        <button
+          className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.68)] px-3 py-2 text-[11px] font-medium text-muted-foreground shadow-sm hover:text-foreground"
+          onClick={toggleTheme}
+          type="button"
+        >
+          {theme === "dark" ? "Light" : "Dark"}
+        </button>
         <div className="flex h-9 shrink-0 items-center rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.68)] px-2 shadow-sm">
           <SignedIn>
             <UserButton afterSignOutUrl="/" />
