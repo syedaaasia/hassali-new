@@ -10,6 +10,7 @@ export function PreviewPanel() {
   const iframeVersion = useRuntimeStore((state) => state.iframeVersion);
   const isLoading = useRuntimeStore((state) => state.isLoading);
   const previewUrl = useRuntimeStore((state) => state.previewUrl);
+  const setPreviewOpen = useRuntimeStore((state) => state.setPreviewOpen);
   const status = useRuntimeStore((state) => state.status);
   const startPreview = useRuntimeStore((state) => state.startPreview);
   const stopPreview = useRuntimeStore((state) => state.stopPreview);
@@ -17,7 +18,7 @@ export function PreviewPanel() {
   const iframeSource = previewUrl ? `${previewUrl}?v=${iframeVersion}` : null;
 
   return (
-    <Panel className="hidden w-80 shrink-0 flex-col border-l border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] xl:flex 2xl:w-[28rem]">
+    <Panel className="hidden w-[21rem] shrink-0 flex-col border-l border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] lg:flex xl:w-[23rem] 2xl:w-[26rem]">
       <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
         <div>
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
@@ -27,17 +28,26 @@ export function PreviewPanel() {
             {status === "running" ? "Local static runtime" : "Stopped"}
           </div>
         </div>
-        <span
-          className={`rounded-full border px-2 py-1 text-[10px] uppercase ${
-            status === "running"
-              ? "border-accent/35 text-accent"
-              : status === "error"
-                ? "border-destructive/35 text-destructive"
-                : "border-[hsl(var(--royal-border-soft))] text-muted-foreground"
-          }`}
-        >
-          {isLoading ? "loading" : status}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={`rounded-full border px-2 py-1 text-[10px] uppercase ${
+              status === "running"
+                ? "border-accent/35 text-accent"
+                : status === "error"
+                  ? "border-destructive/35 text-destructive"
+                  : "border-[hsl(var(--royal-border-soft))] text-muted-foreground"
+            }`}
+          >
+            {isLoading ? "loading" : status}
+          </span>
+          <button
+            className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[10px] uppercase text-muted-foreground hover:text-foreground"
+            onClick={() => setPreviewOpen(false)}
+            type="button"
+          >
+            Close
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 border-b border-[hsl(var(--royal-border-soft))] p-3">
@@ -73,10 +83,10 @@ export function PreviewPanel() {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 bg-[hsl(var(--royal-black)/0.45)] p-3">
+      <div className="min-h-0 flex-1 overflow-hidden bg-[hsl(var(--royal-black)/0.45)] p-2">
         {iframeSource ? (
           <iframe
-            className="h-full w-full rounded-xl border border-[hsl(var(--royal-border-soft))] bg-white"
+            className="h-full min-h-0 w-full rounded-xl border border-[hsl(var(--royal-border-soft))] bg-white"
             key={iframeSource}
             src={iframeSource}
             title="Hassali local preview"

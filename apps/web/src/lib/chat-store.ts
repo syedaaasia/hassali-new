@@ -15,17 +15,24 @@ export type WorkspaceContext = {
   activeFileContent: string;
   activePath: string;
   chatSessionId: string | null;
+  fileContents: Record<string, string>;
   fileList: string[];
   projectId: string | null;
+  projectName: string | null;
 };
+
+type FileProposalAction = "create" | "update";
+type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "stop_runtime";
+type ProposalAction = FileProposalAction | RuntimeProposalAction;
 
 export type DiffProposal = {
   id: string;
   mode: "SUGGEST" | "EXECUTE";
+  projectId: string | null;
   status: "pending" | "approved" | "rejected";
   summary: string;
   changes: Array<{
-    action: "create" | "restart_runtime" | "reload_preview" | "stop_runtime" | "update";
+    action: ProposalAction;
     path?: string;
     summary: string;
     proposedContent?: string;
@@ -69,6 +76,14 @@ function createMessage(role: ChatRole, content: string): ChatMessage {
   };
 }
 
+function isRuntimeProposalAction(action: unknown): action is RuntimeProposalAction {
+  return action === "restart_runtime" || action === "reload_preview" || action === "stop_runtime";
+}
+
+function isFileProposalAction(action: unknown): action is FileProposalAction {
+  return action === "create" || action === "update";
+}
+
 function createGreetingMessage() {
   return createMessage(
     "assistant",
@@ -107,6 +122,7 @@ function isDiffProposal(value: unknown): value is DiffProposal {
 
   return (
     typeof proposal.id === "string" &&
+    (typeof proposal.projectId === "string" || proposal.projectId === null) &&
     typeof proposal.summary === "string" &&
     Array.isArray(proposal.changes) &&
     proposal.changes.every(
@@ -115,12 +131,12 @@ function isDiffProposal(value: unknown): value is DiffProposal {
           return false;
         }
 
-        if (change.action === "restart_runtime" || change.action === "reload_preview" || change.action === "stop_runtime") {
+        if (isRuntimeProposalAction(change.action)) {
           return true;
         }
 
         return (
-          (change.action === "create" || change.action === "update") &&
+          isFileProposalAction(change.action) &&
           typeof change.path === "string" &&
           typeof change.proposedContent === "string" &&
           (typeof change.diffPreview === "undefined" || typeof change.diffPreview === "string")
@@ -200,7 +216,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           workspace: {
             activeFileContent: workspaceContext.activeFileContent,
             activePath: workspaceContext.activePath,
-            fileList: workspaceContext.fileList
+            fileContents: workspaceContext.fileContents,
+            fileList: workspaceContext.fileList,
+            projectName: workspaceContext.projectName
           }
         }),
         headers: {

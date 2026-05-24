@@ -53,7 +53,7 @@ export function EditorPanel() {
   const hasDirtyFiles = Object.values(files).some((file) => file.content !== file.savedContent);
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col bg-[hsl(var(--royal-black))]">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-[hsl(var(--royal-black))]">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.88)]">
         <div className="flex h-full min-w-0 flex-1 items-center overflow-x-auto">
           {openTabs.map((tabPath) => {
@@ -127,7 +127,7 @@ export function EditorPanel() {
           </button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 rounded-b-2xl bg-[hsl(var(--royal-black))]">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-b-2xl bg-[hsl(var(--royal-black))]">
         {activeFile ? (
           <MonacoEditor
             beforeMount={configureMonacoTheme}

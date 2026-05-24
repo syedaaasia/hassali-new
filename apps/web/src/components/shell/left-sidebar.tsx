@@ -25,6 +25,7 @@ type DialogGlobal = {
   confirm?: (message?: string) => boolean;
   prompt?: (message?: string, defaultValue?: string) => string | null;
 };
+type SidebarSection = "git" | "projects" | "search" | "workspace";
 
 function isFolderPlaceholderPath(path: string) {
   return path.endsWith(`/${folderPlaceholderFileName}`);
@@ -108,6 +109,12 @@ function confirmAction(message: string) {
 
 export function LeftSidebar() {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set());
+  const [expandedSections, setExpandedSections] = useState<Record<SidebarSection, boolean>>({
+    git: false,
+    projects: false,
+    search: false,
+    workspace: true
+  });
   const [selectedNode, setSelectedNode] = useState<{
     kind: "file" | "folder";
     path: string;
@@ -132,12 +139,25 @@ export function LeftSidebar() {
   const visibleFileCount = Object.keys(files).filter((path) => !isFolderPlaceholderPath(path)).length;
   const selectedPath = selectedNode?.path ?? activePath;
   const selectedKind = selectedNode?.kind ?? "file";
+  const toggleSection = (section: SidebarSection) => {
+    setExpandedSections((currentSections) => ({
+      ...currentSections,
+      [section]: !currentSections[section]
+    }));
+  };
 
   const hydrateProjectChat = (payload: Awaited<ReturnType<typeof createProject>>) => {
     if (payload) {
       setSelectedNode(null);
       hydrateChat(payload.chat.messages, payload.chat.sessionId);
     }
+  };
+  const createProjectFromPrompt = () => {
+    const requestedName = promptValue("Project name", "");
+    const projectNameFromPrompt =
+      requestedName && requestedName.length > 0 ? requestedName : nextProjectName;
+
+    void createProject(projectNameFromPrompt).then(hydrateProjectChat);
   };
   const createFileFromPrompt = () => {
     const path = promptValue("New file path", "src/app/page.tsx");
@@ -253,8 +273,8 @@ export function LeftSidebar() {
     });
 
   return (
-    <Panel className="hidden w-52 shrink-0 flex-col border-r border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] md:flex xl:w-60 2xl:w-64">
-      <div className="border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
+    <Panel className="hidden w-40 shrink-0 flex-col border-r border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] md:flex lg:w-44 2xl:w-48">
+      <div className="border-b border-[hsl(var(--royal-border-soft))] px-3 py-3">
         <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
           Project
         </div>
@@ -262,22 +282,31 @@ export function LeftSidebar() {
           {projectName ?? "No project yet"}
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5">
-        <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.58)] p-2.5 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
-          <div className="flex items-center justify-between px-1 pb-2 text-xs font-medium">
-            <span>Projects</span>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
+        <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.54)] p-2 shadow-[0_12px_36px_hsl(0_80%_3%/0.18)]">
+          <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium">
+            <button
+              aria-expanded={expandedSections.projects}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left text-foreground hover:text-accent"
+              onClick={() => toggleSection("projects")}
+              type="button"
+            >
+              <span className="w-2 text-[10px] text-muted-foreground">
+                {expandedSections.projects ? "v" : ">"}
+              </span>
+              <span className="truncate">Projects</span>
+            </button>
             <button
               className="rounded-lg border border-accent/35 px-2 py-1 text-[11px] text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isLoading}
-              onClick={() => {
-                void createProject(nextProjectName).then(hydrateProjectChat);
-              }}
+              onClick={createProjectFromPrompt}
               type="button"
             >
               New
             </button>
           </div>
-          <div className="space-y-1">
+          {expandedSections.projects ? (
+          <div className="mt-2 max-h-36 space-y-1 overflow-y-auto pr-1">
             {projects.length === 0 ? (
               <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.34)] px-2 py-3 text-xs leading-5 text-muted-foreground">
                 {isLoading ? "Loading projects..." : "Create your first project."}
@@ -308,35 +337,33 @@ export function LeftSidebar() {
               );
             })}
           </div>
+          ) : (
+            <div className="mt-2 truncate px-1 text-[11px] text-muted-foreground">
+              {projectName ?? "No project selected"}
+            </div>
+          )}
           {error ? <p className="mt-2 px-1 text-xs leading-5 text-destructive">{error}</p> : null}
         </div>
-        {!projectName && projects.length === 0 ? (
-          <div className="rounded-2xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--accent)/0.08)] p-3 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
-            <div className="text-xs font-medium text-foreground">Create Project</div>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Start a PostgreSQL-backed workspace with starter files.
-            </p>
+        <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.54)] p-2 shadow-[0_12px_36px_hsl(0_80%_3%/0.18)]">
+          <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium">
             <button
-              className="mt-3 rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isLoading}
-              onClick={() => {
-                void createProject(nextProjectName).then(hydrateProjectChat);
-              }}
+              aria-expanded={expandedSections.workspace}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left text-foreground hover:text-accent"
+              onClick={() => toggleSection("workspace")}
               type="button"
             >
-              {isLoading ? "Creating..." : "Create Project"}
+              <span className="w-2 text-[10px] text-muted-foreground">
+                {expandedSections.workspace ? "v" : ">"}
+              </span>
+              <span className="truncate">Workspace</span>
             </button>
-            {error ? <p className="mt-2 text-xs leading-5 text-destructive">{error}</p> : null}
-          </div>
-        ) : null}
-        <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.58)] p-2.5 shadow-[0_18px_54px_hsl(0_80%_3%/0.24)]">
-          <div className="flex items-center justify-between px-1 pb-2 text-xs font-medium">
-            <span>Workspace</span>
             <span className="text-[11px] text-muted-foreground">
               {isLoading ? "..." : visibleFileCount}
             </span>
           </div>
-          <div className="mb-2 grid grid-cols-2 gap-1">
+          {expandedSections.workspace ? (
+          <>
+          <div className="mb-2 mt-2 grid grid-cols-2 gap-1">
             <button
               className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isLoading || !projectId}
@@ -370,7 +397,7 @@ export function LeftSidebar() {
               Delete
             </button>
           </div>
-          <div className="space-y-1">
+          <div className="max-h-[48dvh] space-y-1 overflow-y-auto pr-1">
             {fileTree.length === 0 ? (
               <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.34)] px-2 py-3 text-xs leading-5 text-muted-foreground">
                 {isLoading ? "Loading workspace..." : "Create a project to add starter files."}
@@ -378,24 +405,48 @@ export function LeftSidebar() {
             ) : null}
             {renderTree(fileTree)}
           </div>
+          </>
+          ) : null}
         </div>
-        <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.48)] p-3 shadow-sm">
-          <div className="flex items-center gap-2 text-xs font-medium">
+        <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.38)] p-2 shadow-sm">
+          <button
+            aria-expanded={expandedSections.git}
+            className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-accent"
+            onClick={() => toggleSection("git")}
+            type="button"
+          >
+            <span className="w-2 text-[10px] text-muted-foreground">
+              {expandedSections.git ? "v" : ">"}
+            </span>
             <span className="flex h-5 w-5 items-center justify-center rounded-md border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel-raised)/0.68)] font-mono text-[10px] text-muted-foreground">
               G
             </span>
             Git
-          </div>
-          <div className="mt-1 text-xs leading-5 text-muted-foreground">Status placeholder</div>
+          </button>
+          {expandedSections.git ? (
+            <div className="mt-2 px-1 text-xs leading-5 text-muted-foreground">Status placeholder</div>
+          ) : null}
         </div>
-        <div className="rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.48)] p-3 shadow-sm">
-          <div className="flex items-center gap-2 text-xs font-medium">
+        <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.38)] p-2 shadow-sm">
+          <button
+            aria-expanded={expandedSections.search}
+            className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-accent"
+            onClick={() => toggleSection("search")}
+            type="button"
+          >
+            <span className="w-2 text-[10px] text-muted-foreground">
+              {expandedSections.search ? "v" : ">"}
+            </span>
             <span className="flex h-5 w-5 items-center justify-center rounded-md border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel-raised)/0.68)] font-mono text-[10px] text-muted-foreground">
               /
             </span>
             Search
-          </div>
-          <div className="mt-1 text-xs leading-5 text-muted-foreground">Project search placeholder</div>
+          </button>
+          {expandedSections.search ? (
+            <div className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
+              Project search placeholder
+            </div>
+          ) : null}
         </div>
       </div>
     </Panel>

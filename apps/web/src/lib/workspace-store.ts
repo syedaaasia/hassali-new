@@ -60,7 +60,7 @@ type WorkspaceState = {
   workspaceId: string | null;
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
-  applyFileContent: (path: string, content: string) => Promise<void>;
+  applyFileContent: (path: string, content: string, expectedProjectId?: string | null) => Promise<void>;
   createFile: (path: string) => Promise<void>;
   createFolder: (path: string) => Promise<void>;
   createProject: (name: string) => Promise<WorkspaceLoadResult | null>;
@@ -68,6 +68,7 @@ type WorkspaceState = {
   hydrateWorkspace: (payload: WorkspaceLoadResult) => void;
   loadWorkspace: (projectId?: string | null) => Promise<WorkspaceLoadResult | null>;
   renamePath: (path: string, newPath: string, kind: "file" | "folder") => Promise<void>;
+  setError: (error: string | null) => void;
   switchProject: (projectId: string) => Promise<WorkspaceLoadResult | null>;
   updateActiveFile: (content: string) => void;
   saveActiveFile: () => Promise<void>;
@@ -284,8 +285,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         openTabs: nextTabs
       };
     }),
-  applyFileContent: async (path, content) => {
+  applyFileContent: async (path, content, expectedProjectId) => {
     const { files, projectId } = get();
+
+    if (typeof expectedProjectId !== "undefined" && expectedProjectId !== projectId) {
+      const message = "This proposal belongs to another project. Recreate it for the current project.";
+
+      set({ error: message });
+      throw new Error(message);
+    }
 
     if (projectId) {
       const response = await fetch("/api/workspace/files", {
@@ -521,6 +529,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       });
     }
   },
+  setError: (error) => set({ error }),
   switchProject: async (projectId) => get().loadWorkspace(projectId),
   updateActiveFile: (content) =>
     set((state) => ({

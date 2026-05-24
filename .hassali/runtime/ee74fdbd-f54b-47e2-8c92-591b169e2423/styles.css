@@ -1,37 +1,52 @@
 body {
     font-family: 'Roboto', sans-serif;
-    background-color: #f8f9fa;
+    background-color: #f5f5f5;
     color: #333;
 }
 
 header {
-    background-color: #343a40;
-    color: white;
+    background-color: #8A2BE2; /* Royal purple */
+    color: gold;
     text-align: center;
     padding: 20px;
 }
 
+.hero-img {
+    object-fit: cover;
+    width: 100%;
+    height: auto;
+    border: 5px solid #FFD700;
+    border-radius: 10px;
+}
+
 .product-img {
     width: 100%;
-    border-radius: 8px;
-    transition: transform 0.3s;
+    border-radius: 10px;
+    transition: transform 0.3s, box-shadow 0.3s;
 }
 
 .product-img:hover {
     transform: scale(1.05);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
 
 .card {
     display: inline-block;
     margin: 20px;
-    border-radius: 8px;
+    border-radius: 10px;
     overflow: hidden;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+    animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 }
 
 .footer {
-    background-color: #343a40;
-    color: white;
+    background-color: #8A2BE2;
+    color: gold;
     text-align: center;
     padding: 10px 0;
 }

@@ -19,6 +19,16 @@ const modes: Array<{ label: AiMode; disabled?: boolean }> = [
   { label: "EXECUTE" }
 ];
 
+const modeHints: Record<AiMode, string> = {
+  ASK: "Answer only. No preview or runtime actions.",
+  SUGGEST: "Review proposed file changes before anything mutates.",
+  EXECUTE: "Approve safe file and preview actions before they run."
+};
+
+function isFileProposalAction(action: string) {
+  return action === "create" || action === "update";
+}
+
 export function RightSidebar() {
   const messages = useChatStore((state) => state.messages);
   const input = useChatStore((state) => state.input);
@@ -33,13 +43,17 @@ export function RightSidebar() {
   const clearProposal = useChatStore((state) => state.clearProposal);
   const markProposalApproved = useChatStore((state) => state.markProposalApproved);
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const isPreviewOpen = useRuntimeStore((state) => state.isPreviewOpen);
   const startPreview = useRuntimeStore((state) => state.startPreview);
   const stopPreview = useRuntimeStore((state) => state.stopPreview);
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
+  const togglePreview = useRuntimeStore((state) => state.togglePreview);
   const files = useWorkspaceStore((state) => state.files);
   const activePath = useWorkspaceStore((state) => state.activePath);
   const projectId = useWorkspaceStore((state) => state.projectId);
+  const projectName = useWorkspaceStore((state) => state.projectName);
   const applyFileContent = useWorkspaceStore((state) => state.applyFileContent);
+  const setWorkspaceError = useWorkspaceStore((state) => state.setError);
   const activeFile = files[activePath];
   const visibleFileList = Object.keys(files).filter(
     (path) => !path.endsWith(`/${folderPlaceholderFileName}`)
@@ -50,8 +64,12 @@ export function RightSidebar() {
       activeFileContent: activeFile?.content ?? "",
       activePath,
       chatSessionId,
+      fileContents: Object.fromEntries(
+        visibleFileList.map((path) => [path, files[path]?.content ?? ""])
+      ),
       fileList: visibleFileList,
-      projectId
+      projectId,
+      projectName
     });
 
   const approveProposal = async () => {
@@ -59,26 +77,28 @@ export function RightSidebar() {
       return;
     }
 
+    if (proposal.projectId !== projectId) {
+      setWorkspaceError("This proposal belongs to another project. Recreate it for the current project.");
+      clearProposal();
+      return;
+    }
+
     for (const change of proposal.changes) {
       if (
-        (change.action === "create" || change.action === "update") &&
+        isFileProposalAction(change.action) &&
         change.path &&
         typeof change.proposedContent === "string"
       ) {
-        await applyFileContent(change.path, change.proposedContent);
+        await applyFileContent(change.path, change.proposedContent, proposal.projectId);
       }
     }
 
     for (const change of proposal.changes) {
       if (change.action === "restart_runtime") {
-        await startPreview(projectId);
-      }
-
-      if (change.action === "reload_preview") {
-        await syncPreview(projectId);
-      }
-
-      if (change.action === "stop_runtime") {
+        await startPreview(proposal.projectId);
+      } else if (change.action === "reload_preview") {
+        await syncPreview(proposal.projectId);
+      } else if (change.action === "stop_runtime") {
         await stopPreview();
       }
     }
@@ -87,12 +107,23 @@ export function RightSidebar() {
   };
 
   return (
-    <Panel className="hidden w-72 shrink-0 flex-col border-l border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] lg:flex xl:w-80 2xl:w-96">
-      <div className="border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
-        <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-          Assistant
+    <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-[hsl(var(--royal-surface)/0.92)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
+        <div className="min-w-0">
+          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            Assistant
+          </div>
+          <div className="mt-1 truncate text-xs text-foreground">Quiet operating surface</div>
         </div>
-        <div className="mt-1 text-xs text-foreground">Quiet pair programmer</div>
+        {mode !== "ASK" ? (
+          <button
+            className="shrink-0 rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.38)] px-3 py-1.5 text-xs font-medium text-muted-foreground hover:border-accent/35 hover:text-foreground"
+            onClick={togglePreview}
+            type="button"
+          >
+            {isPreviewOpen ? "Hide preview" : "Preview"}
+          </button>
+        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="space-y-3 border-b border-[hsl(var(--royal-border-soft))] p-3.5">
@@ -124,9 +155,12 @@ export function RightSidebar() {
             options={modelOptions}
             value={model}
           />
+          <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.28)] px-3 py-2 text-xs leading-5 text-muted-foreground">
+            {modeHints[mode]}
+          </div>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto scroll-smooth p-3.5">
+        <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto scroll-smooth p-4 lg:p-5">
           {messages.map((message) => (
             <motion.div
               animate={{ opacity: 1, y: 0 }}
@@ -221,14 +255,14 @@ export function RightSidebar() {
         </div>
 
         <form
-          className="border-t border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.82)] p-3.5"
+          className="shrink-0 border-t border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.82)] p-3.5"
           onSubmit={(event) => {
             event.preventDefault();
             void sendWithContext();
           }}
         >
           <textarea
-            className="min-h-24 w-full resize-none rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.48)] p-3.5 text-[12.5px] leading-5 text-foreground shadow-[inset_0_1px_0_hsl(var(--foreground)/0.04),0_16px_44px_hsl(0_80%_3%/0.26)] outline-none placeholder:text-muted-foreground focus:border-accent/55 focus:ring-2 focus:ring-accent/10"
+            className="max-h-40 min-h-20 w-full resize-none rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.48)] p-3.5 text-[12.5px] leading-5 text-foreground shadow-[inset_0_1px_0_hsl(var(--foreground)/0.04),0_16px_44px_hsl(0_80%_3%/0.26)] outline-none placeholder:text-muted-foreground focus:border-accent/55 focus:ring-2 focus:ring-accent/10"
             onChange={(event) =>
               setInput((event.currentTarget as unknown as { value: string }).value)
             }

@@ -17,11 +17,14 @@ type RuntimePayload = {
 type RuntimeState = RuntimePayload & {
   iframeVersion: number;
   isLoading: boolean;
+  isPreviewOpen: boolean;
   clearLogs: () => Promise<void>;
   refreshRuntime: () => Promise<void>;
+  setPreviewOpen: (isPreviewOpen: boolean) => void;
   startPreview: (projectId: string | null) => Promise<void>;
   stopPreview: () => Promise<void>;
   syncPreview: (projectId: string | null) => Promise<void>;
+  togglePreview: () => void;
 };
 
 const initialPayload: RuntimePayload = {
@@ -73,6 +76,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   ...initialPayload,
   iframeVersion: 0,
   isLoading: false,
+  isPreviewOpen: false,
   clearLogs: async () => {
     const response = await fetch("/api/runtime", {
       body: JSON.stringify({ action: "clearLogs" }),
@@ -91,6 +95,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       set({ error: error instanceof Error ? error.message : "Preview status unavailable." });
     }
   },
+  setPreviewOpen: (isPreviewOpen) => set({ isPreviewOpen }),
   startPreview: async (projectId) => {
     if (!projectId) {
       set({ error: "Create or select a project before starting preview." });
@@ -157,5 +162,8 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Preview reload failed." });
     }
+  },
+  togglePreview: () => {
+    set((state) => ({ isPreviewOpen: !state.isPreviewOpen }));
   }
 }));
