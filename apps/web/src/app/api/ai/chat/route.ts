@@ -21,6 +21,10 @@ import {
   type IntentIntelligence
 } from "@/lib/server/ai/intent-intelligence";
 import {
+  buildIntelligenceKernel,
+  type IntelligenceKernelResult
+} from "@/lib/server/ai/intelligence-kernel";
+import {
   buildCompositionStrategy,
   type CompositionStrategy
 } from "@/lib/server/ai/reasoning-composition";
@@ -1224,10 +1228,22 @@ function createProposalStream(proposal: DiffProposal, sessionId?: string | null)
   );
 }
 
+function compactIntelligenceKernel(kernel: IntelligenceKernelResult) {
+  return {
+    confidence: kernel.confidence,
+    critiquePassed: kernel.critiqueResult.passed,
+    riskLevel: kernel.riskAssessment.riskLevel,
+    shouldProceed: kernel.shouldProceed,
+    summary: kernel.summary,
+    verificationChecks: kernel.verificationPlan.checks
+  };
+}
+
 function addCompositionDebugSummary(
   proposal: DiffProposal,
   intent: IntentIntelligence,
-  composition: CompositionStrategy
+  composition: CompositionStrategy,
+  kernel?: IntelligenceKernelResult
 ): DiffProposal {
   const palette = intent.palette.length
     ? intent.palette.join("/")
@@ -1235,6 +1251,7 @@ function addCompositionDebugSummary(
   const style = intent.visualStyle.length
     ? intent.visualStyle.join(", ")
     : composition.visualLanguage.style.join(", ");
+  const kernelSummary = kernel ? ` Kernel: ${kernel.summary}` : "";
 
   return {
     ...proposal,
@@ -1242,7 +1259,7 @@ function addCompositionDebugSummary(
       `Composition-driven generation active. Business: ${composition.businessType}. ` +
       `Audience: ${composition.audience.join(", ")}. Pages: ${composition.siteArchitecture.pageCount}. ` +
       `Palette: ${palette}. Style: ${style}. ` +
-      `Intent: ${intent.summary} Composition: ${composition.reasoningSummary} ${proposal.summary}`
+      `Intent: ${intent.summary} Composition: ${composition.reasoningSummary}.${kernelSummary} ${proposal.summary}`
   };
 }
 
@@ -1251,6 +1268,7 @@ async function createFallbackProposalResponse(input: {
   diagnostic: DiagnosticContext;
   decision: DecisionPlan;
   intent: IntentIntelligence;
+  kernel: IntelligenceKernelResult;
   mode: "SUGGEST" | "EXECUTE";
   model: string;
   persistence: ChatPersistenceContext | null;
@@ -1267,7 +1285,12 @@ async function createFallbackProposalResponse(input: {
     input.intent,
     input.composition
   );
-  const proposalWithIntent = addCompositionDebugSummary(proposal, input.intent, input.composition);
+  const proposalWithIntent = addCompositionDebugSummary(
+    proposal,
+    input.intent,
+    input.composition,
+    input.kernel
+  );
   let persistence = input.persistence;
   const visibleSummary =
     input.mode === "EXECUTE"
@@ -1280,6 +1303,7 @@ async function createFallbackProposalResponse(input: {
       fallbackReason: input.reason,
       composition: input.composition,
       intent: input.intent,
+      intelligenceKernel: compactIntelligenceKernel(input.kernel),
       qualityDecision: input.decision,
       model: input.model,
       proposal: proposalWithIntent
@@ -1460,10 +1484,18 @@ export async function POST(request: Request) {
     prompt: latestUserPrompt
   });
   const composition = buildCompositionStrategy(intent);
+  const kernel = buildIntelligenceKernel({
+    composition,
+    decision,
+    diagnostic,
+    intent,
+    mode
+  });
 
   if (mode === "SUGGEST" || mode === "EXECUTE") {
     console.info("intent intelligence", intent);
     console.info("composition strategy", composition);
+    console.info("intelligence kernel", kernel.summary);
   }
 
   const formattedDiagnostic = formatDiagnosticContext(diagnostic);
@@ -1487,6 +1519,7 @@ export async function POST(request: Request) {
         fileList: workspace.fileList,
         inferredDomain: diagnostic.inferredDomain,
         intent,
+        intelligenceKernel: compactIntelligenceKernel(kernel),
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -1515,7 +1548,8 @@ export async function POST(request: Request) {
         composition
       ),
       intent,
-      composition
+      composition,
+      kernel
     );
     const visibleSummary =
       mode === "EXECUTE"
@@ -1528,6 +1562,7 @@ export async function POST(request: Request) {
         composition,
         model,
         intent,
+        intelligenceKernel: compactIntelligenceKernel(kernel),
         proposal
       },
       role: "assistant"
@@ -1568,6 +1603,7 @@ export async function POST(request: Request) {
                 `For multi-page requests, satisfy the required page files exactly. Decision plan: ${JSON.stringify(decision)}. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
+                `Intelligence kernel: ${kernel.summary}. ` +
                 `The proposal summary must mention what you detected and the safe treatment. Diagnostic context:\n${formattedDiagnostic}`
             },
             ...messages
@@ -1587,6 +1623,7 @@ export async function POST(request: Request) {
         diagnostic,
         decision,
         intent,
+        kernel,
         mode,
         model,
         persistence,
@@ -1602,6 +1639,7 @@ export async function POST(request: Request) {
         diagnostic,
         decision,
         intent,
+        kernel,
         mode,
         model,
         persistence,
@@ -1634,6 +1672,7 @@ export async function POST(request: Request) {
         diagnostic,
         decision,
         intent,
+        kernel,
         mode,
         model,
         persistence,
@@ -1671,7 +1710,7 @@ export async function POST(request: Request) {
           summary: change.summary
         };
       })
-    }, intent, composition);
+    }, intent, composition, kernel);
     const quality = scoreProposalQuality({
       changes: proposal.changes,
       composition,
@@ -1686,6 +1725,7 @@ export async function POST(request: Request) {
         diagnostic,
         decision,
         intent,
+        kernel,
         mode,
         model,
         persistence,
@@ -1700,6 +1740,7 @@ export async function POST(request: Request) {
       metadata: {
         composition,
         intent,
+        intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         proposal
       },
