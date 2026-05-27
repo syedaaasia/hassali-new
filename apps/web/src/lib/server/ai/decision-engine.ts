@@ -53,6 +53,21 @@ function includesAny(text: string, terms: string[]) {
   return terms.some((term) => text.includes(term));
 }
 
+function isWebsiteCreationRequest(promptText: string) {
+  return (
+    includesAny(promptText, ["create", "build", "make", "design", "generate"]) &&
+    includesAny(promptText, ["website", "site", "landing page", "web page", "pages"])
+  );
+}
+
+function isRenameRequest(promptText: string) {
+  return (
+    /\b(?:rename|replace)\b/i.test(promptText) ||
+    /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
+    /\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+to\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(promptText)
+  );
+}
+
 function pageToPath(page: string) {
   const normalized = page.toLowerCase().trim();
   const pageMap: Record<string, string> = {
@@ -111,7 +126,24 @@ function sectionsForDomain(domain: DiagnosticContext["inferredDomain"]) {
 
 function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"]) {
   const pageCount = requestedPageCount(promptText);
+  const explicitPageTerms: Record<string, string[]> = {
+    "about.html": ["about", "about us"],
+    "blog.html": ["blog", "blogs"],
+    "contact.html": ["contact"],
+    "episodes.html": ["episode", "episodes"],
+    "gallery.html": ["gallery"],
+    "index.html": ["home", "homepage", "landing"],
+    "menu.html": ["menu"],
+    "products.html": ["products", "shop", "store"],
+    "services.html": ["services", "service"]
+  };
   const pages = ["index.html"];
+
+  for (const [path, terms] of Object.entries(explicitPageTerms)) {
+    if (!pages.includes(path) && includesAny(promptText, terms)) {
+      pages.push(path);
+    }
+  }
 
   if (domain === "youtube podcast" || domain === "podcast" || includesAny(promptText, ["episode", "episodes"])) {
     pages.push("episodes.html");
@@ -129,19 +161,23 @@ function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"
     pages.push("contact.html");
   }
 
-  while (pages.length < pageCount) {
-    const nextPage = pages.includes("about.html") ? "contact.html" : "about.html";
+  const fallbackPages = ["services.html", "about.html", "contact.html", "gallery.html", "blog.html"];
 
-    if (pages.includes(nextPage)) {
+  for (const nextPage of fallbackPages) {
+    if (pages.length >= pageCount) {
       break;
     }
 
-    pages.push(nextPage);
+    if (!pages.includes(nextPage)) {
+      pages.push(nextPage);
+    }
   }
 
+  const uniquePages = Array.from(new Set(pages));
+
   return {
-    pageCount: pages.length,
-    pages: Array.from(new Set(pages))
+    pageCount: uniquePages.slice(0, pageCount).length,
+    pages: uniquePages.slice(0, pageCount)
   };
 }
 
@@ -150,7 +186,11 @@ function requestTypeForPrompt(promptText: string, diagnostic: DiagnosticContext)
     return "invoice";
   }
 
-  if (diagnostic.promptIntent === "text_rename") {
+  if (isWebsiteCreationRequest(promptText)) {
+    return requestedPageCount(promptText) > 1 ? "multi_page_generation" : "website_generation";
+  }
+
+  if (diagnostic.promptIntent === "text_rename" || isRenameRequest(promptText)) {
     return "rename";
   }
 
@@ -209,6 +249,10 @@ function changeStrategyForType(type: DecisionRequestType, hasIndexHtml: boolean)
   }
 
   return "Use the smallest safe file change that satisfies the request.";
+}
+
+function repeatedOccurrences(content: string, pattern: RegExp) {
+  return content.match(pattern)?.length ?? 0;
 }
 
 export function buildDecisionPlan(input: DecisionInput): DecisionPlan {
@@ -291,6 +335,16 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
     ) {
       score -= 45;
       issues.push(`${change.path ?? "unknown file"} has blank content`);
+    }
+
+    if (
+      typeof change.proposedContent === "string" &&
+      (repeatedOccurrences(change.proposedContent, /const\s+revealTargets\s*=/g) > 1 ||
+        repeatedOccurrences(change.proposedContent, /\/\*\s*Hassali safe enhancement:/g) > 1 ||
+        repeatedOccurrences(change.proposedContent, /function\s+showCarouselCard\s*\(/g) > 1)
+    ) {
+      score -= 25;
+      issues.push(`${change.path ?? "unknown file"} contains repeated generated CSS/JS blocks`);
     }
   }
 

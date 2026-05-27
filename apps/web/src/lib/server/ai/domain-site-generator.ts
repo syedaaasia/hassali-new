@@ -938,6 +938,17 @@ function colorTokens(intent: IntentIntelligence, composition: CompositionStrateg
     };
   }
 
+  if (has("cream") || has("brown") || business.includes("bakery")) {
+    return {
+      accent: "#8b5e34",
+      accentSoft: "rgba(196, 142, 86, 0.28)",
+      canvas: "#fff8ed",
+      ink: "#2a1b12",
+      secondary: "#c48e56",
+      surface: "rgba(255, 255, 255, 0.76)"
+    };
+  }
+
   if (has("green") || has("teal")) {
     return {
       accent: "#00a3af",

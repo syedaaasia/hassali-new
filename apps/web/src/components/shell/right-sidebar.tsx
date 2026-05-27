@@ -1,9 +1,10 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
-import { type AiMode, useChatStore } from "@/lib/chat-store";
+import { type AiMode, type ChatMessage, type DiffProposal, useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
 
@@ -24,9 +25,179 @@ const modeHints: Record<AiMode, string> = {
   SUGGEST: "Review proposed file changes before anything mutates.",
   EXECUTE: "Approve safe file and preview actions before they run."
 };
+const blockedRegenerationLimit = 2;
+const manualReviewNeededMessage =
+  "Manual review needed \u2014 Hassali has blocked multiple regenerated proposals. Please adjust the request or inspect the project files.";
+
+const manualReviewGuidance = [
+  "Check the correct project is selected.",
+  "Inspect selected project files before retrying.",
+  "Simplify the request.",
+  "Restate exact pages, colors, and style.",
+  'Ask Hassali: "Explain why this proposal was blocked and what I should change."',
+  "Reject the proposal and manually rewrite the request if needed."
+];
 
 function isFileProposalAction(action: string) {
   return action === "create" || action === "update";
+}
+
+function isBlockedProposal(proposal: DiffProposal) {
+  return proposal.proposalRoutingMode === "blocked" || proposal.shouldBlockExecution === true;
+}
+
+function blockedProposalReasons(proposal: DiffProposal) {
+  return (proposal.proposalRoutingReasons ?? [])
+    .filter((reason) => reason.severity !== "info")
+    .map((reason) => reason.message);
+}
+
+function blockedProposalWarnings(proposal: DiffProposal) {
+  return (proposal.proposalRoutingWarnings ?? []).map((warning) => warning.message);
+}
+
+function formatPromptList(items: string[], fallback: string) {
+  return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : `- ${fallback}`;
+}
+
+function extractOriginalRequest(content: string) {
+  const match = content.match(/Original request:\s*\n([\s\S]*?)\n\nPrevious proposal was blocked because:/);
+
+  return match?.[1]?.trim() || content;
+}
+
+function getLatestOriginalRequest(messages: ChatMessage[]) {
+  const latestUserMessage =
+    [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+
+  return extractOriginalRequest(latestUserMessage) || "the original request in this chat";
+}
+
+function createSaferProposalPrompt(proposal: DiffProposal, originalRequest: string) {
+  const reasons = blockedProposalReasons(proposal);
+  const warnings = blockedProposalWarnings(proposal);
+
+  return `Please regenerate a safer proposal.
+
+Original request:
+${originalRequest}
+
+Previous proposal was blocked because:
+${formatPromptList(reasons, proposal.summary)}
+
+Warnings:
+${formatPromptList(warnings, "No additional warnings were provided.")}
+
+Required corrections:
+- preserve approval-first safety
+- avoid welcome.ts pollution
+- preserve selected project isolation
+- match the original business/domain
+- match requested page count
+- match requested colors
+- match requested visual style
+- avoid developer/coder fallback unless user explicitly asked for a developer/coder website
+- avoid overgeneration
+- avoid blank files
+
+Required preservation rules:
+- do not simplify away requested pages
+- do not change the business type
+- do not ignore the theme/colors
+- do not change execution behavior
+- produce a normal proposal only after risks are corrected
+
+Return a corrected proposal that keeps the original request intact and fixes the blocked risks.`;
+}
+
+function getProposalReviewState(proposal: DiffProposal) {
+  if (isBlockedProposal(proposal)) {
+    return {
+      badge: "Blocked / Unsafe to Execute",
+      className:
+        "border-red-500/35 bg-red-500/10 text-red-200 shadow-[0_0_18px_rgba(239,68,68,0.12)]",
+      message: "AI marked this proposal as unsafe or mismatched. Do not approve unless corrected."
+    };
+  }
+
+  if (proposal.proposalRoutingMode === "review_required" || proposal.requiresExtraReview) {
+    return {
+      badge: "Needs Review",
+      className:
+        "border-amber-400/35 bg-amber-400/10 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,0.1)]",
+      message: "AI found possible risks. Please review carefully before approving."
+    };
+  }
+
+  return {
+    badge: "Normal",
+    className:
+      "border-emerald-400/30 bg-emerald-400/10 text-emerald-100 shadow-[0_0_18px_rgba(52,211,153,0.1)]",
+    message: "AI safety check passed. Review the proposal before approving."
+  };
+}
+
+function ProposalReviewState({ proposal }: { proposal: DiffProposal }) {
+  const reviewState = getProposalReviewState(proposal);
+  const warnings = proposal.proposalRoutingWarnings ?? [];
+  const visibleReasons = (proposal.proposalRoutingReasons ?? [])
+    .filter((reason) => reason.severity !== "info")
+    .slice(0, 3);
+
+  return (
+    <div className="mt-3 rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.28)] p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase ${reviewState.className}`}>
+          {reviewState.badge}
+        </span>
+        <span className="text-[11px] leading-5 text-muted-foreground">{reviewState.message}</span>
+      </div>
+
+      {warnings.length > 0 ? (
+        <div className="mt-3 space-y-1.5">
+          {warnings.slice(0, 4).map((warning) => (
+            <div className="text-[11px] leading-5 text-muted-foreground" key={warning.code}>
+              <span className={warning.risk === "high" ? "text-red-200" : "text-amber-100"}>
+                {warning.risk === "high" ? "High" : "Review"}:
+              </span>{" "}
+              {warning.message}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {visibleReasons.length > 0 ? (
+        <div className="mt-2 space-y-1.5">
+          {visibleReasons.map((reason) => (
+            <div className="text-[11px] leading-5 text-muted-foreground" key={`${reason.code}-${reason.message}`}>
+              {reason.message}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {proposal.intelligenceKernelSummary ? (
+        <details className="mt-3 text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer text-foreground/80">Intelligence summary</summary>
+          <p className="mt-2 leading-5">{proposal.intelligenceKernelSummary}</p>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function ManualReviewNotice({ message }: { message: string }) {
+  return (
+    <div className="mt-3 rounded-xl border border-red-400/25 bg-red-400/10 px-3 py-2 text-[11px] leading-5 text-red-100">
+      <div>{message}</div>
+      <div className="mt-2 font-medium text-red-50">Try this next:</div>
+      <ol className="mt-1 list-decimal space-y-1 pl-4 text-red-100/90">
+        {manualReviewGuidance.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ol>
+    </div>
+  );
 }
 
 export function RightSidebar() {
@@ -58,22 +229,72 @@ export function RightSidebar() {
   const visibleFileList = Object.keys(files).filter(
     (path) => !path.endsWith(`/${folderPlaceholderFileName}`)
   );
+  const isApprovalBlocked = proposal ? isBlockedProposal(proposal) : false;
+  const regenerationInFlightRef = useRef(false);
+  const [blockedRegenerationAttempts, setBlockedRegenerationAttempts] = useState(0);
+  const [manualReviewMessage, setManualReviewMessage] = useState<string | null>(null);
 
-  const sendWithContext = () =>
-    sendMessage({
-      activeFileContent: activeFile?.content ?? "",
-      activePath,
-      chatSessionId,
-      fileContents: Object.fromEntries(
-        visibleFileList.map((path) => [path, files[path]?.content ?? ""])
-      ),
-      fileList: visibleFileList,
-      projectId,
-      projectName
-    });
+  useEffect(() => {
+    if (!proposal) {
+      if (!regenerationInFlightRef.current) {
+        setBlockedRegenerationAttempts(0);
+        setManualReviewMessage(null);
+      }
+
+      return;
+    }
+
+    if (!isBlockedProposal(proposal)) {
+      regenerationInFlightRef.current = false;
+      setBlockedRegenerationAttempts(0);
+      setManualReviewMessage(null);
+      return;
+    }
+
+    regenerationInFlightRef.current = false;
+  }, [proposal]);
+
+  const createWorkspaceContext = () => ({
+    activeFileContent: activeFile?.content ?? "",
+    activePath,
+    chatSessionId,
+    fileContents: Object.fromEntries(
+      visibleFileList.map((path) => [path, files[path]?.content ?? ""])
+    ),
+    fileList: visibleFileList,
+    projectId,
+    projectName
+  });
+
+  const sendWithContext = () => sendMessage(createWorkspaceContext());
+
+  const rejectAndRequestSaferProposal = () => {
+    if (!proposal || !isBlockedProposal(proposal)) {
+      return;
+    }
+
+    if (blockedRegenerationAttempts >= blockedRegenerationLimit) {
+      setManualReviewMessage(manualReviewNeededMessage);
+      return;
+    }
+
+    const followUpPrompt = createSaferProposalPrompt(proposal, getLatestOriginalRequest(messages));
+
+    regenerationInFlightRef.current = true;
+    setBlockedRegenerationAttempts((attempts) => attempts + 1);
+    setManualReviewMessage(null);
+    clearProposal();
+    setInput(followUpPrompt);
+    void sendMessage(createWorkspaceContext());
+  };
 
   const approveProposal = async () => {
     if (!proposal) {
+      return;
+    }
+
+    if (isBlockedProposal(proposal)) {
+      setWorkspaceError("This proposal was marked unsafe. Reject it and ask Hassali to recreate a safer proposal.");
       return;
     }
 
@@ -207,6 +428,7 @@ export function RightSidebar() {
                   pending
                 </span>
               </div>
+              <ProposalReviewState proposal={proposal} />
 
               <div className="mt-3 space-y-3">
                 {proposal.changes.map((change) => (
@@ -232,7 +454,19 @@ export function RightSidebar() {
                 ))}
               </div>
 
+              {manualReviewMessage ? <ManualReviewNotice message={manualReviewMessage} /> : null}
+
               <div className="mt-3 flex items-center justify-end gap-2">
+                {isApprovalBlocked ? (
+                  <button
+                    className="rounded-xl border border-red-400/25 bg-red-400/10 px-3 py-1.5 text-xs font-medium text-red-100 hover:border-red-300/45 disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={isStreaming}
+                    onClick={rejectAndRequestSaferProposal}
+                    type="button"
+                  >
+                    Reject and ask for safer proposal
+                  </button>
+                ) : null}
                 <button
                   className="rounded-xl border border-[hsl(var(--royal-border-soft))] px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
                   onClick={clearProposal}
@@ -241,13 +475,14 @@ export function RightSidebar() {
                   Reject
                 </button>
                 <button
-                  className="rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground shadow-[0_12px_30px_hsl(var(--accent)/0.18)] hover:opacity-90"
+                  className="rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground shadow-[0_12px_30px_hsl(var(--accent)/0.18)] hover:opacity-90 disabled:cursor-not-allowed disabled:border-red-500/20 disabled:bg-red-500/10 disabled:text-red-200/60 disabled:shadow-none disabled:hover:opacity-100"
+                  disabled={isApprovalBlocked}
                   onClick={() => {
                     void approveProposal();
                   }}
                   type="button"
                 >
-                  Approve
+                  {isApprovalBlocked ? "Approval blocked" : "Approve"}
                 </button>
               </div>
             </motion.div>

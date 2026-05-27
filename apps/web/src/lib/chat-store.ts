@@ -24,11 +24,30 @@ export type WorkspaceContext = {
 type FileProposalAction = "create" | "update";
 type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "stop_runtime";
 type ProposalAction = FileProposalAction | RuntimeProposalAction;
+type ProposalRoutingMode = "blocked" | "normal" | "review_required";
+
+export type ProposalRoutingReason = {
+  code: string;
+  message: string;
+  severity: "high" | "info" | "medium";
+};
+
+export type ProposalRoutingWarning = {
+  code: string;
+  message: string;
+  risk: "high" | "medium";
+};
 
 export type DiffProposal = {
   id: string;
+  intelligenceKernelSummary?: string;
   mode: "SUGGEST" | "EXECUTE";
   projectId: string | null;
+  proposalRoutingMode?: ProposalRoutingMode;
+  proposalRoutingReasons?: ProposalRoutingReason[];
+  proposalRoutingWarnings?: ProposalRoutingWarning[];
+  requiresExtraReview?: boolean;
+  shouldBlockExecution?: boolean;
   status: "pending" | "approved" | "rejected";
   summary: string;
   changes: Array<{
@@ -84,6 +103,38 @@ function isFileProposalAction(action: unknown): action is FileProposalAction {
   return action === "create" || action === "update";
 }
 
+function isProposalRoutingMode(value: unknown): value is ProposalRoutingMode {
+  return value === "blocked" || value === "normal" || value === "review_required";
+}
+
+function isProposalRoutingWarning(value: unknown): value is ProposalRoutingWarning {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const warning = value as ProposalRoutingWarning;
+
+  return (
+    typeof warning.code === "string" &&
+    typeof warning.message === "string" &&
+    (warning.risk === "high" || warning.risk === "medium")
+  );
+}
+
+function isProposalRoutingReason(value: unknown): value is ProposalRoutingReason {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const reason = value as ProposalRoutingReason;
+
+  return (
+    typeof reason.code === "string" &&
+    typeof reason.message === "string" &&
+    (reason.severity === "high" || reason.severity === "info" || reason.severity === "medium")
+  );
+}
+
 function createGreetingMessage() {
   return createMessage(
     "assistant",
@@ -124,6 +175,20 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     typeof proposal.id === "string" &&
     (typeof proposal.projectId === "string" || proposal.projectId === null) &&
     typeof proposal.summary === "string" &&
+    (typeof proposal.intelligenceKernelSummary === "undefined" ||
+      typeof proposal.intelligenceKernelSummary === "string") &&
+    (typeof proposal.proposalRoutingMode === "undefined" ||
+      isProposalRoutingMode(proposal.proposalRoutingMode)) &&
+    (typeof proposal.proposalRoutingWarnings === "undefined" ||
+      (Array.isArray(proposal.proposalRoutingWarnings) &&
+        proposal.proposalRoutingWarnings.every(isProposalRoutingWarning))) &&
+    (typeof proposal.proposalRoutingReasons === "undefined" ||
+      (Array.isArray(proposal.proposalRoutingReasons) &&
+        proposal.proposalRoutingReasons.every(isProposalRoutingReason))) &&
+    (typeof proposal.requiresExtraReview === "undefined" ||
+      typeof proposal.requiresExtraReview === "boolean") &&
+    (typeof proposal.shouldBlockExecution === "undefined" ||
+      typeof proposal.shouldBlockExecution === "boolean") &&
     Array.isArray(proposal.changes) &&
     proposal.changes.every(
       (change) => {

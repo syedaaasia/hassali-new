@@ -59,12 +59,12 @@ function inferBusinessType(intent: IntentIntelligence) {
     return "premium lifestyle commerce";
   }
 
-  if (includesAny(text, ["beauty", "skincare", "skin care", "cream", "cosmetic", "hydration", "glow"])) {
-    return "beauty cream / skincare";
-  }
-
   if (includesAny(text, ["bakery", "bake", "cakes", "pastry", "bread"])) {
     return "bakery hospitality and ordering brand";
+  }
+
+  if (includesAny(text, ["beauty", "skincare", "skin care", "beauty cream", "cosmetic", "hydration", "glow"])) {
+    return "beauty cream / skincare";
   }
 
   if (intent.domain === "youtube podcast" || intent.domain === "podcast" || intent.domain === "creator") {

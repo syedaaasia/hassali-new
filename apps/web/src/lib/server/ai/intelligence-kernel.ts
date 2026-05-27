@@ -341,7 +341,10 @@ export function assessRisk(
         ? 0.34
         : 0.22;
   const wrongDomainRisk =
-    !technicalBusiness && contextDiagnosis.inferredDomain === "code/tooling project" && websiteRequest
+    !technicalBusiness &&
+    contextDiagnosis.inferredDomain === "code/tooling project" &&
+    websiteRequest &&
+    taskUnderstanding.userIntent !== "new_site"
       ? 0.58
       : input.intent.domain === "generic website"
         ? 0.28
@@ -419,12 +422,21 @@ export function critiquePlan(
     issues.push("plan does not satisfy requested/composed page count");
   }
 
-  if (!technicalBusiness && contextDiagnosis.inferredDomain === "code/tooling project" && websiteRequest) {
+  if (
+    !technicalBusiness &&
+    contextDiagnosis.inferredDomain === "code/tooling project" &&
+    websiteRequest &&
+    taskUnderstanding.userIntent !== "new_site"
+  ) {
     issues.push("wrong-domain risk: non-technical website could fall back to developer aesthetics");
   }
 
   if (taskUnderstanding.userIntent === "rename" && input.decision.requestType !== "rename") {
     issues.push("rename intent was not routed to text replacement");
+  }
+
+  if (taskUnderstanding.userIntent === "new_site" && !websiteRequest) {
+    issues.push("new website intent was not routed to website generation");
   }
 
   if (riskAssessment.riskLevel === "high") {

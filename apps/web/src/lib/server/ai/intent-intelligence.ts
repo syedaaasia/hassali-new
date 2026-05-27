@@ -55,6 +55,21 @@ function includesAny(text: string, terms: string[]) {
   return terms.some((term) => text.includes(term));
 }
 
+function isWebsiteCreationRequest(promptText: string) {
+  return (
+    includesAny(promptText, ["create", "build", "make", "design", "generate"]) &&
+    includesAny(promptText, ["website", "site", "landing page", "web page", "pages"])
+  );
+}
+
+function isRenameRequest(promptText: string) {
+  return (
+    /\b(?:rename|replace)\b/i.test(promptText) ||
+    /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
+    /\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+to\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(promptText)
+  );
+}
+
 function unique(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
@@ -90,6 +105,54 @@ function extractPageCount(promptText: string) {
 function inferDomain(promptText: string, projectText: string) {
   const text = `${promptText}\n${projectText}`;
 
+  if (includesAny(promptText, ["youtube podcast", "youtube show", "video podcast"])) {
+    return "youtube podcast";
+  }
+
+  if (includesAny(promptText, ["podcast", "episode", "host", "spotify", "listen now", "microphone"])) {
+    return "podcast";
+  }
+
+  if (includesAny(promptText, ["creator", "content creator", "media brand", "content studio"])) {
+    return "creator";
+  }
+
+  if (includesAny(promptText, ["fish", "seafood", "fresh catch", "aquatic", "daily catch"])) {
+    return "seafood";
+  }
+
+  if (includesAny(promptText, ["candle", "candles", "scent", "fragrance"])) {
+    return "candle";
+  }
+
+  if (includesAny(promptText, ["bakery", "bake", "cakes", "pastry", "bread"])) {
+    return "bakery";
+  }
+
+  if (includesAny(promptText, ["beauty", "skincare", "skin care", "beauty cream", "cosmetic", "hydration", "glow"])) {
+    return "beauty/skincare";
+  }
+
+  if (includesAny(promptText, ["car showroom", "dealership", "test drive"])) {
+    return "car showroom";
+  }
+
+  if (includesAny(promptText, ["car rental", "fleet", "chauffeur", "vehicle rental"])) {
+    return "car rental";
+  }
+
+  if (includesAny(promptText, ["florist", "flower", "bouquet", "petal", "rose"])) {
+    return "florist";
+  }
+
+  if (includesAny(promptText, ["jewellery", "jewelry", "ring", "necklace", "diamond", "gemstone"])) {
+    return "jewellery";
+  }
+
+  if (includesAny(promptText, ["restaurant", "menu", "chef", "dining", "reservation"])) {
+    return "restaurant";
+  }
+
   if (includesAny(text, ["youtube podcast", "youtube show", "video podcast"])) {
     return "youtube podcast";
   }
@@ -106,7 +169,7 @@ function inferDomain(promptText: string, projectText: string) {
     return "seafood";
   }
 
-  if (includesAny(text, ["beauty", "skincare", "skin care", "cream", "cosmetic", "hydration", "glow"])) {
+  if (includesAny(text, ["beauty", "skincare", "skin care", "beauty cream", "cosmetic", "hydration", "glow"])) {
     return "beauty/skincare";
   }
 
@@ -192,7 +255,11 @@ function inferSiteType(domain: string) {
 }
 
 function inferUserIntent(promptText: string): IntentIntelligence["userIntent"] {
-  if (includesAny(promptText, ["rename", "change name", "from ", " to "])) {
+  if (isWebsiteCreationRequest(promptText)) {
+    return "new_site";
+  }
+
+  if (isRenameRequest(promptText)) {
     return "rename";
   }
 
@@ -216,10 +283,6 @@ function inferUserIntent(promptText: string): IntentIntelligence["userIntent"] {
     return "visual_polish";
   }
 
-  if (includesAny(promptText, ["create", "build", "make", "design", "generate"]) && includesAny(promptText, ["website", "site", "page"])) {
-    return "new_site";
-  }
-
   return "modify_site";
 }
 
@@ -232,6 +295,7 @@ function extractRequestedPages(promptText: string, domain: string, pageCount: nu
     episodes: ["episode", "episodes"],
     gallery: ["gallery"],
     home: ["home", "landing"],
+    menu: ["menu"],
     portfolio: ["portfolio", "work"],
     pricing: ["pricing"],
     services: ["services", "service"],
@@ -262,13 +326,24 @@ function extractRequestedPages(promptText: string, domain: string, pageCount: nu
     pages.push(page);
   }
 
-  return unique(pages).slice(0, pageCount ?? undefined);
+  const orderedPages =
+    pageCount || pages.length > 0
+      ? unique(["home", ...pages]).filter((page) => pages.includes(page) || page === "home")
+      : [];
+
+  return orderedPages.slice(0, pageCount ?? undefined);
 }
 
 function extractMatches(promptText: string, dictionary: Record<string, string[]>) {
   return Object.entries(dictionary).flatMap(([label, terms]) =>
     includesAny(promptText, terms) ? [label] : []
   );
+}
+
+function isCreamPaletteRequest(promptText: string) {
+  return /\b(?:in|with|using|palette|theme|colors?|colours?)\s+cream\b/.test(promptText) ||
+    /\bcream\s+(?:and|&|palette|theme|colors?|colours?)\b/.test(promptText) ||
+    /\b(?:and|&)\s+cream\b/.test(promptText);
 }
 
 function inferBusinessGoals(domain: string) {
@@ -335,6 +410,8 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
     extractMatches(promptText, {
       black: ["black"],
       blue: ["blue"],
+      brown: ["brown"],
+      cream: ["cream"],
       gold: ["gold"],
       gradient: ["gradient"],
       green: ["green"],
@@ -344,6 +421,7 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
       teal: ["teal"],
       white: ["white"]
     })
+      .filter((color) => color !== "cream" || isCreamPaletteRequest(promptText))
   );
   const typographyTone = unique(
     extractMatches(promptText, {

@@ -25,6 +25,10 @@ import {
   type IntelligenceKernelResult
 } from "@/lib/server/ai/intelligence-kernel";
 import {
+  buildProposalRoutingDecision,
+  type ProposalRoutingDecision
+} from "@/lib/server/ai/proposal-routing";
+import {
   buildCompositionStrategy,
   type CompositionStrategy
 } from "@/lib/server/ai/reasoning-composition";
@@ -69,11 +73,31 @@ type ProposalChange = {
   diffPreview?: string;
 };
 
+type ProposalRoutingMode = "blocked" | "normal" | "review_required";
+
+type ProposalRoutingReason = {
+  code: string;
+  message: string;
+  severity: "high" | "info" | "medium";
+};
+
+type ProposalRoutingWarning = {
+  code: string;
+  message: string;
+  risk: "high" | "medium";
+};
+
 type DiffProposal = {
   changes: ProposalChange[];
   id: string;
+  intelligenceKernelSummary?: string;
   mode: "SUGGEST" | "EXECUTE";
   projectId: string | null;
+  proposalRoutingMode?: ProposalRoutingMode;
+  proposalRoutingReasons?: ProposalRoutingReason[];
+  proposalRoutingWarnings?: ProposalRoutingWarning[];
+  requiresExtraReview?: boolean;
+  shouldBlockExecution?: boolean;
   status: "pending";
   summary: string;
 };
@@ -172,7 +196,9 @@ function cleanRenameValue(value: string) {
 function detectRenameRequest(prompt: string) {
   const match =
     prompt.match(/(?:rename|change(?:\s+the)?\s+name)\s+from\s+(.+?)\s+to\s+(.+?)(?:$|[.!?])/i) ??
-    prompt.match(/\bfrom\s+(.+?)\s+to\s+(.+?)(?:$|[.!?])/i);
+    prompt.match(/\brename\s+["'`]?(.+?)["'`]?\s+to\s+["'`]?(.+?)["'`]?(?:$|[.!?])/i) ??
+    prompt.match(/(?:replace|change(?:\s+the)?\s+text)\s+["'`]?(.+?)["'`]?\s+(?:with|to)\s+["'`]?(.+?)["'`]?(?:$|[.!?])/i) ??
+    prompt.match(/\bchange\s+["'`]?([a-z0-9][a-z0-9&' -]{0,80}?)["'`]?\s+to\s+["'`]?([a-z0-9][a-z0-9&' -]{0,80}?)["'`]?(?:$|[.!?])/i);
 
   if (!match?.[1] || !match[2]) {
     return null;
@@ -1239,6 +1265,31 @@ function compactIntelligenceKernel(kernel: IntelligenceKernelResult) {
   };
 }
 
+function compactProposalRouting(
+  kernel: IntelligenceKernelResult,
+  routing: ProposalRoutingDecision
+) {
+  return {
+    intelligenceKernelSummary: kernel.summary,
+    proposalRoutingMode: routing.mode,
+    proposalRoutingReasons: routing.reasons,
+    proposalRoutingWarnings: routing.warnings,
+    requiresExtraReview: routing.shouldRequireExtraReview,
+    shouldBlockExecution: routing.shouldBlockExecution
+  };
+}
+
+function attachProposalRoutingMetadata(
+  proposal: DiffProposal,
+  kernel: IntelligenceKernelResult,
+  routing: ProposalRoutingDecision
+): DiffProposal {
+  return {
+    ...proposal,
+    ...compactProposalRouting(kernel, routing)
+  };
+}
+
 function addCompositionDebugSummary(
   proposal: DiffProposal,
   intent: IntentIntelligence,
@@ -1274,6 +1325,7 @@ async function createFallbackProposalResponse(input: {
   persistence: ChatPersistenceContext | null;
   prompt: string;
   reason: string;
+  routing: ProposalRoutingDecision;
   workspace: WorkspaceContext;
 }) {
   const proposal = createLocalProposal(
@@ -1291,6 +1343,11 @@ async function createFallbackProposalResponse(input: {
     input.composition,
     input.kernel
   );
+  const proposalWithRouting = attachProposalRoutingMetadata(
+    proposalWithIntent,
+    input.kernel,
+    input.routing
+  );
   let persistence = input.persistence;
   const visibleSummary =
     input.mode === "EXECUTE"
@@ -1304,14 +1361,15 @@ async function createFallbackProposalResponse(input: {
       composition: input.composition,
       intent: input.intent,
       intelligenceKernel: compactIntelligenceKernel(input.kernel),
+      ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
       model: input.model,
-      proposal: proposalWithIntent
+      proposal: proposalWithRouting
     },
     role: "assistant"
   });
 
-  return createProposalStream(proposalWithIntent, persistence?.sessionId);
+  return createProposalStream(proposalWithRouting, persistence?.sessionId);
 }
 
 function createOpenRouterTextStream(
@@ -1491,11 +1549,13 @@ export async function POST(request: Request) {
     intent,
     mode
   });
+  const routing = buildProposalRoutingDecision(kernel);
 
   if (mode === "SUGGEST" || mode === "EXECUTE") {
     console.info("intent intelligence", intent);
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
+    console.info("proposal routing", routing.metadataSummary);
   }
 
   const formattedDiagnostic = formatDiagnosticContext(diagnostic);
@@ -1520,6 +1580,7 @@ export async function POST(request: Request) {
         inferredDomain: diagnostic.inferredDomain,
         intent,
         intelligenceKernel: compactIntelligenceKernel(kernel),
+        proposalRouting: compactProposalRouting(kernel, routing),
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -1537,19 +1598,23 @@ export async function POST(request: Request) {
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (shouldUseDeterministicProposal || !process.env.OPENROUTER_API_KEY)
   ) {
-    const proposal = addCompositionDebugSummary(
-      createLocalProposal(
-        latestUserPrompt,
-        workspace,
-        mode,
-        diagnostic,
-        decision,
+    const proposal = attachProposalRoutingMetadata(
+      addCompositionDebugSummary(
+        createLocalProposal(
+          latestUserPrompt,
+          workspace,
+          mode,
+          diagnostic,
+          decision,
+          intent,
+          composition
+        ),
         intent,
-        composition
+        composition,
+        kernel
       ),
-      intent,
-      composition,
-      kernel
+      kernel,
+      routing
     );
     const visibleSummary =
       mode === "EXECUTE"
@@ -1563,6 +1628,7 @@ export async function POST(request: Request) {
         model,
         intent,
         intelligenceKernel: compactIntelligenceKernel(kernel),
+        ...compactProposalRouting(kernel, routing),
         proposal
       },
       role: "assistant"
@@ -1629,6 +1695,7 @@ export async function POST(request: Request) {
         persistence,
         prompt: latestUserPrompt,
         reason: "openrouter_network_error",
+        routing,
         workspace
       });
     }
@@ -1645,6 +1712,7 @@ export async function POST(request: Request) {
         persistence,
         prompt: latestUserPrompt,
         reason: `openrouter_${response.status}`,
+        routing,
         workspace
       });
     }
@@ -1678,39 +1746,44 @@ export async function POST(request: Request) {
         persistence,
         prompt: latestUserPrompt,
         reason: "invalid_or_empty_model_proposal",
+        routing,
         workspace
       });
     }
 
-    const proposal: DiffProposal = addCompositionDebugSummary({
-      id: `proposal-${Date.now()}`,
-      mode,
-      projectId: requestedProjectId,
-      status: "pending",
-      summary: `${diagnostic.diagnosis} ${parsed.summary}`,
-      changes: parsed.changes.map((change) => {
-        if (isRuntimeProposalAction(change.action)) {
+    const proposal: DiffProposal = attachProposalRoutingMetadata(
+      addCompositionDebugSummary({
+        id: `proposal-${Date.now()}`,
+        mode,
+        projectId: requestedProjectId,
+        status: "pending",
+        summary: `${diagnostic.diagnosis} ${parsed.summary}`,
+        changes: parsed.changes.map((change) => {
+          if (isRuntimeProposalAction(change.action)) {
+            return {
+              action: change.action,
+              summary: change.summary
+            };
+          }
+
           return {
             action: change.action,
+            diffPreview:
+              change.diffPreview ??
+              createDiffPreview(
+                change.action,
+                change.path ?? "untitled.txt",
+                change.proposedContent ?? ""
+              ),
+            path: change.path,
+            proposedContent: change.proposedContent,
             summary: change.summary
           };
-        }
-
-        return {
-          action: change.action,
-          diffPreview:
-            change.diffPreview ??
-            createDiffPreview(
-              change.action,
-              change.path ?? "untitled.txt",
-              change.proposedContent ?? ""
-            ),
-          path: change.path,
-          proposedContent: change.proposedContent,
-          summary: change.summary
-        };
-      })
-    }, intent, composition, kernel);
+        })
+      }, intent, composition, kernel),
+      kernel,
+      routing
+    );
     const quality = scoreProposalQuality({
       changes: proposal.changes,
       composition,
@@ -1731,6 +1804,7 @@ export async function POST(request: Request) {
         persistence,
         prompt: latestUserPrompt,
         reason: `quality_score_${quality.score}_${quality.issues.join(",")}`,
+        routing,
         workspace
       });
     }
@@ -1742,6 +1816,7 @@ export async function POST(request: Request) {
         intent,
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
+        ...compactProposalRouting(kernel, routing),
         proposal
       },
       role: "assistant"

@@ -78,6 +78,21 @@ function includesAny(text: string, terms: string[]) {
   return terms.some((term) => text.includes(term));
 }
 
+function isWebsiteCreationRequest(promptText: string) {
+  return (
+    includesAny(promptText, ["create", "build", "make", "design", "generate"]) &&
+    includesAny(promptText, ["website", "site", "landing page", "web page", "pages", "html", "css", "javascript"])
+  );
+}
+
+function isRenameRequest(promptText: string) {
+  return (
+    /\b(?:rename|replace)\b/i.test(promptText) ||
+    /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
+    /\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+to\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(promptText)
+  );
+}
+
 function pickFileContent(workspace: WorkspaceContextInput, path: string) {
   if (workspace.fileContents?.[path]) {
     return workspace.fileContents[path];
@@ -187,7 +202,11 @@ function inferPromptIntent(prompt: string): PromptIntent {
     return "runtime_action";
   }
 
-  if (includesAny(promptText, ["rename", "replace text", "change text", "from ", " to "])) {
+  if (isWebsiteCreationRequest(promptText)) {
+    return "full_generation";
+  }
+
+  if (isRenameRequest(promptText)) {
     return "text_rename";
   }
 
@@ -205,13 +224,6 @@ function inferPromptIntent(prompt: string): PromptIntent {
 
   if (includesAny(promptText, ["refactor", "cleanup", "clean up", "restructure code"])) {
     return "refactor";
-  }
-
-  if (
-    includesAny(promptText, ["create", "build", "generate", "new website", "landing page", "from scratch", "make a site", "design"]) &&
-    includesAny(promptText, ["website", "landing", "html", "css", "javascript", "site", "page", "pages"])
-  ) {
-    return "full_generation";
   }
 
   if (includesAny(promptText, ["make better", "improve", "premium", "modern", "fix style", "style", "design"])) {
