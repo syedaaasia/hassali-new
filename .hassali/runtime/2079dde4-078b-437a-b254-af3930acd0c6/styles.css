@@ -1,0 +1,299 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #080808;
+  color: #f4efe6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(230, 0, 76, 0.22), transparent 28rem),
+    radial-gradient(circle at 88% 18%, rgba(0, 163, 175, 0.14), transparent 26rem),
+    linear-gradient(135deg, #070707, #101012);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.site-header,
+footer,
+main {
+  margin: 0 auto;
+  max-width: 1180px;
+}
+
+.site-header,
+footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.2rem clamp(1rem, 4vw, 2rem);
+}
+
+.brand {
+  font-weight: 850;
+  letter-spacing: 0.01em;
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: clamp(0.75rem, 2vw, 1.35rem);
+  color: #b8b0a4;
+  font-size: 0.92rem;
+}
+
+main {
+  padding: clamp(2rem, 5vw, 5rem) clamp(1rem, 4vw, 2rem);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.72fr);
+  align-items: center;
+  gap: clamp(1.4rem, 5vw, 4rem);
+  padding: clamp(2rem, 8vw, 6rem) 0;
+}
+
+.hero-copy {
+  max-width: 840px;
+}
+
+.eyebrow {
+  color: #d6b16d;
+  font-size: 0.76rem;
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  max-width: 13ch;
+  font-size: clamp(2.6rem, 7vw, 6.4rem);
+  line-height: 0.9;
+  letter-spacing: -0.045em;
+}
+
+h2 {
+  margin: 0.5rem 0 0;
+  font-size: clamp(1.2rem, 3vw, 2.1rem);
+  line-height: 1.05;
+}
+
+.lede,
+.story p,
+article p {
+  color: #bdb5aa;
+  line-height: 1.72;
+}
+
+.lede {
+  max-width: 680px;
+  font-size: clamp(1rem, 1.7vw, 1.18rem);
+}
+
+.button,
+.carousel-button {
+  display: inline-flex;
+  border: 1px solid rgba(214, 177, 109, 0.46);
+  border-radius: 999px;
+  background: rgba(214, 177, 109, 0.95);
+  color: #111;
+  cursor: pointer;
+  margin-top: 1rem;
+  padding: 0.82rem 1.1rem;
+  font-weight: 850;
+}
+
+.hero-visual,
+.gallery img,
+article,
+.story {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.5rem;
+  background:
+    radial-gradient(circle at calc(var(--x, 80) * 1px) calc(var(--y, 40) * 1px), rgba(255, 255, 255, 0.08), transparent 12rem),
+    rgba(255, 255, 255, 0.055);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(18px) saturate(120%);
+}
+
+.hero-visual {
+  aspect-ratio: 4 / 5;
+  margin: 0;
+}
+
+.hero-visual img,
+.gallery img {
+  display: block;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+article,
+.story {
+  padding: 1.2rem;
+}
+
+article span {
+  color: #ff5a70;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.story {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: 0.85fr 1.15fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.gallery img {
+  aspect-ratio: 16 / 11;
+}
+
+.is-waiting {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 560ms ease, transform 560ms ease;
+}
+
+.is-waiting.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+footer {
+  color: #91897f;
+}
+
+@media (max-width: 760px) {
+  .site-header,
+  footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hero,
+  .story,
+  .gallery {
+    grid-template-columns: 1fr;
+  }
+
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Hassali safe enhancement: Apple Glass-inspired motion without a full rewrite */
+:where(.hero, section, article, .card, .product-card, .feature-card, .collection-card, .carousel-card) {
+  transition:
+    transform 220ms ease,
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    opacity 240ms ease;
+}
+
+:where(article, .card, .product-card, .feature-card, .collection-card, .carousel-card):hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.26);
+}
+
+.hassali-reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 540ms ease, transform 540ms ease;
+}
+
+.hassali-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.hassali-carousel {
+  display: grid;
+  gap: 1rem;
+  margin-top: clamp(2rem, 5vw, 4rem);
+}
+
+.carousel-copy {
+  max-width: 620px;
+}
+
+.carousel-track {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.carousel-card {
+  min-height: 12rem;
+  opacity: 0.58;
+}
+
+.carousel-card.is-active {
+  opacity: 1;
+  transform: translateY(-3px);
+  border-color: rgba(214, 177, 109, 0.38);
+}
+
+.carousel-card span {
+  color: #d6b16d;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.carousel-card strong {
+  display: block;
+  margin-top: 0.85rem;
+}
+
+.carousel-controls {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.carousel-button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  cursor: pointer;
+  padding: 0.65rem 0.9rem;
+}
+
+@media (max-width: 760px) {
+  .carousel-track {
+    grid-template-columns: 1fr;
+  }
+}

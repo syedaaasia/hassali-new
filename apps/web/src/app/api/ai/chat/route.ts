@@ -9,6 +9,21 @@ import {
   formatDiagnosticContext,
   type DiagnosticContext
 } from "@/lib/server/ai/diagnostic-context";
+import {
+  buildDecisionPlan,
+  scoreProposalQuality,
+  shouldUseDeterministicDecision,
+  type DecisionPlan
+} from "@/lib/server/ai/decision-engine";
+import { generateComposedSiteFiles, generateDomainSite } from "@/lib/server/ai/domain-site-generator";
+import {
+  buildIntentIntelligence,
+  type IntentIntelligence
+} from "@/lib/server/ai/intent-intelligence";
+import {
+  buildCompositionStrategy,
+  type CompositionStrategy
+} from "@/lib/server/ai/reasoning-composition";
 import { getRuntimeStatus } from "@/lib/server/runtime-manager";
 
 export const runtime = "nodejs";
@@ -197,337 +212,7 @@ function safeFileContent(workspace: WorkspaceContext, path: string, fallback: st
 }
 
 function createStaticWebsiteContent(domain: DiagnosticContext["inferredDomain"]) {
-  const theme =
-    domain === "florist"
-      ? {
-          accent: "Fresh bouquets",
-          cta: "Plan a bouquet",
-          detail: "Seasonal stems, quiet arrangements, and thoughtful delivery for everyday rituals.",
-          imageAlt: "A refined bouquet arrangement with soft seasonal flowers",
-          imageMain:
-            "https://images.unsplash.com/photo-1490750967868-88aa4486c946?auto=format&fit=crop&w=1200&q=80",
-          imageSecondary:
-            "https://images.unsplash.com/photo-1487070183336-b863922373d4?auto=format&fit=crop&w=900&q=80",
-          imageTertiary:
-            "https://images.unsplash.com/photo-1526047932273-341f2a7631f9?auto=format&fit=crop&w=900&q=80",
-          title: "Petal House"
-        }
-      : domain === "jewellery"
-        ? {
-            accent: "Fine jewellery",
-            cta: "View collection",
-            detail: "Considered pieces with warm metals, clean silhouettes, and a softer kind of luxury.",
-            imageAlt: "Elegant gold jewellery displayed on a premium surface",
-            imageMain:
-              "https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?auto=format&fit=crop&w=1200&q=80",
-            imageSecondary:
-              "https://images.unsplash.com/photo-1605100804763-247f67b3557e?auto=format&fit=crop&w=900&q=80",
-            imageTertiary:
-              "https://images.unsplash.com/photo-1506630448388-4e683c67ddb0?auto=format&fit=crop&w=900&q=80",
-            title: "Aurum Atelier"
-          }
-        : domain === "car rental"
-          ? {
-              accent: "Premium car rental",
-              cta: "Reserve a drive",
-              detail: "A calm fleet experience for airport transfers, city days, and weekend escapes.",
-              imageAlt: "Premium car parked on a scenic road",
-              imageMain:
-                "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=1200&q=80",
-              imageSecondary:
-                "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=900&q=80",
-              imageTertiary:
-                "https://images.unsplash.com/photo-1542362567-b07e54358753?auto=format&fit=crop&w=900&q=80",
-              title: "Apex Reserve"
-            }
-          : {
-              accent: "Calm web experience",
-              cta: "Start exploring",
-              detail: "A focused, responsive static website with clear sections and lightweight interaction.",
-              imageAlt: "Modern workspace with premium visual design",
-              imageMain:
-                "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80",
-              imageSecondary:
-                "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=900&q=80",
-              imageTertiary:
-                "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=900&q=80",
-              title: "Hassali Studio"
-            };
-
-  return {
-    indexHtml: `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${theme.title}</title>
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <header class="site-header">
-      <a class="brand" href="#">${theme.title}</a>
-      <nav aria-label="Primary navigation">
-        <a href="#services">Services</a>
-        <a href="#story">Story</a>
-        <a href="#contact">Contact</a>
-      </nav>
-    </header>
-    <main>
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">${theme.accent}</p>
-          <h1>A refined digital home built to feel calm, modern, and trustworthy.</h1>
-          <p class="lede">${theme.detail}</p>
-          <a class="button" href="#contact">${theme.cta}</a>
-        </div>
-        <figure class="hero-visual">
-          <img src="${theme.imageMain}" alt="${theme.imageAlt}" />
-        </figure>
-      </section>
-      <section class="feature-grid" id="services">
-        <article>
-          <span>01</span>
-          <h2>Curated choices</h2>
-          <p>Focused options, clear presentation, and no unnecessary clutter.</p>
-        </article>
-        <article>
-          <span>02</span>
-          <h2>Responsive by default</h2>
-          <p>Layouts breathe across phones, laptops, desktops, and large screens.</p>
-        </article>
-        <article>
-          <span>03</span>
-          <h2>Easy next step</h2>
-          <p>A direct call to action keeps the experience simple and confident.</p>
-        </article>
-      </section>
-      <section class="story" id="story">
-        <h2>Designed with restraint.</h2>
-        <p>Warm typography, soft contrast, and spacious sections create a premium first impression without heavy effects.</p>
-      </section>
-      <section class="gallery" aria-label="Visual highlights">
-        <img src="${theme.imageSecondary}" alt="${theme.accent} detail image" />
-        <img src="${theme.imageTertiary}" alt="${theme.accent} lifestyle image" />
-      </section>
-    </main>
-    <footer id="contact">
-      <span>${theme.title}</span>
-      <a href="mailto:hello@example.com">hello@example.com</a>
-    </footer>
-    <script src="./main.js"></script>
-  </body>
-</html>
-`,
-    mainJs: `const cards = document.querySelectorAll(".feature-grid article");
-
-cards.forEach((card) => {
-  card.addEventListener("pointermove", (event) => {
-    const rect = card.getBoundingClientRect();
-    card.style.setProperty("--x", String(event.clientX - rect.left));
-    card.style.setProperty("--y", String(event.clientY - rect.top));
-  });
-});
-`,
-    stylesCss: `:root {
-  color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #080808;
-  color: #f4efe6;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html {
-  scroll-behavior: smooth;
-}
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  background:
-    radial-gradient(circle at 16% 12%, rgba(255, 54, 85, 0.2), transparent 30rem),
-    radial-gradient(circle at 84% 18%, rgba(16, 185, 129, 0.12), transparent 28rem),
-    #080808;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.site-header,
-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin: 0 auto;
-  max-width: 1120px;
-  padding: 1.25rem clamp(1rem, 4vw, 2rem);
-}
-
-.brand {
-  font-weight: 800;
-  letter-spacing: 0.01em;
-}
-
-nav {
-  display: flex;
-  gap: clamp(0.75rem, 2vw, 1.4rem);
-  color: #b8b0a4;
-  font-size: 0.92rem;
-}
-
-main {
-  margin: 0 auto;
-  max-width: 1120px;
-  padding: clamp(2rem, 5vw, 5rem) clamp(1rem, 4vw, 2rem);
-}
-
-.hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.72fr);
-  align-items: center;
-  gap: clamp(1.4rem, 5vw, 4rem);
-  padding: clamp(3rem, 10vw, 7rem) 0;
-}
-
-.hero-copy {
-  max-width: 820px;
-}
-
-.hero-visual,
-.gallery img {
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 2rem;
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 32px 100px rgba(0, 0, 0, 0.32);
-}
-
-.hero-visual {
-  aspect-ratio: 4 / 5;
-  margin: 0;
-}
-
-.hero-visual img,
-.gallery img {
-  display: block;
-  height: 100%;
-  width: 100%;
-  object-fit: cover;
-}
-
-.eyebrow {
-  color: #d6b16d;
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-h1 {
-  margin: 0;
-  max-width: 12ch;
-  font-size: clamp(2.8rem, 8vw, 6.8rem);
-  line-height: 0.9;
-  letter-spacing: -0.04em;
-}
-
-h2 {
-  margin: 0;
-  font-size: clamp(1.4rem, 4vw, 2.5rem);
-}
-
-.lede,
-.story p,
-article p {
-  color: #bbb3a7;
-  line-height: 1.75;
-}
-
-.lede {
-  max-width: 680px;
-  font-size: clamp(1rem, 2vw, 1.22rem);
-}
-
-.button {
-  display: inline-flex;
-  border: 1px solid rgba(214, 177, 109, 0.45);
-  border-radius: 999px;
-  background: #d6b16d;
-  color: #111;
-  margin-top: 1rem;
-  padding: 0.85rem 1.1rem;
-  font-weight: 800;
-}
-
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-article,
-.story {
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 1.5rem;
-  background:
-    radial-gradient(circle at calc(var(--x, 80) * 1px) calc(var(--y, 40) * 1px), rgba(255, 255, 255, 0.08), transparent 12rem),
-    rgba(255, 255, 255, 0.045);
-  padding: 1.25rem;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
-}
-
-article span {
-  color: #ff5a70;
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.story {
-  margin-top: 1rem;
-}
-
-.gallery {
-  display: grid;
-  grid-template-columns: 0.85fr 1.15fr;
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-.gallery img {
-  aspect-ratio: 16 / 11;
-}
-
-footer {
-  color: #91897f;
-}
-
-@media (max-width: 760px) {
-  .site-header,
-  footer {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  nav {
-    flex-wrap: wrap;
-  }
-
-  .feature-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .hero,
-  .gallery {
-    grid-template-columns: 1fr;
-  }
-}
-`
-  };
+  return generateDomainSite(domain);
 }
 
 function createEnhancementChanges(
@@ -971,7 +656,10 @@ function createLocalProposal(
   prompt: string,
   workspace: WorkspaceContext,
   mode: "SUGGEST" | "EXECUTE",
-  diagnostic: DiagnosticContext
+  diagnostic: DiagnosticContext,
+  decision: DecisionPlan,
+  intent: IntentIntelligence,
+  composition: CompositionStrategy
 ): DiffProposal {
   const renameRequest = detectRenameRequest(prompt);
 
@@ -1056,7 +744,78 @@ function createLocalProposal(
     };
   }
 
-  if (isEnhancementRequest(prompt)) {
+  if (decision.requestType === "image_fix") {
+    const websiteContent = createStaticWebsiteContent(diagnostic.inferredDomain);
+    const currentHtml = safeFileContent(workspace, "index.html", websiteContent.indexHtml);
+    const imageSources = Array.from(websiteContent.indexHtml.matchAll(/<img\s+src="([^"]+)"/gi)).map(
+      (match) => match[1]
+    );
+    let imageIndex = 0;
+    const proposedHtml = currentHtml.includes("<img")
+      ? currentHtml.replace(/<img([^>]*?)src="[^"]+"([^>]*?)>/gi, (match, before, after) => {
+          const nextSource = imageSources[imageIndex % Math.max(1, imageSources.length)] ?? "";
+          imageIndex += 1;
+
+          return nextSource ? `<img${before}src="${nextSource}"${after}>` : match;
+        })
+      : websiteContent.indexHtml;
+    const currentCss = safeFileContent(workspace, "styles.css", websiteContent.stylesCss);
+    const imageCss = `
+
+/* Hassali image safety: keep remote images responsive and cropped cleanly */
+img {
+  display: block;
+  max-width: 100%;
+  object-fit: cover;
+}
+`;
+
+    return {
+      changes: [
+        {
+          action: diagnostic.fileList.includes("index.html") ? "update" : "create",
+          diffPreview: createDiffPreview(
+            diagnostic.fileList.includes("index.html") ? "update" : "create",
+            "index.html",
+            proposedHtml
+          ),
+          path: "index.html",
+          proposedContent: proposedHtml,
+          summary: `Replaces broken or generic imagery with safe ${diagnostic.inferredDomain} image sources.`
+        },
+        {
+          action: diagnostic.fileList.includes("styles.css") ? "update" : "create",
+          diffPreview: createDiffPreview(
+            diagnostic.fileList.includes("styles.css") ? "update" : "create",
+            "styles.css",
+            `${currentCss.trimEnd()}${imageCss}`
+          ),
+          path: "styles.css",
+          proposedContent: `${currentCss.trimEnd()}${imageCss}`,
+          summary: "Ensures images remain responsive and do not break the layout."
+        },
+        ...(mode === "EXECUTE"
+          ? [
+              {
+                action: "reload_preview" as const,
+                summary: "Reload the local preview after approved image fixes."
+              }
+            ]
+          : [])
+      ],
+      id: `proposal-${Date.now()}`,
+      mode,
+      projectId: diagnostic.projectId,
+      status: "pending",
+      summary: `Detected an image fix request for a ${diagnostic.inferredDomain} project. I will update imagery only and avoid regenerating unrelated layout.`
+    };
+  }
+
+  if (
+    isEnhancementRequest(prompt) &&
+    decision.requestType !== "website_generation" &&
+    decision.requestType !== "multi_page_generation"
+  ) {
     const changes = createEnhancementChanges(prompt, workspace, diagnostic).map((change) => ({
       ...change,
       diffPreview: createDiffPreview(change.action, change.path, change.proposedContent)
@@ -1205,27 +964,21 @@ if ("IntersectionObserver" in window) {
     };
   }
 
-  if (diagnostic.promptIntent === "full_generation") {
-    const websiteContent = createStaticWebsiteContent(diagnostic.inferredDomain);
-    const standardFiles = [
-      {
-        content: websiteContent.indexHtml,
-        path: "index.html",
-        summary: `Creates the semantic ${diagnostic.inferredDomain} website structure.`
-      },
-      {
-        content: websiteContent.stylesCss,
-        path: "styles.css",
-        summary: "Adds responsive premium styling for the static website."
-      },
-      {
-        content: websiteContent.mainJs,
-        path: "main.js",
-        summary: "Adds a tiny low-cost interaction for card polish."
-      }
-    ];
+  if (decision.requestType === "website_generation" || decision.requestType === "multi_page_generation") {
+    const websiteFiles = generateComposedSiteFiles({ composition, intent });
+    const generatedFileNames = Object.keys(websiteFiles);
+    const standardFiles = Object.entries(websiteFiles).map(([path, content]) => ({
+      content,
+      path,
+      summary:
+        path === "styles.css"
+          ? "Adds responsive premium styling for the static website."
+          : path === "main.js"
+            ? "Adds lightweight interactions for motion, hover polish, and reveal behavior."
+            : `Creates the ${path.replace(".html", "")} page for the ${composition.businessType} website.`
+    }));
     const changes = [
-      ...standardFiles.map((file) => ({
+      ...standardFiles.filter((file) => file.content.trim().length > 0).map((file) => ({
         action: diagnostic.fileList.includes(file.path) ? ("update" as const) : ("create" as const),
         path: file.path,
         proposedContent: file.content,
@@ -1241,11 +994,11 @@ if ("IntersectionObserver" in window) {
       summary:
         mode === "EXECUTE"
           ? hasStandardWebFiles(diagnostic.fileList)
-            ? `Detected existing web files. I will update the standard ${diagnostic.inferredDomain} HTML/CSS/JS website files and prepare the preview runtime.`
-            : `I will create standard ${diagnostic.inferredDomain} website files: index.html, styles.css, and main.js, then prepare the preview runtime.`
+            ? `Using composition-driven generation for ${composition.businessType}. I will update ${generatedFileNames.join(", ")} and prepare the preview runtime.`
+            : `Using composition-driven generation for ${composition.businessType}. I will create ${generatedFileNames.join(", ")} and prepare the preview runtime.`
           : hasStandardWebFiles(diagnostic.fileList)
-            ? `Detected existing web files. I will update index.html, styles.css, and main.js for this ${diagnostic.inferredDomain} request.`
-            : `I will create standard ${diagnostic.inferredDomain} website files: index.html, styles.css, and main.js.`,
+            ? `Using composition-driven generation for ${composition.businessType}. I will update ${generatedFileNames.join(", ")}.`
+            : `Using composition-driven generation for ${composition.businessType}. I will create ${generatedFileNames.join(", ")}.`,
       changes: [
         ...changes.map((change) => ({
           ...change,
@@ -1471,8 +1224,33 @@ function createProposalStream(proposal: DiffProposal, sessionId?: string | null)
   );
 }
 
+function addCompositionDebugSummary(
+  proposal: DiffProposal,
+  intent: IntentIntelligence,
+  composition: CompositionStrategy
+): DiffProposal {
+  const palette = intent.palette.length
+    ? intent.palette.join("/")
+    : composition.visualLanguage.palette.join("/");
+  const style = intent.visualStyle.length
+    ? intent.visualStyle.join(", ")
+    : composition.visualLanguage.style.join(", ");
+
+  return {
+    ...proposal,
+    summary:
+      `Composition-driven generation active. Business: ${composition.businessType}. ` +
+      `Audience: ${composition.audience.join(", ")}. Pages: ${composition.siteArchitecture.pageCount}. ` +
+      `Palette: ${palette}. Style: ${style}. ` +
+      `Intent: ${intent.summary} Composition: ${composition.reasoningSummary} ${proposal.summary}`
+  };
+}
+
 async function createFallbackProposalResponse(input: {
+  composition: CompositionStrategy;
   diagnostic: DiagnosticContext;
+  decision: DecisionPlan;
+  intent: IntentIntelligence;
   mode: "SUGGEST" | "EXECUTE";
   model: string;
   persistence: ChatPersistenceContext | null;
@@ -1480,7 +1258,16 @@ async function createFallbackProposalResponse(input: {
   reason: string;
   workspace: WorkspaceContext;
 }) {
-  const proposal = createLocalProposal(input.prompt, input.workspace, input.mode, input.diagnostic);
+  const proposal = createLocalProposal(
+    input.prompt,
+    input.workspace,
+    input.mode,
+    input.diagnostic,
+    input.decision,
+    input.intent,
+    input.composition
+  );
+  const proposalWithIntent = addCompositionDebugSummary(proposal, input.intent, input.composition);
   let persistence = input.persistence;
   const visibleSummary =
     input.mode === "EXECUTE"
@@ -1491,13 +1278,16 @@ async function createFallbackProposalResponse(input: {
     content: visibleSummary,
     metadata: {
       fallbackReason: input.reason,
+      composition: input.composition,
+      intent: input.intent,
+      qualityDecision: input.decision,
       model: input.model,
-      proposal
+      proposal: proposalWithIntent
     },
     role: "assistant"
   });
 
-  return createProposalStream(proposal, persistence?.sessionId);
+  return createProposalStream(proposalWithIntent, persistence?.sessionId);
 }
 
 function createOpenRouterTextStream(
@@ -1660,6 +1450,22 @@ export async function POST(request: Request) {
     runtime: getRuntimeStatus(),
     workspace
   });
+  const decision = buildDecisionPlan({
+    diagnostic,
+    prompt: latestUserPrompt
+  });
+  const intent = buildIntentIntelligence({
+    fileList: workspace.fileList,
+    projectName: workspace.projectName ?? null,
+    prompt: latestUserPrompt
+  });
+  const composition = buildCompositionStrategy(intent);
+
+  if (mode === "SUGGEST" || mode === "EXECUTE") {
+    console.info("intent intelligence", intent);
+    console.info("composition strategy", composition);
+  }
+
   const formattedDiagnostic = formatDiagnosticContext(diagnostic);
   const requestedSessionId = typeof body?.chatSessionId === "string" ? body.chatSessionId : null;
   let persistence = await createPersistenceContext({
@@ -1674,10 +1480,13 @@ export async function POST(request: Request) {
       model,
       workspace: {
         activePath: workspace.activePath,
+        composition,
         diagnosis: diagnostic.diagnosis,
+        decision,
         editScope: diagnostic.editScope,
         fileList: workspace.fileList,
         inferredDomain: diagnostic.inferredDomain,
+        intent,
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -1686,7 +1495,7 @@ export async function POST(request: Request) {
 
   const shouldUseDeterministicProposal =
     (mode === "SUGGEST" || mode === "EXECUTE") &&
-    (diagnostic.promptIntent === "full_generation" ||
+    (shouldUseDeterministicDecision(decision) ||
       isEnhancementRequest(latestUserPrompt) ||
       Boolean(detectRenameRequest(latestUserPrompt)) ||
       (mode === "EXECUTE" && isInvoiceRequest(latestUserPrompt)));
@@ -1695,7 +1504,19 @@ export async function POST(request: Request) {
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (shouldUseDeterministicProposal || !process.env.OPENROUTER_API_KEY)
   ) {
-    const proposal = createLocalProposal(latestUserPrompt, workspace, mode, diagnostic);
+    const proposal = addCompositionDebugSummary(
+      createLocalProposal(
+        latestUserPrompt,
+        workspace,
+        mode,
+        diagnostic,
+        decision,
+        intent,
+        composition
+      ),
+      intent,
+      composition
+    );
     const visibleSummary =
       mode === "EXECUTE"
         ? "I prepared an execution proposal for review. Nothing runs until you approve it."
@@ -1704,7 +1525,9 @@ export async function POST(request: Request) {
     persistence = await persistChatMessage(persistence, {
       content: visibleSummary,
       metadata: {
+        composition,
         model,
+        intent,
         proposal
       },
       role: "assistant"
@@ -1742,6 +1565,9 @@ export async function POST(request: Request) {
                 `Only include safe runtime actions when the user asks to start, restart, reload, or stop preview. Do not include shell commands, package installs, Docker, or destructive deletes. ` +
                 `Do not use markdown. Do not mutate files. Use the diagnostic context. For vague prompts, preserve existing structure and prefer targeted edits. ` +
                 `For vague create/build website requests without clear web files, propose standard static files: index.html, styles.css, and main.js. ` +
+                `For multi-page requests, satisfy the required page files exactly. Decision plan: ${JSON.stringify(decision)}. ` +
+                `Intent intelligence: ${JSON.stringify(intent)}. ` +
+                `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `The proposal summary must mention what you detected and the safe treatment. Diagnostic context:\n${formattedDiagnostic}`
             },
             ...messages
@@ -1757,7 +1583,10 @@ export async function POST(request: Request) {
       });
     } catch {
       return createFallbackProposalResponse({
+        composition,
         diagnostic,
+        decision,
+        intent,
         mode,
         model,
         persistence,
@@ -1769,7 +1598,10 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       return createFallbackProposalResponse({
+        composition,
         diagnostic,
+        decision,
+        intent,
         mode,
         model,
         persistence,
@@ -1798,7 +1630,10 @@ export async function POST(request: Request) {
       )
     ) {
       return createFallbackProposalResponse({
+        composition,
         diagnostic,
+        decision,
+        intent,
         mode,
         model,
         persistence,
@@ -1808,7 +1643,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const proposal: DiffProposal = {
+    const proposal: DiffProposal = addCompositionDebugSummary({
       id: `proposal-${Date.now()}`,
       mode,
       projectId: requestedProjectId,
@@ -1836,11 +1671,35 @@ export async function POST(request: Request) {
           summary: change.summary
         };
       })
-    };
+    }, intent, composition);
+    const quality = scoreProposalQuality({
+      changes: proposal.changes,
+      composition,
+      decision,
+      existingFileList: workspace.fileList,
+      intent
+    });
+
+    if (!quality.passed) {
+      return createFallbackProposalResponse({
+        composition,
+        diagnostic,
+        decision,
+        intent,
+        mode,
+        model,
+        persistence,
+        prompt: latestUserPrompt,
+        reason: `quality_score_${quality.score}_${quality.issues.join(",")}`,
+        workspace
+      });
+    }
 
     persistence = await persistChatMessage(persistence, {
       content: proposal.summary,
       metadata: {
+        composition,
+        intent,
         model,
         proposal
       },
@@ -1886,3 +1745,4 @@ export async function POST(request: Request) {
     sessionId: persistence?.sessionId
   });
 }
+

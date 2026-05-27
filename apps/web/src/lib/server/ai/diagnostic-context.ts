@@ -14,13 +14,17 @@ type WorkspaceContextInput = {
 
 export type InferredDomain =
   | "car rental"
+  | "car showroom"
   | "code/tooling project"
   | "florist"
   | "generic website"
   | "jewellery"
+  | "media brand"
+  | "podcast"
   | "portfolio"
   | "restaurant"
-  | "SaaS";
+  | "SaaS"
+  | "youtube podcast";
 
 export type PromptIntent =
   | "animation_or_interaction"
@@ -117,7 +121,43 @@ function inferDomain(input: {
     return "florist";
   }
 
-  if (includesAny(projectText, ["car rental", "vehicle", "fleet", "chauffeur", "sedan", "suv", "automotive"])) {
+  if (includesAny(projectText, ["youtube podcast", "youtube show", "video podcast"])) {
+    return "youtube podcast";
+  }
+
+  if (includesAny(projectText, ["podcast", "episode", "host", "listen now", "spotify", "apple podcast", "microphone"])) {
+    return "podcast";
+  }
+
+  if (includesAny(projectText, ["media brand", "newsletter", "publication", "content studio", "creator site", "sponsor"])) {
+    return "media brand";
+  }
+
+  if (
+    includesAny(projectText, [
+      "car showroom",
+      "dealership",
+      "test drive"
+    ])
+  ) {
+    return "car showroom";
+  }
+
+  if (
+    includesAny(projectText, [
+      "auto rental",
+      "car rental",
+      "cars",
+      "chauffeur",
+      "fleet",
+      "luxury car",
+      "sedan",
+      "showroom",
+      "suv",
+      "vehicle",
+      "automotive"
+    ])
+  ) {
     return "car rental";
   }
 
@@ -169,7 +209,7 @@ function inferPromptIntent(prompt: string): PromptIntent {
 
   if (
     includesAny(promptText, ["create", "build", "generate", "new website", "landing page", "from scratch", "make a site", "design"]) &&
-    includesAny(promptText, ["website", "landing", "html", "css", "javascript", "site"])
+    includesAny(promptText, ["website", "landing", "html", "css", "javascript", "site", "page", "pages"])
   ) {
     return "full_generation";
   }
