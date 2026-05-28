@@ -63,6 +63,10 @@ function inferBusinessType(intent: IntentIntelligence) {
     return "bakery hospitality and ordering brand";
   }
 
+  if (includesAny(text, ["shoe", "shoes", "footwear", "sneaker", "sneakers", "boots"])) {
+    return "footwear retail";
+  }
+
   if (includesAny(text, ["beauty", "skincare", "skin care", "beauty cream", "cosmetic", "hydration", "glow"])) {
     return "beauty cream / skincare";
   }
@@ -129,6 +133,10 @@ function inferAudience(businessType: string, intent: IntentIntelligence) {
     return ["families", "event planners", "local food customers"];
   }
 
+  if (includesAny(type, ["footwear", "shoe", "sneaker"])) {
+    return ["style-conscious shoppers", "sneaker buyers", "everyday customers"];
+  }
+
   if (includesAny(type, ["creator", "podcast", "media"])) {
     return ["listeners", "subscribers", "sponsors", "guests"];
   }
@@ -175,6 +183,10 @@ function inferBusinessGoals(businessType: string, intent: IntentIntelligence) {
     return ["orders", "menu confidence", "event inquiries", "local trust"];
   }
 
+  if (includesAny(type, ["footwear", "shoe", "sneaker"])) {
+    return ["product discovery", "retail conversion", "style trust", "repeat purchases"];
+  }
+
   if (includesAny(type, ["creator", "podcast", "media"])) {
     return ["subscriptions", "authority", "retention", "sponsors"];
   }
@@ -205,6 +217,10 @@ function inferBrandPositioning(businessType: string, intent: IntentIntelligence)
     return ["warm", "fresh-made", "local", "welcoming"];
   }
 
+  if (includesAny(type, ["footwear", "shoe", "sneaker"])) {
+    return ["stylish", "durable", "retail-ready", "collection-led"];
+  }
+
   if (includesAny(type, ["creator", "podcast"])) {
     return ["recognizable show identity", "credible voices", "sponsor-ready", "subscriber-focused"];
   }
@@ -232,7 +248,7 @@ function inferPages(intent: IntentIntelligence, businessType: string) {
 
   const businessPage = includesAny(type, ["creator", "podcast", "media"])
     ? "episodes"
-    : includesAny(type, ["commerce", "jewellery", "candle", "fish", "seafood", "beauty", "skincare", "cream"])
+    : includesAny(type, ["commerce", "jewellery", "candle", "fish", "seafood", "beauty", "skincare", "cream", "footwear", "shoe", "sneaker"])
       ? "products"
       : includesAny(type, ["hospitality", "restaurant", "bakery"])
         ? "menu"
@@ -262,7 +278,7 @@ function sectionsForPage(page: string, businessType: string) {
       return ["hero", "featured content", "episode highlights", "social proof", "newsletter", "CTA"];
     }
 
-    if (includesAny(type, ["commerce", "candle", "jewellery", "beauty", "skincare", "cream"])) {
+    if (includesAny(type, ["commerce", "candle", "jewellery", "beauty", "skincare", "cream", "footwear", "shoe", "sneaker"])) {
       return ["hero", "featured products", "categories", "trust", "reviews", "CTA"];
     }
 
@@ -312,6 +328,8 @@ function inferVisualLanguage(intent: IntentIntelligence, businessType: string) {
       ? ["white", "blue", "teal"]
       : includesAny(type, ["beauty", "skincare", "cream"])
         ? ["white", "pink", "soft neutral"]
+        : includesAny(type, ["footwear", "shoe", "sneaker"])
+          ? ["black", "white", "neutral"]
       : includesAny(type, ["bakery", "restaurant"])
         ? ["warm neutral", "cream", "accent"]
         : ["neutral", "accent"];
@@ -350,6 +368,14 @@ function inferContentStrategy(businessType: string) {
       ctaStrategy: ["Shop the glow", "Explore skincare", "Start your routine"],
       heroGoal: "Communicate softness, skincare confidence, ingredient care, and visible glow.",
       trustSignals: ["ingredient clarity", "routine benefits", "customer reviews", "gentle formulation"]
+    };
+  }
+
+  if (includesAny(type, ["footwear", "shoe", "sneaker"])) {
+    return {
+      ctaStrategy: ["Shop new arrivals", "Explore footwear", "Find your fit"],
+      heroGoal: "Present footwear collections with style, durability, and easy product discovery.",
+      trustSignals: ["fit guidance", "quality materials", "customer reviews", "easy returns"]
     };
   }
 

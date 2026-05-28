@@ -35,7 +35,8 @@ export type PromptIntent =
   | "refactor"
   | "runtime_action"
   | "small_style_improvement"
-  | "text_rename";
+  | "text_rename"
+  | "visual_theme_edit";
 
 export type EditScope =
   | "css_only"
@@ -80,7 +81,8 @@ function includesAny(text: string, terms: string[]) {
 
 function isWebsiteCreationRequest(promptText: string) {
   return (
-    includesAny(promptText, ["create", "build", "make", "design", "generate"]) &&
+    (includesAny(promptText, ["create", "build", "design", "generate"]) ||
+      /\bmake\s+(?:me|a|an|new)\b/.test(promptText)) &&
     includesAny(promptText, ["website", "site", "landing page", "web page", "pages", "html", "css", "javascript"])
   );
 }
@@ -90,6 +92,16 @@ function isRenameRequest(promptText: string) {
     /\b(?:rename|replace)\b/i.test(promptText) ||
     /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
     /\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+to\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(promptText)
+  );
+}
+
+function isVisualThemeEditRequest(promptText: string) {
+  const colorTerms = "green|blue|pink|white|black|gold|brown|cream|teal|red";
+
+  return (
+    /\b(?:change|make|update|switch|turn)\b[\s\S]{0,80}\b(?:color|colors|colour|colours|theme|palette)\b/.test(promptText) ||
+    /\b(?:color|colors|colour|colours|theme|palette)\b[\s\S]{0,80}\b(?:to|from|green|blue|pink|white|black|gold|brown|cream|teal|red)\b/.test(promptText) ||
+    new RegExp(`\\b(?:make|turn|change|update|switch)\\b[\\s\\S]{0,100}\\b(?:${colorTerms})\\b`).test(promptText)
   );
 }
 
@@ -206,6 +218,10 @@ function inferPromptIntent(prompt: string): PromptIntent {
     return "full_generation";
   }
 
+  if (isVisualThemeEditRequest(promptText)) {
+    return "visual_theme_edit";
+  }
+
   if (isRenameRequest(promptText)) {
     return "text_rename";
   }
@@ -250,7 +266,7 @@ function inferEditScope(input: {
     return input.keyFiles.mainJs ? "html_css_js" : "css_only";
   }
 
-  if (input.intent === "small_style_improvement" || input.intent === "image_fix") {
+  if (input.intent === "small_style_improvement" || input.intent === "image_fix" || input.intent === "visual_theme_edit") {
     return input.keyFiles.stylesCss ? "css_only" : "html_css_js";
   }
 
@@ -280,6 +296,10 @@ function createDiagnosis(input: {
 
   if (input.intent === "small_style_improvement") {
     return `Detected an existing ${input.domain} project. The request is a style improvement, so preserve the current structure and make the smallest safe visual changes in ${input.editScope}.`;
+  }
+
+  if (input.intent === "visual_theme_edit") {
+    return `Detected a theme/color edit for an existing ${input.domain} project. Inspect CSS first, update palette tokens and accent colors, and preserve layout and content.`;
   }
 
   if (input.intent === "full_generation") {

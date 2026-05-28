@@ -11,6 +11,7 @@ export type DecisionRequestType =
   | "runtime_action"
   | "targeted_edit"
   | "visual_enhancement"
+  | "visual_theme_edit"
   | "website_generation";
 
 export type DecisionPlan = {
@@ -55,7 +56,8 @@ function includesAny(text: string, terms: string[]) {
 
 function isWebsiteCreationRequest(promptText: string) {
   return (
-    includesAny(promptText, ["create", "build", "make", "design", "generate"]) &&
+    (includesAny(promptText, ["create", "build", "design", "generate"]) ||
+      /\bmake\s+(?:me|a|an|new)\b/.test(promptText)) &&
     includesAny(promptText, ["website", "site", "landing page", "web page", "pages"])
   );
 }
@@ -65,6 +67,16 @@ function isRenameRequest(promptText: string) {
     /\b(?:rename|replace)\b/i.test(promptText) ||
     /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
     /\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+to\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(promptText)
+  );
+}
+
+function isVisualThemeEditRequest(promptText: string) {
+  const colorTerms = "green|blue|pink|white|black|gold|brown|cream|teal|red";
+
+  return (
+    /\b(?:change|make|update|switch|turn)\b[\s\S]{0,80}\b(?:color|colors|colour|colours|theme|palette)\b/.test(promptText) ||
+    /\b(?:color|colors|colour|colours|theme|palette)\b[\s\S]{0,80}\b(?:to|from|green|blue|pink|white|black|gold|brown|cream|teal|red)\b/.test(promptText) ||
+    new RegExp(`\\b(?:make|turn|change|update|switch)\\b[\\s\\S]{0,100}\\b(?:${colorTerms})\\b`).test(promptText)
   );
 }
 
@@ -190,6 +202,10 @@ function requestTypeForPrompt(promptText: string, diagnostic: DiagnosticContext)
     return requestedPageCount(promptText) > 1 ? "multi_page_generation" : "website_generation";
   }
 
+  if (diagnostic.promptIntent === "visual_theme_edit" || isVisualThemeEditRequest(promptText)) {
+    return "visual_theme_edit";
+  }
+
   if (diagnostic.promptIntent === "text_rename" || isRenameRequest(promptText)) {
     return "rename";
   }
@@ -230,6 +246,10 @@ function changeStrategyForType(type: DecisionRequestType, hasIndexHtml: boolean)
     return "Update image sources and alt text only, with CSS only when object-fit or sizing is missing.";
   }
 
+  if (type === "visual_theme_edit") {
+    return "Inspect CSS and update existing palette tokens, accents, gradients, buttons, shadows, and interactive color wells without rewriting content or layout.";
+  }
+
   if (type === "visual_enhancement") {
     return hasIndexHtml
       ? "Preserve existing structure and make targeted CSS/JS enhancements."
@@ -255,6 +275,26 @@ function repeatedOccurrences(content: string, pattern: RegExp) {
   return content.match(pattern)?.length ?? 0;
 }
 
+function unrelatedCategoryTerms(businessText: string) {
+  const categories = [
+    {
+      match: ["beauty", "skincare", "cream", "cosmetic"],
+      terms: ["shoe", "shoes", "sneaker", "sneakers", "footwear", "bakery", "pastry", "bread", "developer", "code editor"]
+    },
+    {
+      match: ["bakery", "bread", "pastry"],
+      terms: ["shoe", "shoes", "sneaker", "sneakers", "footwear", "skincare", "cosmetic", "developer", "code editor"]
+    },
+    {
+      match: ["footwear", "shoe", "sneaker"],
+      terms: ["skincare", "cosmetic", "bakery", "pastry", "bread", "developer", "code editor"]
+    }
+  ];
+  const category = categories.find((item) => item.match.some((term) => businessText.includes(term)));
+
+  return category?.terms ?? ["developer", "code editor", "terminal", "repository"];
+}
+
 export function buildDecisionPlan(input: DecisionInput): DecisionPlan {
   const promptText = lower(input.prompt);
   const requestType = requestTypeForPrompt(promptText, input.diagnostic);
@@ -262,6 +302,8 @@ export function buildDecisionPlan(input: DecisionInput): DecisionPlan {
   const isWebsiteRequest = requestType === "website_generation" || requestType === "multi_page_generation";
   const requiredFiles = isWebsiteRequest
     ? [...siteStructure.pages, "styles.css", "main.js"]
+    : requestType === "visual_theme_edit"
+      ? ["styles.css"]
     : requestType === "visual_enhancement"
       ? ["styles.css", "main.js"]
       : [];
@@ -302,6 +344,7 @@ export function shouldUseDeterministicDecision(decision: DecisionPlan) {
     "multi_page_generation",
     "rename",
     "runtime_action",
+    "visual_theme_edit",
     "visual_enhancement",
     "website_generation"
   ].includes(decision.requestType);
@@ -322,6 +365,7 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
   const isWebsiteRequest =
     input.decision.requestType === "website_generation" ||
     input.decision.requestType === "multi_page_generation";
+  const isThemeEdit = input.decision.requestType === "visual_theme_edit";
 
   for (const change of input.changes) {
     if (change.path === "welcome.ts" && isWebsiteRequest) {
@@ -431,6 +475,15 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
         issues.push("non-technical business proposal contains developer/tooling wording");
       }
 
+      const unrelatedTerms = unrelatedCategoryTerms(businessText).filter((term) =>
+        allContent.includes(term)
+      );
+
+      if (unrelatedTerms.length > 0) {
+        score -= 25;
+        issues.push(`proposal contains unrelated category terms: ${Array.from(new Set(unrelatedTerms)).join(", ")}`);
+      }
+
       const businessSignals = [
         ...input.composition.businessType.split(/[\s/]+/),
         ...input.composition.brandPositioning,
@@ -442,6 +495,25 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
       if (businessSignals.length > 0 && !businessSignals.some((signal) => allContent.includes(signal))) {
         score -= 18;
         issues.push("composition business context is not reflected");
+      }
+    }
+  }
+
+  if (isThemeEdit) {
+    const cssChanges = input.changes.filter((change) => change.path?.endsWith(".css"));
+    const cssContent = cssChanges.map((change) => change.proposedContent ?? "").join("\n").toLowerCase();
+
+    if (cssChanges.length === 0 || cssContent.trim().length === 0) {
+      score -= 60;
+      issues.push("visual theme edit does not include a CSS mutation");
+    }
+
+    if (input.intent?.palette.length) {
+      const paletteApplied = input.intent.palette.some((color) => cssContent.includes(color.toLowerCase()));
+
+      if (!paletteApplied) {
+        score -= 30;
+        issues.push(`visual theme edit does not apply requested palette: ${input.intent.palette.join(", ")}`);
       }
     }
   }

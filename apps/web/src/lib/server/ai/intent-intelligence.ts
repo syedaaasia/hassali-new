@@ -28,6 +28,7 @@ export type IntentIntelligence = {
     | "question"
     | "rename"
     | "runtime_action"
+    | "visual_theme_edit"
     | "visual_polish";
   visualStyle: string[];
 };
@@ -57,7 +58,8 @@ function includesAny(text: string, terms: string[]) {
 
 function isWebsiteCreationRequest(promptText: string) {
   return (
-    includesAny(promptText, ["create", "build", "make", "design", "generate"]) &&
+    (includesAny(promptText, ["create", "build", "design", "generate"]) ||
+      /\bmake\s+(?:me|a|an|new)\b/.test(promptText)) &&
     includesAny(promptText, ["website", "site", "landing page", "web page", "pages"])
   );
 }
@@ -67,6 +69,16 @@ function isRenameRequest(promptText: string) {
     /\b(?:rename|replace)\b/i.test(promptText) ||
     /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
     /\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+to\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(promptText)
+  );
+}
+
+function isVisualThemeEditRequest(promptText: string) {
+  const colorTerms = "green|blue|pink|white|black|gold|brown|cream|teal|red";
+
+  return (
+    /\b(?:change|make|update|switch|turn)\b[\s\S]{0,80}\b(?:color|colors|colour|colours|theme|palette)\b/.test(promptText) ||
+    /\b(?:color|colors|colour|colours|theme|palette)\b[\s\S]{0,80}\b(?:to|from|green|blue|pink|white|black|gold|brown|cream|teal|red)\b/.test(promptText) ||
+    new RegExp(`\\b(?:make|turn|change|update|switch)\\b[\\s\\S]{0,100}\\b(?:${colorTerms})\\b`).test(promptText)
   );
 }
 
@@ -129,6 +141,10 @@ function inferDomain(promptText: string, projectText: string) {
     return "bakery";
   }
 
+  if (includesAny(promptText, ["shoe", "shoes", "footwear", "sneaker", "sneakers", "boots"])) {
+    return "shoe/footwear";
+  }
+
   if (includesAny(promptText, ["beauty", "skincare", "skin care", "beauty cream", "cosmetic", "hydration", "glow"])) {
     return "beauty/skincare";
   }
@@ -171,6 +187,10 @@ function inferDomain(promptText: string, projectText: string) {
 
   if (includesAny(text, ["beauty", "skincare", "skin care", "beauty cream", "cosmetic", "hydration", "glow"])) {
     return "beauty/skincare";
+  }
+
+  if (includesAny(text, ["shoe", "shoes", "footwear", "sneaker", "sneakers", "boots"])) {
+    return "shoe/footwear";
   }
 
   if (includesAny(text, ["candle", "candles", "scent", "fragrance"])) {
@@ -248,6 +268,7 @@ function inferSiteType(domain: string) {
     restaurant: "reservation-focused hospitality website",
     SaaS: "software marketing site",
     seafood: "seafood commerce and freshness website",
+    "shoe/footwear": "footwear retail website",
     "youtube podcast": "creator media brand"
   };
 
@@ -257,6 +278,10 @@ function inferSiteType(domain: string) {
 function inferUserIntent(promptText: string): IntentIntelligence["userIntent"] {
   if (isWebsiteCreationRequest(promptText)) {
     return "new_site";
+  }
+
+  if (isVisualThemeEditRequest(promptText)) {
+    return "visual_theme_edit";
   }
 
   if (isRenameRequest(promptText)) {
@@ -364,6 +389,7 @@ function inferBusinessGoals(domain: string) {
     restaurant: ["reservations", "menu confidence", "local trust"],
     SaaS: ["signup", "clarity", "product trust"],
     seafood: ["freshness trust", "orders", "delivery credibility"],
+    "shoe/footwear": ["product discovery", "retail conversion", "style trust"],
     "youtube podcast": ["subscriptions", "authority", "sponsors"]
   };
 

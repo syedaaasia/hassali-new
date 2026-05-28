@@ -916,6 +916,17 @@ function colorTokens(intent: IntentIntelligence, composition: CompositionStrateg
     };
   }
 
+  if (has("black")) {
+    return {
+      accent: has("white") ? "#111827" : "#e5e7eb",
+      accentSoft: has("white") ? "rgba(17, 24, 39, 0.16)" : "rgba(255, 255, 255, 0.14)",
+      canvas: has("white") ? "#f8fafc" : "#050505",
+      ink: has("white") ? "#0b1120" : "#f8fafc",
+      secondary: "#6b7280",
+      surface: has("white") ? "rgba(255, 255, 255, 0.78)" : "rgba(18, 18, 18, 0.76)"
+    };
+  }
+
   if (has("blue") || business.includes("seafood") || business.includes("fish")) {
     return {
       accent: "#0ea5e9",
@@ -994,6 +1005,14 @@ function imageSetForComposition(intent: IntentIntelligence, composition: Composi
       "https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=1400&q=80",
       "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&w=1000&q=80",
       "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1000&q=80"
+    ];
+  }
+
+  if (text.includes("footwear") || text.includes("shoe") || text.includes("sneaker")) {
+    return [
+      "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=1400&q=80",
+      "https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&w=1000&q=80",
+      "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=1000&q=80"
     ];
   }
 

@@ -194,6 +194,10 @@ function cleanRenameValue(value: string) {
 }
 
 function detectRenameRequest(prompt: string) {
+  if (/\b(?:color|colors|colour|colours|theme|palette)\b/i.test(prompt)) {
+    return null;
+  }
+
   const match =
     prompt.match(/(?:rename|change(?:\s+the)?\s+name)\s+from\s+(.+?)\s+to\s+(.+?)(?:$|[.!?])/i) ??
     prompt.match(/\brename\s+["'`]?(.+?)["'`]?\s+to\s+["'`]?(.+?)["'`]?(?:$|[.!?])/i) ??
@@ -229,6 +233,200 @@ function isEnhancementRequest(prompt: string) {
 
 function isInvoiceRequest(prompt: string) {
   return /\binvoice\b/i.test(prompt);
+}
+
+const colorThemes: Record<
+  string,
+  {
+    accent: string;
+    accentSoft: string;
+    canvas: string;
+    ink: string;
+    secondary: string;
+    surface: string;
+    search: RegExp[];
+  }
+> = {
+  black: {
+    accent: "#111827",
+    accentSoft: "rgba(17, 24, 39, 0.16)",
+    canvas: "#f8fafc",
+    ink: "#0b1120",
+    secondary: "#6b7280",
+    surface: "rgba(255, 255, 255, 0.78)",
+    search: [/\bblack\b/gi, /#0b1120/gi, /#111827/gi, /#050505/gi]
+  },
+  blue: {
+    accent: "#0ea5e9",
+    accentSoft: "rgba(125, 211, 252, 0.32)",
+    canvas: "#f5fbff",
+    ink: "#0f2637",
+    secondary: "#00a3af",
+    surface: "rgba(255, 255, 255, 0.74)",
+    search: [/\bblue\b/gi, /#0ea5e9/gi, /#38bdf8/gi, /#00a3af/gi]
+  },
+  brown: {
+    accent: "#8b5e34",
+    accentSoft: "rgba(196, 142, 86, 0.28)",
+    canvas: "#fff8ed",
+    ink: "#2a1b12",
+    secondary: "#c48e56",
+    surface: "rgba(255, 255, 255, 0.76)",
+    search: [/\bbrown\b/gi, /#8b5e34/gi, /#92400e/gi, /#c48e56/gi]
+  },
+  cream: {
+    accent: "#c48e56",
+    accentSoft: "rgba(196, 142, 86, 0.22)",
+    canvas: "#fff8ed",
+    ink: "#2a1b12",
+    secondary: "#8b5e34",
+    surface: "rgba(255, 255, 255, 0.82)",
+    search: [/\bcream\b/gi, /#fff8ed/gi, /#fff7ed/gi, /#fef3c7/gi]
+  },
+  gold: {
+    accent: "#c6923e",
+    accentSoft: "rgba(214, 177, 109, 0.32)",
+    canvas: "#fffaf0",
+    ink: "#21180c",
+    secondary: "#f0c56c",
+    surface: "rgba(255, 255, 255, 0.72)",
+    search: [/\bgold\b/gi, /#c6923e/gi, /#d6b16d/gi, /#f0c56c/gi]
+  },
+  green: {
+    accent: "#16a34a",
+    accentSoft: "rgba(34, 197, 94, 0.28)",
+    canvas: "#f4fff7",
+    ink: "#102318",
+    secondary: "#10b981",
+    surface: "rgba(255, 255, 255, 0.74)",
+    search: [/\bgreen\b/gi, /#16a34a/gi, /#22c55e/gi, /#10b981/gi]
+  },
+  pink: {
+    accent: "#db2777",
+    accentSoft: "rgba(249, 168, 212, 0.34)",
+    canvas: "#fff7fb",
+    ink: "#21121a",
+    secondary: "#f472b6",
+    surface: "rgba(255, 255, 255, 0.72)",
+    search: [
+      /\bpink\b/gi,
+      /\brose\b/gi,
+      /#db2777/gi,
+      /#f472b6/gi,
+      /#f9a8d4/gi,
+      /#fff7fb/gi,
+      /rgba\(\s*249\s*,\s*168\s*,\s*212\s*,\s*[^)]+\)/gi
+    ]
+  },
+  red: {
+    accent: "#e6004c",
+    accentSoft: "rgba(230, 0, 76, 0.22)",
+    canvas: "#fff5f7",
+    ink: "#261018",
+    secondary: "#fb7185",
+    surface: "rgba(255, 255, 255, 0.74)",
+    search: [/\bred\b/gi, /#e6004c/gi, /#fb7185/gi, /#ef4444/gi]
+  },
+  teal: {
+    accent: "#00a3af",
+    accentSoft: "rgba(0, 163, 175, 0.28)",
+    canvas: "#f4fffd",
+    ink: "#102322",
+    secondary: "#10b981",
+    surface: "rgba(255, 255, 255, 0.72)",
+    search: [/\bteal\b/gi, /#00a3af/gi, /#14b8a6/gi]
+  },
+  white: {
+    accent: "#e2e8f0",
+    accentSoft: "rgba(226, 232, 240, 0.44)",
+    canvas: "#f8fafc",
+    ink: "#0f172a",
+    secondary: "#94a3b8",
+    surface: "rgba(255, 255, 255, 0.86)",
+    search: [/\bwhite\b/gi, /#fff(?:fff)?/gi, /#f8fafc/gi]
+  }
+};
+
+const knownColorNames = Object.keys(colorThemes);
+
+function extractThemeEdit(prompt: string) {
+  const promptText = prompt.toLowerCase();
+  const fromToMatch = promptText.match(
+    /\b(?:change|update|switch|turn|replace)\b[\s\S]{0,60}?\b(?:color|colors|colour|colours|theme|palette)?\s*from\s+([a-z]+)\s+to\s+([a-z]+)\b/
+  );
+  const oldColor = fromToMatch?.[1] && colorThemes[fromToMatch[1]] ? fromToMatch[1] : null;
+  const targetColors = fromToMatch?.[2] && colorThemes[fromToMatch[2]]
+    ? [fromToMatch[2]]
+    : knownColorNames.filter((color) => new RegExp(`\\b${color}\\b`, "i").test(promptText));
+
+  return {
+    oldColor,
+    targetColors: Array.from(new Set(targetColors.filter((color) => color !== oldColor)))
+  };
+}
+
+function replaceKnownColorTokens(css: string, oldColor: string | null, targetColor: string) {
+  const target = colorThemes[targetColor];
+  const oldTheme = oldColor ? colorThemes[oldColor] : null;
+  let nextCss = css;
+  let replacements = 0;
+  const searchPatterns = oldTheme
+    ? oldTheme.search
+    : [
+        ...colorThemes.pink.search,
+        ...colorThemes.red.search,
+        ...colorThemes.gold.search,
+        ...colorThemes.blue.search,
+        ...colorThemes.teal.search,
+        ...colorThemes.brown.search
+      ];
+
+  for (const pattern of searchPatterns) {
+    nextCss = nextCss.replace(pattern, () => {
+      replacements += 1;
+      return target.accent;
+    });
+  }
+
+  return { css: nextCss, replacements };
+}
+
+function upsertCssVariable(css: string, variable: string, value: string) {
+  const pattern = new RegExp(`(${variable}\\s*:\\s*)[^;]+;`, "i");
+
+  if (pattern.test(css)) {
+    return css.replace(pattern, `$1${value};`);
+  }
+
+  if (/:root\s*{/.test(css)) {
+    return css.replace(/:root\s*{/, `:root {\n  ${variable}: ${value};`);
+  }
+
+  return `:root {\n  ${variable}: ${value};\n}\n\n${css}`;
+}
+
+function applyThemeToCss(css: string, targetColors: string[], oldColor: string | null) {
+  const primary = targetColors[0] ?? "green";
+  const secondary = targetColors[1] ?? primary;
+  const primaryTheme = colorThemes[primary] ?? colorThemes.green;
+  const secondaryTheme = colorThemes[secondary] ?? primaryTheme;
+  const replaced = replaceKnownColorTokens(css, oldColor, primary);
+  let nextCss = replaced.css;
+
+  nextCss = upsertCssVariable(nextCss, "--canvas", primaryTheme.canvas);
+  nextCss = upsertCssVariable(nextCss, "--surface", primaryTheme.surface);
+  nextCss = upsertCssVariable(nextCss, "--ink", primaryTheme.ink);
+  nextCss = upsertCssVariable(nextCss, "--accent", primaryTheme.accent);
+  nextCss = upsertCssVariable(nextCss, "--accent-2", secondaryTheme.secondary);
+  nextCss = upsertCssVariable(nextCss, "--accent-soft", primaryTheme.accentSoft);
+
+  const themeNote = `\n\n/* Hassali visual theme edit: ${targetColors.join(" and ")} palette applied to tokens, buttons, glows, and accents. */\n`;
+
+  return {
+    changedTokenCount: replaced.replacements,
+    css: `${nextCss.trimEnd()}${nextCss.includes("Hassali visual theme edit") ? "" : themeNote}`,
+    primary
+  };
 }
 
 function contentForPath(workspace: WorkspaceContext, path: string) {
@@ -838,6 +1036,53 @@ img {
       projectId: diagnostic.projectId,
       status: "pending",
       summary: `Detected an image fix request for a ${diagnostic.inferredDomain} project. I will update imagery only and avoid regenerating unrelated layout.`
+    };
+  }
+
+  if (decision.requestType === "visual_theme_edit") {
+    const themeEdit = extractThemeEdit(prompt);
+    const targetColors = themeEdit.targetColors.length ? themeEdit.targetColors : intent.palette;
+    const cssPaths = workspace.fileList.filter((path) => path.endsWith(".css"));
+    const targetCssPaths = cssPaths.length ? cssPaths : ["styles.css"];
+    const changes = targetCssPaths.map((path) => {
+      const currentCss = contentForPath(workspace, path);
+      const baseCss = currentCss.trim().length > 0
+        ? currentCss
+        : `:root {\n  --canvas: #ffffff;\n  --surface: rgba(255, 255, 255, 0.78);\n  --ink: #111827;\n  --accent: #db2777;\n  --accent-2: #f472b6;\n  --accent-soft: rgba(249, 168, 212, 0.34);\n}\n\n.button, button, a {\n  color: var(--accent);\n}\n`;
+      const themed = applyThemeToCss(baseCss, targetColors, themeEdit.oldColor);
+      const action = workspace.fileList.includes(path) ? ("update" as const) : ("create" as const);
+
+      return {
+        action,
+        diffPreview: createDiffPreview(action, path, themed.css),
+        path,
+        proposedContent: themed.css,
+        summary:
+          themed.changedTokenCount > 0
+            ? `Updates ${path} from ${themeEdit.oldColor ?? "the closest existing accent colors"} to ${targetColors.join(" and ")} across CSS tokens, accents, buttons, glows, and interactive color wells.`
+            : `Applies ${targetColors.join(" and ")} theme tokens in ${path}; no exact ${themeEdit.oldColor ?? "old"} color token was found, so the closest palette variables are updated.`
+      };
+    });
+
+    return {
+      changes: [
+        ...changes,
+        ...(mode === "EXECUTE"
+          ? [
+              {
+                action: "reload_preview" as const,
+                summary: "Reload the local preview after the approved theme edit."
+              }
+            ]
+          : [])
+      ],
+      id: `proposal-${Date.now()}`,
+      mode,
+      projectId: diagnostic.projectId,
+      status: "pending",
+      summary:
+        `Detected a visual theme edit. I will preserve the current content/layout and change the CSS palette ` +
+        `${themeEdit.oldColor ? `from ${themeEdit.oldColor} ` : ""}to ${targetColors.join(" and ")}.`
     };
   }
 
