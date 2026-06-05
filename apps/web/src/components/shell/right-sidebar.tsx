@@ -42,6 +42,75 @@ function isFileProposalAction(action: string) {
   return action === "create" || action === "update";
 }
 
+function isRuntimeProposalAction(action: string) {
+  return action === "restart_runtime" || action === "reload_preview" || action === "stop_runtime";
+}
+
+function normalizeProposalPath(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const rawPath = value.trim();
+
+  if (!rawPath || rawPath.startsWith("/") || rawPath.startsWith("\\") || /^[a-z]:/i.test(rawPath)) {
+    return null;
+  }
+
+  const normalized = rawPath
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+
+  if (normalized === folderPlaceholderFileName || normalized.endsWith(`/${folderPlaceholderFileName}`)) {
+    return null;
+  }
+
+  const segments = normalized.split("/");
+  const hasUnsafeSegment = segments.some(
+    (segment) => !segment || segment === "." || segment === ".."
+  );
+
+  return hasUnsafeSegment ? null : normalized;
+}
+
+function validateProposalForApproval(proposal: DiffProposal, selectedProjectId: string | null) {
+  if (isBlockedProposal(proposal)) {
+    return "This proposal was marked unsafe. Reject it and ask Hassali to recreate a safer proposal.";
+  }
+
+  if (!proposal.projectId) {
+    return "This proposal is missing projectId. Recreate it before approving.";
+  }
+
+  if (!selectedProjectId) {
+    return "Select a project before approving this proposal.";
+  }
+
+  if (proposal.projectId !== selectedProjectId) {
+    return "This proposal belongs to another project. Recreate it for the current project.";
+  }
+
+  for (const change of proposal.changes) {
+    if (isFileProposalAction(change.action)) {
+      const normalizedPath = normalizeProposalPath(change.path);
+
+      if (!normalizedPath) {
+        return "This proposal contains an invalid file path. Recreate it before approving.";
+      }
+
+      if (typeof change.proposedContent !== "string") {
+        return `Could not save ${normalizedPath}. Proposed content was missing. Proposal was not applied.`;
+      }
+    } else if (!isRuntimeProposalAction(change.action)) {
+      return "This proposal contains an unsupported action. Recreate it before approving.";
+    }
+  }
+
+  return null;
+}
+
 function isBlockedProposal(proposal: DiffProposal) {
   return proposal.proposalRoutingMode === "blocked" || proposal.shouldBlockExecution === true;
 }
@@ -293,38 +362,40 @@ export function RightSidebar() {
       return;
     }
 
-    if (isBlockedProposal(proposal)) {
-      setWorkspaceError("This proposal was marked unsafe. Reject it and ask Hassali to recreate a safer proposal.");
+    const validationError = validateProposalForApproval(proposal, projectId);
+
+    if (validationError) {
+      setWorkspaceError(validationError);
       return;
     }
 
-    if (proposal.projectId !== projectId) {
-      setWorkspaceError("This proposal belongs to another project. Recreate it for the current project.");
-      clearProposal();
-      return;
-    }
-
-    for (const change of proposal.changes) {
-      if (
-        isFileProposalAction(change.action) &&
-        change.path &&
-        typeof change.proposedContent === "string"
-      ) {
-        await applyFileContent(change.path, change.proposedContent, proposal.projectId);
+    try {
+      for (const change of proposal.changes) {
+        if (isFileProposalAction(change.action)) {
+          await applyFileContent(change.path ?? "", change.proposedContent ?? "", proposal.projectId, {
+            syncPreview: false
+          });
+        }
       }
-    }
 
-    for (const change of proposal.changes) {
-      if (change.action === "restart_runtime") {
-        await startPreview(proposal.projectId);
-      } else if (change.action === "reload_preview") {
-        await syncPreview(proposal.projectId);
-      } else if (change.action === "stop_runtime") {
-        await stopPreview();
+      for (const change of proposal.changes) {
+        if (change.action === "restart_runtime") {
+          await startPreview(proposal.projectId);
+        } else if (change.action === "reload_preview") {
+          await syncPreview(proposal.projectId);
+        } else if (change.action === "stop_runtime") {
+          await stopPreview();
+        }
       }
-    }
 
-    markProposalApproved();
+      markProposalApproved();
+    } catch (error) {
+      setWorkspaceError(
+        error instanceof Error
+          ? error.message
+          : "Proposal apply failed. The proposal was not applied."
+      );
+    }
   };
 
   return (

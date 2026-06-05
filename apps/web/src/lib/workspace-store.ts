@@ -19,6 +19,9 @@ type WorkspacePayloadFile = {
 type FilesMutationResult = {
   files: WorkspacePayloadFile[];
 };
+type ApplyFileContentOptions = {
+  syncPreview?: boolean;
+};
 
 type WorkspaceProject = {
   id: string;
@@ -60,7 +63,12 @@ type WorkspaceState = {
   workspaceId: string | null;
   openFile: (path: string) => void;
   closeFile: (path: string) => void;
-  applyFileContent: (path: string, content: string, expectedProjectId?: string | null) => Promise<void>;
+  applyFileContent: (
+    path: string,
+    content: string,
+    expectedProjectId?: string | null,
+    options?: ApplyFileContentOptions
+  ) => Promise<void>;
   createFile: (path: string) => Promise<void>;
   createFolder: (path: string) => Promise<void>;
   createProject: (name: string) => Promise<WorkspaceLoadResult | null>;
@@ -241,13 +249,66 @@ function applyFilesPayload(
 }
 
 async function readFilesMutationResponse(response: Response) {
-  const payload = (await response.json()) as unknown;
+  const payload = (await response.json().catch(() => null)) as unknown;
 
   if (!isFilesMutationResult(payload)) {
     throw new Error("File API did not return project files.");
   }
 
   return payload;
+}
+
+async function readFileApiError(response: Response) {
+  const payload = (await response.json().catch(() => null)) as unknown;
+
+  if (payload && typeof payload === "object") {
+    const error = (payload as { error?: unknown; message?: unknown }).error;
+    const message = (payload as { error?: unknown; message?: unknown }).message;
+
+    if (typeof error === "string" && error.trim().length > 0) {
+      return error;
+    }
+
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+  }
+
+  return response.statusText || "File persistence failed.";
+}
+
+function normalizeProjectFilePath(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const rawPath = value.trim();
+
+  if (!rawPath || rawPath.startsWith("/") || rawPath.startsWith("\\") || /^[a-z]:/i.test(rawPath)) {
+    return null;
+  }
+
+  const normalized = rawPath
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+
+  if (normalized === folderPlaceholderFileName || normalized.endsWith(`/${folderPlaceholderFileName}`)) {
+    return null;
+  }
+
+  const segments = normalized.split("/");
+  const hasUnsafeSegment = segments.some(
+    (segment) => !segment || segment === "." || segment === ".."
+  );
+
+  return hasUnsafeSegment ? null : normalized;
+}
+
+function setAndThrowFileApplyError(set: WorkspaceSet, message: string): never {
+  set({ error: message, isLoading: false });
+  throw new Error(message);
 }
 
 function syncPreviewIfRunning(projectId: string | null) {
@@ -285,53 +346,83 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         openTabs: nextTabs
       };
     }),
-  applyFileContent: async (path, content, expectedProjectId) => {
-    const { files, projectId } = get();
+  applyFileContent: async (path, content, expectedProjectId, options) => {
+    const { projectId } = get();
+    const normalizedPath = normalizeProjectFilePath(path);
 
-    if (typeof expectedProjectId !== "undefined" && expectedProjectId !== projectId) {
-      const message = "This proposal belongs to another project. Recreate it for the current project.";
-
-      set({ error: message });
-      throw new Error(message);
+    if (!normalizedPath) {
+      setAndThrowFileApplyError(
+        set,
+        "Could not save file. The proposal contains an invalid project path. Proposal was not applied."
+      );
     }
 
-    if (projectId) {
-      const response = await fetch("/api/workspace/files", {
-        body: JSON.stringify({ content, path, projectId }),
-        headers: {
-          "Content-Type": "application/json"
-        },
-        method: "PATCH"
-      });
-
-      if (!response.ok) {
-        set({ error: "File persistence failed." });
-        throw new Error("File persistence failed.");
-      }
-
-      const payload = await readFilesMutationResponse(response);
-      applyFilesPayload(payload.files, set, get, path);
-      syncPreviewIfRunning(projectId);
-      return;
+    if (typeof content !== "string") {
+      setAndThrowFileApplyError(
+        set,
+        `Could not save ${normalizedPath}. Proposed content was missing. Proposal was not applied.`
+      );
     }
 
-    const existingFile = files[path];
+    if (!expectedProjectId) {
+      setAndThrowFileApplyError(
+        set,
+        `Could not save ${normalizedPath}. The proposal is missing projectId. Proposal was not applied.`
+      );
+    }
 
-    set((state) => ({
-      activePath: path,
-      error: null,
-      files: {
-        ...state.files,
-        [path]: {
-          content,
-          id: existingFile?.id,
-          language: existingFile?.language ?? languageFromPath(path),
-          path,
-          savedContent: content
-        }
+    if (!projectId) {
+      setAndThrowFileApplyError(
+        set,
+        `Could not save ${normalizedPath}. No selected project is loaded. Proposal was not applied.`
+      );
+    }
+
+    if (expectedProjectId !== projectId) {
+      setAndThrowFileApplyError(
+        set,
+        "This proposal belongs to another project. Recreate it for the current project."
+      );
+    }
+
+    const response = await fetch("/api/workspace/files", {
+      body: JSON.stringify({ content, path: normalizedPath, projectId }),
+      headers: {
+        "Content-Type": "application/json"
       },
-      openTabs: state.openTabs.includes(path) ? state.openTabs : [...state.openTabs, path]
-    }));
+      method: "PATCH"
+    });
+
+    if (!response.ok) {
+      const backendMessage = await readFileApiError(response);
+      setAndThrowFileApplyError(
+        set,
+        `Could not save ${normalizedPath}. Backend returned ${response.status}: ${backendMessage}. Proposal was not applied.`
+      );
+    }
+
+    const payload = await readFilesMutationResponse(response);
+    const savedFile = payload.files.find((workspaceFile) => workspaceFile.path === normalizedPath);
+
+    if (!savedFile) {
+      setAndThrowFileApplyError(
+        set,
+        `Could not verify ${normalizedPath}. The backend did not return the saved file. Proposal was not applied.`
+      );
+    }
+
+    if (savedFile.content !== content) {
+      setAndThrowFileApplyError(
+        set,
+        `Could not verify ${normalizedPath}. The saved content did not match the proposal. Proposal was not applied.`
+      );
+    }
+
+    applyFilesPayload(payload.files, set, get, normalizedPath);
+
+    if (options?.syncPreview !== false) {
+      syncPreviewIfRunning(projectId);
+    }
   },
   createFile: async (path) => {
     const { projectId } = get();
