@@ -5,6 +5,12 @@ import {
 } from "@hassali/database";
 import { auth } from "@clerk/nextjs/server";
 import {
+  createAskDirectAnswer,
+  buildAskRuntimeContext,
+  detectAskLiveIntent,
+  formatAskRuntimeContext
+} from "@/lib/server/ai/ask-context";
+import {
   buildDiagnosticContext,
   formatDiagnosticContext,
   type DiagnosticContext
@@ -15,7 +21,11 @@ import {
   shouldUseDeterministicDecision,
   type DecisionPlan
 } from "@/lib/server/ai/decision-engine";
-import { generateComposedSiteFiles, generateDomainSite } from "@/lib/server/ai/domain-site-generator";
+import {
+  generateComposedSiteFiles,
+  generateDomainSite,
+  type SiteDomain
+} from "@/lib/server/ai/domain-site-generator";
 import {
   buildIntentIntelligence,
   type IntentIntelligence
@@ -28,6 +38,11 @@ import {
   buildProposalRoutingDecision,
   type ProposalRoutingDecision
 } from "@/lib/server/ai/proposal-routing";
+import {
+  buildPromptSovereigntyContract,
+  validatePromptSovereignty,
+  type PromptAcceptanceResult
+} from "@/lib/server/ai/prompt-sovereignty";
 import {
   buildCompositionStrategy,
   type CompositionStrategy
@@ -198,6 +213,13 @@ function detectRenameRequest(prompt: string) {
     return null;
   }
 
+  const colorTerms = "green|blue|pink|white|black|gold|golden|yellow|brown|cream|teal|red|maroon|gradient";
+  if (
+    new RegExp(`\\b(?:change|update|switch|turn|replace)\\b\\s+(?:${colorTerms})(?:\\s+(?:color|colors|colour|colours|theme|palette|gradient))?\\s+(?:to|into|with)\\s+(?:${colorTerms})\\b`, "i").test(prompt)
+  ) {
+    return null;
+  }
+
   const match =
     prompt.match(/(?:rename|change(?:\s+the)?\s+name)\s+from\s+(.+?)\s+to\s+(.+?)(?:$|[.!?])/i) ??
     prompt.match(/\brename\s+["'`]?(.+?)["'`]?\s+to\s+["'`]?(.+?)["'`]?(?:$|[.!?])/i) ??
@@ -212,6 +234,14 @@ function detectRenameRequest(prompt: string) {
   const to = cleanRenameValue(match[2]);
 
   return from && to && from.toLowerCase() !== to.toLowerCase() ? { from, to } : null;
+}
+
+function extractEffectiveUserRequest(prompt: string) {
+  const originalRequestMatch = prompt.match(
+    /Original request:\s*\n([\s\S]*?)(?:\n\nPrevious proposal was blocked because:|\n\nWarnings:|\n\nRequired corrections:|$)/i
+  );
+
+  return originalRequestMatch?.[1]?.trim() || prompt;
 }
 
 function isEnhancementRequest(prompt: string) {
@@ -263,7 +293,13 @@ const colorThemes: Record<
     ink: "#0f2637",
     secondary: "#00a3af",
     surface: "rgba(255, 255, 255, 0.74)",
-    search: [/\bblue\b/gi, /#0ea5e9/gi, /#38bdf8/gi, /#00a3af/gi]
+    search: [
+      /\bblue\b/gi,
+      /#0ea5e9/gi,
+      /#38bdf8/gi,
+      /#00a3af/gi,
+      /rgba\(\s*125\s*,\s*211\s*,\s*252\s*,\s*[^)]+\)/gi
+    ]
   },
   brown: {
     accent: "#8b5e34",
@@ -284,13 +320,38 @@ const colorThemes: Record<
     search: [/\bcream\b/gi, /#fff8ed/gi, /#fff7ed/gi, /#fef3c7/gi]
   },
   gold: {
-    accent: "#c6923e",
-    accentSoft: "rgba(214, 177, 109, 0.32)",
-    canvas: "#fffaf0",
-    ink: "#21180c",
-    secondary: "#f0c56c",
-    surface: "rgba(255, 255, 255, 0.72)",
-    search: [/\bgold\b/gi, /#c6923e/gi, /#d6b16d/gi, /#f0c56c/gi]
+    accent: "#d97706",
+    accentSoft: "rgba(245, 158, 11, 0.28)",
+    canvas: "#fff8e6",
+    ink: "#2b1a05",
+    secondary: "#f59e0b",
+    surface: "rgba(255, 255, 255, 0.78)",
+    search: [
+      /\bgold(?:en)?\b/gi,
+      /#d97706/gi,
+      /#c6923e/gi,
+      /#d6b16d/gi,
+      /#f0c56c/gi,
+      /rgba\(\s*214\s*,\s*177\s*,\s*109\s*,\s*[^)]+\)/gi
+    ]
+  },
+  maroon: {
+    accent: "#8a1538",
+    accentSoft: "rgba(138, 21, 56, 0.28)",
+    canvas: "#fbf7f8",
+    ink: "#251018",
+    secondary: "#b91c1c",
+    surface: "rgba(255, 255, 255, 0.78)",
+    search: [
+      /\bmaroon\b/gi,
+      /#7f1d1d/gi,
+      /#7f1d2d/gi,
+      /#8a1538/gi,
+      /#9f1239/gi,
+      /#b91c1c/gi,
+      /rgba\(\s*138\s*,\s*21\s*,\s*56\s*,\s*[^)]+\)/gi,
+      /rgba\(\s*127\s*,\s*29\s*,\s*(?:29|45)\s*,\s*[^)]+\)/gi
+    ]
   },
   green: {
     accent: "#16a34a",
@@ -299,7 +360,13 @@ const colorThemes: Record<
     ink: "#102318",
     secondary: "#10b981",
     surface: "rgba(255, 255, 255, 0.74)",
-    search: [/\bgreen\b/gi, /#16a34a/gi, /#22c55e/gi, /#10b981/gi]
+    search: [
+      /\bgreen\b/gi,
+      /#16a34a/gi,
+      /#22c55e/gi,
+      /#10b981/gi,
+      /rgba\(\s*34\s*,\s*197\s*,\s*94\s*,\s*[^)]+\)/gi
+    ]
   },
   pink: {
     accent: "#db2777",
@@ -319,13 +386,13 @@ const colorThemes: Record<
     ]
   },
   red: {
-    accent: "#e6004c",
-    accentSoft: "rgba(230, 0, 76, 0.22)",
-    canvas: "#fff5f7",
-    ink: "#261018",
-    secondary: "#fb7185",
+    accent: "#dc2626",
+    accentSoft: "rgba(220, 38, 38, 0.24)",
+    canvas: "#fff7f7",
+    ink: "#2a0d0d",
+    secondary: "#b91c1c",
     surface: "rgba(255, 255, 255, 0.74)",
-    search: [/\bred\b/gi, /#e6004c/gi, /#fb7185/gi, /#ef4444/gi]
+    search: [/\bred\b/gi, /#dc2626/gi, /#b91c1c/gi, /#ef4444/gi, /rgba\(\s*220\s*,\s*38\s*,\s*38\s*,\s*[^)]+\)/gi]
   },
   teal: {
     accent: "#00a3af",
@@ -344,22 +411,69 @@ const colorThemes: Record<
     secondary: "#94a3b8",
     surface: "rgba(255, 255, 255, 0.86)",
     search: [/\bwhite\b/gi, /#fff(?:fff)?/gi, /#f8fafc/gi]
+  },
+  yellow: {
+    accent: "#eab308",
+    accentSoft: "rgba(234, 179, 8, 0.28)",
+    canvas: "#fffbea",
+    ink: "#261b05",
+    secondary: "#f59e0b",
+    surface: "rgba(255, 255, 255, 0.8)",
+    search: [
+      /\byellow\b/gi,
+      /#eab308/gi,
+      /#facc15/gi,
+      /#f59e0b/gi,
+      /rgba\(\s*234\s*,\s*179\s*,\s*8\s*,\s*[^)]+\)/gi
+    ]
   }
 };
 
 const knownColorNames = Object.keys(colorThemes);
+const colorAliases: Record<string, string> = {
+  golden: "gold",
+  yellowish: "yellow"
+};
+
+function normalizeColorName(value: string | undefined | null) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.toLowerCase().trim();
+  const color = colorAliases[normalized] ?? normalized;
+
+  return colorThemes[color] ? color : null;
+}
 
 function extractThemeEdit(prompt: string) {
   const promptText = prompt.toLowerCase();
+  const colorAlternation = [...knownColorNames, ...Object.keys(colorAliases)].join("|");
   const fromToMatch = promptText.match(
-    /\b(?:change|update|switch|turn|replace)\b[\s\S]{0,60}?\b(?:color|colors|colour|colours|theme|palette)?\s*from\s+([a-z]+)\s+to\s+([a-z]+)\b/
+    new RegExp(`\\b(?:change|update|switch|turn|replace)\\b[\\s\\S]{0,60}?\\b(?:color|colors|colour|colours|theme|palette)?\\s*from\\s+(${colorAlternation})(?:\\s+(?:color|colors|colour|colours|theme|palette|gradient))?\\s+to\\s+(?:gradient\\s+)?(${colorAlternation})\\b`)
   );
-  const oldColor = fromToMatch?.[1] && colorThemes[fromToMatch[1]] ? fromToMatch[1] : null;
-  const targetColors = fromToMatch?.[2] && colorThemes[fromToMatch[2]]
-    ? [fromToMatch[2]]
-    : knownColorNames.filter((color) => new RegExp(`\\b${color}\\b`, "i").test(promptText));
+  const directChangeMatch = promptText.match(
+    new RegExp(`\\b(?:change|update|switch|turn|replace)\\b\\s+(${colorAlternation})(?:\\s+(?:color|colors|colour|colours|theme|palette|gradient))?\\s+(?:to|into|with)\\s+(?:gradient\\s+)?(${colorAlternation})\\b`)
+  );
+  const mentionedColors = [...knownColorNames, ...Object.keys(colorAliases)]
+    .filter((color) => new RegExp(`\\b${color}\\b`, "i").test(promptText))
+    .map((color) => normalizeColorName(color))
+    .filter((color): color is string => Boolean(color));
+  const oldColor =
+    normalizeColorName(fromToMatch?.[1]) ?? normalizeColorName(directChangeMatch?.[1]);
+  const targetColors =
+    normalizeColorName(fromToMatch?.[2])
+      ? [normalizeColorName(fromToMatch?.[2]) as string]
+      : normalizeColorName(directChangeMatch?.[2])
+        ? [normalizeColorName(directChangeMatch?.[2]) as string]
+        : mentionedColors.length > 1 && /\b(?:change|update|switch|turn|replace)\b/.test(promptText)
+          ? [mentionedColors[mentionedColors.length - 1]]
+          : mentionedColors;
 
   return {
+    fullTheme:
+      !oldColor &&
+      /\b(?:make|set|turn|update)\b[\s\S]{0,80}\b(?:theme|palette|site|website)\b/.test(promptText),
     oldColor,
     targetColors: Array.from(new Set(targetColors.filter((color) => color !== oldColor)))
   };
@@ -375,7 +489,10 @@ function replaceKnownColorTokens(css: string, oldColor: string | null, targetCol
     : [
         ...colorThemes.pink.search,
         ...colorThemes.red.search,
+        ...colorThemes.maroon.search,
         ...colorThemes.gold.search,
+        ...colorThemes.yellow.search,
+        ...colorThemes.green.search,
         ...colorThemes.blue.search,
         ...colorThemes.teal.search,
         ...colorThemes.brown.search
@@ -405,7 +522,11 @@ function upsertCssVariable(css: string, variable: string, value: string) {
   return `:root {\n  ${variable}: ${value};\n}\n\n${css}`;
 }
 
-function applyThemeToCss(css: string, targetColors: string[], oldColor: string | null) {
+function hasCssVariable(css: string, variable: string) {
+  return new RegExp(`${variable}\\s*:`, "i").test(css);
+}
+
+function applyThemeToCss(css: string, targetColors: string[], oldColor: string | null, fullTheme: boolean) {
   const primary = targetColors[0] ?? "green";
   const secondary = targetColors[1] ?? primary;
   const primaryTheme = colorThemes[primary] ?? colorThemes.green;
@@ -413,14 +534,29 @@ function applyThemeToCss(css: string, targetColors: string[], oldColor: string |
   const replaced = replaceKnownColorTokens(css, oldColor, primary);
   let nextCss = replaced.css;
 
-  nextCss = upsertCssVariable(nextCss, "--canvas", primaryTheme.canvas);
-  nextCss = upsertCssVariable(nextCss, "--surface", primaryTheme.surface);
-  nextCss = upsertCssVariable(nextCss, "--ink", primaryTheme.ink);
+  if (fullTheme) {
+    nextCss = upsertCssVariable(nextCss, "--canvas", primaryTheme.canvas);
+    nextCss = upsertCssVariable(nextCss, "--surface", primaryTheme.surface);
+    nextCss = upsertCssVariable(nextCss, "--ink", primaryTheme.ink);
+  } else {
+    if (!hasCssVariable(nextCss, "--canvas")) {
+      nextCss = upsertCssVariable(nextCss, "--canvas", "#f8fafc");
+    }
+
+    if (!hasCssVariable(nextCss, "--surface")) {
+      nextCss = upsertCssVariable(nextCss, "--surface", "rgba(255, 255, 255, 0.78)");
+    }
+
+    if (!hasCssVariable(nextCss, "--ink")) {
+      nextCss = upsertCssVariable(nextCss, "--ink", "#111827");
+    }
+  }
+
   nextCss = upsertCssVariable(nextCss, "--accent", primaryTheme.accent);
   nextCss = upsertCssVariable(nextCss, "--accent-2", secondaryTheme.secondary);
   nextCss = upsertCssVariable(nextCss, "--accent-soft", primaryTheme.accentSoft);
 
-  const themeNote = `\n\n/* Hassali visual theme edit: ${targetColors.join(" and ")} palette applied to tokens, buttons, glows, and accents. */\n`;
+  const themeNote = `\n\n/* Hassali visual theme edit: ${targetColors.join(" and ")} ${fullTheme ? "theme" : "accent"} palette applied to tokens, buttons, glows, and highlights while preserving readable surfaces. */\n`;
 
   return {
     changedTokenCount: replaced.replacements,
@@ -439,8 +575,25 @@ function safeFileContent(workspace: WorkspaceContext, path: string, fallback: st
   return content.trim().length > 0 ? content : fallback;
 }
 
+function isLegacySiteDomain(domain: string): domain is SiteDomain {
+  return [
+    "car rental",
+    "car showroom",
+    "code/tooling project",
+    "florist",
+    "generic website",
+    "jewellery",
+    "media brand",
+    "podcast",
+    "portfolio",
+    "restaurant",
+    "SaaS",
+    "youtube podcast"
+  ].includes(domain);
+}
+
 function createStaticWebsiteContent(domain: DiagnosticContext["inferredDomain"]) {
-  return generateDomainSite(domain);
+  return generateDomainSite(isLegacySiteDomain(domain) ? domain : "generic website");
 }
 
 function createEnhancementChanges(
@@ -891,6 +1044,135 @@ function createLocalProposal(
 ): DiffProposal {
   const renameRequest = detectRenameRequest(prompt);
 
+  if (decision.requestType === "data_tool_generation") {
+    const script = `#!/usr/bin/env python3
+"""Merge many CSV files into one long CSV file.
+
+Designed for low-spec laptops: it streams rows, preserves the first header,
+logs skipped files, and avoids loading every CSV into memory at once.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+from pathlib import Path
+
+
+def merge_csv_files(input_dir: Path, output_file: Path) -> None:
+    csv_files = sorted(input_dir.glob("*.csv"))
+    if not csv_files:
+        raise SystemExit(f"No CSV files found in {input_dir}")
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    header_written = False
+    expected_header: list[str] | None = None
+    merged_rows = 0
+    skipped_files: list[str] = []
+
+    with output_file.open("w", newline="", encoding="utf-8") as target:
+        writer = csv.writer(target)
+
+        for csv_path in csv_files:
+            try:
+                with csv_path.open("r", newline="", encoding="utf-8-sig") as source:
+                    reader = csv.reader(source)
+                    header = next(reader, None)
+
+                    if not header:
+                        skipped_files.append(f"{csv_path.name}: empty file")
+                        continue
+
+                    if expected_header is None:
+                        expected_header = header
+                        writer.writerow(header)
+                        header_written = True
+                    elif header != expected_header:
+                        skipped_files.append(f"{csv_path.name}: header mismatch")
+                        continue
+
+                    for row in reader:
+                        writer.writerow(row)
+                        merged_rows += 1
+            except UnicodeDecodeError:
+                skipped_files.append(f"{csv_path.name}: could not decode as UTF-8")
+
+    print(f"Merged {merged_rows} rows into {output_file}")
+    if not header_written:
+        print("No header was written.")
+    if skipped_files:
+        print("Skipped files:")
+        for item in skipped_files:
+            print(f"  - {item}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Merge many CSV files into one long CSV file.")
+    parser.add_argument("input_dir", help="Folder containing CSV files")
+    parser.add_argument("output_file", help="Merged output CSV path")
+    args = parser.parse_args()
+
+    merge_csv_files(Path(args.input_dir), Path(args.output_file))
+
+
+if __name__ == "__main__":
+    main()
+`;
+    const readme = `# CSV Merger
+
+A lightweight Python tool for merging hundreds of CSV files into one long file.
+
+## What it does
+
+- Reads CSV files from a folder
+- Writes one merged output CSV
+- Preserves the first file header
+- Skips files with mismatched headers
+- Logs skipped files clearly
+- Streams rows so it stays friendly on low-spec laptops
+
+## Run
+
+\`\`\`bash
+python merge_csv.py ./input-csv ./merged/output.csv
+\`\`\`
+
+No package install is required.
+`;
+    const files = [
+      {
+        content: script,
+        path: "merge_csv.py",
+        summary: "Creates a lightweight Python CSV merge script with streaming row handling."
+      },
+      {
+        content: readme,
+        path: "README.md",
+        summary: "Documents the CSV merger workflow, run command, and skipped-file behavior."
+      }
+    ];
+
+    return {
+      changes: files.map((file) => ({
+        action: diagnostic.fileList.includes(file.path) ? ("update" as const) : ("create" as const),
+        diffPreview: createDiffPreview(
+          diagnostic.fileList.includes(file.path) ? "update" : "create",
+          file.path,
+          file.content
+        ),
+        path: file.path,
+        proposedContent: file.content,
+        summary: file.summary
+      })),
+      id: `proposal-${Date.now()}`,
+      mode,
+      projectId: diagnostic.projectId,
+      status: "pending",
+      summary:
+        "Detected a Python CSV data-tool request. I will create a lightweight local merger script and README, not a website."
+    };
+  }
+
   if (mode === "EXECUTE" && isInvoiceRequest(prompt)) {
     const invoiceContent = createInvoiceContent();
     const files = [
@@ -1049,7 +1331,7 @@ img {
       const baseCss = currentCss.trim().length > 0
         ? currentCss
         : `:root {\n  --canvas: #ffffff;\n  --surface: rgba(255, 255, 255, 0.78);\n  --ink: #111827;\n  --accent: #db2777;\n  --accent-2: #f472b6;\n  --accent-soft: rgba(249, 168, 212, 0.34);\n}\n\n.button, button, a {\n  color: var(--accent);\n}\n`;
-      const themed = applyThemeToCss(baseCss, targetColors, themeEdit.oldColor);
+      const themed = applyThemeToCss(baseCss, targetColors, themeEdit.oldColor, themeEdit.fullTheme);
       const action = workspace.fileList.includes(path) ? ("update" as const) : ("create" as const);
 
       return {
@@ -1524,15 +1806,124 @@ function compactProposalRouting(
   };
 }
 
+function intentRoutingWarnings(
+  intent: IntentIntelligence,
+  composition: CompositionStrategy,
+  prompt?: string
+): ProposalRoutingWarning[] {
+  const warnings: ProposalRoutingWarning[] = [];
+  const blueprint = composition.businessType.toLowerCase();
+  const promptText = prompt?.toLowerCase() ?? "";
+
+  if (intent.pageConflict) {
+    warnings.push({
+      code: "page_count_conflict",
+      message: `${intent.pageConflict.resolution} Stated count: ${intent.pageConflict.statedPageCount}; listed pages: ${intent.requestedPages.join(", ")}.`,
+      risk: "medium"
+    });
+  }
+
+  if (blueprint.includes("ambiguous rider") || intent.domain === "bike shop") {
+    warnings.push({
+      code: "ambiguous_bike_domain",
+      message: "Bike can mean bicycle or motorbike. This proposal keeps bike-shop wording balanced unless the user clarifies.",
+      risk: "medium"
+    });
+  }
+
+  if (
+    promptText.match(/\b(?:image|images|photo|photos)\s+of\s+(bike|bicycle|motorbike|motorcycle)\b/) &&
+    (blueprint.includes("perfume") || blueprint.includes("fragrance"))
+  ) {
+    warnings.push({
+      code: "image_domain_mismatch",
+      message: "The image request mentions bikes, but the detected business is perfume/fragrance. This proposal uses fragrance visuals and should be reviewed before approval.",
+      risk: "medium"
+    });
+  }
+
+  return warnings;
+}
+
 function attachProposalRoutingMetadata(
   proposal: DiffProposal,
   kernel: IntelligenceKernelResult,
-  routing: ProposalRoutingDecision
+  routing: ProposalRoutingDecision,
+  intent?: IntentIntelligence,
+  composition?: CompositionStrategy,
+  prompt?: string
 ): DiffProposal {
+  const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
+
   return {
     ...proposal,
-    ...compactProposalRouting(kernel, routing)
+    ...compactProposalRouting(kernel, routing),
+    proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
+    proposalRoutingMode:
+      extraWarnings.length > 0 && routing.mode === "normal" ? "review_required" : routing.mode,
+    requiresExtraReview: routing.shouldRequireExtraReview || extraWarnings.length > 0
   };
+}
+
+function applyPromptAcceptanceMetadata(
+  proposal: DiffProposal,
+  acceptance: PromptAcceptanceResult
+): DiffProposal {
+  const acceptanceWarnings: ProposalRoutingWarning[] = acceptance.warnings.map((warning) => ({
+    code: "prompt_sovereignty_warning",
+    message: warning,
+    risk: "medium"
+  }));
+  const acceptanceReasons: ProposalRoutingReason[] = acceptance.issues.map((issue) => ({
+    code: "prompt_sovereignty_block",
+    message: issue,
+    severity: "high"
+  }));
+
+  return {
+    ...proposal,
+    proposalRoutingMode: acceptance.blocked
+      ? "blocked"
+      : acceptance.mode === "review_required" && proposal.proposalRoutingMode === "normal"
+        ? "review_required"
+        : proposal.proposalRoutingMode,
+    proposalRoutingReasons: [
+      ...(proposal.proposalRoutingReasons ?? []),
+      ...acceptanceReasons
+    ],
+    proposalRoutingWarnings: [
+      ...(proposal.proposalRoutingWarnings ?? []),
+      ...acceptanceWarnings
+    ],
+    requiresExtraReview:
+      proposal.requiresExtraReview || acceptance.mode === "review_required" || acceptance.blocked,
+    shouldBlockExecution: proposal.shouldBlockExecution || acceptance.blocked,
+    summary:
+      acceptance.blocked
+        ? `${proposal.summary} Prompt sovereignty blocked this proposal: ${acceptance.issues.join("; ")}.`
+        : proposal.summary
+  };
+}
+
+function enforcePromptSovereignty(input: {
+  composition: CompositionStrategy;
+  decision: DecisionPlan;
+  intent: IntentIntelligence;
+  prompt: string;
+  proposal: DiffProposal;
+}) {
+  const contract = buildPromptSovereigntyContract({
+    composition: input.composition,
+    decision: input.decision,
+    intent: input.intent,
+    prompt: input.prompt
+  });
+  const acceptance = validatePromptSovereignty({
+    changes: input.proposal.changes,
+    contract
+  });
+
+  return applyPromptAcceptanceMetadata(input.proposal, acceptance);
 }
 
 function addCompositionDebugSummary(
@@ -1548,6 +1939,22 @@ function addCompositionDebugSummary(
     ? intent.visualStyle.join(", ")
     : composition.visualLanguage.style.join(", ");
   const kernelSummary = kernel ? ` Kernel: ${kernel.summary}` : "";
+  const imageRequested = intent.requiredFeatures.some((feature) => /\b(?:image|images|photo|photos)\b/i.test(feature));
+  const businessText = composition.businessType.toLowerCase();
+  const usesPanelFirstVisuals =
+    businessText.includes("television") ||
+    businessText.includes("home cinema") ||
+    businessText.includes("electronics") ||
+    businessText.includes("perfume") ||
+    businessText.includes("fragrance");
+  const visualTruth =
+    imageRequested && (businessText.includes("perfume") || businessText.includes("fragrance"))
+      ? " Visuals: the image-domain mismatch is flagged and the proposal uses fragrance-specific visual panels instead of unsafe bike images."
+      : imageRequested && usesPanelFirstVisuals
+        ? " Visuals: this proposal uses premium domain-specific visual panels rather than claiming unverified remote images."
+      : imageRequested
+        ? " Visuals: safe remote images are used only when reliable; otherwise the proposal uses honest domain-specific visual panels."
+        : "";
 
   return {
     ...proposal,
@@ -1555,7 +1962,7 @@ function addCompositionDebugSummary(
       `Composition-driven generation active. Business: ${composition.businessType}. ` +
       `Audience: ${composition.audience.join(", ")}. Pages: ${composition.siteArchitecture.pageCount}. ` +
       `Palette: ${palette}. Style: ${style}. ` +
-      `Intent: ${intent.summary} Composition: ${composition.reasoningSummary}.${kernelSummary} ${proposal.summary}`
+      `Intent: ${intent.summary} Composition: ${composition.reasoningSummary}.${kernelSummary}${visualTruth} ${proposal.summary}`
   };
 }
 
@@ -1588,11 +1995,20 @@ async function createFallbackProposalResponse(input: {
     input.composition,
     input.kernel
   );
-  const proposalWithRouting = attachProposalRoutingMetadata(
-    proposalWithIntent,
-    input.kernel,
-    input.routing
-  );
+  const proposalWithRouting = enforcePromptSovereignty({
+    composition: input.composition,
+    decision: input.decision,
+    intent: input.intent,
+    prompt: input.prompt,
+    proposal: attachProposalRoutingMetadata(
+      proposalWithIntent,
+      input.kernel,
+      input.routing,
+      input.intent,
+      input.composition,
+      input.prompt
+    )
+  });
   let persistence = input.persistence;
   const visibleSummary =
     input.mode === "EXECUTE"
@@ -1768,23 +2184,24 @@ export async function POST(request: Request) {
         projectName: null
       };
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+  const effectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
     projectId: requestedProjectId,
     projectName: workspace.projectName ?? null,
-    prompt: latestUserPrompt,
+    prompt: effectiveUserPrompt,
     runtime: getRuntimeStatus(),
     workspace
   });
   const decision = buildDecisionPlan({
     diagnostic,
-    prompt: latestUserPrompt
+    prompt: effectiveUserPrompt
   });
   const intent = buildIntentIntelligence({
     fileList: workspace.fileList,
     projectName: workspace.projectName ?? null,
-    prompt: latestUserPrompt
+    prompt: effectiveUserPrompt
   });
   const composition = buildCompositionStrategy(intent);
   const kernel = buildIntelligenceKernel({
@@ -1795,6 +2212,8 @@ export async function POST(request: Request) {
     mode
   });
   const routing = buildProposalRoutingDecision(kernel);
+  const askRuntimeContext = buildAskRuntimeContext();
+  const askLiveIntent = detectAskLiveIntent(effectiveUserPrompt);
 
   if (mode === "SUGGEST" || mode === "EXECUTE") {
     console.info("intent intelligence", intent);
@@ -1815,6 +2234,8 @@ export async function POST(request: Request) {
     content: latestUserPrompt,
     metadata: {
       model,
+      askRuntimeContext: mode === "ASK" ? askRuntimeContext : undefined,
+      askLiveIntent: mode === "ASK" ? askLiveIntent : undefined,
       workspace: {
         activePath: workspace.activePath,
         composition,
@@ -1832,35 +2253,66 @@ export async function POST(request: Request) {
     role: "user"
   });
 
+  if (mode === "ASK") {
+    const directAskAnswer = await createAskDirectAnswer(
+      effectiveUserPrompt,
+      askRuntimeContext
+    );
+
+    if (directAskAnswer) {
+      persistence = await persistChatMessage(persistence, {
+        content: directAskAnswer,
+        metadata: {
+          askLiveIntent,
+          askRuntimeContext,
+          deterministic: askLiveIntent !== "weather",
+          model
+        },
+        role: "assistant"
+      });
+
+      return createTextStream(directAskAnswer, persistence?.sessionId);
+    }
+  }
+
   const shouldUseDeterministicProposal =
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (shouldUseDeterministicDecision(decision) ||
-      isEnhancementRequest(latestUserPrompt) ||
-      Boolean(detectRenameRequest(latestUserPrompt)) ||
-      (mode === "EXECUTE" && isInvoiceRequest(latestUserPrompt)));
+      isEnhancementRequest(effectiveUserPrompt) ||
+      Boolean(detectRenameRequest(effectiveUserPrompt)) ||
+      (mode === "EXECUTE" && isInvoiceRequest(effectiveUserPrompt)));
 
   if (
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (shouldUseDeterministicProposal || !process.env.OPENROUTER_API_KEY)
   ) {
-    const proposal = attachProposalRoutingMetadata(
-      addCompositionDebugSummary(
-        createLocalProposal(
-          latestUserPrompt,
-          workspace,
-          mode,
-          diagnostic,
-          decision,
+    const proposal = enforcePromptSovereignty({
+      composition,
+      decision,
+      intent,
+      prompt: effectiveUserPrompt,
+      proposal: attachProposalRoutingMetadata(
+        addCompositionDebugSummary(
+          createLocalProposal(
+            effectiveUserPrompt,
+            workspace,
+            mode,
+            diagnostic,
+            decision,
+            intent,
+            composition
+          ),
           intent,
-          composition
+          composition,
+          kernel
         ),
+        kernel,
+        routing,
         intent,
         composition,
-        kernel
-      ),
-      kernel,
-      routing
-    );
+        effectiveUserPrompt
+      )
+    });
     const visibleSummary =
       mode === "EXECUTE"
         ? "I prepared an execution proposal for review. Nothing runs until you approve it."
@@ -1887,7 +2339,11 @@ export async function POST(request: Request) {
       onComplete: async (content) => {
         persistence = await persistChatMessage(persistence, {
           content,
-          metadata: { model },
+          metadata: {
+            askLiveIntent,
+            askRuntimeContext,
+            model
+          },
           role: "assistant"
         });
       },
@@ -1938,7 +2394,7 @@ export async function POST(request: Request) {
         mode,
         model,
         persistence,
-        prompt: latestUserPrompt,
+        prompt: effectiveUserPrompt,
         reason: "openrouter_network_error",
         routing,
         workspace
@@ -1955,7 +2411,7 @@ export async function POST(request: Request) {
         mode,
         model,
         persistence,
-        prompt: latestUserPrompt,
+        prompt: effectiveUserPrompt,
         reason: `openrouter_${response.status}`,
         routing,
         workspace
@@ -1989,46 +2445,77 @@ export async function POST(request: Request) {
         mode,
         model,
         persistence,
-        prompt: latestUserPrompt,
+        prompt: effectiveUserPrompt,
         reason: "invalid_or_empty_model_proposal",
         routing,
         workspace
       });
     }
 
-    const proposal: DiffProposal = attachProposalRoutingMetadata(
-      addCompositionDebugSummary({
-        id: `proposal-${Date.now()}`,
-        mode,
-        projectId: requestedProjectId,
-        status: "pending",
-        summary: `${diagnostic.diagnosis} ${parsed.summary}`,
-        changes: parsed.changes.map((change) => {
-          if (isRuntimeProposalAction(change.action)) {
+    const proposal: DiffProposal = enforcePromptSovereignty({
+      composition,
+      decision,
+      intent,
+      prompt: effectiveUserPrompt,
+      proposal: attachProposalRoutingMetadata(
+        addCompositionDebugSummary({
+          id: `proposal-${Date.now()}`,
+          mode,
+          projectId: requestedProjectId,
+          status: "pending",
+          summary: `${diagnostic.diagnosis} ${parsed.summary}`,
+          changes: parsed.changes.map((change) => {
+            if (isRuntimeProposalAction(change.action)) {
+              return {
+                action: change.action,
+                summary: change.summary
+              };
+            }
+
             return {
               action: change.action,
+              diffPreview:
+                change.diffPreview ??
+                createDiffPreview(
+                  change.action,
+                  change.path ?? "untitled.txt",
+                  change.proposedContent ?? ""
+                ),
+              path: change.path,
+              proposedContent: change.proposedContent,
               summary: change.summary
             };
-          }
+          })
+        }, intent, composition, kernel),
+        kernel,
+        routing,
+        intent,
+        composition,
+        effectiveUserPrompt
+      )
+    });
 
-          return {
-            action: change.action,
-            diffPreview:
-              change.diffPreview ??
-              createDiffPreview(
-                change.action,
-                change.path ?? "untitled.txt",
-                change.proposedContent ?? ""
-              ),
-            path: change.path,
-            proposedContent: change.proposedContent,
-            summary: change.summary
-          };
-        })
-      }, intent, composition, kernel),
-      kernel,
-      routing
-    );
+    if (
+      proposal.shouldBlockExecution &&
+      proposal.proposalRoutingReasons?.some((reason) => reason.code === "prompt_sovereignty_block") &&
+      shouldUseDeterministicDecision(decision)
+    ) {
+      return createFallbackProposalResponse({
+        composition,
+        diagnostic,
+        decision,
+        intent,
+        kernel,
+        mode,
+        model,
+        persistence,
+        prompt: effectiveUserPrompt,
+        reason: "prompt_sovereignty_repair",
+        routing,
+        workspace
+      });
+    }
+
     const quality = scoreProposalQuality({
       changes: proposal.changes,
       composition,
@@ -2047,7 +2534,7 @@ export async function POST(request: Request) {
         mode,
         model,
         persistence,
-        prompt: latestUserPrompt,
+        prompt: effectiveUserPrompt,
         reason: `quality_score_${quality.score}_${quality.issues.join(",")}`,
         routing,
         workspace
@@ -2077,6 +2564,9 @@ export async function POST(request: Request) {
           role: "system",
           content:
             `You are Hassali.ai in ASK mode. Keep answers concise and do not edit files from chat. ` +
+            `ASK is a universal assistant mode for explanation, planning, learning, debugging, and general help. ` +
+            `If the user asks to build or edit files, explain that WEBSITE or CODE mode should be used for approval-first file changes. ` +
+            `${formatAskRuntimeContext(askRuntimeContext, askLiveIntent)}\n` +
             `Current mode: ${mode}. Active file: ${workspace.activePath}. Files: ${workspace.fileList.join(", ")}.`
         },
         ...messages
@@ -2099,7 +2589,11 @@ export async function POST(request: Request) {
     onComplete: async (content) => {
       persistence = await persistChatMessage(persistence, {
         content,
-        metadata: { model },
+        metadata: {
+          askLiveIntent,
+          askRuntimeContext,
+          model
+        },
         role: "assistant"
       });
     },

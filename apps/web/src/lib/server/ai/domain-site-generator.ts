@@ -1,3 +1,8 @@
+import {
+  buildDomainBlueprint,
+  domainTitle,
+  isTechnicalBlueprint
+} from "@/lib/server/ai/capability-domain-blueprint";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 
@@ -547,6 +552,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 18% 10%, rgba(230, 0, 76, 0.22), transparent 28rem),
     radial-gradient(circle at 88% 18%, rgba(0, 163, 175, 0.14), transparent 26rem),
@@ -589,6 +595,7 @@ nav {
 
 main {
   padding: clamp(2rem, 5vw, 5rem) clamp(1rem, 4vw, 2rem);
+  width: min(100%, 1180px);
 }
 
 .hero {
@@ -851,7 +858,9 @@ function pageToPath(page: string) {
   const pageMap: Record<string, string> = {
     blog: "blog.html",
     blogs: "blog.html",
+    bikes: "bikes.html",
     contact: "contact.html",
+    distributors: "distributors.html",
     episodes: "episodes.html",
     gallery: "gallery.html",
     home: "index.html",
@@ -892,12 +901,34 @@ function brandNameForIntent(intent: IntentIntelligence, composition: Composition
     return intent.brandName;
   }
 
+  const blueprint = buildDomainBlueprint({
+    prompt: `${intent.domain} ${composition.businessType} ${composition.reasoningSummary}`
+  });
+
+  if (blueprint.brandFallback && !/^(local service|business|generic)/i.test(blueprint.domainLabel)) {
+    return blueprint.brandFallback;
+  }
+
   const businessWords = composition.businessType
     .replace(/\s*\/\s*/g, " ")
     .split(/\s+/)
-    .filter((word) => !["and", "brand", "business", "commerce", "website"].includes(word.toLowerCase()));
+    .filter((word, index, words) => {
+      const normalized = word.toLowerCase();
 
-  return titleCase(businessWords.slice(0, 2).join(" ") || "Business Studio");
+      return (
+        !["and", "brand", "business", "commerce", "website"].includes(normalized) &&
+        normalized !== words[index - 1]?.toLowerCase()
+      );
+    });
+  const inferredName = titleCase(businessWords.slice(0, 2).join(" "));
+
+  if (!inferredName || /^(business|generic|local service)$/i.test(inferredName)) {
+    return blueprint.brandFallback || `${domainTitle(blueprint)} Studio`;
+  }
+
+  return inferredName.includes(domainTitle(blueprint))
+    ? inferredName
+    : `${domainTitle(blueprint)} Studio`;
 }
 
 function colorTokens(intent: IntentIntelligence, composition: CompositionStrategy) {
@@ -938,14 +969,25 @@ function colorTokens(intent: IntentIntelligence, composition: CompositionStrateg
     };
   }
 
-  if (has("gold")) {
+  if (has("yellow") || has("gold") || business.includes("perfume") || business.includes("fragrance")) {
     return {
-      accent: "#c6923e",
-      accentSoft: "rgba(214, 177, 109, 0.32)",
-      canvas: has("white") ? "#fffaf0" : "#110d07",
-      ink: has("white") ? "#21180c" : "#fff4de",
-      secondary: "#f0c56c",
-      surface: "rgba(255, 255, 255, 0.72)"
+      accent: has("gold") ? "#d97706" : "#eab308",
+      accentSoft: has("gold") ? "rgba(245, 158, 11, 0.28)" : "rgba(234, 179, 8, 0.28)",
+      canvas: has("white") ? "#fffbea" : "#171104",
+      ink: has("white") ? "#261b05" : "#fff7d6",
+      secondary: "#f59e0b",
+      surface: "rgba(255, 255, 255, 0.8)"
+    };
+  }
+
+  if (has("maroon") || business.includes("television") || business.includes("motorbike")) {
+    return {
+      accent: "#8a1538",
+      accentSoft: "rgba(138, 21, 56, 0.28)",
+      canvas: has("white") ? "#fbf7f8" : "#12070b",
+      ink: has("white") ? "#251018" : "#fff5f7",
+      secondary: "#b91c1c",
+      surface: has("white") ? "rgba(255, 255, 255, 0.78)" : "rgba(28, 9, 14, 0.76)"
     };
   }
 
@@ -960,7 +1002,18 @@ function colorTokens(intent: IntentIntelligence, composition: CompositionStrateg
     };
   }
 
-  if (has("green") || has("teal")) {
+  if (has("green")) {
+    return {
+      accent: "#16a34a",
+      accentSoft: "rgba(34, 197, 94, 0.28)",
+      canvas: has("white") ? "#f4fff7" : "#061b12",
+      ink: has("white") ? "#102318" : "#effff4",
+      secondary: "#22c55e",
+      surface: "rgba(255, 255, 255, 0.74)"
+    };
+  }
+
+  if (has("teal")) {
     return {
       accent: "#00a3af",
       accentSoft: "rgba(0, 163, 175, 0.28)",
@@ -983,8 +1036,9 @@ function colorTokens(intent: IntentIntelligence, composition: CompositionStrateg
 
 function imageSetForComposition(intent: IntentIntelligence, composition: CompositionStrategy) {
   const text = [intent.domain, composition.businessType, ...composition.brandPositioning].join(" ").toLowerCase();
+  const blueprint = buildDomainBlueprint({ prompt: text });
 
-  if (isTechnicalComposition(intent, composition)) {
+  if (isTechnicalComposition(intent, composition) || isTechnicalBlueprint(blueprint)) {
     return [
       "https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&w=1400&q=80",
       "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1000&q=80",
@@ -1005,6 +1059,46 @@ function imageSetForComposition(intent: IntentIntelligence, composition: Composi
       "https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=1400&q=80",
       "https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&w=1000&q=80",
       "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1000&q=80"
+    ];
+  }
+
+  if (text.includes("ice cream") || text.includes("frozen dessert") || text.includes("gelato") || text.includes("scoop")) {
+    return [
+      "https://images.unsplash.com/photo-1488900128323-21503983a07e?auto=format&fit=crop&w=1400&q=80",
+      "https://images.unsplash.com/photo-1501443762994-82bd5dace89a?auto=format&fit=crop&w=1000&q=80",
+      "https://images.unsplash.com/photo-1563805042-7684c019e1cb?auto=format&fit=crop&w=1000&q=80"
+    ];
+  }
+
+  if (text.includes("perfume") || text.includes("fragrance") || text.includes("scent")) {
+    return [];
+  }
+
+  if (blueprint.ambiguity.isAmbiguous) {
+    return [];
+  }
+
+  if (text.includes("bicycle") || text.includes("cycling") || text.includes("bike") || text.includes("rider")) {
+    return [
+      "https://images.unsplash.com/photo-1485965120184-e220f721d03e?auto=format&fit=crop&w=1400&q=80",
+      "https://images.unsplash.com/photo-1507035895480-2b3156c31fc8?auto=format&fit=crop&w=1000&q=80",
+      "https://images.unsplash.com/photo-1529422643029-d4585747aaf2?auto=format&fit=crop&w=1000&q=80"
+    ];
+  }
+
+  if (text.includes("television") || text.includes("smart tv") || text.includes("home cinema") || text.includes("oled") || text.includes("qled")) {
+    return [];
+  }
+
+  if (text.includes("motorbike") || text.includes("motorcycle") || text.includes("engine service")) {
+    return [];
+  }
+
+  if (text.includes("cola") || text.includes("beverage") || text.includes("soft drink")) {
+    return [
+      "https://images.unsplash.com/photo-1587668178277-295251f900ce?auto=format&fit=crop&w=1400&q=80",
+      "https://images.unsplash.com/photo-1622483767028-3f66f32aef97?auto=format&fit=crop&w=1000&q=80",
+      "https://images.unsplash.com/photo-1554866585-cd94860890b7?auto=format&fit=crop&w=1000&q=80"
     ];
   }
 
@@ -1040,11 +1134,7 @@ function imageSetForComposition(intent: IntentIntelligence, composition: Composi
     ];
   }
 
-  return [
-    "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1400&q=80",
-    "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=1000&q=80",
-    "https://images.unsplash.com/photo-1497215728101-856f4ea42174?auto=format&fit=crop&w=1000&q=80"
-  ];
+  return [];
 }
 
 function navForComposition(pages: string[]) {
@@ -1057,19 +1147,256 @@ function navForComposition(pages: string[]) {
 }
 
 function sectionCopy(section: string, composition: CompositionStrategy) {
+  const blueprint = buildDomainBlueprint({ prompt: composition.businessType });
   const goal = composition.businessGoals[0] ?? "trust";
-  const positioning = composition.brandPositioning[0] ?? "clear";
   const audience = composition.audience[0] ?? "customers";
+  const sectionText = section.toLowerCase();
+  const terms = blueprint.contentTerms.slice(0, 5);
+  const termText = terms.join(", ");
+  const category = blueprint.productCategory;
+
+  if (blueprint.ambiguity.isAmbiguous) {
+    if (sectionText.includes("service") || sectionText.includes("parts")) {
+      return {
+        body: "Frame service around parts, safety checks, booking, and practical rider support while leaving room for the customer's exact bike type.",
+        title: "Service and parts guidance for the right kind of bike"
+      };
+    }
+
+    if (sectionText.includes("gear") || sectionText.includes("safety")) {
+      return {
+        body: "Present helmets, locks, lights, gloves, bags, and safety essentials as a neutral rider gear wall for different bike customers.",
+        title: "Rider safety gear without overcommitting the bike type"
+      };
+    }
+
+    if (sectionText.includes("test") || sectionText.includes("fit")) {
+      return {
+        body: "Offer fit checks, showroom advice, and guided try-outs so customers can clarify what kind of bike suits them.",
+        title: "Fit checks and guided try-outs before the sale"
+      };
+    }
+
+    return {
+      body: "Keep the wording balanced for bike shoppers: showroom guidance, service booking, parts, safety gear, and fit help without narrowing the shop to one ride category.",
+      title: "Balanced bike-shop guidance for different riders"
+    };
+  }
+
+  if (sectionText.includes("bike") || sectionText.includes("cycling") || sectionText.includes("repair") || sectionText.includes("tune")) {
+    return {
+      body:
+        sectionText.includes("repair") || sectionText.includes("tune")
+          ? "Make service booking obvious with tune-ups, brake checks, chain care, fitting notes, and clear turnaround expectations."
+          : "Present bikes, accessories, rentals, and rider guidance for commuters, weekend riders, and families choosing their next ride.",
+      title:
+        sectionText.includes("repair") || sectionText.includes("tune")
+          ? "Tune-ups, repairs, and fittings riders can trust"
+          : "Bikes and cycling gear matched to real riders"
+    };
+  }
+
+  if (sectionText.includes("smart tv") || sectionText.includes("oled") || sectionText.includes("qled") || sectionText.includes("cinema") || sectionText.includes("mounting") || sectionText.includes("warranty")) {
+    return {
+      body:
+        sectionText.includes("mounting")
+          ? "Make wall mounting, cable routing, delivery, calibration, and installation booking clear before customers leave the showroom."
+          : sectionText.includes("warranty")
+            ? "Explain warranty support, after-sales help, soundbar bundles, and replacement guidance in plain language."
+            : "Help shoppers compare smart TVs, OLED/QLED/LED panels, screen sizes, viewing distance, and home cinema bundles without confusion.",
+      title:
+        sectionText.includes("mounting")
+          ? "Installation and wall mounting handled cleanly"
+          : sectionText.includes("warranty")
+            ? "Warranty and after-sales support customers can understand"
+            : "Smart TV comparison for real living rooms"
+    };
+  }
+
+  if (sectionText.includes("motorcycle") || sectionText.includes("engine") || sectionText.includes("helmet") || sectionText.includes("gear") || sectionText.includes("spare") || sectionText.includes("test ride")) {
+    return {
+      body:
+        sectionText.includes("engine")
+          ? "Surface oil changes, diagnostics, tuning, brake checks, and maintenance slots with a direct booking path."
+          : sectionText.includes("helmet") || sectionText.includes("gear")
+            ? "Pair motorcycles with helmets, jackets, gloves, safety gear, and road-ready accessories."
+            : "Present motorcycles, test rides, spare parts, and service confidence without drifting into bicycle language.",
+      title:
+        sectionText.includes("engine")
+          ? "Engine service and maintenance with clear booking"
+          : sectionText.includes("helmet") || sectionText.includes("gear")
+            ? "Helmets, rider gear, and safety essentials"
+            : "Motorcycles, test rides, and road-ready support"
+    };
+  }
+
+  if (sectionText.includes("cola") || sectionText.includes("product") || sectionText.includes("distributor") || sectionText.includes("retailer")) {
+    return {
+      body:
+        sectionText.includes("distributor") || sectionText.includes("retailer")
+          ? "Show retailers and distributors the product range, chilled delivery promise, crate flow, and contact path for sales."
+          : "Spotlight drink flavors, pack sizes, campaign moments, and shelf-ready product stories for local buyers.",
+      title:
+        sectionText.includes("distributor") || sectionText.includes("retailer")
+          ? "Distributor and retailer paths made clear"
+          : "A chilled product lineup with campaign energy"
+    };
+  }
+
+  if (sectionText.includes("flavor")) {
+    return {
+      body: `Showcase ${escapeHtml(category)} with clear choices, seasonal notes, and a reason to visit today.`,
+      title: "Flavors, scoops, and specials that feel worth the trip"
+    };
+  }
+
+  if (sectionText.includes("scent") || sectionText.includes("fragrance") || sectionText.includes("note")) {
+    return {
+      body: "Present oud, floral, citrus, musk, and soft amber notes as a clear fragrance journey for shoppers choosing a signature scent.",
+      title: "Fragrance notes arranged for discovery"
+    };
+  }
+
+  if (sectionText.includes("bottle") || sectionText.includes("tester")) {
+    return {
+      body: "Show perfume bottles, testers, premium packaging, and sampling guidance so customers can compare before gifting or buying.",
+      title: "Bottles, testers, and gift-ready presentation"
+    };
+  }
+
+  if (sectionText.includes("gift")) {
+    return {
+      body: "Guide visitors toward gift sets, wrapping, occasion picks, and scent consultation for birthdays, weddings, and everyday luxury.",
+      title: "Gift sets and scent rituals with a premium finish"
+    };
+  }
+
+  if (sectionText.includes("catering")) {
+    return {
+      body: `Make events easy with ${escapeHtml(termText || category)}, simple booking, and clear service expectations.`,
+      title: "Catering and celebration treats without confusion"
+    };
+  }
+
+  if (sectionText.includes("store") || sectionText.includes("visit")) {
+    return {
+      body: `Guide ${escapeHtml(audience)} toward the shop, opening hours, contact, and the next friendly step.`,
+      title: "A simple path from craving to shop visit"
+    };
+  }
 
   return {
-    body: `Built around ${escapeHtml(goal)}, ${escapeHtml(positioning)} positioning, and a clear path for ${escapeHtml(audience)}.`,
-    title: `${titleCase(section)} for ${escapeHtml(composition.businessType)}`
+    body: `Connect ${escapeHtml(audience)} with ${escapeHtml(termText || category)} through a practical next step focused on ${escapeHtml(goal)}.`,
+    title: `${titleCase(section)} for ${escapeHtml(domainTitle(blueprint))} customers`
+  };
+}
+
+function visualAssetMarkup(input: {
+  alt: string;
+  className?: string;
+  image?: string;
+  label: string;
+}) {
+  if (input.image) {
+    return `<img src="${input.image}" alt="${escapeHtml(input.alt)}" />`;
+  }
+
+  return `<div class="domain-visual-placeholder ${escapeHtml(input.className ?? "")}" role="img" aria-label="${escapeHtml(input.alt)}">
+            <span>${escapeHtml(input.label)}</span>
+          </div>`;
+}
+
+function layoutClassForComposition(composition: CompositionStrategy) {
+  const text = composition.businessType.toLowerCase();
+
+  if (text.includes("television") || text.includes("home cinema") || text.includes("electronics")) {
+    return "layout-showroom";
+  }
+
+  if (text.includes("motorbike") || text.includes("motorcycle")) {
+    return "layout-moto";
+  }
+
+  if (text.includes("ambiguous rider") || text.includes("bike shop")) {
+    return "layout-bike-balanced";
+  }
+
+  if (text.includes("bicycle") || text.includes("cycling")) {
+    return "layout-cycle";
+  }
+
+  if (text.includes("ice cream") || text.includes("frozen dessert")) {
+    return "layout-dessert";
+  }
+
+  if (text.includes("perfume") || text.includes("fragrance") || text.includes("scent")) {
+    return "layout-fragrance";
+  }
+
+  if (text.includes("cola") || text.includes("beverage")) {
+    return "layout-beverage";
+  }
+
+  return "layout-standard";
+}
+
+function visualPlaceholder(input: {
+  blueprintLabel: string;
+  index: number;
+  section?: string;
+}) {
+  const label = input.blueprintLabel.toLowerCase();
+
+  if (label.includes("television")) {
+    const labels = ["OLED showroom", "Home cinema", "Wall mount"];
+    return {
+      className: "visual-tv",
+      label: labels[input.index % labels.length]
+    };
+  }
+
+  if (label === "bike shop") {
+    const labels = ["Bike showroom", "Rider gear", "Service desk"];
+    return {
+      className: "visual-bike",
+      label: labels[input.index % labels.length]
+    };
+  }
+
+  if (label.includes("motorbike")) {
+    const labels = ["Moto showroom", "Engine service", "Rider gear"];
+    return {
+      className: "visual-moto",
+      label: labels[input.index % labels.length]
+    };
+  }
+
+  if (label.includes("perfume")) {
+    const labels = ["Fragrance notes", "Perfume bottles", "Gift sets"];
+    return {
+      className: "visual-fragrance",
+      label: labels[input.index % labels.length]
+    };
+  }
+
+  if (label.includes("bicycle")) {
+    const labels = ["Cycling wall", "Tune-up lane", "Ride fitting"];
+    return {
+      className: "visual-cycle",
+      label: labels[input.index % labels.length]
+    };
+  }
+
+  return {
+    className: "visual-generic",
+    label: input.section ?? input.blueprintLabel
   };
 }
 
 function renderSections(page: string, composition: CompositionStrategy, images: string[]) {
   const plan = composition.sectionPlan.find((item) => item.page === page) ?? composition.sectionPlan[0];
   const sections = plan?.sections?.length ? plan.sections : ["offerings", "trust", "CTA"];
+  const blueprint = buildDomainBlueprint({ prompt: composition.businessType });
 
   return sections
     .map((section, index) => {
@@ -1082,7 +1409,19 @@ function renderSections(page: string, composition: CompositionStrategy, images: 
           <h2>${copy.title}</h2>
           <p>${copy.body}</p>
         </div>
-        <img src="${images[index % images.length]}" alt="${escapeHtml(composition.businessType)} visual ${index + 1}" />
+        ${visualAssetMarkup({
+          alt: `${blueprint.domainLabel} visual for ${section}`,
+          className: visualPlaceholder({
+            blueprintLabel: blueprint.domainLabel,
+            index
+          }).className,
+          image: images[index % images.length],
+          label: visualPlaceholder({
+            blueprintLabel: blueprint.domainLabel,
+            index,
+            section
+          }).label
+        })}
       </section>`;
       }
 
@@ -1106,13 +1445,23 @@ function renderComposedPage(input: {
 }) {
   const pageTitleText = titleCase(input.page);
   const isHome = input.page === "home";
+  const blueprint = buildDomainBlueprint({
+    prompt: `${input.intent.domain} ${input.composition.businessType} ${input.composition.reasoningSummary}`
+  });
+  const heroTerms = blueprint.contentTerms.slice(0, 4).join(", ");
   const heroTitle = isHome
-    ? `${input.brandName} brings ${input.composition.brandPositioning.slice(0, 2).join(" and ")} ${input.composition.businessType} online.`
+    ? `${input.brandName} brings ${heroTerms || input.composition.businessType} to life.`
     : `${pageTitleText} for ${input.brandName}`;
   const heroBody = isHome
-    ? input.composition.contentStrategy.heroGoal
+    ? `${input.composition.contentStrategy.heroGoal} The page emphasizes ${blueprint.productCategory}, ${blueprint.industry}, and clear next steps.`
     : `This page supports ${input.composition.businessGoals.join(", ")} with focused sections for ${input.composition.audience.join(", ")}.`;
   const primaryCta = input.composition.contentStrategy.ctaStrategy[0] ?? "Contact us";
+  const layoutClass = layoutClassForComposition(input.composition);
+  const heroVisual = visualPlaceholder({
+    blueprintLabel: blueprint.domainLabel,
+    index: 0,
+    section: "hero"
+  });
 
   return `<!doctype html>
 <html lang="en">
@@ -1131,18 +1480,23 @@ function renderComposedPage(input: {
       </nav>
     </header>
     <main>
-      <section class="hero">
+      <section class="hero ${layoutClass}-hero">
         <div class="hero-copy">
-          <p class="eyebrow">${escapeHtml(input.composition.businessType)}</p>
+          <p class="eyebrow">${escapeHtml(blueprint.domainLabel)} / ${escapeHtml(blueprint.productCategory)}</p>
           <h1>${escapeHtml(heroTitle)}</h1>
           <p class="lede">${escapeHtml(heroBody)}</p>
           <a class="button" href="./${pageToPath(input.composition.siteArchitecture.pages.includes("contact") ? "contact" : input.composition.siteArchitecture.pages[input.composition.siteArchitecture.pages.length - 1] ?? "contact")}">${escapeHtml(primaryCta)}</a>
         </div>
         <figure class="hero-visual glass-card">
-          <img src="${input.images[0]}" alt="${escapeHtml(input.composition.businessType)} hero visual" />
+          ${visualAssetMarkup({
+            alt: `${blueprint.domainLabel} hero visual`,
+            className: heroVisual.className,
+            image: input.images[0],
+            label: heroVisual.label
+          })}
         </figure>
       </section>
-      <section class="section-grid">
+      <section class="section-grid ${layoutClass}">
 ${renderSections(input.page, input.composition, input.images)}
       </section>
     </main>
@@ -1159,9 +1513,14 @@ ${renderSections(input.page, input.composition, input.images)}
 
 function renderComposedCss(intent: IntentIntelligence, composition: CompositionStrategy) {
   const tokens = colorTokens(intent, composition);
+  const layoutClass = layoutClassForComposition(composition);
   const usesGlass = [...intent.visualStyle, ...composition.visualLanguage.style].some((style) =>
     style.toLowerCase().includes("glass")
   );
+  const usesTactical = [...intent.visualStyle, ...composition.visualLanguage.style, ...composition.brandPositioning]
+    .join(" ")
+    .toLowerCase()
+    .includes("tactical");
   const rounded = [...intent.shapeLanguage, ...composition.visualLanguage.shapeLanguage].some((shape) =>
     shape.toLowerCase().includes("round")
   );
@@ -1193,10 +1552,24 @@ body {
   min-height: 100vh;
   background:
     radial-gradient(circle at 15% 12%, var(--accent-soft), transparent 30rem),
-    radial-gradient(circle at 84% 10%, rgba(0, 163, 175, 0.16), transparent 28rem),
+    radial-gradient(circle at 84% 10%, color-mix(in srgb, var(--accent-2), transparent 84%), transparent 28rem),
     var(--canvas);
   color: var(--ink);
 }
+
+${usesTactical ? `body::before {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  content: "";
+  background:
+    linear-gradient(rgba(127, 29, 45, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(127, 29, 45, 0.08) 1px, transparent 1px),
+    linear-gradient(180deg, transparent, rgba(138, 21, 56, 0.1), transparent);
+  background-size: 34px 34px, 34px 34px, 100% 13px;
+  mix-blend-mode: multiply;
+}
+` : ""}
 
 a {
   color: inherit;
@@ -1245,6 +1618,7 @@ main {
 
 .hero-copy {
   max-width: 820px;
+  min-width: 0;
 }
 
 .eyebrow {
@@ -1266,12 +1640,14 @@ h1 {
   font-size: clamp(2.55rem, 7vw, 6rem);
   line-height: 0.92;
   letter-spacing: -0.045em;
+  overflow-wrap: anywhere;
 }
 
 h2 {
   margin-top: 0.45rem;
   font-size: clamp(1.25rem, 3vw, 2rem);
   line-height: 1.06;
+  overflow-wrap: anywhere;
 }
 
 .lede,
@@ -1302,13 +1678,28 @@ footer {
 
 .glass-card {
   position: relative;
+  min-width: 0;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  border-radius: var(--radius);
+  border: 1px solid ${usesTactical ? "color-mix(in srgb, var(--accent), white 42%)" : "rgba(255, 255, 255, 0.58)"};
+  border-radius: ${usesTactical ? "18px" : "var(--radius)"};
   background: var(--surface);
   box-shadow: 0 28px 90px rgba(15, 23, 42, 0.12);
   ${usesGlass ? "backdrop-filter: blur(18px) saturate(128%);" : ""}
 }
+
+${usesTactical ? `.glass-card::after {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  content: "";
+  border: 1px solid rgba(185, 28, 28, 0.18);
+  background: linear-gradient(135deg, rgba(127, 29, 45, 0.08), transparent 42%);
+}
+
+.eyebrow {
+  color: var(--accent-2);
+}
+` : ""}
 
 .hero-visual {
   aspect-ratio: 4 / 5;
@@ -1316,16 +1707,74 @@ footer {
 }
 
 .hero-visual img,
-.image-band img {
+.image-band img,
+.domain-visual-placeholder {
   display: block;
   height: 100%;
   width: 100%;
   object-fit: cover;
 }
 
+.domain-visual-placeholder {
+  display: grid;
+  min-height: 18rem;
+  min-width: 0;
+  place-items: center;
+  background:
+    radial-gradient(circle at 20% 18%, var(--accent-soft), transparent 16rem),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent), white 78%), color-mix(in srgb, var(--accent-2), white 82%));
+  color: var(--ink);
+  font-size: clamp(1.4rem, 4vw, 3rem);
+  font-weight: 900;
+  text-align: center;
+}
+
+.visual-tv {
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.16), transparent 18%, transparent 82%, rgba(255, 255, 255, 0.12)),
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.44), transparent 11rem),
+    linear-gradient(145deg, #18070d, #3a0c19 48%, #8a1538);
+  color: #fff5f7;
+  outline: 10px solid rgba(20, 8, 12, 0.62);
+  outline-offset: -2.4rem;
+}
+
+.visual-bike {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.28), transparent 32%),
+    radial-gradient(circle at 28% 42%, var(--accent-soft), transparent 9rem),
+    linear-gradient(145deg, color-mix(in srgb, var(--accent), white 62%), color-mix(in srgb, var(--accent-2), white 72%));
+}
+
+.visual-moto {
+  background:
+    radial-gradient(circle at 22% 24%, rgba(255, 255, 255, 0.22), transparent 10rem),
+    linear-gradient(120deg, #16060a, #47111d 52%, #8a1538);
+  color: #fff5f7;
+}
+
+.visual-cycle {
+  background:
+    radial-gradient(circle at 72% 20%, rgba(34, 197, 94, 0.34), transparent 10rem),
+    linear-gradient(135deg, #ecfdf5, #bbf7d0 46%, #16a34a);
+}
+
+.visual-fragrance {
+  background:
+    radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.62), transparent 7rem),
+    radial-gradient(circle at 70% 74%, rgba(245, 158, 11, 0.3), transparent 10rem),
+    linear-gradient(145deg, #fffbea, #fef3c7 44%, #eab308);
+  color: #261b05;
+}
+
+.domain-visual-placeholder span {
+  max-width: 10ch;
+  overflow-wrap: anywhere;
+}
+
 .section-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   gap: 1rem;
 }
 
@@ -1341,7 +1790,7 @@ footer {
 
 .image-band {
   display: grid;
-  grid-column: span 2;
+  grid-column: span 1;
   grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.75fr);
   gap: 1rem;
   align-items: center;
@@ -1350,6 +1799,8 @@ footer {
 .image-band img {
   min-height: 14rem;
 }
+
+${layoutCssForClass(layoutClass)}
 
 .reveal {
   opacity: 0;
@@ -1364,6 +1815,22 @@ footer {
 
 .glass-card:hover {
   box-shadow: 0 32px 100px rgba(15, 23, 42, 0.16);
+}
+
+@media (max-width: 980px) {
+  .section-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-grid > *,
+  .image-band {
+    grid-column: span 1 !important;
+  }
+
+  .layout-showroom .glass-card:first-child,
+  .image-band {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 @media (max-width: 820px) {
@@ -1407,6 +1874,71 @@ if ("IntersectionObserver" in window) {
   revealTargets.forEach((element) => element.classList.add("is-visible"));
 }
 `;
+}
+
+function layoutCssForClass(layoutClass: string) {
+  if (layoutClass === "layout-showroom") {
+    return `.layout-showroom {
+  grid-template-columns: 1.15fr 0.85fr;
+}
+
+.layout-showroom .glass-card:first-child,
+.layout-showroom .glass-card:nth-child(4) {
+  grid-column: span 2;
+}
+
+.layout-showroom .glass-card:first-child {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.58fr);
+}
+`;
+  }
+
+  if (layoutClass === "layout-bike-balanced" || layoutClass === "layout-moto") {
+    return `.${layoutClass} {
+  grid-template-columns: 0.9fr 1.1fr;
+}
+
+.${layoutClass} .glass-card:nth-child(2) {
+  grid-column: span 2;
+}
+`;
+  }
+
+  if (layoutClass === "layout-cycle") {
+    return `.layout-cycle {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+`;
+  }
+
+  if (layoutClass === "layout-dessert" || layoutClass === "layout-beverage") {
+    return `.${layoutClass} {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.${layoutClass} .glass-card:first-child {
+  grid-column: span 2;
+}
+`;
+  }
+
+  if (layoutClass === "layout-fragrance") {
+    return `.layout-fragrance {
+  grid-template-columns: 1fr 0.78fr 1fr;
+}
+
+.layout-fragrance .glass-card:first-child {
+  grid-column: span 2;
+}
+
+.layout-fragrance .glass-card:nth-child(3) {
+  transform: translateY(1.2rem);
+}
+`;
+  }
+
+  return "";
 }
 
 export function generateComposedSiteFiles(input: {

@@ -1,3 +1,4 @@
+import { buildDomainBlueprint } from "@/lib/server/ai/capability-domain-blueprint";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 
 export type CompositionStrategy = {
@@ -50,13 +51,34 @@ function unique(values: string[]) {
 
 function inferBusinessType(intent: IntentIntelligence) {
   const text = lower([intent.domain, intent.siteType ?? "", intent.brandName ?? "", intent.summary].join(" "));
+  const blueprint = buildDomainBlueprint({ prompt: text });
 
   if (includesAny(text, ["fish", "seafood", "aquatic", "fresh catch"])) {
     return "seafood commerce / freshness brand";
   }
 
-  if (includesAny(text, ["candle", "candles", "scent", "fragrance"])) {
+  if (includesAny(text, ["perfume", "fragrance", "scent", "oud", "musk", "cologne", "attar"])) {
+    return "perfume shop / fragrance retail and gifting";
+  }
+
+  if (includesAny(text, ["candle", "candles"])) {
     return "premium lifestyle commerce";
+  }
+
+  if (includesAny(text, ["television", "smart tv", "oled", "qled", "home cinema", "soundbar", "wall mounting"])) {
+    return "television shop / electronics and home cinema retail";
+  }
+
+  if (includesAny(text, ["motorbike", "motorcycle", "engine service", "oil change", "helmet", "spare parts"])) {
+    return "motorbike shop / motorcycle retail and service";
+  }
+
+  if (includesAny(text, ["bike shop", "bike business"]) && !includesAny(text, ["bicycle", "cycling", "motorbike", "motorcycle"])) {
+    return "bike shop / ambiguous rider retail and service";
+  }
+
+  if (includesAny(text, ["ice cream", "icecream", "gelato", "scoop", "sundae", "frozen dessert", "kulfi"])) {
+    return "ice cream shop / frozen dessert brand";
   }
 
   if (includesAny(text, ["bakery", "bake", "cakes", "pastry", "bread"])) {
@@ -111,6 +133,10 @@ function inferBusinessType(intent: IntentIntelligence) {
     return "product commerce";
   }
 
+  if (blueprint.domainLabel !== "business") {
+    return `${blueprint.domainLabel} / ${blueprint.productCategory}`;
+  }
+
   return intent.siteType ?? `${intent.domain} business website`;
 }
 
@@ -123,6 +149,26 @@ function inferAudience(businessType: string, intent: IntentIntelligence) {
 
   if (includesAny(type, ["candle", "lifestyle commerce"])) {
     return ["gift shoppers", "home decor buyers", "wellness customers"];
+  }
+
+  if (includesAny(type, ["ice cream", "frozen dessert", "gelato", "scoop"])) {
+    return ["families", "dessert lovers", "local visitors", "event customers"];
+  }
+
+  if (includesAny(type, ["perfume", "fragrance", "scent"])) {
+    return ["fragrance lovers", "gift buyers", "luxury shoppers", "scent explorers"];
+  }
+
+  if (includesAny(type, ["television", "home cinema", "electronics"])) {
+    return ["families upgrading their living room", "home cinema buyers", "showroom visitors", "installation customers"];
+  }
+
+  if (includesAny(type, ["motorbike", "motorcycle"])) {
+    return ["riders", "commuters", "touring customers", "service customers"];
+  }
+
+  if (includesAny(type, ["ambiguous rider", "bike shop"])) {
+    return ["riders", "commuters", "families", "service customers"];
   }
 
   if (includesAny(type, ["beauty", "skincare", "cream"])) {
@@ -161,7 +207,7 @@ function inferAudience(businessType: string, intent: IntentIntelligence) {
     return ["teams", "founders", "operators", "technical buyers"];
   }
 
-  return unique([...intent.businessGoals, "customers", "visitors"]);
+  return unique([...intent.businessGoals, ...buildDomainBlueprint({ prompt: type }).audience, "customers", "visitors"]);
 }
 
 function inferBusinessGoals(businessType: string, intent: IntentIntelligence) {
@@ -173,6 +219,26 @@ function inferBusinessGoals(businessType: string, intent: IntentIntelligence) {
 
   if (includesAny(type, ["candle", "commerce"])) {
     return ["product desire", "trust", "gift conversion", "repeat purchases"];
+  }
+
+  if (includesAny(type, ["ice cream", "frozen dessert", "gelato", "scoop"])) {
+    return ["flavor discovery", "shop visits", "seasonal special orders", "catering inquiries"];
+  }
+
+  if (includesAny(type, ["perfume", "fragrance", "scent"])) {
+    return ["signature scent discovery", "gift conversion", "luxury collection trust", "consultation bookings"];
+  }
+
+  if (includesAny(type, ["television", "home cinema", "electronics"])) {
+    return ["product comparison", "showroom visits", "installation bookings", "warranty confidence"];
+  }
+
+  if (includesAny(type, ["motorbike", "motorcycle"])) {
+    return ["motorcycle sales", "engine service bookings", "rider gear sales", "test ride leads"];
+  }
+
+  if (includesAny(type, ["ambiguous rider", "bike shop"])) {
+    return ["rider confidence", "service bookings", "parts and gear discovery", "showroom visits"];
   }
 
   if (includesAny(type, ["beauty", "skincare", "cream"])) {
@@ -195,7 +261,11 @@ function inferBusinessGoals(businessType: string, intent: IntentIntelligence) {
     return ["reservations", "menu confidence", "trust", "repeat visits"];
   }
 
-  return unique(intent.businessGoals.length ? intent.businessGoals : ["trust", "clarity", "conversion"]);
+  return unique(
+    intent.businessGoals.length
+      ? intent.businessGoals
+      : buildDomainBlueprint({ prompt: type }).businessGoals
+  );
 }
 
 function inferBrandPositioning(businessType: string, intent: IntentIntelligence) {
@@ -207,6 +277,26 @@ function inferBrandPositioning(businessType: string, intent: IntentIntelligence)
 
   if (includesAny(type, ["candle"])) {
     return ["sensory", "calm", "giftable", "lifestyle-led"];
+  }
+
+  if (includesAny(type, ["ice cream", "frozen dessert", "gelato", "scoop"])) {
+    return ["joyful", "creamy", "fresh", "family-friendly", "treat-led"];
+  }
+
+  if (includesAny(type, ["perfume", "fragrance", "scent"])) {
+    return ["luxury editorial", "sensory", "gift-ready", "consultative"];
+  }
+
+  if (includesAny(type, ["television", "home cinema", "electronics"])) {
+    return ["cinematic", "comparison-led", "install-ready", "warranty-backed"];
+  }
+
+  if (includesAny(type, ["motorbike", "motorcycle"])) {
+    return ["rider-focused", "mechanical", "showroom-ready", "safety-led"];
+  }
+
+  if (includesAny(type, ["ambiguous rider", "bike shop"])) {
+    return ["balanced rider language", "service-ready", "showroom-aware", "safety-led"];
   }
 
   if (includesAny(type, ["beauty", "skincare", "cream"])) {
@@ -237,23 +327,35 @@ function inferBrandPositioning(businessType: string, intent: IntentIntelligence)
     return ["luxury", "editorial", "craft-led", "consultative"];
   }
 
-  return unique(["clear", "trustworthy", ...intent.qualityExpectations.slice(0, 2)]);
+  return unique([
+    ...buildDomainBlueprint({ prompt: type }).visualMood,
+    "clear",
+    "trustworthy",
+    ...intent.qualityExpectations.slice(0, 2)
+  ]);
 }
 
 function inferPages(intent: IntentIntelligence, businessType: string) {
   const requested = intent.requestedPages.length ? intent.requestedPages : ["home"];
-  const pageCount = intent.pageCount ?? Math.max(1, requested.length);
+  const pageCount = Math.max(intent.pageCount ?? 1, requested.length);
   const pages = [...requested];
   const type = lower(businessType);
 
   const businessPage = includesAny(type, ["creator", "podcast", "media"])
     ? "episodes"
-    : includesAny(type, ["commerce", "jewellery", "candle", "fish", "seafood", "beauty", "skincare", "cream", "footwear", "shoe", "sneaker"])
+    : includesAny(type, ["television", "electronics"])
+      ? "services"
+    : includesAny(type, ["motorbike", "motorcycle", "ambiguous rider", "bike shop"])
+      ? "bikes"
+    : includesAny(type, ["commerce", "jewellery", "candle", "fish", "seafood", "beauty", "skincare", "cream", "ice cream", "gelato", "scoop", "perfume", "fragrance", "scent", "footwear", "shoe", "sneaker"])
       ? "products"
       : includesAny(type, ["hospitality", "restaurant", "bakery"])
         ? "menu"
         : "services";
-  const fallback = ["home", businessPage, "about", "gallery", "contact"];
+  const blueprintPages = buildDomainBlueprint({ prompt: type }).modules.filter((item) =>
+    ["home", "flavors", "products", "services", "about", "gallery", "contact", "catering", "bikes", "blog", "story"].includes(item)
+  );
+  const fallback = unique(["home", businessPage, ...blueprintPages, "about", "gallery", "contact"]);
 
   for (const page of fallback) {
     if (pages.length >= pageCount) {
@@ -270,6 +372,26 @@ function sectionsForPage(page: string, businessType: string) {
   const type = lower(businessType);
 
   if (page === "home") {
+    if (includesAny(type, ["television", "home cinema", "electronics"])) {
+      return ["hero", "smart TV showroom", "OLED QLED LED comparison", "home cinema setup", "wall mounting installation", "warranty support CTA"];
+    }
+
+    if (includesAny(type, ["motorbike", "motorcycle"])) {
+      return ["hero", "motorcycle showroom", "engine service", "helmets and rider gear", "spare parts", "test ride CTA"];
+    }
+
+    if (includesAny(type, ["ambiguous rider", "bike shop"])) {
+      return ["hero", "bike showroom", "service and parts", "rider safety gear", "test rides or fittings", "booking CTA"];
+    }
+
+    if (includesAny(type, ["ice cream", "frozen dessert", "gelato", "scoop"])) {
+      return ["hero", "signature flavors", "scoops and cones", "seasonal specials", "catering", "store visit CTA"];
+    }
+
+    if (includesAny(type, ["perfume", "fragrance", "scent"])) {
+      return ["hero", "signature scent collections", "fragrance notes", "bottle and tester experience", "gifting sets", "scent consultation CTA"];
+    }
+
     if (includesAny(type, ["seafood", "fish"])) {
       return ["hero", "featured fish", "freshness promise", "delivery/services", "testimonials", "CTA"];
     }
@@ -278,7 +400,7 @@ function sectionsForPage(page: string, businessType: string) {
       return ["hero", "featured content", "episode highlights", "social proof", "newsletter", "CTA"];
     }
 
-    if (includesAny(type, ["commerce", "candle", "jewellery", "beauty", "skincare", "cream", "footwear", "shoe", "sneaker"])) {
+    if (includesAny(type, ["commerce", "candle", "jewellery", "beauty", "skincare", "cream", "perfume", "fragrance", "scent", "footwear", "shoe", "sneaker"])) {
       return ["hero", "featured products", "categories", "trust", "reviews", "CTA"];
     }
 
@@ -286,7 +408,11 @@ function sectionsForPage(page: string, businessType: string) {
       return ["hero", "menu/services", "testimonials", "booking/contact"];
     }
 
-    return ["hero", "offerings", "trust", "CTA", "contact"];
+    return buildDomainBlueprint({ prompt: type }).sections;
+  }
+
+  if (page === "flavors") {
+    return ["flavor grid", "seasonal specials", "cones and cups", "family favorites", "order CTA"];
   }
 
   if (page === "episodes") {
@@ -294,11 +420,27 @@ function sectionsForPage(page: string, businessType: string) {
   }
 
   if (page === "products") {
-    return ["product grid", "categories", "quality promise", "reviews", "purchase CTA"];
+    return includesAny(type, ["perfume", "fragrance", "scent"])
+      ? ["scent collection cards", "note families", "bottle testers", "gift sets", "signature scent CTA"]
+      : ["product grid", "categories", "quality promise", "reviews", "purchase CTA"];
+  }
+
+  if (page === "story") {
+    return includesAny(type, ["perfume", "fragrance", "scent"])
+      ? ["fragrance origin", "scent families", "bottle ritual", "consultation CTA"]
+      : ["origin story", "values", "customer next step", "CTA"];
+  }
+
+  if (page === "bikes") {
+    return includesAny(type, ["motorbike", "motorcycle"])
+      ? ["motorcycle lineup", "test ride options", "rider gear", "spare parts", "service CTA"]
+      : includesAny(type, ["ambiguous rider", "bike shop"])
+        ? ["bike lineup", "rider fit or test ride", "parts and gear", "service CTA"]
+        : ["bicycle lineup", "rider fitting", "accessories", "rental options", "service CTA"];
   }
 
   if (page === "services") {
-    return ["services overview", "process", "proof", "CTA"];
+    return ["service choices", "how booking works", "support details", "CTA"];
   }
 
   if (page === "menu") {
@@ -310,21 +452,27 @@ function sectionsForPage(page: string, businessType: string) {
   }
 
   if (page === "about") {
-    return ["story", "values", "trust signals", "CTA"];
+    return ["origin story", "specialist values", "support standards", "CTA"];
   }
 
   if (page === "contact") {
     return ["contact details", "form", "location/service area", "CTA"];
   }
 
-  return ["page hero", "main content", "trust", "CTA"];
+  return ["focused introduction", "practical details", "customer next step", "CTA"];
 }
 
 function inferVisualLanguage(intent: IntentIntelligence, businessType: string) {
   const type = lower(businessType);
   const palette = intent.palette.length
     ? intent.palette
-    : includesAny(type, ["seafood", "fish"])
+    : includesAny(type, ["television", "home cinema", "motorbike", "motorcycle", "ambiguous rider", "bike shop"])
+      ? ["maroon", "white", "dark neutral"]
+    : includesAny(type, ["ice cream", "frozen dessert", "gelato", "scoop"])
+      ? ["cream", "pink", "blue", "white"]
+      : includesAny(type, ["perfume", "fragrance", "scent"])
+        ? ["yellow", "white", "soft gold"]
+      : includesAny(type, ["seafood", "fish"])
       ? ["white", "blue", "teal"]
       : includesAny(type, ["beauty", "skincare", "cream"])
         ? ["white", "pink", "soft neutral"]
@@ -339,7 +487,11 @@ function inferVisualLanguage(intent: IntentIntelligence, businessType: string) {
     palette,
     shapeLanguage: intent.shapeLanguage.length ? intent.shapeLanguage : ["rounded", "soft"],
     spacingTone: includesAny(type, ["luxury", "jewellery"]) ? ["generous", "editorial"] : ["balanced", "breathable"],
-    style: intent.visualStyle.length ? intent.visualStyle : ["modern", "premium", "calm"],
+    style: intent.visualStyle.length
+      ? intent.visualStyle
+      : includesAny(type, ["television", "home cinema", "motorbike", "motorcycle", "ambiguous rider", "bike shop"])
+        ? ["tactical glass HUD", "cinematic", "premium"]
+        : ["modern", "premium", "calm"],
     typography: intent.typographyTone.length ? intent.typographyTone : ["clean", "readable", "premium"]
   };
 }
@@ -352,6 +504,46 @@ function inferContentStrategy(businessType: string) {
       ctaStrategy: ["Order fresh fish", "Request delivery", "Contact for today's catch"],
       heroGoal: "Immediately communicate freshness, cleanliness, and order confidence.",
       trustSignals: ["freshness promise", "delivery reliability", "quality sourcing", "customer reviews"]
+    };
+  }
+
+  if (includesAny(type, ["ice cream", "frozen dessert", "gelato", "scoop"])) {
+    return {
+      ctaStrategy: ["Explore flavors", "Visit the shop", "Book catering"],
+      heroGoal: "Make visitors crave fresh scoops, cones, sundaes, seasonal specials, and an easy shop visit.",
+      trustSignals: ["fresh daily flavors", "family-friendly service", "seasonal specials", "event catering"]
+    };
+  }
+
+  if (includesAny(type, ["perfume", "fragrance", "scent"])) {
+    return {
+      ctaStrategy: ["Explore scents", "Find your signature", "Book a scent consultation"],
+      heroGoal: "Invite visitors into fragrance notes, perfume bottles, testers, gift sets, oud, floral, citrus, and musk collections with a luxury editorial feel.",
+      trustSignals: ["fragrance notes", "tester guidance", "gift packaging", "signature scent consultation"]
+    };
+  }
+
+  if (includesAny(type, ["television", "home cinema", "electronics"])) {
+    return {
+      ctaStrategy: ["Compare TVs", "Book installation", "Visit showroom"],
+      heroGoal: "Help customers compare smart TVs, OLED/QLED/LED displays, screen sizes, home cinema bundles, and installation options with confidence.",
+      trustSignals: ["warranty support", "wall mounting", "delivery and installation", "showroom comparison"]
+    };
+  }
+
+  if (includesAny(type, ["motorbike", "motorcycle"])) {
+    return {
+      ctaStrategy: ["Schedule a test ride", "Book engine service", "Explore rider gear"],
+      heroGoal: "Present motorcycles, rider gear, spare parts, engine service, and test rides with a confident showroom feel.",
+      trustSignals: ["engine service", "helmets and gear", "spare parts", "road safety support"]
+    };
+  }
+
+  if (includesAny(type, ["ambiguous rider", "bike shop"])) {
+    return {
+      ctaStrategy: ["Explore bikes", "Book service", "Ask for guidance"],
+      heroGoal: "Focus on showroom support, service, parts, safety, and fit guidance while leaving room for the customer's exact bike type.",
+      trustSignals: ["service support", "parts guidance", "rider safety", "showroom advice"]
     };
   }
 
@@ -396,9 +588,9 @@ function inferContentStrategy(businessType: string) {
   }
 
   return {
-    ctaStrategy: ["Get started", "Contact", "Explore services"],
-    heroGoal: "Explain the offer quickly and make the next step obvious.",
-    trustSignals: ["clear offerings", "reviews", "process", "contact clarity"]
+    ctaStrategy: buildDomainBlueprint({ prompt: businessType }).ctaStrategy,
+    heroGoal: `Explain ${businessType} with domain-specific proof, useful offers, and a clear next step.`,
+    trustSignals: buildDomainBlueprint({ prompt: businessType }).contentTerms.slice(0, 4)
   };
 }
 

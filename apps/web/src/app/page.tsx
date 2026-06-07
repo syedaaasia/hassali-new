@@ -15,8 +15,12 @@ export default function HomePage() {
         <div className="pointer-events-none absolute inset-x-6 top-20 h-px bg-gradient-to-r from-transparent via-accent/25 to-transparent" />
         <header className="relative z-10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--royal-panel)/0.78)] font-mono text-xs font-semibold text-accent shadow-[0_0_34px_hsl(var(--accent)/0.22)]">
-              H
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl">
+              <img
+                alt="Hassali.ai"
+                className="h-full w-full object-contain"
+                src="/brand/hassali-logo.png"
+              />
             </div>
             <div>
               <div className="text-sm font-medium">Hassali.ai</div>

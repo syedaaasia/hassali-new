@@ -1,3 +1,5 @@
+import { buildDomainBlueprint } from "@/lib/server/ai/capability-domain-blueprint";
+
 export type IntentIntelligence = {
   brandName: string | null;
   businessGoals: string[];
@@ -12,6 +14,11 @@ export type IntentIntelligence = {
   interactionExpectations: string[];
   motionStyle: string[];
   pageCount: number | null;
+  pageConflict?: {
+    listedPageCount: number;
+    resolution: string;
+    statedPageCount: number;
+  };
   palette: string[];
   qualityExpectations: string[];
   requestedPages: string[];
@@ -73,11 +80,11 @@ function isRenameRequest(promptText: string) {
 }
 
 function isVisualThemeEditRequest(promptText: string) {
-  const colorTerms = "green|blue|pink|white|black|gold|brown|cream|teal|red";
+  const colorTerms = "green|blue|pink|white|black|gold|golden|yellow|brown|cream|teal|red|maroon|gradient";
 
   return (
     /\b(?:change|make|update|switch|turn)\b[\s\S]{0,80}\b(?:color|colors|colour|colours|theme|palette)\b/.test(promptText) ||
-    /\b(?:color|colors|colour|colours|theme|palette)\b[\s\S]{0,80}\b(?:to|from|green|blue|pink|white|black|gold|brown|cream|teal|red)\b/.test(promptText) ||
+    /\b(?:color|colors|colour|colours|theme|palette)\b[\s\S]{0,80}\b(?:to|from|green|blue|pink|white|black|gold|golden|yellow|brown|cream|teal|red|maroon)\b/.test(promptText) ||
     new RegExp(`\\b(?:make|turn|change|update|switch)\\b[\\s\\S]{0,100}\\b(?:${colorTerms})\\b`).test(promptText)
   );
 }
@@ -89,7 +96,10 @@ function unique(values: string[]) {
 function extractBrandName(prompt: string) {
   const match =
     prompt.match(/\b(?:named|called)\s+([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i) ??
-    prompt.match(/\bname\s+([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i);
+    prompt.match(/\bname\s+([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i) ??
+    prompt.match(/\b(?:brand|business|company)\s+name\s+(?:is\s+)?([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i) ??
+    prompt.match(/\b(?:website|site|landing page)\s+for\s+([A-Z][A-Za-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/) ??
+    prompt.match(/\bfor\s+([A-Z][A-Za-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|in|it|should|as)\b|[,.!?]|$)/);
 
   return match?.[1]?.trim().replace(/\s+/g, " ") ?? null;
 }
@@ -116,6 +126,11 @@ function extractPageCount(promptText: string) {
 
 function inferDomain(promptText: string, projectText: string) {
   const text = `${promptText}\n${projectText}`;
+  const blueprint = buildDomainBlueprint({ prompt: promptText });
+
+  if (blueprint.domainLabel && blueprint.domainLabel !== "business") {
+    return blueprint.domainLabel;
+  }
 
   if (includesAny(promptText, ["youtube podcast", "youtube show", "video podcast"])) {
     return "youtube podcast";
@@ -251,6 +266,30 @@ function inferDomain(promptText: string, projectText: string) {
 }
 
 function inferSiteType(domain: string) {
+  if (domain.includes("csv")) {
+    return "Python data tool";
+  }
+
+  if (domain.includes("television")) {
+    return "electronics and home cinema website";
+  }
+
+  if (domain.includes("motorbike") || domain.includes("motorcycle")) {
+    return "motorcycle showroom and service website";
+  }
+
+  if (domain === "bike shop") {
+    return "ambiguous bike retail and service website";
+  }
+
+  if (domain.includes("bicycle")) {
+    return "cycling retail and service website";
+  }
+
+  if (domain.includes("perfume") || domain.includes("fragrance")) {
+    return "fragrance retail and gifting website";
+  }
+
   const map: Record<string, string> = {
     "car rental": "automotive booking site",
     "car showroom": "premium automotive lead-generation site",
@@ -272,11 +311,15 @@ function inferSiteType(domain: string) {
     "youtube podcast": "creator media brand"
   };
 
-  return map[domain] ?? null;
+  return map[domain] ?? `${domain} ${domain.includes("system") || domain.includes("app") ? "interface" : "website"}`;
 }
 
 function inferUserIntent(promptText: string): IntentIntelligence["userIntent"] {
-  if (isWebsiteCreationRequest(promptText)) {
+  if (
+    isWebsiteCreationRequest(promptText) ||
+    (/\b(?:create|build|generate|design|make)\b/.test(promptText) &&
+      /\b(?:system|web app|app|dashboard|inventory|crm|erp|pos|tool)\b/.test(promptText))
+  ) {
     return "new_site";
   }
 
@@ -316,15 +359,19 @@ function extractRequestedPages(promptText: string, domain: string, pageCount: nu
   const pageTerms: Record<string, string[]> = {
     about: ["about"],
     blog: ["blog"],
+    bikes: ["bikes", "motorcycles", "motorbike", "motorbikes"],
     contact: ["contact"],
+    distributors: ["distributor", "distributors", "retailer", "retailers"],
     episodes: ["episode", "episodes"],
     gallery: ["gallery"],
     home: ["home", "landing"],
     menu: ["menu"],
     portfolio: ["portfolio", "work"],
     pricing: ["pricing"],
+    products: ["product", "products", "lineup"],
     services: ["services", "service"],
-    shop: ["shop", "store"]
+    shop: ["shop page", "store page"],
+    story: ["story", "our story"]
   };
 
   for (const [page, terms] of Object.entries(pageTerms)) {
@@ -356,7 +403,19 @@ function extractRequestedPages(promptText: string, domain: string, pageCount: nu
       ? unique(["home", ...pages]).filter((page) => pages.includes(page) || page === "home")
       : [];
 
-  return orderedPages.slice(0, pageCount ?? undefined);
+  return orderedPages.slice(0, Math.max(pageCount ?? orderedPages.length, orderedPages.length));
+}
+
+function findPageConflict(pageCount: number | null, requestedPages: string[]) {
+  if (!pageCount || requestedPages.length <= pageCount) {
+    return undefined;
+  }
+
+  return {
+    listedPageCount: requestedPages.length,
+    resolution: "The prompt lists more page names than the stated count. Use the explicit listed pages instead of dropping them.",
+    statedPageCount: pageCount
+  };
 }
 
 function extractMatches(promptText: string, dictionary: Record<string, string[]>) {
@@ -393,7 +452,7 @@ function inferBusinessGoals(domain: string) {
     "youtube podcast": ["subscriptions", "authority", "sponsors"]
   };
 
-  return goals[domain] ?? goals["generic website"];
+  return goals[domain] ?? buildDomainBlueprint({ prompt: domain }).businessGoals;
 }
 
 function createSummary(intent: IntentIntelligence) {
@@ -403,13 +462,19 @@ function createSummary(intent: IntentIntelligence) {
   const paletteText = intent.palette.length ? `, ${intent.palette.join("/")} palette` : "";
   const shapeText = intent.shapeLanguage.length ? `, ${intent.shapeLanguage.join(", ")} interaction language` : "";
   const featureText = intent.requiredFeatures.length ? `, ${intent.requiredFeatures.join(", ")} requirements` : "";
+  const siteType = intent.siteType ?? "website";
+  const domainText = intent.domain.toLowerCase();
+  const typeText = siteType.toLowerCase().includes(domainText)
+    ? siteType
+    : `${intent.domain} ${siteType}`;
 
-  return `Detected a ${pageText}${intent.domain} ${intent.siteType ?? "website"}${brandText}${styleText}${paletteText}${shapeText}${featureText}, ${intent.qualityExpectations.join(", ")} expectations, responsive and lightweight constraints.`;
+  return `Detected a ${pageText}${typeText}${brandText}${styleText}${paletteText}${shapeText}${featureText}, ${intent.qualityExpectations.join(", ")} expectations, responsive and lightweight constraints.`;
 }
 
 export function buildIntentIntelligence(input: IntentInput): IntentIntelligence {
   const promptText = lower(input.prompt);
   const projectText = lower([input.projectName ?? "", ...(input.fileList ?? [])].join(" "));
+  const blueprint = buildDomainBlueprint({ prompt: input.prompt });
   const domain = inferDomain(promptText, projectText);
   const pageCount = extractPageCount(promptText);
   const visualStyle = unique(
@@ -430,6 +495,8 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
       modern: ["modern"],
       playful: ["playful"],
       premium: ["premium"]
+      ,
+      "tactical glass HUD": ["the division", "ubisoft", "tactical glass", "hud", "scanline"]
     })
   );
   const palette = unique(
@@ -438,14 +505,16 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
       blue: ["blue"],
       brown: ["brown"],
       cream: ["cream"],
-      gold: ["gold"],
+      gold: ["gold", "golden"],
       gradient: ["gradient"],
       green: ["green"],
+      maroon: ["maroon"],
       neutral: ["neutral"],
       pink: ["pink"],
       red: ["red"],
       teal: ["teal"],
-      white: ["white"]
+      white: ["white"],
+      yellow: ["yellow"]
     })
       .filter((color) => color !== "cream" || isCreamPaletteRequest(promptText))
   );
@@ -484,6 +553,7 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
       CTA: ["cta", "call to action"],
       dashboard: ["dashboard"],
       filters: ["filter", "filters"],
+      "high quality images": ["high quality image", "high quality images", "images of", "photo", "photos"],
       newsletter: ["newsletter", "subscribe"],
       search: ["search"],
       slider: ["slider"]
@@ -510,6 +580,7 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
     "premium modern",
     "responsive"
   ]);
+  const requestedPages = extractRequestedPages(promptText, domain, pageCount);
   const intent: IntentIntelligence = {
     brandName: extractBrandName(input.prompt),
     businessGoals: inferBusinessGoals(domain),
@@ -524,9 +595,10 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
     interactionExpectations,
     motionStyle: motionStyle.length ? motionStyle : ["lightweight"],
     pageCount,
+    pageConflict: findPageConflict(pageCount, requestedPages),
     palette,
     qualityExpectations,
-    requestedPages: extractRequestedPages(promptText, domain, pageCount),
+    requestedPages,
     requiredFeatures,
     shapeLanguage,
     siteType: inferSiteType(domain),
@@ -535,6 +607,16 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
     userIntent: inferUserIntent(promptText),
     visualStyle
   };
+  if (blueprint.domainLabel !== "business" && domain === blueprint.domainLabel) {
+    intent.businessGoals = unique([...blueprint.businessGoals, ...intent.businessGoals]);
+    intent.requiredFeatures = unique([...intent.requiredFeatures, ...blueprint.modules.slice(0, 3)]);
+    intent.qualityExpectations = unique([
+      ...intent.qualityExpectations,
+      "domain-specific output",
+      "no generic developer fallback"
+    ]);
+  }
+
   const signalCount = [
     intent.domain !== "generic website",
     Boolean(intent.brandName),

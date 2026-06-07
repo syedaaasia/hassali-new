@@ -54,7 +54,7 @@ function hasRequestedVisualStyle(kernel: IntelligenceKernelResult, term: string)
 }
 
 function hasRequestedPalette(kernel: IntelligenceKernelResult) {
-  return /palette|white|pink|blue|black|gold|green|red|teal|neutral|gradient/i.test(
+  return /palette|white|pink|blue|black|gold|golden|yellow|green|red|teal|maroon|neutral|gradient/i.test(
     kernel.taskUnderstanding.summary
   );
 }

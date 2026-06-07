@@ -21,19 +21,19 @@ const configureMonacoTheme: MonacoBeforeMount = (monaco) => {
     inherit: true,
     rules: [
       { token: "comment", foreground: "7b7f8e" },
-      { token: "keyword", foreground: "ff5a70" },
+      { token: "keyword", foreground: "9f8cff" },
       { token: "string", foreground: "48d597" },
-      { token: "number", foreground: "d94dff" }
+      { token: "number", foreground: "b8a8ff" }
     ],
     colors: {
       "editor.background": "#070707",
       "editor.foreground": "#eee6d4",
       "editor.lineHighlightBackground": "#151515",
-      "editorCursor.foreground": "#ff3655",
+      "editorCursor.foreground": "#8b7cf6",
       "editorLineNumber.foreground": "#5f5b58",
-      "editorLineNumber.activeForeground": "#ff6a7f",
-      "editor.selectionBackground": "#4b1822",
-      "editor.inactiveSelectionBackground": "#261116"
+      "editorLineNumber.activeForeground": "#a59bff",
+      "editor.selectionBackground": "#2d285f",
+      "editor.inactiveSelectionBackground": "#17152d"
     }
   });
 };
@@ -77,13 +77,13 @@ export function EditorPanel() {
                 type="button"
               >
                 {isActive ? (
-                  <span className="absolute inset-x-3 top-0 h-px rounded-full bg-accent shadow-[0_0_16px_hsl(var(--accent)/0.55)]" />
+                  <span className="absolute inset-x-3 top-0 h-px rounded-full bg-[#8b7cf6] shadow-[0_0_16px_rgba(139,124,246,0.5)]" />
                 ) : null}
                 <span className="truncate">{tabPath}</span>
                 {isDirty ? (
                   <span
                     aria-label={`${tabPath} has unsaved changes`}
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#8b7cf6]"
                   />
                 ) : null}
                 {openTabs.length > 1 ? (
@@ -116,7 +116,7 @@ export function EditorPanel() {
             <span className="hidden text-xs text-muted-foreground sm:inline">Unsaved changes</span>
           ) : null}
           <button
-            className="rounded-xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--royal-panel)/0.72)] px-3.5 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-[hsl(var(--royal-panel-raised))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/10"
+            className="rounded-full border border-[#7c6cff]/35 bg-[#7c6cff]/12 px-3.5 py-1.5 text-xs font-medium text-[#f4f1e8] shadow-sm hover:bg-[#7c6cff]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6cff]/20"
             disabled={!activeFile}
             onClick={() => {
               void saveActiveFile();

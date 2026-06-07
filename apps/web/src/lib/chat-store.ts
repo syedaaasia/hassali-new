@@ -4,6 +4,7 @@ import { create } from "zustand";
 
 export type ChatRole = "user" | "assistant";
 export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
+export type ProductMode = "ASK" | "WEBSITE" | "CODE";
 
 export type ChatMessage = {
   id: string;
@@ -64,6 +65,7 @@ type ChatState = {
   input: string;
   model: string;
   mode: AiMode;
+  productMode: ProductMode;
   isStreaming: boolean;
   proposal: DiffProposal | null;
   chatSessionId: string | null;
@@ -79,6 +81,7 @@ type ChatState = {
   setInput: (input: string) => void;
   setModel: (model: string) => void;
   setMode: (mode: AiMode) => void;
+  setProductMode: (mode: ProductMode) => void;
   clearProposal: () => void;
   markProposalApproved: () => void;
   sendMessage: (workspaceContext: WorkspaceContext) => Promise<void>;
@@ -86,6 +89,18 @@ type ChatState = {
 
 const defaultModel = "openai/gpt-4o-mini";
 const proposalMarker = "HASSALI_DIFF_PROPOSAL:";
+
+function productModeToAiMode(mode: ProductMode): AiMode {
+  return mode === "ASK" ? "ASK" : "EXECUTE";
+}
+
+function aiModeToProductMode(mode: AiMode): ProductMode {
+  if (mode === "ASK") {
+    return "ASK";
+  }
+
+  return mode === "SUGGEST" ? "WEBSITE" : "CODE";
+}
 
 function createMessage(role: ChatRole, content: string): ChatMessage {
   return {
@@ -230,6 +245,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   input: "",
   model: defaultModel,
   mode: "ASK",
+  productMode: "ASK",
   isStreaming: false,
   proposal: null,
   chatSessionId: null,
@@ -250,7 +266,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setInput: (input) => set({ input }),
   setModel: (model) => set({ model }),
   setMode: (mode) => {
-    set({ mode });
+    set({ mode, productMode: aiModeToProductMode(mode) });
+  },
+  setProductMode: (productMode) => {
+    set({ mode: productModeToAiMode(productMode), productMode });
   },
   clearProposal: () => set({ proposal: null }),
   markProposalApproved: () => set({ proposal: null }),

@@ -10,7 +10,7 @@ type ScrollableElement = {
 
 const statusTone = {
   error: "bg-destructive/80",
-  running: "bg-accent/80",
+  running: "bg-emerald-400/80",
   starting: "bg-yellow-400/80",
   stopped: "bg-muted-foreground/60"
 };
@@ -52,7 +52,7 @@ export function BottomPanel() {
   }, [logs]);
 
   return (
-    <footer className="hidden h-32 shrink-0 flex-col border-t border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.88)] text-xs lg:flex">
+    <footer className="hidden h-28 shrink-0 flex-col border-t border-white/10 bg-[#0b0b0b] text-xs lg:flex">
       <section className="flex min-h-0 min-w-0 flex-1 flex-col p-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 font-medium">

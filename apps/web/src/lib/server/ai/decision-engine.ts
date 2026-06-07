@@ -1,9 +1,11 @@
+import { buildDomainBlueprint, isTechnicalBlueprint } from "@/lib/server/ai/capability-domain-blueprint";
 import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 
 export type DecisionRequestType =
   | "ask"
+  | "data_tool_generation"
   | "image_fix"
   | "invoice"
   | "multi_page_generation"
@@ -71,11 +73,11 @@ function isRenameRequest(promptText: string) {
 }
 
 function isVisualThemeEditRequest(promptText: string) {
-  const colorTerms = "green|blue|pink|white|black|gold|brown|cream|teal|red";
+  const colorTerms = "green|blue|pink|white|black|gold|golden|yellow|brown|cream|teal|red|maroon|gradient";
 
   return (
     /\b(?:change|make|update|switch|turn)\b[\s\S]{0,80}\b(?:color|colors|colour|colours|theme|palette)\b/.test(promptText) ||
-    /\b(?:color|colors|colour|colours|theme|palette)\b[\s\S]{0,80}\b(?:to|from|green|blue|pink|white|black|gold|brown|cream|teal|red)\b/.test(promptText) ||
+    /\b(?:color|colors|colour|colours|theme|palette)\b[\s\S]{0,80}\b(?:to|from|green|blue|pink|white|black|gold|golden|yellow|brown|cream|teal|red|maroon)\b/.test(promptText) ||
     new RegExp(`\\b(?:make|turn|change|update|switch)\\b[\\s\\S]{0,100}\\b(?:${colorTerms})\\b`).test(promptText)
   );
 }
@@ -85,7 +87,9 @@ function pageToPath(page: string) {
   const pageMap: Record<string, string> = {
     blog: "blog.html",
     blogs: "blog.html",
+    bikes: "bikes.html",
     contact: "contact.html",
+    distributors: "distributors.html",
     episodes: "episodes.html",
     gallery: "gallery.html",
     home: "index.html",
@@ -93,7 +97,8 @@ function pageToPath(page: string) {
     menu: "menu.html",
     products: "products.html",
     services: "services.html",
-    shop: "products.html"
+    shop: "products.html",
+    story: "story.html"
   };
 
   return pageMap[normalized] ?? `${normalized.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "page"}.html`;
@@ -118,6 +123,11 @@ function requestedPageCount(promptText: string) {
 }
 
 function sectionsForDomain(domain: DiagnosticContext["inferredDomain"]) {
+  const blueprint = buildDomainBlueprint({ prompt: domain });
+  if (domain !== "generic website" && !["car rental", "car showroom", "code/tooling project", "florist", "jewellery", "media brand", "podcast", "portfolio", "restaurant", "SaaS", "youtube podcast"].includes(domain)) {
+    return blueprint.sections;
+  }
+
   const sections: Record<DiagnosticContext["inferredDomain"], string[]> = {
     "car rental": ["hero", "fleet showcase", "premium experience", "reservation CTA"],
     "car showroom": ["hero", "featured cars", "showroom experience", "test drive CTA"],
@@ -138,16 +148,20 @@ function sectionsForDomain(domain: DiagnosticContext["inferredDomain"]) {
 
 function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"]) {
   const pageCount = requestedPageCount(promptText);
+  const blueprint = buildDomainBlueprint({ prompt: `${promptText} ${domain}` });
   const explicitPageTerms: Record<string, string[]> = {
     "about.html": ["about", "about us"],
+    "bikes.html": ["bikes", "motorbikes", "motorcycles"],
     "blog.html": ["blog", "blogs"],
     "contact.html": ["contact"],
+    "distributors.html": ["distributor", "distributors", "retailer", "retailers"],
     "episodes.html": ["episode", "episodes"],
     "gallery.html": ["gallery"],
     "index.html": ["home", "homepage", "landing"],
     "menu.html": ["menu"],
-    "products.html": ["products", "shop", "store"],
-    "services.html": ["services", "service"]
+    "products.html": ["products", "product page", "shop page", "store page"],
+    "services.html": ["services", "service"],
+    "story.html": ["story", "our story"]
   };
   const pages = ["index.html"];
 
@@ -173,10 +187,14 @@ function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"
     pages.push("contact.html");
   }
 
-  const fallbackPages = ["services.html", "about.html", "contact.html", "gallery.html", "blog.html"];
+  const blueprintPages = blueprint.modules
+    .filter((moduleName) => /^[a-z0-9 -]+$/i.test(moduleName))
+    .map((moduleName) => pageToPath(moduleName));
+  const fallbackPages = [...blueprintPages, "services.html", "about.html", "contact.html", "gallery.html", "blog.html"];
+  const effectivePageCount = Math.max(pageCount, pages.length);
 
   for (const nextPage of fallbackPages) {
-    if (pages.length >= pageCount) {
+    if (pages.length >= effectivePageCount) {
       break;
     }
 
@@ -188,8 +206,8 @@ function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"
   const uniquePages = Array.from(new Set(pages));
 
   return {
-    pageCount: uniquePages.slice(0, pageCount).length,
-    pages: uniquePages.slice(0, pageCount)
+    pageCount: uniquePages.slice(0, effectivePageCount).length,
+    pages: uniquePages.slice(0, effectivePageCount)
   };
 }
 
@@ -198,8 +216,22 @@ function requestTypeForPrompt(promptText: string, diagnostic: DiagnosticContext)
     return "invoice";
   }
 
+  if (
+    includesAny(promptText, ["csv", "spreadsheet"]) &&
+    includesAny(promptText, ["merge", "merger", "combine", "desktop app", "python"])
+  ) {
+    return "data_tool_generation";
+  }
+
   if (isWebsiteCreationRequest(promptText)) {
     return requestedPageCount(promptText) > 1 ? "multi_page_generation" : "website_generation";
+  }
+
+  if (
+    /\b(?:create|build|generate|design|make)\b/.test(promptText) &&
+    /\b(?:inventory system|management system|web app|dashboard app|dashboard|crm|erp|pos)\b/.test(promptText)
+  ) {
+    return "website_generation";
   }
 
   if (diagnostic.promptIntent === "visual_theme_edit" || isVisualThemeEditRequest(promptText)) {
@@ -256,6 +288,10 @@ function changeStrategyForType(type: DecisionRequestType, hasIndexHtml: boolean)
       : "Create standard web files only if the project has no runnable static website yet.";
   }
 
+  if (type === "data_tool_generation") {
+    return "Create a lightweight local Python data tool with a clear script, README, safe file handling, and no package installs.";
+  }
+
   if (type === "multi_page_generation") {
     return "Create or update the requested static HTML pages plus shared CSS and JavaScript.";
   }
@@ -295,6 +331,10 @@ function unrelatedCategoryTerms(businessText: string) {
   return category?.terms ?? ["developer", "code editor", "terminal", "repository"];
 }
 
+function hasDuplicatedAdjacentWords(content: string) {
+  return /\b([a-z][a-z0-9-]{2,})\s+\1\b/i.test(content);
+}
+
 export function buildDecisionPlan(input: DecisionInput): DecisionPlan {
   const promptText = lower(input.prompt);
   const requestType = requestTypeForPrompt(promptText, input.diagnostic);
@@ -302,6 +342,8 @@ export function buildDecisionPlan(input: DecisionInput): DecisionPlan {
   const isWebsiteRequest = requestType === "website_generation" || requestType === "multi_page_generation";
   const requiredFiles = isWebsiteRequest
     ? [...siteStructure.pages, "styles.css", "main.js"]
+    : requestType === "data_tool_generation"
+      ? ["merge_csv.py", "README.md"]
     : requestType === "visual_theme_edit"
       ? ["styles.css"]
     : requestType === "visual_enhancement"
@@ -341,6 +383,7 @@ export function shouldUseDeterministicDecision(decision: DecisionPlan) {
   return [
     "image_fix",
     "invoice",
+    "data_tool_generation",
     "multi_page_generation",
     "rename",
     "runtime_action",
@@ -366,6 +409,39 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
     input.decision.requestType === "website_generation" ||
     input.decision.requestType === "multi_page_generation";
   const isThemeEdit = input.decision.requestType === "visual_theme_edit";
+  const genericFillerPhrases = [
+    "business offers, services, proof, customer outcomes",
+    "built around trust",
+    "clear offer studio",
+    "domain-specific positioning",
+    "hero for business",
+    "hero shaped around",
+    "page hero",
+    "specific offer clarity studio",
+    "detected 6-page",
+    "detected 5-page",
+    "detected 4-page",
+    "local service",
+    "with smart context",
+    "with bike context",
+    "trust / trust",
+    "trust proof"
+  ];
+
+  if (genericFillerPhrases.some((phrase) => allContent.includes(phrase))) {
+    score -= 45;
+    issues.push("proposal contains generic filler copy");
+  }
+
+  if (hasDuplicatedAdjacentWords(allContent)) {
+    score -= 18;
+    issues.push("proposal contains duplicated adjacent words or brand terms");
+  }
+
+  if (/<img[^>]+src=["']\s*["']/i.test(allContent) || allContent.includes("source.unsplash.com")) {
+    score -= 25;
+    issues.push("proposal contains empty or unreliable image source patterns");
+  }
 
   for (const change of input.changes) {
     if (change.path === "welcome.ts" && isWebsiteRequest) {
@@ -417,14 +493,34 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
       issues.push("index.html is not a full HTML document");
     }
 
-    if (indexChange?.proposedContent && !/(images\.unsplash\.com|<img\s)/i.test(indexChange.proposedContent)) {
+    if (
+      indexChange?.proposedContent &&
+      !/(images\.unsplash\.com|<img\s|domain-visual-placeholder|role="img")/i.test(indexChange.proposedContent)
+    ) {
       score -= 10;
       issues.push("website proposal lacks relevant imagery");
+    }
+
+    if (
+      input.intent?.requiredFeatures.some((feature) => feature.includes("image")) &&
+      indexChange?.proposedContent &&
+      !/(images\.unsplash\.com|<img\s|domain-visual-placeholder|role="img")/i.test(indexChange.proposedContent)
+    ) {
+      score -= 24;
+      issues.push("image request does not include a reliable image or domain visual panel");
     }
 
     if (cssChange?.proposedContent && !/@media/i.test(cssChange.proposedContent)) {
       score -= 10;
       issues.push("CSS lacks responsive media rules");
+    }
+
+    if (
+      cssChange?.proposedContent &&
+      !/(auto-fit|minmax\(min\(100%,|grid-template-columns:\s*1fr|flex-wrap:\s*wrap)/i.test(cssChange.proposedContent)
+    ) {
+      score -= 14;
+      issues.push("CSS lacks narrow-preview layout safety");
     }
 
     if (input.intent?.palette.length) {
@@ -434,6 +530,14 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
       if (missingPalette.length > 0) {
         score -= 12;
         issues.push(`requested palette not reflected: ${missingPalette.join(", ")}`);
+      }
+
+      if (
+        input.intent.palette.includes("maroon") &&
+        /#d97706|#f0c56c|#c6923e|\bgold\b|\borange\b/i.test(cssChange?.proposedContent ?? "")
+      ) {
+        score -= 30;
+        issues.push("maroon request leaks gold/orange accent tokens");
       }
     }
 
@@ -450,6 +554,9 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
 
     if (input.composition) {
       const businessText = input.composition.businessType.toLowerCase();
+      const blueprint = buildDomainBlueprint({
+        prompt: `${input.intent?.domain ?? ""} ${input.composition.businessType} ${input.composition.reasoningSummary}`
+      });
       const isTechnical =
         businessText.includes("ai tooling") ||
         businessText.includes("coding") ||
@@ -457,22 +564,53 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
         businessText.includes("dev platform") ||
         businessText.includes("engineering product") ||
         businessText.includes("programming") ||
-        businessText.includes("software product");
-      const developerLeakTerms = [
-        "api",
-        "build faster",
-        "code editor",
-        "coding",
-        "developer",
-        "engineering",
-        "programming",
-        "repository",
-        "terminal"
-      ];
+        businessText.includes("software product") ||
+        isTechnicalBlueprint(blueprint);
+      const developerLeakTerms = blueprint.forbiddenTerms.length
+        ? blueprint.forbiddenTerms
+        : [
+            "api",
+            "build faster",
+            "code editor",
+            "coding",
+            "developer",
+            "engineering",
+            "programming",
+            "repository",
+            "terminal"
+          ];
 
       if (!isTechnical && developerLeakTerms.some((term) => allContent.includes(term))) {
         score -= 40;
         issues.push("non-technical business proposal contains developer/tooling wording");
+      }
+
+      const domainSignals = blueprint.validationTerms
+        .map((term) => term.toLowerCase())
+        .filter((term) => term.length > 3 && !["business", "website", "services"].includes(term));
+      const matchedDomainSignals = domainSignals.filter((signal) => allContent.includes(signal));
+
+      if (domainSignals.length > 0 && matchedDomainSignals.length < Math.min(2, domainSignals.length)) {
+        score -= 32;
+        issues.push(
+          `proposal does not contain enough domain-specific terms for ${blueprint.domainLabel}: ${domainSignals.slice(0, 5).join(", ")}`
+        );
+      }
+
+      if (
+        blueprint.ambiguity.isAmbiguous &&
+        (allContent.includes("bicycle") || allContent.includes("cycling") || allContent.includes("motorcycle") || allContent.includes("motorbike"))
+      ) {
+        score -= 24;
+        issues.push("ambiguous bike request overcommits to bicycle or motorbike language");
+      }
+
+      if (
+        (businessText.includes("perfume") || businessText.includes("fragrance")) &&
+        !/(fragrance|scent|oud|floral|citrus|musk|perfume bottle|tester|gift set|signature scent)/i.test(allContent)
+      ) {
+        score -= 32;
+        issues.push("perfume proposal lacks fragrance-specific vocabulary");
       }
 
       const unrelatedTerms = unrelatedCategoryTerms(businessText).filter((term) =>
@@ -495,6 +633,11 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
       if (businessSignals.length > 0 && !businessSignals.some((signal) => allContent.includes(signal))) {
         score -= 18;
         issues.push("composition business context is not reflected");
+      }
+
+      if (repeatedOccurrences(allContent, /\bconnect [^.]{0,120} through a practical next step/gi) > 2) {
+        score -= 18;
+        issues.push("proposal repeats the same section copy pattern");
       }
     }
   }

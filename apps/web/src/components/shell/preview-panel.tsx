@@ -20,8 +20,8 @@ export function PreviewPanel() {
   const hasIndexHtml = Boolean(files["index.html"]);
 
   return (
-    <Panel className="hidden w-[20rem] shrink-0 flex-col border-l border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.9)] lg:flex xl:w-[22rem] 2xl:w-[24rem]">
-      <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
+    <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 hidden w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-[22px] border border-white/10 bg-[#0b0b0b] shadow-[0_24px_90px_rgba(0,0,0,0.55)] lg:flex xl:w-[34rem] 2xl:w-[38rem]">
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3.5">
         <div>
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Preview
@@ -34,7 +34,7 @@ export function PreviewPanel() {
           <span
             className={`rounded-full border px-2 py-1 text-[10px] uppercase ${
               status === "running"
-                ? "border-accent/35 text-accent"
+                ? "border-emerald-400/35 text-emerald-300"
                 : status === "error"
                   ? "border-destructive/35 text-destructive"
                   : "border-[hsl(var(--royal-border-soft))] text-muted-foreground"
@@ -43,7 +43,7 @@ export function PreviewPanel() {
             {isLoading ? "loading" : status}
           </span>
           <button
-            className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[10px] uppercase text-muted-foreground hover:text-foreground"
+            className="rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[10px] uppercase text-muted-foreground hover:text-foreground"
             onClick={() => setPreviewOpen(false)}
             type="button"
           >
@@ -52,9 +52,9 @@ export function PreviewPanel() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-[hsl(var(--royal-border-soft))] p-3">
+      <div className="flex items-center gap-2 border-b border-white/10 p-3">
         <button
-          className="rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-[#7c6cff]/35 bg-[#7c6cff] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           disabled={isLoading || !projectId || !hasIndexHtml}
           onClick={() => {
             void startPreview(projectId);
@@ -64,7 +64,7 @@ export function PreviewPanel() {
           Start
         </button>
         <button
-          className="rounded-xl border border-[hsl(var(--royal-border-soft))] px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           disabled={isLoading || status !== "running"}
           onClick={() => {
             void syncPreview(projectId);
@@ -74,7 +74,7 @@ export function PreviewPanel() {
           Reload
         </button>
         <button
-          className="rounded-xl border border-[hsl(var(--royal-border-soft))] px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           disabled={isLoading || status === "stopped"}
           onClick={() => {
             void stopPreview();
@@ -85,10 +85,10 @@ export function PreviewPanel() {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden bg-[hsl(var(--royal-black)/0.45)] p-2">
+      <div className="min-h-0 flex-1 overflow-hidden bg-black/35 p-2">
         {iframeSource ? (
           <iframe
-            className="h-full min-h-0 w-full rounded-xl border border-[hsl(var(--royal-border-soft))] bg-white"
+            className="h-full min-h-0 w-full rounded-2xl border border-white/10 bg-white"
             key={iframeSource}
             src={iframeSource}
             title="Hassali local preview"
@@ -99,13 +99,13 @@ export function PreviewPanel() {
               ? "Create or select a project before starting preview."
               : hasIndexHtml
                 ? "Start preview when you are ready."
-                : "Preview needs index.html. Ask EXECUTE to create a static website."}
+                : "Preview needs index.html. Use WEBSITE mode to create a static website."}
           </div>
         )}
       </div>
 
       {error ? (
-        <div className="border-t border-[hsl(var(--royal-border-soft))] px-4 py-3 text-xs leading-5 text-destructive">
+        <div className="border-t border-white/10 px-4 py-3 text-xs leading-5 text-destructive">
           {error}
         </div>
       ) : null}

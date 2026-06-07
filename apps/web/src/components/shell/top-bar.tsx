@@ -2,18 +2,8 @@
 
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
-import { PremiumSelect } from "@/components/ui/premium-select";
+import { useChatStore } from "@/lib/chat-store";
 
-const modelOptions = [
-  { label: "Auto", value: "auto" },
-  { label: "OpenRouter", value: "openrouter" },
-  { label: "Local", value: "local" }
-];
-const performanceOptions = [
-  { label: "Balanced", value: "balanced" },
-  { label: "Low power", value: "low-power" },
-  { label: "Fast", value: "fast" }
-];
 const themeStorageKey = "hassali:theme";
 type ThemeMode = "dark" | "light";
 type BrowserGlobal = {
@@ -37,10 +27,27 @@ function applyTheme(theme: ThemeMode) {
   classList?.toggle("light", theme === "light");
 }
 
+function SettingsIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+      viewBox="0 0 24 24"
+    >
+      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+      <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2.1 2.1 0 0 1-2.97 2.97l-.04-.04a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.08 1.65V21a2.1 2.1 0 0 1-4.2 0v-.06a1.8 1.8 0 0 0-1.08-1.65 1.8 1.8 0 0 0-1.98.36l-.04.04a2.1 2.1 0 0 1-2.97-2.97l.04-.04A1.8 1.8 0 0 0 3.86 15a1.8 1.8 0 0 0-1.65-1.08H2a2.1 2.1 0 0 1 0-4.2h.06a1.8 1.8 0 0 0 1.65-1.08 1.8 1.8 0 0 0-.36-1.98l-.04-.04a2.1 2.1 0 0 1 2.97-2.97l.04.04a1.8 1.8 0 0 0 1.98.36 1.8 1.8 0 0 0 1.08-1.65V2a2.1 2.1 0 0 1 4.2 0v.06a1.8 1.8 0 0 0 1.08 1.65 1.8 1.8 0 0 0 1.98-.36l.04-.04a2.1 2.1 0 0 1 2.97 2.97l-.04.04a1.8 1.8 0 0 0-.36 1.98 1.8 1.8 0 0 0 1.65 1.08H22a2.1 2.1 0 0 1 0 4.2h-.06A1.8 1.8 0 0 0 19.4 15Z" />
+    </svg>
+  );
+}
+
 export function TopBar() {
-  const [model, setModel] = useState("auto");
-  const [mode, setMode] = useState("balanced");
   const [theme, setTheme] = useState<ThemeMode>("dark");
+  const productMode = useChatStore((state) => state.productMode);
 
   useEffect(() => {
     const savedTheme = (globalThis as BrowserGlobal).localStorage?.getItem(themeStorageKey);
@@ -59,54 +66,61 @@ export function TopBar() {
   };
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.88)] px-4 shadow-[0_1px_0_hsl(var(--gold)/0.08)] backdrop-blur-xl">
+    <header className="flex h-10 shrink-0 items-center justify-between border-b border-white/10 bg-[#050505]/95 px-4 backdrop-blur-xl">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--royal-panel-raised)/0.8)] font-mono text-xs font-semibold text-accent shadow-[inset_0_1px_0_hsl(var(--foreground)/0.06),0_0_28px_hsl(var(--accent)/0.2)]">
-          H
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full">
+          <img
+            alt="Hassali.ai"
+            className="h-full w-full object-contain"
+            src="/brand/hassali-logo.png"
+          />
         </div>
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">Hassali.ai</div>
-          <div className="hidden text-[11px] text-muted-foreground sm:block">Neon calm workspace</div>
+          <div className="hidden text-[11px] text-muted-foreground sm:block">
+            Autonomous engineering workspace
+          </div>
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <PremiumSelect
-          className="hidden sm:block"
-          label="Model"
-          onChange={setModel}
-          options={modelOptions}
-          value={model}
-        />
-        <PremiumSelect
-          className="hidden md:block"
-          label="Mode"
-          onChange={setMode}
-          options={performanceOptions}
-          value={mode}
-        />
-        <div className="hidden items-center gap-2 rounded-full border border-[hsl(var(--royal-border))] bg-[hsl(var(--gold)/0.1)] px-3 py-1.5 text-[11px] font-medium text-accent shadow-sm sm:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_12px_hsl(var(--accent)/0.55)]" />
+        <div className="hidden items-center gap-2 px-1.5 py-1 text-[11px] font-medium text-[#f4f1e8] md:flex">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#8b7cf6] shadow-[0_0_12px_rgba(139,124,246,0.45)]" />
+          {productMode}
+        </div>
+        <div className="hidden items-center gap-2 px-1.5 py-1 text-[11px] font-medium text-muted-foreground lg:flex">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70" />
           Usage 0%
         </div>
-        <button
-          className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.68)] px-3 py-2 text-[11px] font-medium text-muted-foreground shadow-sm hover:text-foreground"
-          onClick={toggleTheme}
-          type="button"
-        >
-          {theme === "dark" ? "Light" : "Dark"}
-        </button>
-        <div className="flex h-9 shrink-0 items-center rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.68)] px-2 shadow-sm">
-          <SignedIn>
-            <UserButton afterSignOutUrl="/" />
-          </SignedIn>
-          <SignedOut>
-            <SignInButton mode="modal">
-              <button className="text-xs text-muted-foreground" type="button">
-                Account
-              </button>
-            </SignInButton>
-          </SignedOut>
-        </div>
+        <details className="group relative">
+          <summary
+            aria-label="Settings"
+            className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-full text-muted-foreground hover:bg-white/[0.06] hover:text-foreground [.light_&]:hover:bg-slate-200 [.light_&]:hover:text-slate-950 [&::-webkit-details-marker]:hidden"
+          >
+            <SettingsIcon />
+          </summary>
+          <div className="absolute right-0 top-9 z-20 w-48 rounded-2xl border border-white/10 bg-[#111] p-2 shadow-[0_20px_80px_rgba(0,0,0,0.45)] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-950">
+            <button
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs text-muted-foreground hover:bg-white/[0.05] hover:text-foreground [.light_&]:hover:bg-slate-100 [.light_&]:hover:text-slate-950"
+              onClick={toggleTheme}
+              type="button"
+            >
+              Theme
+              <span>{theme === "dark" ? "Light" : "Dark"}</span>
+            </button>
+            <div className="mt-1 rounded-xl px-3 py-2">
+              <SignedIn>
+                <UserButton afterSignOutUrl="/" />
+              </SignedIn>
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="text-xs text-muted-foreground" type="button">
+                    Account
+                  </button>
+                </SignInButton>
+              </SignedOut>
+            </div>
+          </div>
+        </details>
       </div>
     </header>
   );

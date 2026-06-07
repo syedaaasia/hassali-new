@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
-import { type AiMode, type ChatMessage, type DiffProposal, useChatStore } from "@/lib/chat-store";
+import { type ChatMessage, type DiffProposal, type ProductMode, useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
 
@@ -14,16 +14,50 @@ const modelOptions = [
   { label: "Gemini Flash", value: "google/gemini-flash-1.5" }
 ];
 
-const modes: Array<{ label: AiMode; disabled?: boolean }> = [
-  { label: "ASK" },
-  { label: "SUGGEST" },
-  { label: "EXECUTE" }
+const productModes: Array<{
+  label: ProductMode;
+}> = [
+  {
+    label: "ASK"
+  },
+  {
+    label: "WEBSITE"
+  },
+  {
+    label: "CODE"
+  }
 ];
 
-const modeHints: Record<AiMode, string> = {
-  ASK: "Answer only. No preview or runtime actions.",
-  SUGGEST: "Review proposed file changes before anything mutates.",
-  EXECUTE: "Approve safe file and preview actions before they run."
+const modeHints: Record<ProductMode, string> = {
+  ASK: "Ask mode is answer-first. Hassali can explain, plan, debug, and reason without mutating files.",
+  WEBSITE: "Website mode focuses on premium sites, pages, visuals, animation, copy, images, and theme edits.",
+  CODE: "Code mode is for apps, tools, systems, automations, APIs, and industry-grade software proposals."
+};
+type RightSidebarProps = {
+  isEditorOpen: boolean;
+  onToggleEditor: () => void;
+};
+type SpeechRecognitionEventLike = {
+  results: ArrayLike<{
+    0: {
+      transcript: string;
+    };
+    isFinal: boolean;
+  }>;
+};
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechGlobal = {
+  SpeechRecognition?: new () => SpeechRecognitionLike;
+  webkitSpeechRecognition?: new () => SpeechRecognitionLike;
 };
 const blockedRegenerationLimit = 2;
 const manualReviewNeededMessage =
@@ -142,9 +176,90 @@ function getLatestOriginalRequest(messages: ChatMessage[]) {
   return extractOriginalRequest(latestUserMessage) || "the original request in this chat";
 }
 
+function regenerationIntentFor(request: string) {
+  const prompt = request.toLowerCase();
+  const colorTerms = "green|blue|pink|white|black|gold|golden|yellow|brown|cream|teal|red|maroon|gradient";
+
+  if (
+    /\b(?:change|make|update|switch|turn|replace)\b[\s\S]{0,80}\b(?:color|colors|colour|colours|theme|palette)\b/.test(prompt) ||
+    new RegExp(`\\b(?:change|update|switch|turn|replace)\\b[\\s\\S]{0,80}\\b(?:${colorTerms})\\b`).test(prompt)
+  ) {
+    return "visual_theme_edit";
+  }
+
+  if (/\b(?:rename|replace)\b/.test(prompt) || /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/.test(prompt)) {
+    return "rename";
+  }
+
+  if (/\b(?:reload|restart|stop|start)\s+preview\b/.test(prompt)) {
+    return "runtime_action";
+  }
+
+  if (/\b(?:create|build|generate|design|make)\b[\s\S]{0,80}\b(?:website|site|web app|system|app|tool)\b/.test(prompt)) {
+    return "generation";
+  }
+
+  return "small_edit";
+}
+
 function createSaferProposalPrompt(proposal: DiffProposal, originalRequest: string) {
   const reasons = blockedProposalReasons(proposal);
   const warnings = blockedProposalWarnings(proposal);
+  const intent = regenerationIntentFor(originalRequest);
+  const typeSpecificCorrections =
+    intent === "visual_theme_edit"
+      ? `Required corrections:
+- preserve approval-first safety
+- keep this as a visual_theme_edit
+- preserve the existing CSS/layout/content
+- apply the requested color tokens, accents, glows, buttons, and highlights
+- mutate CSS only, plus reload preview only if needed
+- do not create index.html/about/contact/story pages
+- do not regenerate the website
+- do not include page-count or domain-generation rules
+- do not output generic website copy
+- avoid blank files`
+      : intent === "rename"
+        ? `Required corrections:
+- preserve approval-first safety
+- keep this as a rename/text replacement
+- edit only files that contain the source text
+- do not create new pages or regenerate the website
+- do not change unrelated content
+- preserve selected project isolation
+- avoid blank files`
+        : intent === "runtime_action"
+          ? `Required corrections:
+- preserve approval-first safety
+- keep this as a runtime action proposal
+- do not create or update files
+- use only allowed runtime actions
+- preserve selected project isolation`
+          : `Required corrections:
+- preserve approval-first safety
+- avoid welcome.ts pollution
+- preserve selected project isolation
+- match the original business/domain
+- match requested page count
+- match requested colors
+- match requested visual style
+- avoid developer/coder fallback unless user explicitly asked for a developer/coder website
+- avoid overgeneration
+- avoid blank files`;
+  const preservationRules =
+    intent === "generation"
+      ? `Required preservation rules:
+- do not simplify away requested pages
+- do not change the business type
+- do not ignore the theme/colors
+- do not change execution behavior
+- produce a normal proposal only after risks are corrected`
+      : `Required preservation rules:
+- preserve the original intent family: ${intent}
+- do not expand this into website generation
+- do not introduce unrelated pages, business copy, or domain changes
+- do not change execution behavior
+- produce a corrected proposal only after risks are fixed`;
 
   return `Please regenerate a safer proposal.
 
@@ -157,24 +272,12 @@ ${formatPromptList(reasons, proposal.summary)}
 Warnings:
 ${formatPromptList(warnings, "No additional warnings were provided.")}
 
-Required corrections:
-- preserve approval-first safety
-- avoid welcome.ts pollution
-- preserve selected project isolation
-- match the original business/domain
-- match requested page count
-- match requested colors
-- match requested visual style
-- avoid developer/coder fallback unless user explicitly asked for a developer/coder website
-- avoid overgeneration
-- avoid blank files
+Proposal type:
+${intent}
 
-Required preservation rules:
-- do not simplify away requested pages
-- do not change the business type
-- do not ignore the theme/colors
-- do not change execution behavior
-- produce a normal proposal only after risks are corrected
+${typeSpecificCorrections}
+
+${preservationRules}
 
 Return a corrected proposal that keeps the original request intact and fixes the blocked risks.`;
 }
@@ -269,17 +372,36 @@ function ManualReviewNotice({ message }: { message: string }) {
   );
 }
 
-export function RightSidebar() {
+function MicIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+      viewBox="0 0 24 24"
+    >
+      <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <path d="M12 19v3" />
+    </svg>
+  );
+}
+
+export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps) {
   const messages = useChatStore((state) => state.messages);
   const input = useChatStore((state) => state.input);
   const model = useChatStore((state) => state.model);
-  const mode = useChatStore((state) => state.mode);
+  const productMode = useChatStore((state) => state.productMode);
   const isStreaming = useChatStore((state) => state.isStreaming);
   const proposal = useChatStore((state) => state.proposal);
   const chatSessionId = useChatStore((state) => state.chatSessionId);
   const setInput = useChatStore((state) => state.setInput);
   const setModel = useChatStore((state) => state.setModel);
-  const setMode = useChatStore((state) => state.setMode);
+  const setProductMode = useChatStore((state) => state.setProductMode);
   const clearProposal = useChatStore((state) => state.clearProposal);
   const markProposalApproved = useChatStore((state) => state.markProposalApproved);
   const sendMessage = useChatStore((state) => state.sendMessage);
@@ -300,7 +422,9 @@ export function RightSidebar() {
   );
   const isApprovalBlocked = proposal ? isBlockedProposal(proposal) : false;
   const regenerationInFlightRef = useRef(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const [blockedRegenerationAttempts, setBlockedRegenerationAttempts] = useState(0);
+  const [isListening, setIsListening] = useState(false);
   const [manualReviewMessage, setManualReviewMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -336,6 +460,50 @@ export function RightSidebar() {
   });
 
   const sendWithContext = () => sendMessage(createWorkspaceContext());
+
+  const toggleVoiceInput = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognitionConstructor =
+      (globalThis as SpeechGlobal).SpeechRecognition ??
+      (globalThis as SpeechGlobal).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionConstructor) {
+      setWorkspaceError("Voice input is not supported in this browser.");
+      return;
+    }
+
+    const recognition = new SpeechRecognitionConstructor();
+
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => {
+      setIsListening(false);
+      setWorkspaceError("Voice input stopped before Hassali could capture speech.");
+    };
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map((result) => result[0]?.transcript ?? "")
+        .join(" ")
+        .trim();
+
+      if (transcript) {
+        const nextInput = input.trim() ? `${input.trim()} ${transcript}` : transcript;
+
+        setInput(nextInput);
+      }
+    };
+
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    recognition.start();
+  };
 
   const rejectAndRequestSaferProposal = () => {
     if (!proposal || !isBlockedProposal(proposal)) {
@@ -399,76 +567,75 @@ export function RightSidebar() {
   };
 
   return (
-    <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-[hsl(var(--royal-surface)/0.92)]">
-      <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--royal-border-soft))] px-4 py-3.5">
-        <div className="min-w-0">
-          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-            Assistant
+    <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0d0d0d]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-1.5">
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            {productMode === "ASK" ? "Ask" : productMode === "WEBSITE" ? "Website" : "Code"}
           </div>
-          <div className="mt-1 truncate text-xs text-foreground">Quiet operating surface</div>
+          <div className="max-w-sm truncate text-[10px] leading-4 text-muted-foreground">
+            {modeHints[productMode]}
+          </div>
         </div>
-        {mode !== "ASK" ? (
-          <button
-            className="shrink-0 rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.38)] px-3 py-1.5 text-xs font-medium text-muted-foreground hover:border-accent/35 hover:text-foreground"
-            onClick={togglePreview}
-            type="button"
-          >
-            {isPreviewOpen ? "Hide preview" : "Preview"}
-          </button>
+        <div className="order-3 grid w-full grid-cols-3 gap-1 rounded-full border border-white/10 bg-black/35 p-0.5 md:order-none md:w-[29rem]">
+          {productModes.map((item) => {
+            const isActive = item.label === productMode;
+
+            return (
+              <button
+                className={`rounded-full px-3 py-1 text-center transition ${
+                  isActive
+                    ? "bg-[#f4f1e8] text-black shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+                    : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+                }`}
+                key={item.label}
+                onClick={() => setProductMode(item.label)}
+                type="button"
+              >
+                <span className="block text-[10px] font-semibold uppercase tracking-[0.08em]">
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {productMode !== "ASK" ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-muted-foreground hover:border-[#7c6cff]/50 hover:text-foreground"
+              onClick={onToggleEditor}
+              type="button"
+            >
+              {isEditorOpen ? "Hide files" : "Files"}
+            </button>
+            <button
+              className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-muted-foreground hover:border-[#7c6cff]/50 hover:text-foreground"
+              onClick={togglePreview}
+              type="button"
+            >
+              {isPreviewOpen ? "Hide preview" : "Preview"}
+            </button>
+          </div>
         ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="space-y-3 border-b border-[hsl(var(--royal-border-soft))] p-3.5">
-          <div className="grid grid-cols-3 gap-1 rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.45)] p-1">
-            {modes.map((item) => {
-              const isActive = item.label === mode;
-
-              return (
-                <button
-                  className={`rounded-xl px-2 py-1.5 text-[11px] font-medium ${
-                    isActive
-                      ? "bg-[hsl(var(--accent)/0.16)] text-foreground shadow-[0_0_18px_hsl(var(--accent)/0.18)]"
-                      : "text-muted-foreground hover:bg-[hsl(var(--royal-panel-raised)/0.52)] hover:text-foreground"
-                  } disabled:cursor-not-allowed disabled:opacity-35`}
-                  disabled={item.disabled}
-                  key={item.label}
-                  onClick={() => setMode(item.label)}
-                  type="button"
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-          <PremiumSelect
-            compact
-            label="Model"
-            onChange={setModel}
-            options={modelOptions}
-            value={model}
-          />
-          <div className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.28)] px-3 py-2 text-xs leading-5 text-muted-foreground">
-            {modeHints[mode]}
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto scroll-smooth p-4 lg:p-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-smooth px-4 py-4 lg:px-6">
           {messages.map((message) => (
             <motion.div
               animate={{ opacity: 1, y: 0 }}
               initial={{ opacity: 0, y: 4 }}
               key={message.id}
               transition={{ duration: 0.16, ease: "easeOut" }}
-              className={`rounded-xl border px-3.5 py-3 text-[12.5px] leading-5 shadow-sm ${
+              className={`mx-auto w-full max-w-4xl rounded-2xl border px-4 py-3 text-[13px] leading-6 ${
                 message.role === "user"
-                  ? "ml-6 border-[hsl(var(--royal-border))] bg-[hsl(var(--gold)/0.1)] text-foreground shadow-[0_16px_42px_hsl(var(--gold)/0.08)]"
-                  : "mr-6 border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.62)] text-muted-foreground"
+                  ? "border-[#7c6cff]/25 bg-[#7c6cff]/10 text-[#f4f1e8]"
+                  : "border-white/10 bg-white/[0.035] text-[#c7c1b4]"
               }`}
             >
               <div className="mb-1 flex items-center justify-between gap-2 font-medium text-foreground">
                 <span>{message.role === "user" ? "You" : "Hassali"}</span>
                 {message.role === "assistant" && isStreaming && message.content.length === 0 ? (
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent shadow-[0_0_16px_hsl(var(--accent)/0.65)]" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#8b7cf6] shadow-[0_0_16px_rgba(139,124,246,0.55)]" />
                 ) : null}
               </div>
               <div className="whitespace-pre-wrap break-words">
@@ -479,23 +646,27 @@ export function RightSidebar() {
           {proposal ? (
             <motion.div
               animate={{ opacity: 1, y: 0 }}
-              className="rounded-2xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--royal-panel)/0.72)] p-3.5 text-xs shadow-[0_18px_46px_hsl(var(--accent)/0.12)]"
+              className="mx-auto w-full max-w-4xl rounded-[22px] border border-white/10 bg-white/[0.045] p-4 text-xs shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
               initial={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.16, ease: "easeOut" }}
             >
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="font-medium text-foreground">
-                    {proposal.mode === "EXECUTE" ? "Execution proposal" : "Diff proposal"}
+                    {productMode === "WEBSITE"
+                      ? "Website proposal"
+                      : productMode === "CODE"
+                        ? "Code proposal"
+                        : "Review proposal"}
                   </div>
                   <div className="mt-1 text-muted-foreground">{proposal.summary}</div>
                   {proposal.mode === "EXECUTE" ? (
-                    <div className="mt-1 text-[11px] text-accent">
+                    <div className="mt-1 text-[11px] text-[#a59bff]">
                       Approval is required before any file or preview action runs.
                     </div>
                   ) : null}
                 </div>
-                <span className="rounded-full border border-[hsl(var(--royal-border))] px-2 py-1 text-[10px] text-accent">
+                <span className="rounded-full border border-[#7c6cff]/25 px-2 py-1 text-[10px] text-[#a59bff]">
                   pending
                 </span>
               </div>
@@ -546,7 +717,7 @@ export function RightSidebar() {
                   Reject
                 </button>
                 <button
-                  className="rounded-xl border border-accent/35 bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground shadow-[0_12px_30px_hsl(var(--accent)/0.18)] hover:opacity-90 disabled:cursor-not-allowed disabled:border-red-500/20 disabled:bg-red-500/10 disabled:text-red-200/60 disabled:shadow-none disabled:hover:opacity-100"
+                  className="rounded-xl border border-[#7c6cff]/35 bg-[#7c6cff] px-3 py-1.5 text-xs font-medium text-white shadow-[0_12px_30px_rgba(124,108,255,0.18)] hover:bg-[#8b7cf6] disabled:cursor-not-allowed disabled:border-red-500/20 disabled:bg-red-500/10 disabled:text-red-200/60 disabled:shadow-none disabled:hover:opacity-100"
                   disabled={isApprovalBlocked}
                   onClick={() => {
                     void approveProposal();
@@ -561,42 +732,67 @@ export function RightSidebar() {
         </div>
 
         <form
-          className="shrink-0 border-t border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-surface)/0.82)] p-3.5"
+          className="shrink-0 border-t border-white/10 bg-[#0b0b0b] px-4 py-3 lg:px-6"
           onSubmit={(event) => {
             event.preventDefault();
             void sendWithContext();
           }}
         >
-          <textarea
-            className="max-h-40 min-h-20 w-full resize-none rounded-2xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.48)] p-3.5 text-[12.5px] leading-5 text-foreground shadow-[inset_0_1px_0_hsl(var(--foreground)/0.04),0_16px_44px_hsl(0_80%_3%/0.26)] outline-none placeholder:text-muted-foreground focus:border-accent/55 focus:ring-2 focus:ring-accent/10"
-            onChange={(event) =>
-              setInput((event.currentTarget as unknown as { value: string }).value)
-            }
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void sendWithContext();
-              }
-            }}
-            placeholder={
-              mode === "EXECUTE"
-                ? "Describe the safe file or preview task..."
-                : mode === "SUGGEST"
-                  ? "Describe the change to propose..."
-                  : "Ask Hassali..."
-            }
-            value={input}
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="truncate text-xs text-muted-foreground">
-              {isStreaming ? "Streaming response..." : `${mode} mode`}
-            </span>
+          <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] border border-white/10 bg-[#1d1d1d] px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] focus-within:border-[#7c6cff]/55 focus-within:ring-2 focus-within:ring-[#7c6cff]/10">
             <button
-              className="rounded-xl border border-accent/35 bg-accent px-4 py-1.5 text-xs font-medium text-accent-foreground shadow-[0_14px_34px_hsl(var(--accent)/0.18)] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-45"
+              aria-label="Add context"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg leading-none text-muted-foreground hover:bg-white/[0.04] hover:text-foreground [.light_&]:hover:bg-slate-200 [.light_&]:hover:text-slate-950"
+              type="button"
+            >
+              +
+            </button>
+            <textarea
+              className="max-h-28 min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-[14px] leading-5 text-[#f4f1e8] outline-none placeholder:text-muted-foreground"
+              onChange={(event) =>
+                setInput((event.currentTarget as unknown as { value: string }).value)
+              }
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendWithContext();
+                }
+              }}
+              placeholder={
+                productMode === "WEBSITE"
+                  ? "Build or refine a premium website. Mention pages, style, images, products, colors, or animations..."
+                  : productMode === "CODE"
+                    ? "Build an app, tool, system, API, automation, or technical workflow..."
+                    : "Ask Hassali anything. Explain, plan, learn, debug, compare, or think through an idea..."
+              }
+              value={input}
+            />
+            <div className="mb-0.5 hidden w-44 shrink-0 sm:block">
+              <PremiumSelect
+                compact
+                label="Model"
+                onChange={setModel}
+                options={modelOptions}
+                value={model}
+              />
+            </div>
+            <button
+              aria-label={isListening ? "Stop voice input" : "Start voice input"}
+              className={`mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
+                isListening
+                  ? "border-[#7c6cff]/45 bg-[#7c6cff]/20 text-[#d8d2ff]"
+                  : "border-white/10 bg-white/[0.04] text-muted-foreground hover:text-foreground"
+              }`}
+              onClick={toggleVoiceInput}
+              type="button"
+            >
+              <MicIcon />
+            </button>
+            <button
+              className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#7c6cff]/35 bg-[#7c6cff] text-[10px] font-semibold text-white shadow-[0_14px_34px_rgba(124,108,255,0.18)] hover:bg-[#8b7cf6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6cff]/20 disabled:cursor-not-allowed disabled:opacity-45"
               disabled={isStreaming || input.trim().length === 0}
               type="submit"
             >
-              Send
+              Go
             </button>
           </div>
         </form>

@@ -1,3 +1,5 @@
+import { buildDomainBlueprint } from "@/lib/server/ai/capability-domain-blueprint";
+
 type RuntimeContextInput = {
   error?: string | null;
   logs?: string[];
@@ -12,19 +14,7 @@ type WorkspaceContextInput = {
   fileList: string[];
 };
 
-export type InferredDomain =
-  | "car rental"
-  | "car showroom"
-  | "code/tooling project"
-  | "florist"
-  | "generic website"
-  | "jewellery"
-  | "media brand"
-  | "podcast"
-  | "portfolio"
-  | "restaurant"
-  | "SaaS"
-  | "youtube podcast";
+export type InferredDomain = string;
 
 export type PromptIntent =
   | "animation_or_interaction"
@@ -96,7 +86,7 @@ function isRenameRequest(promptText: string) {
 }
 
 function isVisualThemeEditRequest(promptText: string) {
-  const colorTerms = "green|blue|pink|white|black|gold|brown|cream|teal|red";
+  const colorTerms = "green|blue|pink|white|black|gold|golden|yellow|brown|cream|teal|red|maroon|gradient";
 
   return (
     /\b(?:change|make|update|switch|turn)\b[\s\S]{0,80}\b(?:color|colors|colour|colours|theme|palette)\b/.test(promptText) ||
@@ -128,6 +118,17 @@ function inferDomain(input: {
   projectName: string | null;
   prompt: string;
 }): InferredDomain {
+  const promptText = lower(input.prompt);
+  const promptBlueprint = buildDomainBlueprint({ prompt: input.prompt });
+
+  if (
+    isWebsiteCreationRequest(promptText) &&
+    promptBlueprint.domainLabel &&
+    promptBlueprint.domainLabel !== "business"
+  ) {
+    return promptBlueprint.domainLabel;
+  }
+
   const projectText = lower(
     [
       input.prompt,
