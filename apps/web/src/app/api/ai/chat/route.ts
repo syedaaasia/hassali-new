@@ -40,6 +40,15 @@ import {
   type ProposalRoutingDecision
 } from "@/lib/server/ai/proposal-routing";
 import {
+  buildUpdatedProjectContract,
+  projectContractPath,
+  projectContractSystemContext,
+  readProjectContractFromWorkspace,
+  renderProjectContract,
+  summarizeProjectContract,
+  type ProjectContract
+} from "@/lib/server/ai/project-contract";
+import {
   buildPromptSovereigntyContract,
   validatePromptSovereignty,
   type PromptAcceptanceResult
@@ -2266,6 +2275,60 @@ function addCompositionDebugSummary(
   };
 }
 
+function shouldUpdateProjectContract(decision: DecisionPlan) {
+  return (
+    decision.requestType === "code_system_generation" ||
+    decision.requestType === "multi_page_generation" ||
+    decision.requestType === "website_generation"
+  );
+}
+
+function withProjectContractUpdate(input: {
+  composition: CompositionStrategy;
+  contract: ProjectContract | null;
+  decision: DecisionPlan;
+  intent: IntentIntelligence;
+  kernel: IntelligenceKernelResult;
+  prompt: string;
+  proposal: DiffProposal;
+  workspace: WorkspaceContext;
+}): DiffProposal {
+  if (!shouldUpdateProjectContract(input.decision) || input.proposal.shouldBlockExecution) {
+    return input.proposal;
+  }
+
+  const updatedContract = buildUpdatedProjectContract({
+    composition: input.composition,
+    contract: input.contract,
+    decision: input.decision,
+    intent: input.intent,
+    kernel: input.kernel,
+    prompt: input.prompt
+  });
+  const proposedContent = renderProjectContract(updatedContract);
+  const action = input.workspace.fileList.includes(projectContractPath) ? "update" : "create";
+  const alreadyIncluded = input.proposal.changes.some((change) => change.path === projectContractPath);
+
+  if (alreadyIncluded) {
+    return input.proposal;
+  }
+
+  return {
+    ...input.proposal,
+    changes: [
+      ...input.proposal.changes,
+      {
+        action,
+        diffPreview: createDiffPreview(action, projectContractPath, proposedContent),
+        path: projectContractPath,
+        proposedContent,
+        summary: "Updates Hassali's project contract with current mode, domain, preview type, constraints, and do-not rules."
+      }
+    ],
+    summary: `${input.proposal.summary} Project contract will be ${action === "create" ? "created" : "updated"} in ${projectContractPath}.`
+  };
+}
+
 async function createFallbackProposalResponse(input: {
   composition: CompositionStrategy;
   diagnostic: DiagnosticContext;
@@ -2276,6 +2339,7 @@ async function createFallbackProposalResponse(input: {
   model: string;
   persistence: ChatPersistenceContext | null;
   prompt: string;
+  projectContract: ProjectContract | null;
   reason: string;
   routing: ProposalRoutingDecision;
   workspace: WorkspaceContext;
@@ -2290,7 +2354,16 @@ async function createFallbackProposalResponse(input: {
     input.composition
   );
   const proposalWithIntent = addCompositionDebugSummary(
-    proposal,
+    withProjectContractUpdate({
+      composition: input.composition,
+      contract: input.projectContract,
+      decision: input.decision,
+      intent: input.intent,
+      kernel: input.kernel,
+      prompt: input.prompt,
+      proposal,
+      workspace: input.workspace
+    }),
     input.intent,
     input.composition,
     input.kernel
@@ -2322,6 +2395,7 @@ async function createFallbackProposalResponse(input: {
       composition: input.composition,
       intent: input.intent,
       intelligenceKernel: compactIntelligenceKernel(input.kernel),
+      projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
       model: input.model,
@@ -2485,6 +2559,8 @@ export async function POST(request: Request) {
         fileList: [],
         projectName: null
       };
+  const projectContract = readProjectContractFromWorkspace(workspace);
+  const projectContractContext = projectContractSystemContext(projectContract);
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const effectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
 
@@ -2542,6 +2618,7 @@ export async function POST(request: Request) {
       workspace: {
         activePath: workspace.activePath,
         composition,
+        projectContract: summarizeProjectContract(projectContract),
         diagnosis: diagnostic.diagnosis,
         decision,
         editScope: diagnostic.editScope,
@@ -2571,7 +2648,8 @@ export async function POST(request: Request) {
           askLiveIntent,
           askRuntimeContext,
           deterministic: askLiveIntent !== "weather",
-          model
+          model,
+          projectContract: summarizeProjectContract(projectContract)
         },
         role: "assistant"
       });
@@ -2592,7 +2670,8 @@ export async function POST(request: Request) {
         intelligenceKernel: compactIntelligenceKernel(kernel),
         kernelRoutingDecision: kernel.routingDecision,
         model,
-        productMode
+        productMode,
+        projectContract: summarizeProjectContract(projectContract)
       },
       role: "assistant"
     });
@@ -2611,6 +2690,25 @@ export async function POST(request: Request) {
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (shouldUseDeterministicProposal || !process.env.OPENROUTER_API_KEY)
   ) {
+    const localProposal = createLocalProposal(
+      effectiveUserPrompt,
+      workspace,
+      mode,
+      diagnostic,
+      decision,
+      intent,
+      composition
+    );
+    const proposalWithContract = withProjectContractUpdate({
+      composition,
+      contract: projectContract,
+      decision,
+      intent,
+      kernel,
+      prompt: effectiveUserPrompt,
+      proposal: localProposal,
+      workspace
+    });
     const proposal = enforcePromptSovereignty({
       composition,
       decision,
@@ -2618,15 +2716,7 @@ export async function POST(request: Request) {
       prompt: effectiveUserPrompt,
       proposal: attachProposalRoutingMetadata(
         addCompositionDebugSummary(
-          createLocalProposal(
-            effectiveUserPrompt,
-            workspace,
-            mode,
-            diagnostic,
-            decision,
-            intent,
-            composition
-          ),
+          proposalWithContract,
           intent,
           composition,
           kernel
@@ -2650,6 +2740,7 @@ export async function POST(request: Request) {
         model,
         intent,
         intelligenceKernel: compactIntelligenceKernel(kernel),
+        projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
         proposal
       },
@@ -2698,6 +2789,7 @@ export async function POST(request: Request) {
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
                 `Kernel routing decision: ${JSON.stringify(kernel.routingDecision)}. Obey the kernel mutation policy and required checks. ` +
+                `Project contract: ${projectContractContext} ` +
                 `The proposal summary must mention what you detected and the safe treatment. Diagnostic context:\n${formattedDiagnostic}`
             },
             ...messages
@@ -2722,6 +2814,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
+        projectContract,
         reason: "openrouter_network_error",
         routing,
         workspace
@@ -2739,6 +2832,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
+        projectContract,
         reason: `openrouter_${response.status}`,
         routing,
         workspace
@@ -2773,6 +2867,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
+        projectContract,
         reason: "invalid_or_empty_model_proposal",
         routing,
         workspace
@@ -2785,7 +2880,14 @@ export async function POST(request: Request) {
       intent,
       prompt: effectiveUserPrompt,
       proposal: attachProposalRoutingMetadata(
-        addCompositionDebugSummary({
+        addCompositionDebugSummary(withProjectContractUpdate({
+          composition,
+          contract: projectContract,
+          decision,
+          intent,
+          kernel,
+          prompt: effectiveUserPrompt,
+          proposal: {
           id: `proposal-${Date.now()}`,
           mode,
           projectId: requestedProjectId,
@@ -2813,7 +2915,9 @@ export async function POST(request: Request) {
               summary: change.summary
             };
           })
-        }, intent, composition, kernel),
+          },
+          workspace
+        }), intent, composition, kernel),
         kernel,
         routing,
         intent,
@@ -2837,6 +2941,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
+        projectContract,
         reason: "prompt_sovereignty_repair",
         routing,
         workspace
@@ -2862,6 +2967,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
+        projectContract,
         reason: `quality_score_${quality.score}_${quality.issues.join(",")}`,
         routing,
         workspace
@@ -2875,6 +2981,7 @@ export async function POST(request: Request) {
         intent,
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
+        projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
         proposal
       },
@@ -2894,6 +3001,7 @@ export async function POST(request: Request) {
             `ASK is a universal assistant mode for explanation, planning, learning, debugging, and general help. ` +
             `If the user asks to build or edit files, explain that WEBSITE or CODE mode should be used for approval-first file changes. ` +
             `${formatAskRuntimeContext(askRuntimeContext, askLiveIntent)}\n` +
+            `${projectContractContext}\n` +
             `Current mode: ${mode}. Active file: ${workspace.activePath}. Files: ${workspace.fileList.join(", ")}.`
         },
         ...messages
@@ -2919,7 +3027,8 @@ export async function POST(request: Request) {
         metadata: {
           askLiveIntent,
           askRuntimeContext,
-          model
+          model,
+          projectContract: summarizeProjectContract(projectContract)
         },
         role: "assistant"
       });
