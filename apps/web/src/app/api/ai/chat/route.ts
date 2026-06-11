@@ -11,6 +11,11 @@ import {
   formatAskRuntimeContext
 } from "@/lib/server/ai/ask-context";
 import {
+  matchBusinessBlueprint,
+  summarizeBusinessBlueprint,
+  type BusinessBlueprint
+} from "@/lib/server/ai/blueprint-matcher";
+import {
   buildDiagnosticContext,
   formatDiagnosticContext,
   type DiagnosticContext
@@ -120,6 +125,12 @@ type ProposalRoutingWarning = {
 
 type DiffProposal = {
   appPreview?: CodeAppPreview;
+  blueprintConfidence?: number;
+  blueprintId?: string;
+  blueprintKind?: "answer" | "code_app" | "website";
+  blueprintName?: string;
+  blueprintPreviewType?: "code_app_preview" | "code_plan_preview" | "none" | "website_static_preview";
+  blueprintStatus?: "fallback" | "matched" | "none";
   changes: ProposalChange[];
   blockedReason?: string;
   contradictionStatus?: "blocked" | "clear" | "review_required";
@@ -2077,6 +2088,28 @@ function compactTranslatedIntent(translatedIntent: TranslatedIntentSpec) {
   };
 }
 
+function compactBusinessBlueprint(blueprint: BusinessBlueprint) {
+  return {
+    acceptanceChecks: blueprint.acceptanceChecks,
+    blueprintId: blueprint.blueprintId,
+    blueprintKind: blueprint.blueprintKind,
+    blueprintName: blueprint.blueprintName,
+    blueprintStatus: blueprint.blueprintStatus,
+    confidence: blueprint.confidence,
+    dataEntities: blueprint.dataEntities,
+    fileStrategy: blueprint.fileStrategy,
+    integrations: blueprint.integrations,
+    matchedDomain: blueprint.matchedDomain,
+    mustAvoid: blueprint.mustAvoid,
+    mustInclude: blueprint.mustInclude,
+    previewType: blueprint.previewType,
+    requiredComponents: blueprint.requiredComponents,
+    requiredCopyBlocks: blueprint.requiredCopyBlocks,
+    screens: blueprint.screens,
+    sections: blueprint.sections
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2138,7 +2171,8 @@ function attachProposalRoutingMetadata(
   intent?: IntentIntelligence,
   composition?: CompositionStrategy,
   prompt?: string,
-  translatedIntent?: TranslatedIntentSpec
+  translatedIntent?: TranslatedIntentSpec,
+  blueprint?: BusinessBlueprint
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
   const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
@@ -2154,6 +2188,12 @@ function attachProposalRoutingMetadata(
   return {
     ...proposal,
     ...compactProposalRouting(kernel, routing),
+    blueprintConfidence: blueprint?.confidence,
+    blueprintId: blueprint?.blueprintId,
+    blueprintKind: blueprint?.blueprintKind,
+    blueprintName: blueprint?.blueprintName,
+    blueprintPreviewType: blueprint?.previewType,
+    blueprintStatus: blueprint?.blueprintStatus,
     contradictionStatus: "clear",
     detectedDomain,
     domainConfidence: translatedIntent?.confidence ?? intent?.confidence,
@@ -2172,7 +2212,13 @@ function attachProposalRoutingMetadata(
           ? "answer_only"
           : "static_preview"),
     previewType: proposal.previewType ??
-      (kernel.routingDecision.mode === "CODE"
+      (blueprint?.previewType === "code_app_preview"
+        ? "code_app_preview"
+        : blueprint?.previewType === "code_plan_preview"
+          ? "code_plan_preview"
+          : blueprint?.previewType === "none"
+            ? "none"
+            : kernel.routingDecision.mode === "CODE"
         ? "code_plan_preview"
         : kernel.routingDecision.mode === "ASK"
           ? "none"
@@ -2386,6 +2432,7 @@ async function createFallbackProposalResponse(input: {
   reason: string;
   routing: ProposalRoutingDecision;
   translatedIntent: TranslatedIntentSpec;
+  blueprint: BusinessBlueprint;
   workspace: WorkspaceContext;
 }) {
   const proposal = createLocalProposal(
@@ -2424,7 +2471,8 @@ async function createFallbackProposalResponse(input: {
       input.intent,
       input.composition,
       input.prompt,
-      input.translatedIntent
+      input.translatedIntent,
+      input.blueprint
     )
   });
   let persistence = input.persistence;
@@ -2441,6 +2489,7 @@ async function createFallbackProposalResponse(input: {
       intent: input.intent,
       intelligenceKernel: compactIntelligenceKernel(input.kernel),
       intentTranslation: compactTranslatedIntent(input.translatedIntent),
+      blueprint: compactBusinessBlueprint(input.blueprint),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
@@ -2614,6 +2663,12 @@ export async function POST(request: Request) {
     mode: productMode,
     prompt: effectiveUserPrompt
   });
+  const blueprint = matchBusinessBlueprint({
+    contract: projectContract,
+    productMode,
+    prompt: effectiveUserPrompt,
+    translatedIntent
+  });
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -2634,6 +2689,7 @@ export async function POST(request: Request) {
   });
   const composition = buildCompositionStrategy(intent);
   const kernel = buildIntelligenceKernel({
+    blueprint,
     composition,
     decision,
     diagnostic,
@@ -2648,6 +2704,7 @@ export async function POST(request: Request) {
   if (mode === "SUGGEST" || mode === "EXECUTE") {
     console.info("intent intelligence", intent);
     console.info("intent translation", summarizeTranslatedIntent(translatedIntent));
+    console.info("business blueprint", summarizeBusinessBlueprint(blueprint));
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
     console.info("kernel routing decision", kernel.routingDecision);
@@ -2670,6 +2727,7 @@ export async function POST(request: Request) {
       askLiveIntent: mode === "ASK" ? askLiveIntent : undefined,
       workspace: {
         activePath: workspace.activePath,
+        blueprint: compactBusinessBlueprint(blueprint),
         composition,
         projectContract: summarizeProjectContract(projectContract),
         diagnosis: diagnostic.diagnosis,
@@ -2780,7 +2838,8 @@ export async function POST(request: Request) {
         intent,
         composition,
         effectiveUserPrompt,
-        translatedIntent
+        translatedIntent,
+        blueprint
       )
     });
     const visibleSummary =
@@ -2795,6 +2854,7 @@ export async function POST(request: Request) {
         model,
         intent,
         intentTranslation: compactTranslatedIntent(translatedIntent),
+        blueprint: compactBusinessBlueprint(blueprint),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -2842,6 +2902,7 @@ export async function POST(request: Request) {
                 `For vague create/build website requests without clear web files, propose standard static files: index.html, styles.css, and main.js. ` +
                 `For multi-page requests, satisfy the required page files exactly. Decision plan: ${JSON.stringify(decision)}. ` +
                 `Intent translator spec from current prompt, higher priority than project contract: ${JSON.stringify(translatedIntent)}. ` +
+                `Business/app blueprint matched from translated intent: ${JSON.stringify(blueprint)}. Use it for sections, screens, components, copy blocks, file strategy, must-include, must-avoid, and acceptance checks. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
@@ -2875,6 +2936,7 @@ export async function POST(request: Request) {
         reason: "openrouter_network_error",
         routing,
         translatedIntent,
+        blueprint,
         workspace
       });
     }
@@ -2894,6 +2956,7 @@ export async function POST(request: Request) {
         reason: `openrouter_${response.status}`,
         routing,
         translatedIntent,
+        blueprint,
         workspace
       });
     }
@@ -2930,6 +2993,7 @@ export async function POST(request: Request) {
         reason: "invalid_or_empty_model_proposal",
         routing,
         translatedIntent,
+        blueprint,
         workspace
       });
     }
@@ -2983,7 +3047,8 @@ export async function POST(request: Request) {
         intent,
         composition,
         effectiveUserPrompt,
-        translatedIntent
+        translatedIntent,
+        blueprint
       )
     });
 
@@ -3006,6 +3071,7 @@ export async function POST(request: Request) {
         reason: "prompt_sovereignty_repair",
         routing,
         translatedIntent,
+        blueprint,
         workspace
       });
     }
@@ -3033,6 +3099,7 @@ export async function POST(request: Request) {
         reason: `quality_score_${quality.score}_${quality.issues.join(",")}`,
         routing,
         translatedIntent,
+        blueprint,
         workspace
       });
     }
@@ -3043,6 +3110,7 @@ export async function POST(request: Request) {
         composition,
         intent,
         intentTranslation: compactTranslatedIntent(translatedIntent),
+        blueprint: compactBusinessBlueprint(blueprint),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

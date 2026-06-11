@@ -1,5 +1,6 @@
 import type { DecisionPlan } from "@/lib/server/ai/decision-engine";
 import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
+import type { BusinessBlueprint } from "@/lib/server/ai/blueprint-matcher";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
@@ -150,6 +151,7 @@ type IntelligenceKernelInput = {
   composition: CompositionStrategy;
   decision: DecisionPlan;
   diagnostic: DiagnosticContext;
+  blueprint?: BusinessBlueprint;
   intent: IntentIntelligence;
   mode: KernelMode;
   translatedIntent?: TranslatedIntentSpec;
@@ -186,6 +188,10 @@ function promptText(input: IntelligenceKernelInput) {
     input.translatedIntent?.visualLanguage,
     input.translatedIntent?.requestedFeatures.join(" "),
     input.translatedIntent?.constraints.join(" "),
+    input.blueprint?.blueprintName,
+    input.blueprint?.sections.join(" "),
+    input.blueprint?.screens.join(" "),
+    input.blueprint?.mustInclude.join(" "),
     input.intent.summary,
     input.decision.reason,
     input.composition.businessType,
@@ -311,6 +317,7 @@ function frameworkHintFor(input: IntelligenceKernelInput, taskType: string): Ker
 
 function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
   const translated = input.translatedIntent;
+  const blueprint = input.blueprint;
 
   return Array.from(
     new Set([
@@ -324,6 +331,11 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
       translated?.pages.count ? `translated-pages:${translated.pages.count}` : null,
       translated?.pages.names.length ? `translated-page-names:${translated.pages.names.join(", ")}` : null,
       translated?.requestedFeatures.length ? `translated-features:${translated.requestedFeatures.slice(0, 8).join(", ")}` : null,
+      blueprint ? `blueprint:${blueprint.blueprintId}` : null,
+      blueprint ? `blueprint-kind:${blueprint.blueprintKind}` : null,
+      blueprint ? `blueprint-preview:${blueprint.previewType}` : null,
+      blueprint?.sections.length ? `blueprint-sections:${blueprint.sections.slice(0, 8).join(", ")}` : null,
+      blueprint?.screens.length ? `blueprint-screens:${blueprint.screens.slice(0, 8).join(", ")}` : null,
       `domain:${input.intent.domain}`,
       `business:${input.composition.businessType}`,
       input.intent.pageCount ? `pages:${input.intent.pageCount}` : null,
@@ -523,6 +535,9 @@ export function buildReasoningTrace(
       input.translatedIntent
         ? `Intent translator normalized current prompt as domain=${input.translatedIntent.domain ?? "unknown"}, business=${input.translatedIntent.businessType ?? "unknown"}, features=${input.translatedIntent.requestedFeatures.join(", ") || "none"}, constraints=${input.translatedIntent.constraints.join(", ") || "none"}.`
         : "Intent translator was not available for this request.",
+      input.blueprint
+        ? `Blueprint matcher selected ${input.blueprint.blueprintName} (${input.blueprint.blueprintId}) with ${input.blueprint.blueprintStatus} status and preview ${input.blueprint.previewType}.`
+        : "Blueprint matcher was not available for this request.",
       input.composition.reasoningSummary,
       input.decision.reason
     ],

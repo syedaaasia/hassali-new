@@ -79,6 +79,12 @@ export type DiffProposal = {
     mockDataNotice: string;
     screens: string[];
   };
+  blueprintConfidence?: number;
+  blueprintId?: string;
+  blueprintKind?: "answer" | "code_app" | "website";
+  blueprintName?: string;
+  blueprintPreviewType?: "code_app_preview" | "code_plan_preview" | "none" | "website_static_preview";
+  blueprintStatus?: "fallback" | "matched" | "none";
   blockedReason?: string;
   contradictionStatus?: "blocked" | "clear" | "review_required";
   detectedDomain?: string;
@@ -303,6 +309,23 @@ function isDiffProposal(value: unknown): value is DiffProposal {
   return (
     typeof proposal.id === "string" &&
     (typeof proposal.appPreview === "undefined" || isAppPreview(proposal.appPreview)) &&
+    (typeof proposal.blueprintConfidence === "undefined" ||
+      typeof proposal.blueprintConfidence === "number") &&
+    (typeof proposal.blueprintId === "undefined" || typeof proposal.blueprintId === "string") &&
+    (typeof proposal.blueprintKind === "undefined" ||
+      proposal.blueprintKind === "answer" ||
+      proposal.blueprintKind === "code_app" ||
+      proposal.blueprintKind === "website") &&
+    (typeof proposal.blueprintName === "undefined" || typeof proposal.blueprintName === "string") &&
+    (typeof proposal.blueprintPreviewType === "undefined" ||
+      proposal.blueprintPreviewType === "code_app_preview" ||
+      proposal.blueprintPreviewType === "code_plan_preview" ||
+      proposal.blueprintPreviewType === "none" ||
+      proposal.blueprintPreviewType === "website_static_preview") &&
+    (typeof proposal.blueprintStatus === "undefined" ||
+      proposal.blueprintStatus === "fallback" ||
+      proposal.blueprintStatus === "matched" ||
+      proposal.blueprintStatus === "none") &&
     (typeof proposal.projectId === "string" || proposal.projectId === null) &&
     typeof proposal.summary === "string" &&
     (typeof proposal.blockedReason === "undefined" || typeof proposal.blockedReason === "string") &&
