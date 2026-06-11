@@ -8,7 +8,7 @@ import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition"
 
 export type PromptSovereigntyContract = {
   contradictoryTerms: string[];
-  expectedCapability: CapabilityPath | "rename" | "theme_edit";
+  expectedCapability: CapabilityPath | "rename" | "small_edit" | "theme_edit";
   expectedDomain: string;
   expectedTerms: string[];
   isExplicitNewBuild: boolean;
@@ -77,6 +77,10 @@ function expectedCapabilityFor(decision: DecisionPlan): PromptSovereigntyContrac
 
   if (decision.requestType === "visual_theme_edit") {
     return "theme_edit";
+  }
+
+  if (decision.requestType === "targeted_edit") {
+    return "small_edit";
   }
 
   if (decision.requestType === "data_tool_generation") {
@@ -254,6 +258,16 @@ export function validatePromptSovereignty(input: {
 
     if (input.changes.some((change) => change.action === "create")) {
       issues.push("rename request should not create new files");
+    }
+  }
+
+  if (input.contract.expectedCapability === "small_edit") {
+    if (input.changes.some((change) => change.action === "create")) {
+      issues.push("small edit should not create new files");
+    }
+
+    if (/hassali suggestion:/i.test(content)) {
+      issues.push("small edit must make the requested change instead of adding a Hassali suggestion comment");
     }
   }
 

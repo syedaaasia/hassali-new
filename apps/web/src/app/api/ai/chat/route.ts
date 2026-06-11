@@ -105,6 +105,7 @@ type ProposalRoutingWarning = {
 };
 
 type DiffProposal = {
+  appPreview?: CodeAppPreview;
   changes: ProposalChange[];
   blockedReason?: string;
   contradictionStatus?: "blocked" | "clear" | "review_required";
@@ -117,6 +118,7 @@ type DiffProposal = {
   modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
   mode: "SUGGEST" | "EXECUTE";
   previewMode?: "answer_only" | "code_plan" | "static_preview";
+  previewType?: "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
   projectId: string | null;
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
@@ -128,6 +130,15 @@ type DiffProposal = {
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
   status: "pending";
   summary: string;
+};
+
+type CodeAppPreview = {
+  appKind: string;
+  appName: string;
+  entities: string[];
+  integrations: string[];
+  mockDataNotice: string;
+  screens: string[];
 };
 
 type DiffProposalPayload = {
@@ -255,9 +266,10 @@ function detectRenameRequest(prompt: string) {
 
   const match =
     prompt.match(/(?:rename|change(?:\s+the)?\s+name)\s+from\s+(.+?)\s+to\s+(.+?)(?:$|[.!?])/i) ??
+    prompt.match(/\brename\s+["'`]?(.+?)["'`]?\s+with\s+["'`]?(.+?)["'`]?(?:$|[.!?])/i) ??
     prompt.match(/\brename\s+["'`]?(.+?)["'`]?\s+to\s+["'`]?(.+?)["'`]?(?:$|[.!?])/i) ??
     prompt.match(/(?:replace|change(?:\s+the)?\s+text)\s+["'`]?(.+?)["'`]?\s+(?:with|to)\s+["'`]?(.+?)["'`]?(?:$|[.!?])/i) ??
-    prompt.match(/\bchange\s+["'`]?([a-z0-9][a-z0-9&' -]{0,80}?)["'`]?\s+to\s+["'`]?([a-z0-9][a-z0-9&' -]{0,80}?)["'`]?(?:$|[.!?])/i);
+    prompt.match(/\bchange\s+["'`]?([a-z0-9][a-z0-9&' -]{0,80}?)["'`]?\s+(?:to|with)\s+["'`]?([a-z0-9][a-z0-9&' -]{0,80}?)["'`]?(?:$|[.!?])/i);
 
   if (!match?.[1] || !match[2]) {
     return null;
@@ -267,6 +279,55 @@ function detectRenameRequest(prompt: string) {
   const to = cleanRenameValue(match[2]);
 
   return from && to && from.toLowerCase() !== to.toLowerCase() ? { from, to } : null;
+}
+
+function extractRequestedAppName(prompt: string, fallback: string) {
+  const match =
+    prompt.match(/\b(?:call it|called|named|name it)\s+([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i) ??
+    prompt.match(/\b(?:app|system|crm)\s+name\s+(?:is\s+)?([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i);
+
+  return cleanRenameValue(match?.[1] ?? fallback);
+}
+
+function titleCaseWords(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function createCodeAppPreview(prompt: string): CodeAppPreview {
+  const promptText = prompt.toLowerCase();
+  const appKind = promptText.includes("crm")
+    ? "CRM"
+    : promptText.includes("inventory")
+      ? "Inventory system"
+      : promptText.includes("erp")
+        ? "ERP"
+        : promptText.includes("pos")
+          ? "POS system"
+          : "software app";
+  const appName = extractRequestedAppName(prompt, appKind === "CRM" ? "Hello CRM" : titleCaseWords(appKind));
+
+  return {
+    appKind,
+    appName,
+    entities:
+      appKind === "CRM"
+        ? ["User", "Customer", "Deal/Record", "Invoice/Subscription"]
+        : ["User", "Record", "Activity", "Report"],
+    integrations: [
+      "Auth placeholder",
+      "Database placeholder",
+      promptText.includes("billing") ? "Billing provider placeholder" : "Integration placeholder"
+    ],
+    mockDataNotice: "Preview uses mock dashboard data only; no database, auth provider, billing provider, or file mutation runs before approval.",
+    screens:
+      appKind === "CRM"
+        ? ["Login/Auth", "Dashboard", "Customers", "Records/Deals", "Billing", "Settings"]
+        : ["Login/Auth", "Dashboard", "Records", "Reports", "Settings"]
+  };
 }
 
 function extractEffectiveUserRequest(prompt: string) {
@@ -1079,6 +1140,7 @@ function createLocalProposal(
 
   if (decision.requestType === "code_system_generation") {
     const promptText = prompt.toLowerCase();
+    const appPreview = createCodeAppPreview(prompt);
     const systemName = promptText.includes("crm")
       ? "CRM"
       : promptText.includes("inventory")
@@ -1215,12 +1277,15 @@ Required checks before approval:
         proposedContent: file.content,
         summary: file.summary
       })),
+      appPreview,
       id: `proposal-${Date.now()}`,
       mode,
+      previewMode: "code_plan",
+      previewType: "code_app_preview",
       projectId: diagnostic.projectId,
       status: "pending",
       summary:
-        `Detected a CODE-mode ${systemName} request. I will create a serious architecture, data model, implementation, and security plan instead of a static website.`
+        `Detected a CODE-mode ${appPreview.appName} ${systemName} request. I will create a serious architecture, data model, implementation, security plan, and lightweight app preview metadata instead of a static website.`
     };
   }
 
@@ -2052,12 +2117,18 @@ function attachProposalRoutingMetadata(
     domainConfidence: intent?.confidence,
     domainSource,
     modeObedienceStatus: "obeyed",
-    previewMode:
-      kernel.routingDecision.mode === "CODE"
+    previewMode: proposal.previewMode ??
+      (kernel.routingDecision.mode === "CODE"
         ? "code_plan"
         : kernel.routingDecision.mode === "ASK"
           ? "answer_only"
-          : "static_preview",
+          : "static_preview"),
+    previewType: proposal.previewType ??
+      (kernel.routingDecision.mode === "CODE"
+        ? "code_plan_preview"
+        : kernel.routingDecision.mode === "ASK"
+          ? "none"
+          : "website_static_preview"),
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
     publicCopyCleanStatus: "clean",
     proposalRoutingMode:

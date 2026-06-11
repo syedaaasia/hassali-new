@@ -26,7 +26,12 @@ export function PreviewPanel() {
       .map((change) => change.path)
       .filter((path): path is string => typeof path === "string" && /\.(?:md|mdx|txt)$/i.test(path))
       .slice(0, 4) ?? [];
-  const isCodePreviewContext = productMode === "CODE" || proposal?.previewMode === "code_plan";
+  const appPreview = proposal?.appPreview;
+  const isCodePreviewContext =
+    productMode === "CODE" ||
+    proposal?.previewMode === "code_plan" ||
+    proposal?.previewType === "code_app_preview" ||
+    proposal?.previewType === "code_plan_preview";
   const missingPreviewMessage = isCodePreviewContext
     ? `CODE proposal ready. Review the architecture and implementation files in the proposal panel. Live preview is available for WEBSITE/static outputs.${
         proposalDocFiles.length ? ` Planning docs: ${proposalDocFiles.join(", ")}.` : ""
@@ -107,6 +112,73 @@ export function PreviewPanel() {
             src={iframeSource}
             title="Hassali local preview"
           />
+        ) : appPreview && isCodePreviewContext ? (
+          <div className="flex h-full min-h-0 flex-col overflow-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.55)] p-4 text-xs text-foreground">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  CODE app preview
+                </p>
+                <h3 className="mt-1 text-lg font-semibold">{appPreview.appName}</h3>
+                <p className="mt-1 text-muted-foreground">{appPreview.appKind} dashboard concept</p>
+              </div>
+              <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase text-muted-foreground">
+                Mock data
+              </span>
+            </div>
+            <div className="grid min-h-0 gap-3 md:grid-cols-[8rem_1fr]">
+              <aside className="rounded-xl border border-white/10 bg-black/25 p-3">
+                <p className="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Screens</p>
+                <div className="space-y-1.5">
+                  {appPreview.screens.map((screen) => (
+                    <div className="rounded-full bg-white/[0.04] px-2.5 py-1" key={screen}>
+                      {screen}
+                    </div>
+                  ))}
+                </div>
+              </aside>
+              <section className="space-y-3">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-muted-foreground">Customers</p>
+                    <strong className="mt-2 block text-lg">128</strong>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-muted-foreground">Open deals</p>
+                    <strong className="mt-2 block text-lg">24</strong>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                    <p className="text-muted-foreground">Billing</p>
+                    <strong className="mt-2 block text-lg">Planned</strong>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Entities</p>
+                  <div className="flex flex-wrap gap-2">
+                    {appPreview.entities.map((entity) => (
+                      <span className="rounded-full border border-white/10 px-2.5 py-1" key={entity}>
+                        {entity}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Integrations</p>
+                  <div className="space-y-1.5">
+                    {appPreview.integrations.map((integration) => (
+                      <div className="flex items-center justify-between gap-2" key={integration}>
+                        <span>{integration}</span>
+                        <span className="text-muted-foreground">placeholder</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <p className="rounded-xl border border-amber-300/20 bg-amber-300/10 p-3 text-amber-100">
+                  {appPreview.mockDataNotice}
+                </p>
+              </section>
+            </div>
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.5)] p-6 text-center text-xs leading-5 text-muted-foreground">
             {!projectId

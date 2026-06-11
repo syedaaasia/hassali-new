@@ -191,6 +191,10 @@ function regenerationIntentFor(request: string) {
     return "rename";
   }
 
+  if (/\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+(?:to|with)\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(prompt)) {
+    return "rename";
+  }
+
   if (/\b(?:reload|restart|stop|start)\s+preview\b/.test(prompt)) {
     return "runtime_action";
   }

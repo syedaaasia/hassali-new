@@ -71,6 +71,14 @@ export type KernelRoutingDecision = {
 };
 
 export type DiffProposal = {
+  appPreview?: {
+    appKind: string;
+    appName: string;
+    entities: string[];
+    integrations: string[];
+    mockDataNotice: string;
+    screens: string[];
+  };
   blockedReason?: string;
   contradictionStatus?: "blocked" | "clear" | "review_required";
   detectedDomain?: string;
@@ -82,6 +90,7 @@ export type DiffProposal = {
   modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
   mode: "SUGGEST" | "EXECUTE";
   previewMode?: "answer_only" | "code_plan" | "static_preview";
+  previewType?: "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
   projectId: string | null;
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
@@ -101,6 +110,27 @@ export type DiffProposal = {
     diffPreview?: string;
   }>;
 };
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isAppPreview(value: unknown): value is NonNullable<DiffProposal["appPreview"]> {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const preview = value as NonNullable<DiffProposal["appPreview"]>;
+
+  return (
+    typeof preview.appKind === "string" &&
+    typeof preview.appName === "string" &&
+    isStringArray(preview.entities) &&
+    isStringArray(preview.integrations) &&
+    typeof preview.mockDataNotice === "string" &&
+    isStringArray(preview.screens)
+  );
+}
 
 type ChatState = {
   messages: ChatMessage[];
@@ -266,6 +296,7 @@ function isDiffProposal(value: unknown): value is DiffProposal {
 
   return (
     typeof proposal.id === "string" &&
+    (typeof proposal.appPreview === "undefined" || isAppPreview(proposal.appPreview)) &&
     (typeof proposal.projectId === "string" || proposal.projectId === null) &&
     typeof proposal.summary === "string" &&
     (typeof proposal.blockedReason === "undefined" || typeof proposal.blockedReason === "string") &&
@@ -294,6 +325,12 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.previewMode === "answer_only" ||
       proposal.previewMode === "code_plan" ||
       proposal.previewMode === "static_preview") &&
+    (typeof proposal.previewType === "undefined" ||
+      proposal.previewType === "code_app_preview" ||
+      proposal.previewType === "code_plan_preview" ||
+      proposal.previewType === "docs_preview" ||
+      proposal.previewType === "none" ||
+      proposal.previewType === "website_static_preview") &&
     (typeof proposal.proposalRoutingWarnings === "undefined" ||
       (Array.isArray(proposal.proposalRoutingWarnings) &&
         proposal.proposalRoutingWarnings.every(isProposalRoutingWarning))) &&

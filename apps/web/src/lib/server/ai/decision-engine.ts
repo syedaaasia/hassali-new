@@ -81,7 +81,7 @@ function isRenameRequest(promptText: string) {
   return (
     /\b(?:rename|replace)\b/i.test(promptText) ||
     /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
-    /\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+to\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(promptText)
+    /\bchange\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\s+(?:to|with)\s+["'`]?[a-z0-9][a-z0-9&' -]{0,80}["'`]?\b/i.test(promptText)
   );
 }
 
