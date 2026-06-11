@@ -1,6 +1,7 @@
 import type { DecisionPlan } from "@/lib/server/ai/decision-engine";
 import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
 import type { BusinessBlueprint } from "@/lib/server/ai/blueprint-matcher";
+import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-engine";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
@@ -152,6 +153,7 @@ type IntelligenceKernelInput = {
   decision: DecisionPlan;
   diagnostic: DiagnosticContext;
   blueprint?: BusinessBlueprint;
+  contextPriority?: ContextPriorityResult;
   intent: IntentIntelligence;
   mode: KernelMode;
   translatedIntent?: TranslatedIntentSpec;
@@ -192,6 +194,10 @@ function promptText(input: IntelligenceKernelInput) {
     input.blueprint?.sections.join(" "),
     input.blueprint?.screens.join(" "),
     input.blueprint?.mustInclude.join(" "),
+    input.contextPriority?.authoritativeDomain,
+    input.contextPriority?.authoritativeBusinessType,
+    input.contextPriority?.authoritativeIntentFamily,
+    input.contextPriority?.authoritativeFeatures.join(" "),
     input.intent.summary,
     input.decision.reason,
     input.composition.businessType,
@@ -318,6 +324,7 @@ function frameworkHintFor(input: IntelligenceKernelInput, taskType: string): Ker
 function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
   const translated = input.translatedIntent;
   const blueprint = input.blueprint;
+  const priority = input.contextPriority;
 
   return Array.from(
     new Set([
@@ -336,6 +343,11 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
       blueprint ? `blueprint-preview:${blueprint.previewType}` : null,
       blueprint?.sections.length ? `blueprint-sections:${blueprint.sections.slice(0, 8).join(", ")}` : null,
       blueprint?.screens.length ? `blueprint-screens:${blueprint.screens.slice(0, 8).join(", ")}` : null,
+      priority ? `authoritative-mode:${priority.authoritativeMode}` : null,
+      priority?.authoritativeDomain ? `authoritative-domain:${priority.authoritativeDomain}` : null,
+      priority ? `authoritative-intent:${priority.authoritativeIntentFamily}` : null,
+      priority ? `authoritative-preview:${priority.authoritativePreviewType}` : null,
+      priority?.conflicts.length ? `context-conflicts:${priority.conflicts.length}` : null,
       `domain:${input.intent.domain}`,
       `business:${input.composition.businessType}`,
       input.intent.pageCount ? `pages:${input.intent.pageCount}` : null,
@@ -459,8 +471,8 @@ export function buildTaskUnderstanding(input: IntelligenceKernelInput): TaskUnde
   );
   const taskUnderstanding: TaskUnderstanding = {
     brandName: input.intent.brandName,
-    businessType: input.translatedIntent?.businessType ?? input.composition.businessType,
-    domain: input.translatedIntent?.domain ?? input.intent.domain,
+    businessType: input.contextPriority?.authoritativeBusinessType ?? input.translatedIntent?.businessType ?? input.composition.businessType,
+    domain: input.contextPriority?.authoritativeDomain ?? input.translatedIntent?.domain ?? input.intent.domain,
     mode: input.mode,
     pageCount: input.translatedIntent?.pages.count ?? input.intent.pageCount,
     requestedPages: translatedPages.length ? translatedPages : input.intent.requestedPages,
@@ -538,6 +550,9 @@ export function buildReasoningTrace(
       input.blueprint
         ? `Blueprint matcher selected ${input.blueprint.blueprintName} (${input.blueprint.blueprintId}) with ${input.blueprint.blueprintStatus} status and preview ${input.blueprint.previewType}.`
         : "Blueprint matcher was not available for this request.",
+      input.contextPriority
+        ? `Context priority selected mode=${input.contextPriority.authoritativeMode}, domain=${input.contextPriority.authoritativeDomain ?? "unknown"}, intent=${input.contextPriority.authoritativeIntentFamily}, preview=${input.contextPriority.authoritativePreviewType}, suppressed=${input.contextPriority.suppressedContext.length}.`
+        : "Context priority engine was not available for this request.",
       input.composition.reasoningSummary,
       input.decision.reason
     ],

@@ -16,6 +16,11 @@ import {
   type BusinessBlueprint
 } from "@/lib/server/ai/blueprint-matcher";
 import {
+  buildContextPriority,
+  summarizeContextPriority,
+  type ContextPriorityResult
+} from "@/lib/server/ai/context-priority-engine";
+import {
   buildDiagnosticContext,
   formatDiagnosticContext,
   type DiagnosticContext
@@ -133,6 +138,12 @@ type DiffProposal = {
   blueprintStatus?: "fallback" | "matched" | "none";
   changes: ProposalChange[];
   blockedReason?: string;
+  authoritativeDomain?: string | null;
+  authoritativeIntentFamily?: string;
+  authoritativeMode?: "ASK" | "CODE" | "WEBSITE";
+  authoritativePreviewType?: "code_app_preview" | "code_plan_preview" | "none" | "website_static_preview";
+  contextConflictCount?: number;
+  contextPriorityStatus?: "clear" | "conflicts_resolved" | "low_confidence";
   contradictionStatus?: "blocked" | "clear" | "review_required";
   detectedDomain?: string;
   domainConfidence?: number;
@@ -156,6 +167,7 @@ type DiffProposal = {
   shouldBlockExecution?: boolean;
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
   status: "pending";
+  suppressedContextCount?: number;
   summary: string;
   translatedBusinessType?: string | null;
   translatedDomain?: string | null;
@@ -2110,6 +2122,25 @@ function compactBusinessBlueprint(blueprint: BusinessBlueprint) {
   };
 }
 
+function compactContextPriority(contextPriority: ContextPriorityResult) {
+  return {
+    authoritativeBusinessType: contextPriority.authoritativeBusinessType,
+    authoritativeConstraints: contextPriority.authoritativeConstraints,
+    authoritativeDomain: contextPriority.authoritativeDomain,
+    authoritativeFeatures: contextPriority.authoritativeFeatures,
+    authoritativeIntentFamily: contextPriority.authoritativeIntentFamily,
+    authoritativeMode: contextPriority.authoritativeMode,
+    authoritativePreviewType: contextPriority.authoritativePreviewType,
+    confidence: contextPriority.confidence,
+    conflictCount: contextPriority.conflicts.length,
+    conflicts: contextPriority.conflicts,
+    priorityNotes: contextPriority.priorityNotes,
+    priorityStatus: contextPriority.priorityStatus,
+    suppressedContextCount: contextPriority.suppressedContext.length,
+    suppressedContext: contextPriority.suppressedContext
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2172,7 +2203,8 @@ function attachProposalRoutingMetadata(
   composition?: CompositionStrategy,
   prompt?: string,
   translatedIntent?: TranslatedIntentSpec,
-  blueprint?: BusinessBlueprint
+  blueprint?: BusinessBlueprint,
+  contextPriority?: ContextPriorityResult
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
   const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
@@ -2194,6 +2226,12 @@ function attachProposalRoutingMetadata(
     blueprintName: blueprint?.blueprintName,
     blueprintPreviewType: blueprint?.previewType,
     blueprintStatus: blueprint?.blueprintStatus,
+    authoritativeDomain: contextPriority?.authoritativeDomain,
+    authoritativeIntentFamily: contextPriority?.authoritativeIntentFamily,
+    authoritativeMode: contextPriority?.authoritativeMode,
+    authoritativePreviewType: contextPriority?.authoritativePreviewType,
+    contextConflictCount: contextPriority?.conflicts.length,
+    contextPriorityStatus: contextPriority?.priorityStatus,
     contradictionStatus: "clear",
     detectedDomain,
     domainConfidence: translatedIntent?.confidence ?? intent?.confidence,
@@ -2212,7 +2250,13 @@ function attachProposalRoutingMetadata(
           ? "answer_only"
           : "static_preview"),
     previewType: proposal.previewType ??
-      (blueprint?.previewType === "code_app_preview"
+      (contextPriority?.authoritativePreviewType === "code_app_preview"
+        ? "code_app_preview"
+        : contextPriority?.authoritativePreviewType === "code_plan_preview"
+          ? "code_plan_preview"
+          : contextPriority?.authoritativePreviewType === "none"
+            ? "none"
+            : blueprint?.previewType === "code_app_preview"
         ? "code_app_preview"
         : blueprint?.previewType === "code_plan_preview"
           ? "code_plan_preview"
@@ -2230,6 +2274,7 @@ function attachProposalRoutingMetadata(
     requiresExtraReview: routing.shouldRequireExtraReview || extraWarnings.length > 0,
     sectionCopyQualityStatus: "clean",
     staleTermScanStatus: "clean",
+    suppressedContextCount: contextPriority?.suppressedContext.length,
     translatedBusinessType: translatedIntent?.businessType,
     translatedDomain: translatedIntent?.domain,
     translatedFeatures: translatedIntent?.requestedFeatures,
@@ -2433,6 +2478,7 @@ async function createFallbackProposalResponse(input: {
   routing: ProposalRoutingDecision;
   translatedIntent: TranslatedIntentSpec;
   blueprint: BusinessBlueprint;
+  contextPriority: ContextPriorityResult;
   workspace: WorkspaceContext;
 }) {
   const proposal = createLocalProposal(
@@ -2472,7 +2518,8 @@ async function createFallbackProposalResponse(input: {
       input.composition,
       input.prompt,
       input.translatedIntent,
-      input.blueprint
+      input.blueprint,
+      input.contextPriority
     )
   });
   let persistence = input.persistence;
@@ -2490,6 +2537,7 @@ async function createFallbackProposalResponse(input: {
       intelligenceKernel: compactIntelligenceKernel(input.kernel),
       intentTranslation: compactTranslatedIntent(input.translatedIntent),
       blueprint: compactBusinessBlueprint(input.blueprint),
+      contextPriority: compactContextPriority(input.contextPriority),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
@@ -2669,6 +2717,17 @@ export async function POST(request: Request) {
     prompt: effectiveUserPrompt,
     translatedIntent
   });
+  const contextPriority = buildContextPriority({
+    businessBlueprint: blueprint,
+    currentPrompt: effectiveUserPrompt,
+    fallbackDefaults: ["approval-first", "selected-project-only", "no shell execution", "no package installs"],
+    previousProposalContext: null,
+    productMode,
+    projectContract,
+    regenerationContext: latestUserPrompt.includes("Previous proposal was blocked") ? latestUserPrompt : null,
+    translatedIntent,
+    workspaceContextSummary: `${workspace.fileList.length} file(s); active=${workspace.activePath}; project=${workspace.projectName ?? "unknown"}`
+  });
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -2691,6 +2750,7 @@ export async function POST(request: Request) {
   const kernel = buildIntelligenceKernel({
     blueprint,
     composition,
+    contextPriority,
     decision,
     diagnostic,
     intent,
@@ -2705,6 +2765,7 @@ export async function POST(request: Request) {
     console.info("intent intelligence", intent);
     console.info("intent translation", summarizeTranslatedIntent(translatedIntent));
     console.info("business blueprint", summarizeBusinessBlueprint(blueprint));
+    console.info("context priority", summarizeContextPriority(contextPriority));
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
     console.info("kernel routing decision", kernel.routingDecision);
@@ -2839,7 +2900,8 @@ export async function POST(request: Request) {
         composition,
         effectiveUserPrompt,
         translatedIntent,
-        blueprint
+        blueprint,
+        contextPriority
       )
     });
     const visibleSummary =
@@ -2855,6 +2917,7 @@ export async function POST(request: Request) {
         intent,
         intentTranslation: compactTranslatedIntent(translatedIntent),
         blueprint: compactBusinessBlueprint(blueprint),
+        contextPriority: compactContextPriority(contextPriority),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -2903,6 +2966,7 @@ export async function POST(request: Request) {
                 `For multi-page requests, satisfy the required page files exactly. Decision plan: ${JSON.stringify(decision)}. ` +
                 `Intent translator spec from current prompt, higher priority than project contract: ${JSON.stringify(translatedIntent)}. ` +
                 `Business/app blueprint matched from translated intent: ${JSON.stringify(blueprint)}. Use it for sections, screens, components, copy blocks, file strategy, must-include, must-avoid, and acceptance checks. ` +
+                `Context priority result: ${JSON.stringify(contextPriority)}. Obey authoritativeMode, authoritativeDomain, authoritativeIntentFamily, authoritativePreviewType, suppressedContext, and conflicts. Current prompt and selected product mode outrank HASSALI.md, old proposals, fallback defaults, and examples. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
@@ -2937,6 +3001,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        contextPriority,
         workspace
       });
     }
@@ -2957,6 +3022,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        contextPriority,
         workspace
       });
     }
@@ -2994,6 +3060,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        contextPriority,
         workspace
       });
     }
@@ -3048,7 +3115,8 @@ export async function POST(request: Request) {
         composition,
         effectiveUserPrompt,
         translatedIntent,
-        blueprint
+        blueprint,
+        contextPriority
       )
     });
 
@@ -3072,6 +3140,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        contextPriority,
         workspace
       });
     }
@@ -3100,6 +3169,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        contextPriority,
         workspace
       });
     }
@@ -3111,6 +3181,7 @@ export async function POST(request: Request) {
         intent,
         intentTranslation: compactTranslatedIntent(translatedIntent),
         blueprint: compactBusinessBlueprint(blueprint),
+        contextPriority: compactContextPriority(contextPriority),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

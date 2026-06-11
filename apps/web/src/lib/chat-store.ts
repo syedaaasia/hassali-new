@@ -86,6 +86,12 @@ export type DiffProposal = {
   blueprintPreviewType?: "code_app_preview" | "code_plan_preview" | "none" | "website_static_preview";
   blueprintStatus?: "fallback" | "matched" | "none";
   blockedReason?: string;
+  authoritativeDomain?: string | null;
+  authoritativeIntentFamily?: string;
+  authoritativeMode?: "ASK" | "CODE" | "WEBSITE";
+  authoritativePreviewType?: "code_app_preview" | "code_plan_preview" | "none" | "website_static_preview";
+  contextConflictCount?: number;
+  contextPriorityStatus?: "clear" | "conflicts_resolved" | "low_confidence";
   contradictionStatus?: "blocked" | "clear" | "review_required";
   detectedDomain?: string;
   domainConfidence?: number;
@@ -109,6 +115,7 @@ export type DiffProposal = {
   shouldBlockExecution?: boolean;
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
   status: "pending" | "approved" | "rejected";
+  suppressedContextCount?: number;
   summary: string;
   translatedBusinessType?: string | null;
   translatedDomain?: string | null;
@@ -326,6 +333,26 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.blueprintStatus === "fallback" ||
       proposal.blueprintStatus === "matched" ||
       proposal.blueprintStatus === "none") &&
+    (typeof proposal.authoritativeDomain === "undefined" ||
+      proposal.authoritativeDomain === null ||
+      typeof proposal.authoritativeDomain === "string") &&
+    (typeof proposal.authoritativeIntentFamily === "undefined" ||
+      typeof proposal.authoritativeIntentFamily === "string") &&
+    (typeof proposal.authoritativeMode === "undefined" ||
+      proposal.authoritativeMode === "ASK" ||
+      proposal.authoritativeMode === "CODE" ||
+      proposal.authoritativeMode === "WEBSITE") &&
+    (typeof proposal.authoritativePreviewType === "undefined" ||
+      proposal.authoritativePreviewType === "code_app_preview" ||
+      proposal.authoritativePreviewType === "code_plan_preview" ||
+      proposal.authoritativePreviewType === "none" ||
+      proposal.authoritativePreviewType === "website_static_preview") &&
+    (typeof proposal.contextConflictCount === "undefined" ||
+      typeof proposal.contextConflictCount === "number") &&
+    (typeof proposal.contextPriorityStatus === "undefined" ||
+      proposal.contextPriorityStatus === "clear" ||
+      proposal.contextPriorityStatus === "conflicts_resolved" ||
+      proposal.contextPriorityStatus === "low_confidence") &&
     (typeof proposal.projectId === "string" || proposal.projectId === null) &&
     typeof proposal.summary === "string" &&
     (typeof proposal.blockedReason === "undefined" || typeof proposal.blockedReason === "string") &&
@@ -388,6 +415,8 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.staleTermScanStatus === "blocked" ||
       proposal.staleTermScanStatus === "clean" ||
       proposal.staleTermScanStatus === "review_required") &&
+    (typeof proposal.suppressedContextCount === "undefined" ||
+      typeof proposal.suppressedContextCount === "number") &&
     (typeof proposal.translatedBusinessType === "undefined" ||
       proposal.translatedBusinessType === null ||
       typeof proposal.translatedBusinessType === "string") &&
