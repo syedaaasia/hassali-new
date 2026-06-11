@@ -72,6 +72,10 @@ function isWebsiteCreationRequest(promptText: string) {
 }
 
 function isRenameRequest(promptText: string) {
+  if (/\b(?:do not|don't|dont|no)\s+rename\b/i.test(promptText)) {
+    return false;
+  }
+
   return (
     /\b(?:rename|replace)\b/i.test(promptText) ||
     /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
@@ -101,7 +105,24 @@ function extractBrandName(prompt: string) {
     prompt.match(/\b(?:website|site|landing page)\s+for\s+([A-Z][A-Za-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/) ??
     prompt.match(/\bfor\s+([A-Z][A-Za-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|in|it|should|as)\b|[,.!?]|$)/);
 
-  return match?.[1]?.trim().replace(/\s+/g, " ") ?? null;
+  const value = match?.[1]?.trim().replace(/\s+/g, " ") ?? null;
+  const locationOnly = new Set([
+    "canada",
+    "toronto",
+    "pakistan",
+    "india",
+    "bangladesh",
+    "dubai",
+    "uae",
+    "london",
+    "uk",
+    "new york",
+    "usa",
+    "karachi",
+    "lahore"
+  ]);
+
+  return value && !locationOnly.has(value.toLowerCase()) ? value : null;
 }
 
 function extractPageCount(promptText: string) {

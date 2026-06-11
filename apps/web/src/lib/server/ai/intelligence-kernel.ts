@@ -3,7 +3,25 @@ import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 
-type KernelMode = "ASK" | "SUGGEST" | "EXECUTE";
+export type KernelMode = "ASK" | "CODE" | "WEBSITE";
+export type KernelMutationPolicy = "answer_only" | "proposal_required" | "safe_auto_apply_blocked";
+export type KernelProviderProfileHint =
+  | "cheap"
+  | "coding"
+  | "fast"
+  | "local"
+  | "long_context"
+  | "privacy_sensitive"
+  | "reasoning"
+  | "vision";
+export type KernelFrameworkHint =
+  | "crewai_candidate"
+  | "langchain_candidate"
+  | "langgraph_candidate"
+  | "llamaindex_candidate"
+  | "multi_agent_candidate"
+  | "none"
+  | "rag_candidate";
 type RiskLevel = "low" | "medium" | "high";
 type RuntimeAction = "restart_runtime" | "reload_preview" | "stop_runtime";
 
@@ -97,6 +115,19 @@ export type LearningSignal = {
   qualitySignals: string[];
 };
 
+export type KernelRoutingDecision = {
+  confidence: number;
+  constraints: string[];
+  frameworkHint?: KernelFrameworkHint;
+  mode: KernelMode;
+  mutationPolicy: KernelMutationPolicy;
+  providerProfileHint?: KernelProviderProfileHint;
+  requiredChecks: string[];
+  risks: string[];
+  routingExplanation: string;
+  taskType: string;
+};
+
 export type IntelligenceKernelResult = {
   confidence: number;
   contextDiagnosis: ContextDiagnosis;
@@ -106,6 +137,7 @@ export type IntelligenceKernelResult = {
   planCandidates: PlanCandidate[];
   reasoningTrace: ReasoningTrace;
   riskAssessment: RiskAssessment;
+  routingDecision: KernelRoutingDecision;
   selectedPlan: PlanCandidate;
   shouldProceed: boolean;
   summary: string;
@@ -142,6 +174,203 @@ function isWebsiteRequest(decision: DecisionPlan) {
     decision.requestType === "multi_page_generation" ||
     decision.requestType === "website_generation"
   );
+}
+
+function promptText(input: IntelligenceKernelInput) {
+  return [
+    input.intent.summary,
+    input.decision.reason,
+    input.composition.businessType,
+    input.intent.requiredFeatures.join(" "),
+    input.intent.visualStyle.join(" "),
+    input.intent.requestedPages.join(" ")
+  ].join(" ").toLowerCase();
+}
+
+function includesPromptAny(input: IntelligenceKernelInput, terms: string[]) {
+  const text = promptText(input);
+
+  return terms.some((term) => text.includes(term));
+}
+
+function taskTypeFor(input: IntelligenceKernelInput) {
+  if (input.mode === "ASK" || input.decision.requestType === "ask" || input.intent.userIntent === "question") {
+    return "explanation_or_guidance";
+  }
+
+  if (input.decision.requestType === "rename") {
+    return "rename_text_replace";
+  }
+
+  if (input.decision.requestType === "visual_theme_edit") {
+    return "visual_theme_edit";
+  }
+
+  if (input.decision.requestType === "visual_enhancement") {
+    return "website_visual_polish";
+  }
+
+  if (input.decision.requestType === "data_tool_generation") {
+    return "code_data_tool";
+  }
+
+  if (input.decision.requestType === "code_system_generation") {
+    return "code_system_generation";
+  }
+
+  if (input.decision.requestType === "runtime_action") {
+    return "preview_runtime_action";
+  }
+
+  if (input.mode === "CODE") {
+    return includesPromptAny(input, ["crm", "erp", "api", "auth", "database", "dashboard", "billing", "automation", "desktop app", "python", "mobile app", "iot", "hardware"])
+      ? "code_system_generation"
+      : "code_change";
+  }
+
+  if (isWebsiteRequest(input.decision) || input.mode === "WEBSITE") {
+    return input.decision.requestType === "multi_page_generation"
+      ? "website_multi_page_generation"
+      : "website_generation_or_edit";
+  }
+
+  return input.decision.requestType;
+}
+
+function mutationPolicyFor(input: IntelligenceKernelInput, taskType: string): KernelMutationPolicy {
+  if (
+    input.mode === "ASK" ||
+    input.decision.requestType === "ask" ||
+    input.intent.userIntent === "question" ||
+    includesPromptAny(input, ["without changing files", "no file changes", "answer this", "explain only"])
+  ) {
+    return "answer_only";
+  }
+
+  return taskType === "preview_runtime_action" ? "proposal_required" : "proposal_required";
+}
+
+function providerHintFor(input: IntelligenceKernelInput, taskType: string): KernelProviderProfileHint {
+  if (includesPromptAny(input, ["private", "privacy", "confidential", "local only", "offline"])) {
+    return "privacy_sensitive";
+  }
+
+  if (includesPromptAny(input, ["read these docs", "documentation", "entire repo", "large codebase", "many files"])) {
+    return "long_context";
+  }
+
+  if (taskType.startsWith("code") || input.mode === "CODE") {
+    return includesPromptAny(input, ["complex", "architecture", "auth", "database", "billing", "crm", "erp"])
+      ? "reasoning"
+      : "coding";
+  }
+
+  if (input.mode === "WEBSITE") {
+    return includesPromptAny(input, ["image", "images", "visual", "screenshot", "beautiful", "premium", "apple glass"])
+      ? "vision"
+      : "reasoning";
+  }
+
+  return includesPromptAny(input, ["quick", "simple", "short"]) ? "fast" : "cheap";
+}
+
+function frameworkHintFor(input: IntelligenceKernelInput, taskType: string): KernelFrameworkHint {
+  if (includesPromptAny(input, ["read these docs", "documentation", "repo memory", "knowledge base", "many files"])) {
+    return "rag_candidate";
+  }
+
+  if (includesPromptAny(input, ["multi agent", "multiple agents", "team of agents", "roles"])) {
+    return "multi_agent_candidate";
+  }
+
+  if (
+    input.mode === "CODE" &&
+    includesPromptAny(input, ["crm", "erp", "auth", "database", "dashboard", "billing", "workflow", "approval", "state machine"])
+  ) {
+    return "langgraph_candidate";
+  }
+
+  if (input.mode === "CODE" && taskType === "code_system_generation") {
+    return "multi_agent_candidate";
+  }
+
+  return "none";
+}
+
+function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
+  return Array.from(
+    new Set([
+      `mode:${input.mode}`,
+      `task:${taskType}`,
+      `domain:${input.intent.domain}`,
+      `business:${input.composition.businessType}`,
+      input.intent.pageCount ? `pages:${input.intent.pageCount}` : null,
+      input.intent.requestedPages.length ? `requested-pages:${input.intent.requestedPages.join(", ")}` : null,
+      input.intent.palette.length ? `palette:${input.intent.palette.join(", ")}` : null,
+      input.intent.visualStyle.length ? `style:${input.intent.visualStyle.join(", ")}` : null,
+      input.intent.requiredFeatures.length ? `features:${input.intent.requiredFeatures.slice(0, 6).join(", ")}` : null,
+      input.mode === "ASK" ? "no-file-mutation-by-default" : "approval-required-before-mutation",
+      "no-shell-execution",
+      "no-package-install"
+    ].filter(Boolean) as string[])
+  );
+}
+
+function routingRisks(input: IntelligenceKernelInput, riskAssessment: RiskAssessment, critiqueResult: CritiqueResult) {
+  return Array.from(
+    new Set([
+      riskAssessment.projectIsolationRisk >= 0.34 ? "project isolation must be verified" : null,
+      riskAssessment.fileMutationRisk >= 0.34 ? "file mutation requires approval" : null,
+      riskAssessment.overgenerationRisk >= 0.34 ? "overgeneration risk" : null,
+      riskAssessment.wrongDomainRisk >= 0.34 ? "wrong-domain risk" : null,
+      riskAssessment.visualMismatchRisk >= 0.2 ? "visual/style mismatch risk" : null,
+      riskAssessment.userIntentMismatchRisk >= 0.34 ? "user intent mismatch risk" : null,
+      input.mode === "WEBSITE" && input.decision.requestType === "data_tool_generation" ? "website mode received code/tool request" : null,
+      input.mode === "WEBSITE" && input.decision.requestType === "code_system_generation" ? "website mode received software/system request" : null,
+      input.mode === "CODE" && isWebsiteRequest(input.decision) && !includesPromptAny(input, ["web app", "crm", "dashboard", "api", "database"]) ? "code mode may be receiving website-style generation" : null,
+      ...critiqueResult.issues
+    ].filter(Boolean) as string[])
+  );
+}
+
+export function buildKernelRoutingDecision(
+  input: IntelligenceKernelInput,
+  riskAssessment: RiskAssessment,
+  critiqueResult: CritiqueResult,
+  verificationPlan: VerificationPlan,
+  confidence: number
+): KernelRoutingDecision {
+  const taskType = taskTypeFor(input);
+  const mutationPolicy = mutationPolicyFor(input, taskType);
+  const constraints = routingConstraints(input, taskType);
+  const risks = routingRisks(input, riskAssessment, critiqueResult);
+  const requiredChecks = Array.from(
+    new Set([
+      ...verificationPlan.checks,
+      input.mode === "WEBSITE" ? "check website domain, visuals, responsiveness, colors, images, and requested pages" : null,
+      input.mode === "CODE" ? "check architecture, data model, auth/security impact, state, tests, and maintainability" : null,
+      mutationPolicy === "answer_only" ? "confirm no file mutation proposal is created" : null,
+      confidence < 0.7 ? "low confidence requires explicit review before approval" : null
+    ].filter(Boolean) as string[])
+  );
+  const providerProfileHint = providerHintFor(input, taskType);
+  const frameworkHint = frameworkHintFor(input, taskType);
+
+  return {
+    confidence,
+    constraints,
+    frameworkHint,
+    mode: input.mode,
+    mutationPolicy,
+    providerProfileHint,
+    requiredChecks,
+    risks,
+    routingExplanation:
+      mutationPolicy === "answer_only"
+        ? `Kernel classified this as ${taskType}; Hassali should answer without proposing file changes.`
+        : `Kernel classified this as ${taskType}; Hassali should create an approval-first ${input.mode.toLowerCase()} proposal with the listed checks.`,
+    taskType
+  };
 }
 
 function isTechnicalBusiness(composition: CompositionStrategy) {
@@ -281,14 +510,14 @@ export function buildPlanCandidates(
 ): PlanCandidate[] {
   const expectedFiles = expectedFilesFromComposition(input.composition, input.decision);
   const runtimeActions: RuntimeAction[] =
-    input.mode === "EXECUTE" && input.decision.requestType === "runtime_action"
+      input.mode !== "ASK" && input.decision.requestType === "runtime_action"
       ? ["restart_runtime", "reload_preview", "stop_runtime"]
-      : input.mode === "EXECUTE" && isWebsiteRequest(input.decision)
+      : input.mode === "WEBSITE" && isWebsiteRequest(input.decision)
         ? ["reload_preview"]
         : [];
   const baseConfidence = average([input.intent.confidence, input.decision.confidence]);
   const primaryRisk =
-    input.mode === "EXECUTE" || runtimeActions.length > 0
+    input.mode !== "ASK" || runtimeActions.length > 0
       ? "medium"
       : expectedFiles.length > 0
         ? "low"
@@ -537,7 +766,7 @@ export function buildIntelligenceKernel(input: IntelligenceKernelInput): Intelli
     allowedRuntimeActions: ["restart_runtime", "reload_preview", "stop_runtime"],
     approvalRequired: true,
     canMutateFiles: input.mode !== "ASK" && selectedPlan.expectedFiles.length > 0,
-    canRunRuntimeActions: input.mode === "EXECUTE" && selectedPlan.runtimeActions.length > 0,
+    canRunRuntimeActions: input.mode !== "ASK" && selectedPlan.runtimeActions.length > 0,
     mutationScope: input.mode === "ASK" ? "none" : "selected_project",
     summary:
       input.mode === "ASK"
@@ -555,9 +784,17 @@ export function buildIntelligenceKernel(input: IntelligenceKernelInput): Intelli
     ])
   );
   const shouldProceed = critiqueResult.passed && riskAssessment.riskLevel !== "high";
+  const routingDecision = buildKernelRoutingDecision(
+    input,
+    riskAssessment,
+    critiqueResult,
+    verificationPlan,
+    confidence
+  );
   const summary =
-    `${taskUnderstanding.businessType}; intent=${taskUnderstanding.userIntent}; ` +
+    `${input.mode}; ${taskUnderstanding.businessType}; intent=${taskUnderstanding.userIntent}; ` +
     `plan=${selectedPlan.title}; risk=${riskAssessment.riskLevel}; ` +
+    `policy=${routingDecision.mutationPolicy}; task=${routingDecision.taskType}; ` +
     `confidence=${confidence.toFixed(2)}; proceed=${shouldProceed ? "yes" : "needs review"}.`;
 
   return {
@@ -569,6 +806,7 @@ export function buildIntelligenceKernel(input: IntelligenceKernelInput): Intelli
     planCandidates,
     reasoningTrace,
     riskAssessment,
+    routingDecision,
     selectedPlan,
     shouldProceed,
     summary,

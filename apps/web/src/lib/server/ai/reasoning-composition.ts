@@ -81,6 +81,14 @@ function inferBusinessType(intent: IntentIntelligence) {
     return "ice cream shop / frozen dessert brand";
   }
 
+  if (includesAny(text, ["coffee", "coffee shop", "cafe", "espresso", "latte", "cold brew", "barista", "roastery"])) {
+    return "coffee shop / cafe hospitality and retail";
+  }
+
+  if (includesAny(text, ["dentist", "dental", "orthodontic", "clinic", "root canal", "teeth", "tooth"])) {
+    return "dental clinic / family and cosmetic dental care";
+  }
+
   if (includesAny(text, ["bakery", "bake", "cakes", "pastry", "bread"])) {
     return "bakery hospitality and ordering brand";
   }
@@ -155,6 +163,14 @@ function inferAudience(businessType: string, intent: IntentIntelligence) {
     return ["families", "dessert lovers", "local visitors", "event customers"];
   }
 
+  if (includesAny(type, ["coffee", "cafe", "espresso", "latte", "barista"])) {
+    return ["local coffee drinkers", "office workers", "weekend visitors", "pickup customers"];
+  }
+
+  if (includesAny(type, ["dental", "dentist", "orthodontic", "clinic"])) {
+    return ["families", "new patients", "cosmetic dental patients", "hygiene appointment seekers"];
+  }
+
   if (includesAny(type, ["perfume", "fragrance", "scent"])) {
     return ["fragrance lovers", "gift buyers", "luxury shoppers", "scent explorers"];
   }
@@ -225,6 +241,14 @@ function inferBusinessGoals(businessType: string, intent: IntentIntelligence) {
     return ["flavor discovery", "shop visits", "seasonal special orders", "catering inquiries"];
   }
 
+  if (includesAny(type, ["coffee", "cafe", "espresso", "latte", "barista"])) {
+    return ["menu discovery", "shop visits", "pickup orders", "community loyalty"];
+  }
+
+  if (includesAny(type, ["dental", "dentist", "orthodontic", "clinic"])) {
+    return ["appointment bookings", "patient trust", "treatment clarity", "family care confidence"];
+  }
+
   if (includesAny(type, ["perfume", "fragrance", "scent"])) {
     return ["signature scent discovery", "gift conversion", "luxury collection trust", "consultation bookings"];
   }
@@ -281,6 +305,14 @@ function inferBrandPositioning(businessType: string, intent: IntentIntelligence)
 
   if (includesAny(type, ["ice cream", "frozen dessert", "gelato", "scoop"])) {
     return ["joyful", "creamy", "fresh", "family-friendly", "treat-led"];
+  }
+
+  if (includesAny(type, ["coffee", "cafe", "espresso", "latte", "barista"])) {
+    return ["warm editorial", "crafted", "community-led", "premium cafe"];
+  }
+
+  if (includesAny(type, ["dental", "dentist", "orthodontic", "clinic"])) {
+    return ["calm clinical", "trust-led", "modern care", "patient-first"];
   }
 
   if (includesAny(type, ["perfume", "fragrance", "scent"])) {
@@ -347,7 +379,9 @@ function inferPages(intent: IntentIntelligence, businessType: string) {
       ? "services"
     : includesAny(type, ["motorbike", "motorcycle", "ambiguous rider", "bike shop"])
       ? "bikes"
-    : includesAny(type, ["commerce", "jewellery", "candle", "fish", "seafood", "beauty", "skincare", "cream", "ice cream", "gelato", "scoop", "perfume", "fragrance", "scent", "footwear", "shoe", "sneaker"])
+    : includesAny(type, ["dental", "dentist", "orthodontic", "clinic"])
+      ? "services"
+    : includesAny(type, ["commerce", "jewellery", "candle", "fish", "seafood", "beauty", "skincare", "cream", "ice cream", "gelato", "scoop", "coffee", "cafe", "espresso", "latte", "perfume", "fragrance", "scent", "footwear", "shoe", "sneaker"])
       ? "products"
       : includesAny(type, ["hospitality", "restaurant", "bakery"])
         ? "menu"
@@ -388,6 +422,14 @@ function sectionsForPage(page: string, businessType: string) {
       return ["hero", "signature flavors", "scoops and cones", "seasonal specials", "catering", "store visit CTA"];
     }
 
+    if (includesAny(type, ["coffee", "cafe", "espresso", "latte", "barista"])) {
+      return ["hero", "signature drinks", "menu highlights", "pastries and food", "pickup ordering", "location hours CTA"];
+    }
+
+    if (includesAny(type, ["dental", "dentist", "orthodontic", "clinic"])) {
+      return ["hero", "dental services", "dentists and doctors", "appointment booking", "hygiene and safety", "patient trust CTA"];
+    }
+
     if (includesAny(type, ["perfume", "fragrance", "scent"])) {
       return ["hero", "signature scent collections", "fragrance notes", "bottle and tester experience", "gifting sets", "scent consultation CTA"];
     }
@@ -400,7 +442,7 @@ function sectionsForPage(page: string, businessType: string) {
       return ["hero", "featured content", "episode highlights", "social proof", "newsletter", "CTA"];
     }
 
-    if (includesAny(type, ["commerce", "candle", "jewellery", "beauty", "skincare", "cream", "perfume", "fragrance", "scent", "footwear", "shoe", "sneaker"])) {
+    if (includesAny(type, ["commerce", "candle", "jewellery", "beauty", "skincare", "cream", "coffee", "cafe", "espresso", "latte", "perfume", "fragrance", "scent", "footwear", "shoe", "sneaker"])) {
       return ["hero", "featured products", "categories", "trust", "reviews", "CTA"];
     }
 
@@ -440,7 +482,9 @@ function sectionsForPage(page: string, businessType: string) {
   }
 
   if (page === "services") {
-    return ["service choices", "how booking works", "support details", "CTA"];
+    return includesAny(type, ["dental", "dentist", "orthodontic", "clinic"])
+      ? ["family dentistry", "cosmetic treatments", "hygiene visits", "emergency care", "appointment CTA"]
+      : ["service choices", "how booking works", "support details", "CTA"];
   }
 
   if (page === "menu") {
@@ -470,6 +514,10 @@ function inferVisualLanguage(intent: IntentIntelligence, businessType: string) {
       ? ["maroon", "white", "dark neutral"]
     : includesAny(type, ["ice cream", "frozen dessert", "gelato", "scoop"])
       ? ["cream", "pink", "blue", "white"]
+      : includesAny(type, ["coffee", "cafe", "espresso", "latte", "barista"])
+        ? ["cream", "brown", "black", "warm neutral"]
+      : includesAny(type, ["dental", "dentist", "orthodontic", "clinic"])
+        ? ["white", "blue", "soft teal", "clinical neutral"]
       : includesAny(type, ["perfume", "fragrance", "scent"])
         ? ["yellow", "white", "soft gold"]
       : includesAny(type, ["seafood", "fish"])
@@ -512,6 +560,22 @@ function inferContentStrategy(businessType: string) {
       ctaStrategy: ["Explore flavors", "Visit the shop", "Book catering"],
       heroGoal: "Make visitors crave fresh scoops, cones, sundaes, seasonal specials, and an easy shop visit.",
       trustSignals: ["fresh daily flavors", "family-friendly service", "seasonal specials", "event catering"]
+    };
+  }
+
+  if (includesAny(type, ["coffee", "cafe", "espresso", "latte", "barista"])) {
+    return {
+      ctaStrategy: ["View the menu", "Order pickup", "Visit the cafe"],
+      heroGoal: "Make visitors feel the cafe atmosphere, signature drinks, pastries, pickup options, and local community rhythm.",
+      trustSignals: ["barista craft", "fresh pastries", "pickup ordering", "local cafe reviews"]
+    };
+  }
+
+  if (includesAny(type, ["dental", "dentist", "orthodontic", "clinic"])) {
+    return {
+      ctaStrategy: ["Book an appointment", "Meet the dentists", "Explore treatments"],
+      heroGoal: "Present calm modern dental care, clear treatment plans, appointment booking, hygiene standards, and patient trust.",
+      trustSignals: ["experienced dentists", "hygiene standards", "clear treatment plans", "patient reviews"]
     };
   }
 
@@ -589,7 +653,7 @@ function inferContentStrategy(businessType: string) {
 
   return {
     ctaStrategy: buildDomainBlueprint({ prompt: businessType }).ctaStrategy,
-    heroGoal: `Explain ${businessType} with domain-specific proof, useful offers, and a clear next step.`,
+    heroGoal: `Present ${businessType} with useful details, credible proof, and a clear next step.`,
     trustSignals: buildDomainBlueprint({ prompt: businessType }).contentTerms.slice(0, 4)
   };
 }

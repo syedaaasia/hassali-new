@@ -32,7 +32,8 @@ import {
 } from "@/lib/server/ai/intent-intelligence";
 import {
   buildIntelligenceKernel,
-  type IntelligenceKernelResult
+  type IntelligenceKernelResult,
+  type KernelRoutingDecision
 } from "@/lib/server/ai/intelligence-kernel";
 import {
   buildProposalRoutingDecision,
@@ -60,6 +61,7 @@ type ChatRequestMessage = {
 };
 
 type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
+type ProductMode = "ASK" | "WEBSITE" | "CODE";
 
 type WorkspaceContext = {
   activeFileContent: string;
@@ -104,15 +106,26 @@ type ProposalRoutingWarning = {
 
 type DiffProposal = {
   changes: ProposalChange[];
+  blockedReason?: string;
+  contradictionStatus?: "blocked" | "clear" | "review_required";
+  detectedDomain?: string;
+  domainConfidence?: number;
+  domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
   id: string;
   intelligenceKernelSummary?: string;
+  kernelRoutingDecision?: KernelRoutingDecision;
+  modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
   mode: "SUGGEST" | "EXECUTE";
+  previewMode?: "answer_only" | "code_plan" | "static_preview";
   projectId: string | null;
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
+  publicCopyCleanStatus?: "blocked" | "clean" | "review_required";
   requiresExtraReview?: boolean;
+  sectionCopyQualityStatus?: "blocked" | "clean" | "review_required";
   shouldBlockExecution?: boolean;
+  staleTermScanStatus?: "blocked" | "clean" | "review_required";
   status: "pending";
   summary: string;
 };
@@ -158,6 +171,22 @@ function isWorkspaceContext(value: unknown): value is WorkspaceContext {
       workspace.projectName === null ||
       typeof workspace.projectName === "string")
   );
+}
+
+function isProductMode(value: unknown): value is ProductMode {
+  return value === "ASK" || value === "WEBSITE" || value === "CODE";
+}
+
+function productModeFromRequest(value: unknown, legacyMode: AiMode): ProductMode {
+  if (isProductMode(value)) {
+    return value;
+  }
+
+  if (legacyMode === "ASK") {
+    return "ASK";
+  }
+
+  return legacyMode === "SUGGEST" ? "WEBSITE" : "CODE";
 }
 
 function createDiffPreview(action: "create" | "update", path: string, proposedContent: string) {
@@ -209,6 +238,10 @@ function cleanRenameValue(value: string) {
 }
 
 function detectRenameRequest(prompt: string) {
+  if (/\b(?:do not|don't|dont|no)\s+rename\b/i.test(prompt)) {
+    return null;
+  }
+
   if (/\b(?:color|colors|colour|colours|theme|palette)\b/i.test(prompt)) {
     return null;
   }
@@ -1044,6 +1077,153 @@ function createLocalProposal(
 ): DiffProposal {
   const renameRequest = detectRenameRequest(prompt);
 
+  if (decision.requestType === "code_system_generation") {
+    const promptText = prompt.toLowerCase();
+    const systemName = promptText.includes("crm")
+      ? "CRM"
+      : promptText.includes("inventory")
+        ? "inventory system"
+        : promptText.includes("erp")
+          ? "ERP"
+          : promptText.includes("pos")
+            ? "POS system"
+            : "software system";
+    const requestedCapabilities = Array.from(
+      new Set([
+        promptText.includes("auth") || promptText.includes("authentication") ? "authentication and role-aware access" : null,
+        promptText.includes("database") ? "database-backed persistence" : null,
+        promptText.includes("dashboard") ? "dashboard and reporting surfaces" : null,
+        promptText.includes("billing") ? "billing/payment integration planning" : null,
+        promptText.includes("crm") ? "customers, leads, pipeline, notes, and activity tracking" : null,
+        "API/service layer",
+        "environment variables",
+        "security and test plan"
+      ].filter(Boolean) as string[])
+    );
+    const architecture = `# ${systemName.toUpperCase()} Architecture Plan
+
+Source request:
+${prompt}
+
+Kernel mode:
+CODE
+
+Purpose:
+Create a serious ${systemName} plan instead of a fake static website. This proposal does not install packages, run shell commands, or bypass approval-first safety.
+
+Core modules:
+${requestedCapabilities.map((item) => `- ${item}`).join("\n")}
+
+Architecture direction:
+- Frontend app shell with authenticated dashboard routes.
+- Server/API layer for customers, records, activity, billing state, and reports.
+- Database-backed source of truth with explicit ownership checks.
+- Safe environment variable contract for auth, database, billing provider, and app URLs.
+- Review-first execution: each implementation phase should be proposed and approved separately.
+
+Non-goals for this proposal:
+- No static marketing-site substitution.
+- No index.html/styles.css/main.js scaffold unless the user explicitly asks for a landing page or frontend mockup.
+- No package installs or database migrations in this step.
+`;
+    const dataModel = `# ${systemName.toUpperCase()} Data Model Draft
+
+Primary entities:
+- users: authenticated account identity and role metadata
+- organizations/workspaces: tenant boundary for project or company data
+- customers: CRM contacts or accounts
+- leads: pipeline stage, source, priority, owner, expected value
+- activities: notes, calls, emails, meetings, follow-ups
+- invoices/subscriptions: billing status, plan, renewal, provider reference
+- audit_events: important user actions and sensitive state changes
+
+Ownership and isolation:
+- Every mutable record must belong to a workspace/organization.
+- API routes must verify authenticated user access before reads or writes.
+- Billing records should never be trusted from client-only state.
+`;
+    const implementationPlan = `# ${systemName.toUpperCase()} Implementation Plan
+
+Phase 1 - Product skeleton:
+- Define routes, dashboard layout, navigation, empty states, and data-loading boundaries.
+- Add typed module contracts for customers, leads, activity, reports, and billing.
+
+Phase 2 - Data and API:
+- Add database schema and migration proposal.
+- Add API/service functions with validation and ownership checks.
+- Add seed-safe examples only if explicitly requested.
+
+Phase 3 - Auth and permissions:
+- Wire protected routes.
+- Add role checks for owner/admin/member access.
+- Confirm no sensitive data is exposed client-side.
+
+Phase 4 - Billing:
+- Plan provider integration, webhook handling, subscription status, and failure states.
+- Keep payment secrets server-side.
+
+Phase 5 - Verification:
+- Typecheck source changes.
+- Test critical create/update/read flows.
+- Manually review dashboard states and error messages.
+`;
+    const securityPlan = `# ${systemName.toUpperCase()} Security And Testing Checklist
+
+Required checks before approval:
+- Proposal projectId matches the selected project.
+- No cross-project file edits.
+- No shell execution or package installation.
+- No secrets added to client files.
+- API validation uses typed schemas before mutation.
+- Database writes enforce ownership and workspace scope.
+- Billing logic treats webhooks/server state as authority.
+- Typecheck should run after source code phases.
+- Manual review should verify dashboard, auth, billing, and empty/error states.
+`;
+    const files = [
+      {
+        content: architecture,
+        path: "ARCHITECTURE.md",
+        summary: `Creates a serious CODE architecture plan for the ${systemName}.`
+      },
+      {
+        content: dataModel,
+        path: "DATA_MODEL.md",
+        summary: "Defines the first-pass entities, ownership boundaries, and persistence model."
+      },
+      {
+        content: implementationPlan,
+        path: "IMPLEMENTATION_PLAN.md",
+        summary: "Breaks the system into safe approval-first implementation phases."
+      },
+      {
+        content: securityPlan,
+        path: "SECURITY_AND_TESTING.md",
+        summary: "Captures security, isolation, billing, and verification checks."
+      }
+    ];
+
+    return {
+      changes: files.map((file) => ({
+        action: diagnostic.fileList.includes(file.path) ? ("update" as const) : ("create" as const),
+        diffPreview: createDiffPreview(
+          diagnostic.fileList.includes(file.path) ? "update" : "create",
+          file.path,
+          file.content
+        ),
+        path: file.path,
+        proposedContent: file.content,
+        summary: file.summary
+      })),
+      id: `proposal-${Date.now()}`,
+      mode,
+      projectId: diagnostic.projectId,
+      status: "pending",
+      summary:
+        `Detected a CODE-mode ${systemName} request. I will create a serious architecture, data model, implementation, and security plan instead of a static website.`
+    };
+  }
+
   if (decision.requestType === "data_tool_generation") {
     const script = `#!/usr/bin/env python3
 """Merge many CSV files into one long CSV file.
@@ -1785,6 +1965,7 @@ function compactIntelligenceKernel(kernel: IntelligenceKernelResult) {
   return {
     confidence: kernel.confidence,
     critiquePassed: kernel.critiqueResult.passed,
+    routingDecision: kernel.routingDecision,
     riskLevel: kernel.riskAssessment.riskLevel,
     shouldProceed: kernel.shouldProceed,
     summary: kernel.summary,
@@ -1798,6 +1979,7 @@ function compactProposalRouting(
 ) {
   return {
     intelligenceKernelSummary: kernel.summary,
+    kernelRoutingDecision: kernel.routingDecision,
     proposalRoutingMode: routing.mode,
     proposalRoutingReasons: routing.reasons,
     proposalRoutingWarnings: routing.warnings,
@@ -1854,14 +2036,35 @@ function attachProposalRoutingMetadata(
   prompt?: string
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
+  const detectedDomain = composition?.businessType ?? intent?.domain;
+  const domainSource =
+    intent?.domain && intent.domain !== "generic website"
+      ? "current_user_prompt"
+      : detectedDomain
+        ? "inferred"
+        : "unknown";
 
   return {
     ...proposal,
     ...compactProposalRouting(kernel, routing),
+    contradictionStatus: "clear",
+    detectedDomain,
+    domainConfidence: intent?.confidence,
+    domainSource,
+    modeObedienceStatus: "obeyed",
+    previewMode:
+      kernel.routingDecision.mode === "CODE"
+        ? "code_plan"
+        : kernel.routingDecision.mode === "ASK"
+          ? "answer_only"
+          : "static_preview",
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
+    publicCopyCleanStatus: "clean",
     proposalRoutingMode:
       extraWarnings.length > 0 && routing.mode === "normal" ? "review_required" : routing.mode,
-    requiresExtraReview: routing.shouldRequireExtraReview || extraWarnings.length > 0
+    requiresExtraReview: routing.shouldRequireExtraReview || extraWarnings.length > 0,
+    sectionCopyQualityStatus: "clean",
+    staleTermScanStatus: "clean"
   };
 }
 
@@ -1882,6 +2085,22 @@ function applyPromptAcceptanceMetadata(
 
   return {
     ...proposal,
+    blockedReason: acceptance.blocked ? acceptance.issues.join("; ") : proposal.blockedReason,
+    contradictionStatus: acceptance.blocked
+      ? "blocked"
+      : acceptance.mode === "review_required"
+        ? "review_required"
+        : proposal.contradictionStatus ?? "clear",
+    modeObedienceStatus: acceptance.blocked
+      ? "blocked"
+      : acceptance.mode === "review_required"
+        ? "review_required"
+        : proposal.modeObedienceStatus ?? "obeyed",
+    publicCopyCleanStatus: acceptance.blocked
+      ? "blocked"
+      : acceptance.mode === "review_required"
+        ? "review_required"
+        : proposal.publicCopyCleanStatus ?? "clean",
     proposalRoutingMode: acceptance.blocked
       ? "blocked"
       : acceptance.mode === "review_required" && proposal.proposalRoutingMode === "normal"
@@ -1897,7 +2116,17 @@ function applyPromptAcceptanceMetadata(
     ],
     requiresExtraReview:
       proposal.requiresExtraReview || acceptance.mode === "review_required" || acceptance.blocked,
+    sectionCopyQualityStatus: acceptance.blocked
+      ? "blocked"
+      : acceptance.mode === "review_required"
+        ? "review_required"
+        : proposal.sectionCopyQualityStatus ?? "clean",
     shouldBlockExecution: proposal.shouldBlockExecution || acceptance.blocked,
+    staleTermScanStatus: acceptance.blocked
+      ? "blocked"
+      : acceptance.mode === "review_required"
+        ? "review_required"
+        : proposal.staleTermScanStatus ?? "clean",
     summary:
       acceptance.blocked
         ? `${proposal.summary} Prompt sovereignty blocked this proposal: ${acceptance.issues.join("; ")}.`
@@ -2151,6 +2380,7 @@ export async function POST(request: Request) {
     messages?: unknown;
     mode?: unknown;
     model?: unknown;
+    productMode?: unknown;
     projectId?: unknown;
     workspace?: unknown;
   } | null;
@@ -2174,6 +2404,7 @@ export async function POST(request: Request) {
     body?.mode === "SUGGEST" || body?.mode === "EXECUTE" || body?.mode === "ASK"
       ? body.mode
       : "ASK";
+  const productMode = productModeFromRequest(body?.productMode, mode);
   const workspace = isWorkspaceContext(body?.workspace)
     ? body.workspace
     : {
@@ -2209,7 +2440,7 @@ export async function POST(request: Request) {
     decision,
     diagnostic,
     intent,
-    mode
+    mode: productMode
   });
   const routing = buildProposalRoutingDecision(kernel);
   const askRuntimeContext = buildAskRuntimeContext();
@@ -2219,6 +2450,7 @@ export async function POST(request: Request) {
     console.info("intent intelligence", intent);
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
+    console.info("kernel routing decision", kernel.routingDecision);
     console.info("proposal routing", routing.metadataSummary);
   }
 
@@ -2246,7 +2478,9 @@ export async function POST(request: Request) {
         inferredDomain: diagnostic.inferredDomain,
         intent,
         intelligenceKernel: compactIntelligenceKernel(kernel),
+        kernelRoutingDecision: kernel.routingDecision,
         proposalRouting: compactProposalRouting(kernel, routing),
+        productMode,
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -2273,6 +2507,26 @@ export async function POST(request: Request) {
 
       return createTextStream(directAskAnswer, persistence?.sessionId);
     }
+  }
+
+  if (mode !== "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
+    const answerOnlyContent =
+      "I can answer this without changing files. " +
+      `${kernel.routingDecision.routingExplanation} ` +
+      "No proposal was created and no project files were touched.";
+
+    persistence = await persistChatMessage(persistence, {
+      content: answerOnlyContent,
+      metadata: {
+        intelligenceKernel: compactIntelligenceKernel(kernel),
+        kernelRoutingDecision: kernel.routingDecision,
+        model,
+        productMode
+      },
+      role: "assistant"
+    });
+
+    return createTextStream(answerOnlyContent, persistence?.sessionId);
   }
 
   const shouldUseDeterministicProposal =
@@ -2366,11 +2620,13 @@ export async function POST(request: Request) {
                 `You may include multiple file changes. Use action "create" for new files and "update" for existing files. ` +
                 `Only include safe runtime actions when the user asks to start, restart, reload, or stop preview. Do not include shell commands, package installs, Docker, or destructive deletes. ` +
                 `Do not use markdown. Do not mutate files. Use the diagnostic context. For vague prompts, preserve existing structure and prefer targeted edits. ` +
+                `If Product mode is CODE or kernel task is code_system_generation, do not create a fake static website or index.html/styles.css/main.js unless the user explicitly asks for a static landing page. Prefer architecture, implementation, data model, and security plan files. ` +
                 `For vague create/build website requests without clear web files, propose standard static files: index.html, styles.css, and main.js. ` +
                 `For multi-page requests, satisfy the required page files exactly. Decision plan: ${JSON.stringify(decision)}. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
-                `Intelligence kernel: ${kernel.summary}. ` +
+                `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
+                `Kernel routing decision: ${JSON.stringify(kernel.routingDecision)}. Obey the kernel mutation policy and required checks. ` +
                 `The proposal summary must mention what you detected and the safe treatment. Diagnostic context:\n${formattedDiagnostic}`
             },
             ...messages

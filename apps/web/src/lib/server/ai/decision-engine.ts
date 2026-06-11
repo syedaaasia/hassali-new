@@ -5,6 +5,7 @@ import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition"
 
 export type DecisionRequestType =
   | "ask"
+  | "code_system_generation"
   | "data_tool_generation"
   | "image_fix"
   | "invoice"
@@ -64,7 +65,19 @@ function isWebsiteCreationRequest(promptText: string) {
   );
 }
 
+function isCodeSystemRequest(promptText: string) {
+  return (
+    /\b(?:create|build|generate|design|make)\b/.test(promptText) &&
+    /\b(?:inventory system|management system|web app|dashboard app|dashboard|crm|erp|pos|api|backend|auth|authentication|database|billing|automation|mobile app|desktop app|iot|hardware)\b/.test(promptText) &&
+    !/\b(?:website|site|landing page|static website|marketing page)\b/.test(promptText)
+  );
+}
+
 function isRenameRequest(promptText: string) {
+  if (/\b(?:do not|don't|dont|no)\s+rename\b/i.test(promptText)) {
+    return false;
+  }
+
   return (
     /\b(?:rename|replace)\b/i.test(promptText) ||
     /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||
@@ -228,10 +241,9 @@ function requestTypeForPrompt(promptText: string, diagnostic: DiagnosticContext)
   }
 
   if (
-    /\b(?:create|build|generate|design|make)\b/.test(promptText) &&
-    /\b(?:inventory system|management system|web app|dashboard app|dashboard|crm|erp|pos)\b/.test(promptText)
+    isCodeSystemRequest(promptText)
   ) {
-    return "website_generation";
+    return "code_system_generation";
   }
 
   if (diagnostic.promptIntent === "visual_theme_edit" || isVisualThemeEditRequest(promptText)) {
@@ -292,6 +304,10 @@ function changeStrategyForType(type: DecisionRequestType, hasIndexHtml: boolean)
     return "Create a lightweight local Python data tool with a clear script, README, safe file handling, and no package installs.";
   }
 
+  if (type === "code_system_generation") {
+    return "Create a serious CODE proposal with architecture, data model, security, implementation phases, environment needs, and verification plan. Do not create a fake static website.";
+  }
+
   if (type === "multi_page_generation") {
     return "Create or update the requested static HTML pages plus shared CSS and JavaScript.";
   }
@@ -342,6 +358,8 @@ export function buildDecisionPlan(input: DecisionInput): DecisionPlan {
   const isWebsiteRequest = requestType === "website_generation" || requestType === "multi_page_generation";
   const requiredFiles = isWebsiteRequest
     ? [...siteStructure.pages, "styles.css", "main.js"]
+    : requestType === "code_system_generation"
+      ? ["ARCHITECTURE.md", "DATA_MODEL.md", "IMPLEMENTATION_PLAN.md", "SECURITY_AND_TESTING.md"]
     : requestType === "data_tool_generation"
       ? ["merge_csv.py", "README.md"]
     : requestType === "visual_theme_edit"
@@ -383,6 +401,7 @@ export function shouldUseDeterministicDecision(decision: DecisionPlan) {
   return [
     "image_fix",
     "invoice",
+    "code_system_generation",
     "data_tool_generation",
     "multi_page_generation",
     "rename",
@@ -425,7 +444,10 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
     "with smart context",
     "with bike context",
     "trust / trust",
-    "trust proof"
+    "trust proof",
+    "build faster with our platform",
+    "ship faster with our platform",
+    "all-in-one platform for teams"
   ];
 
   if (genericFillerPhrases.some((phrase) => allContent.includes(phrase))) {
@@ -436,6 +458,24 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
   if (hasDuplicatedAdjacentWords(allContent)) {
     score -= 18;
     issues.push("proposal contains duplicated adjacent words or brand terms");
+  }
+
+  if (isWebsiteRequest && /\bbg-blue-500\b|\btext-gray-700\b|\bfrom-blue-500\b|\bto-purple-500\b/.test(allContent)) {
+    score -= 18;
+    issues.push("website proposal contains generic Tailwind color defaults");
+  }
+
+  if (isWebsiteRequest && repeatedOccurrences(allContent, /\brounded-md\b/g) >= 5) {
+    score -= 12;
+    issues.push("website proposal overuses generic rounded-md card styling");
+  }
+
+  if (
+    isWebsiteRequest &&
+    repeatedOccurrences(allContent, /grid-template-columns:\s*repeat\(3,\s*1fr\)|grid-cols-3/g) >= 3
+  ) {
+    score -= 12;
+    issues.push("website proposal repeats equal three-card grid patterns");
   }
 
   if (/<img[^>]+src=["']\s*["']/i.test(allContent) || allContent.includes("source.unsplash.com")) {

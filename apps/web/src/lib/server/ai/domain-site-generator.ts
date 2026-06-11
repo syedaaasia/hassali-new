@@ -216,7 +216,7 @@ const profiles: Record<SiteDomain, DomainProfile> = {
       {
         eyebrow: "Partnerships",
         title: "A clean home for sponsorships, services, and booking inquiries.",
-        body: "Explain reach, format, and collaboration options without burying the main show."
+        body: "Show reach, format, and collaboration options without burying the main show."
       }
     ],
     testimonial: "The brand finally felt like a show people could subscribe to.",
@@ -326,11 +326,11 @@ const profiles: Record<SiteDomain, DomainProfile> = {
       {
         eyebrow: "Features",
         title: "Workflows, dashboards, and decisions in one calm place.",
-        body: "Explain the core product benefits with crisp cards and a direct path to activation."
+        body: "Present the core product benefits with crisp cards and a direct path to activation."
       },
       {
         eyebrow: "Integrations",
-        title: "Connect the tools your team already trusts.",
+        title: "Integrations with the tools your team already trusts.",
         body: "Use structured sections to show compatibility without overwhelming new users."
       },
       {
@@ -991,7 +991,7 @@ function colorTokens(intent: IntentIntelligence, composition: CompositionStrateg
     };
   }
 
-  if (has("cream") || has("brown") || business.includes("bakery")) {
+  if (has("cream") || has("brown") || business.includes("bakery") || business.includes("coffee") || business.includes("cafe")) {
     return {
       accent: "#8b5e34",
       accentSoft: "rgba(196, 142, 86, 0.28)",
@@ -1067,6 +1067,14 @@ function imageSetForComposition(intent: IntentIntelligence, composition: Composi
       "https://images.unsplash.com/photo-1488900128323-21503983a07e?auto=format&fit=crop&w=1400&q=80",
       "https://images.unsplash.com/photo-1501443762994-82bd5dace89a?auto=format&fit=crop&w=1000&q=80",
       "https://images.unsplash.com/photo-1563805042-7684c019e1cb?auto=format&fit=crop&w=1000&q=80"
+    ];
+  }
+
+  if (text.includes("coffee") || text.includes("cafe") || text.includes("espresso") || text.includes("latte") || text.includes("barista")) {
+    return [
+      "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1400&q=80",
+      "https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=1000&q=80",
+      "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1000&q=80"
     ];
   }
 
@@ -1154,6 +1162,29 @@ function sectionCopy(section: string, composition: CompositionStrategy) {
   const terms = blueprint.contentTerms.slice(0, 5);
   const termText = terms.join(", ");
   const category = blueprint.productCategory;
+  const isCoffeeDomain = blueprint.domainLabel.includes("coffee");
+  const isDentalDomain = blueprint.domainLabel.includes("dentist");
+
+  if (sectionText === "hero") {
+    if (isCoffeeDomain) {
+      return {
+        body: "Lead with espresso, latte, cold brew, pastries, pickup, cafe seating, and a warm reason to visit.",
+        title: "A warm cafe first impression for coffee people"
+      };
+    }
+
+    if (isDentalDomain) {
+      return {
+        body: "Lead with calm dental care, appointment booking, experienced dentists, hygiene standards, and treatment clarity for families and new patients.",
+        title: "Premium dental care for confident smiles"
+      };
+    }
+
+    return {
+      body: `Open with ${escapeHtml(termText || category)} in plain customer language and give ${escapeHtml(audience)} a clear next step.`,
+      title: `${domainTitle(blueprint)} with a clear first-screen promise`
+    };
+  }
 
   if (blueprint.ambiguity.isAmbiguous) {
     if (sectionText.includes("service") || sectionText.includes("parts")) {
@@ -1202,7 +1233,7 @@ function sectionCopy(section: string, composition: CompositionStrategy) {
         sectionText.includes("mounting")
           ? "Make wall mounting, cable routing, delivery, calibration, and installation booking clear before customers leave the showroom."
           : sectionText.includes("warranty")
-            ? "Explain warranty support, after-sales help, soundbar bundles, and replacement guidance in plain language."
+            ? "Make warranty support, after-sales help, soundbar bundles, and replacement guidance easy to understand."
             : "Help shoppers compare smart TVs, OLED/QLED/LED panels, screen sizes, viewing distance, and home cinema bundles without confusion.",
       title:
         sectionText.includes("mounting")
@@ -1250,6 +1281,54 @@ function sectionCopy(section: string, composition: CompositionStrategy) {
     };
   }
 
+  if (isDentalDomain || sectionText.includes("dental") || sectionText.includes("dentist") || sectionText.includes("doctor") || sectionText.includes("appointment") || sectionText.includes("hygiene") || sectionText.includes("emergency")) {
+    return {
+      body:
+        sectionText.includes("appointment")
+          ? "Make booking feel simple with clear appointment paths, treatment expectations, and a calm first-visit experience."
+          : sectionText.includes("hygiene") || sectionText.includes("safety")
+            ? "Build confidence with sterilization standards, preventive hygiene visits, transparent care plans, and patient comfort."
+            : sectionText.includes("doctor") || sectionText.includes("dentist")
+              ? "Introduce experienced dentists, gentle communication, family care, cosmetic options, and clear treatment guidance."
+              : "Present family dentistry, cosmetic treatments, emergency care, hygiene visits, and patient support without overwhelming visitors.",
+      title:
+        sectionText.includes("appointment")
+          ? "Appointments that feel simple to book"
+          : sectionText.includes("hygiene") || sectionText.includes("safety")
+            ? "Hygiene standards and calm patient care"
+            : sectionText.includes("doctor") || sectionText.includes("dentist")
+              ? "Experienced dentists with clear care plans"
+              : "Dental services for healthy confident smiles"
+    };
+  }
+
+  if (
+    isCoffeeDomain &&
+    (sectionText.includes("coffee") ||
+      sectionText.includes("drink") ||
+      sectionText.includes("menu") ||
+      sectionText.includes("espresso") ||
+      sectionText.includes("latte") ||
+      sectionText.includes("pastries") ||
+      sectionText.includes("pickup") ||
+      sectionText.includes("location"))
+  ) {
+    return {
+      body:
+        sectionText.includes("pickup") || sectionText.includes("location")
+          ? "Make hours, pickup, neighborhood location, and the next visit feel obvious for Canadian coffee customers."
+          : sectionText.includes("pastries") || sectionText.includes("food")
+            ? "Pair espresso, cold brew, and signature drinks with pastries, breakfast bites, and a warm cafe rhythm."
+            : "Present espresso, latte, cold brew, signature drinks, barista craft, and menu highlights with a premium cafe tone.",
+      title:
+        sectionText.includes("pickup") || sectionText.includes("location")
+          ? "Pickup, hours, and a simple path to the cafe"
+          : sectionText.includes("pastries") || sectionText.includes("food")
+            ? "Pastries and cafe food paired with the drinks"
+            : "Signature coffee drinks with barista craft"
+    };
+  }
+
   if (sectionText.includes("scent") || sectionText.includes("fragrance") || sectionText.includes("note")) {
     return {
       body: "Present oud, floral, citrus, musk, and soft amber notes as a clear fragrance journey for shoppers choosing a signature scent.",
@@ -1286,8 +1365,53 @@ function sectionCopy(section: string, composition: CompositionStrategy) {
   }
 
   return {
-    body: `Connect ${escapeHtml(audience)} with ${escapeHtml(termText || category)} through a practical next step focused on ${escapeHtml(goal)}.`,
-    title: `${titleCase(section)} for ${escapeHtml(domainTitle(blueprint))} customers`
+    body: `Help ${escapeHtml(audience)} understand ${escapeHtml(termText || category)} and move toward ${escapeHtml(goal)} with confidence.`,
+    title: `${titleCase(section)} for ${escapeHtml(domainTitle(blueprint))}`
+  };
+}
+
+function heroCopyForComposition(input: {
+  blueprint: ReturnType<typeof buildDomainBlueprint>;
+  brandName: string;
+  composition: CompositionStrategy;
+  isHome: boolean;
+  pageTitleText: string;
+}) {
+  const label = input.blueprint.domainLabel.toLowerCase();
+
+  if (!input.isHome) {
+    return {
+      body: `Focused information for ${input.composition.audience.slice(0, 2).join(" and ")} with clear next steps and practical details.`,
+      title: `${input.pageTitleText} for ${input.brandName}`
+    };
+  }
+
+  if (label.includes("coffee")) {
+    return {
+      body: "Signature drinks, fresh pastries, pickup options, and a warm cafe rhythm for local visitors.",
+      title: `${input.brandName} is a premium coffee stop for everyday rituals.`
+    };
+  }
+
+  if (label.includes("dentist")) {
+    return {
+      body: "Book appointments, meet experienced dentists, and explore family, cosmetic, hygiene, and emergency dental care in one calm place.",
+      title: `${input.brandName} delivers modern dental care for confident smiles.`
+    };
+  }
+
+  if (label.includes("florist")) {
+    return {
+      body: "Bouquets, bridal florals, event styling, and thoughtful delivery arranged with warm editorial care.",
+      title: `${input.brandName} creates floral moments that feel personal.`
+    };
+  }
+
+  const terms = input.blueprint.contentTerms.slice(0, 3).join(", ") || input.blueprint.productCategory;
+
+  return {
+    body: `${input.composition.contentStrategy.heroGoal} Visitors can quickly understand ${terms} and choose the next step.`,
+    title: `${input.brandName} presents ${input.blueprint.domainLabel} with clarity and confidence.`
   };
 }
 
@@ -1379,6 +1503,14 @@ function visualPlaceholder(input: {
     };
   }
 
+  if (label.includes("coffee")) {
+    const labels = ["Espresso bar", "Signature drinks", "Cafe seating"];
+    return {
+      className: "visual-warm-service",
+      label: labels[input.index % labels.length]
+    };
+  }
+
   if (label.includes("bicycle")) {
     const labels = ["Cycling wall", "Tune-up lane", "Ride fitting"];
     return {
@@ -1448,13 +1580,13 @@ function renderComposedPage(input: {
   const blueprint = buildDomainBlueprint({
     prompt: `${input.intent.domain} ${input.composition.businessType} ${input.composition.reasoningSummary}`
   });
-  const heroTerms = blueprint.contentTerms.slice(0, 4).join(", ");
-  const heroTitle = isHome
-    ? `${input.brandName} brings ${heroTerms || input.composition.businessType} to life.`
-    : `${pageTitleText} for ${input.brandName}`;
-  const heroBody = isHome
-    ? `${input.composition.contentStrategy.heroGoal} The page emphasizes ${blueprint.productCategory}, ${blueprint.industry}, and clear next steps.`
-    : `This page supports ${input.composition.businessGoals.join(", ")} with focused sections for ${input.composition.audience.join(", ")}.`;
+  const heroCopy = heroCopyForComposition({
+    blueprint,
+    brandName: input.brandName,
+    composition: input.composition,
+    isHome,
+    pageTitleText
+  });
   const primaryCta = input.composition.contentStrategy.ctaStrategy[0] ?? "Contact us";
   const layoutClass = layoutClassForComposition(input.composition);
   const heroVisual = visualPlaceholder({
@@ -1483,8 +1615,8 @@ function renderComposedPage(input: {
       <section class="hero ${layoutClass}-hero">
         <div class="hero-copy">
           <p class="eyebrow">${escapeHtml(blueprint.domainLabel)} / ${escapeHtml(blueprint.productCategory)}</p>
-          <h1>${escapeHtml(heroTitle)}</h1>
-          <p class="lede">${escapeHtml(heroBody)}</p>
+          <h1>${escapeHtml(heroCopy.title)}</h1>
+          <p class="lede">${escapeHtml(heroCopy.body)}</p>
           <a class="button" href="./${pageToPath(input.composition.siteArchitecture.pages.includes("contact") ? "contact" : input.composition.siteArchitecture.pages[input.composition.siteArchitecture.pages.length - 1] ?? "contact")}">${escapeHtml(primaryCta)}</a>
         </div>
         <figure class="hero-visual glass-card">
@@ -1765,6 +1897,14 @@ ${usesTactical ? `.glass-card::after {
     radial-gradient(circle at 70% 74%, rgba(245, 158, 11, 0.3), transparent 10rem),
     linear-gradient(145deg, #fffbea, #fef3c7 44%, #eab308);
   color: #261b05;
+}
+
+.visual-warm-service {
+  background:
+    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.34), transparent 8rem),
+    radial-gradient(circle at 72% 72%, rgba(196, 142, 86, 0.36), transparent 10rem),
+    linear-gradient(145deg, #fff8ed, #d8b78f 46%, #5f351f);
+  color: #2a1b12;
 }
 
 .domain-visual-placeholder span {

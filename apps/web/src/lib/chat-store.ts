@@ -5,6 +5,24 @@ import { create } from "zustand";
 export type ChatRole = "user" | "assistant";
 export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
 export type ProductMode = "ASK" | "WEBSITE" | "CODE";
+export type KernelMutationPolicy = "answer_only" | "proposal_required" | "safe_auto_apply_blocked";
+export type KernelProviderProfileHint =
+  | "cheap"
+  | "coding"
+  | "fast"
+  | "local"
+  | "long_context"
+  | "privacy_sensitive"
+  | "reasoning"
+  | "vision";
+export type KernelFrameworkHint =
+  | "crewai_candidate"
+  | "langchain_candidate"
+  | "langgraph_candidate"
+  | "llamaindex_candidate"
+  | "multi_agent_candidate"
+  | "none"
+  | "rag_candidate";
 
 export type ChatMessage = {
   id: string;
@@ -39,16 +57,40 @@ export type ProposalRoutingWarning = {
   risk: "high" | "medium";
 };
 
+export type KernelRoutingDecision = {
+  confidence: number;
+  constraints: string[];
+  frameworkHint?: KernelFrameworkHint;
+  mode: ProductMode;
+  mutationPolicy: KernelMutationPolicy;
+  providerProfileHint?: KernelProviderProfileHint;
+  requiredChecks: string[];
+  risks: string[];
+  routingExplanation: string;
+  taskType: string;
+};
+
 export type DiffProposal = {
+  blockedReason?: string;
+  contradictionStatus?: "blocked" | "clear" | "review_required";
+  detectedDomain?: string;
+  domainConfidence?: number;
+  domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
   id: string;
   intelligenceKernelSummary?: string;
+  kernelRoutingDecision?: KernelRoutingDecision;
+  modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
   mode: "SUGGEST" | "EXECUTE";
+  previewMode?: "answer_only" | "code_plan" | "static_preview";
   projectId: string | null;
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
+  publicCopyCleanStatus?: "blocked" | "clean" | "review_required";
   requiresExtraReview?: boolean;
+  sectionCopyQualityStatus?: "blocked" | "clean" | "review_required";
   shouldBlockExecution?: boolean;
+  staleTermScanStatus?: "blocked" | "clean" | "review_required";
   status: "pending" | "approved" | "rejected";
   summary: string;
   changes: Array<{
@@ -150,6 +192,42 @@ function isProposalRoutingReason(value: unknown): value is ProposalRoutingReason
   );
 }
 
+function isKernelRoutingDecision(value: unknown): value is KernelRoutingDecision {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const decision = value as KernelRoutingDecision;
+
+  return (
+    (decision.mode === "ASK" || decision.mode === "WEBSITE" || decision.mode === "CODE") &&
+    typeof decision.taskType === "string" &&
+    typeof decision.confidence === "number" &&
+    (decision.mutationPolicy === "answer_only" ||
+      decision.mutationPolicy === "proposal_required" ||
+      decision.mutationPolicy === "safe_auto_apply_blocked") &&
+    Array.isArray(decision.constraints) &&
+    decision.constraints.every((item) => typeof item === "string") &&
+    Array.isArray(decision.risks) &&
+    decision.risks.every((item) => typeof item === "string") &&
+    Array.isArray(decision.requiredChecks) &&
+    decision.requiredChecks.every((item) => typeof item === "string") &&
+    typeof decision.routingExplanation === "string" &&
+    (typeof decision.providerProfileHint === "undefined" ||
+      ["cheap", "coding", "fast", "local", "long_context", "privacy_sensitive", "reasoning", "vision"].includes(decision.providerProfileHint)) &&
+    (typeof decision.frameworkHint === "undefined" ||
+      [
+        "crewai_candidate",
+        "langchain_candidate",
+        "langgraph_candidate",
+        "llamaindex_candidate",
+        "multi_agent_candidate",
+        "none",
+        "rag_candidate"
+      ].includes(decision.frameworkHint))
+  );
+}
+
 function createGreetingMessage() {
   return createMessage(
     "assistant",
@@ -190,10 +268,32 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     typeof proposal.id === "string" &&
     (typeof proposal.projectId === "string" || proposal.projectId === null) &&
     typeof proposal.summary === "string" &&
+    (typeof proposal.blockedReason === "undefined" || typeof proposal.blockedReason === "string") &&
+    (typeof proposal.contradictionStatus === "undefined" ||
+      proposal.contradictionStatus === "blocked" ||
+      proposal.contradictionStatus === "clear" ||
+      proposal.contradictionStatus === "review_required") &&
+    (typeof proposal.detectedDomain === "undefined" || typeof proposal.detectedDomain === "string") &&
+    (typeof proposal.domainConfidence === "undefined" || typeof proposal.domainConfidence === "number") &&
+    (typeof proposal.domainSource === "undefined" ||
+      proposal.domainSource === "current_user_prompt" ||
+      proposal.domainSource === "existing_project" ||
+      proposal.domainSource === "inferred" ||
+      proposal.domainSource === "unknown") &&
     (typeof proposal.intelligenceKernelSummary === "undefined" ||
       typeof proposal.intelligenceKernelSummary === "string") &&
+    (typeof proposal.kernelRoutingDecision === "undefined" ||
+      isKernelRoutingDecision(proposal.kernelRoutingDecision)) &&
+    (typeof proposal.modeObedienceStatus === "undefined" ||
+      proposal.modeObedienceStatus === "blocked" ||
+      proposal.modeObedienceStatus === "obeyed" ||
+      proposal.modeObedienceStatus === "review_required") &&
     (typeof proposal.proposalRoutingMode === "undefined" ||
       isProposalRoutingMode(proposal.proposalRoutingMode)) &&
+    (typeof proposal.previewMode === "undefined" ||
+      proposal.previewMode === "answer_only" ||
+      proposal.previewMode === "code_plan" ||
+      proposal.previewMode === "static_preview") &&
     (typeof proposal.proposalRoutingWarnings === "undefined" ||
       (Array.isArray(proposal.proposalRoutingWarnings) &&
         proposal.proposalRoutingWarnings.every(isProposalRoutingWarning))) &&
@@ -202,8 +302,20 @@ function isDiffProposal(value: unknown): value is DiffProposal {
         proposal.proposalRoutingReasons.every(isProposalRoutingReason))) &&
     (typeof proposal.requiresExtraReview === "undefined" ||
       typeof proposal.requiresExtraReview === "boolean") &&
+    (typeof proposal.publicCopyCleanStatus === "undefined" ||
+      proposal.publicCopyCleanStatus === "blocked" ||
+      proposal.publicCopyCleanStatus === "clean" ||
+      proposal.publicCopyCleanStatus === "review_required") &&
+    (typeof proposal.sectionCopyQualityStatus === "undefined" ||
+      proposal.sectionCopyQualityStatus === "blocked" ||
+      proposal.sectionCopyQualityStatus === "clean" ||
+      proposal.sectionCopyQualityStatus === "review_required") &&
     (typeof proposal.shouldBlockExecution === "undefined" ||
       typeof proposal.shouldBlockExecution === "boolean") &&
+    (typeof proposal.staleTermScanStatus === "undefined" ||
+      proposal.staleTermScanStatus === "blocked" ||
+      proposal.staleTermScanStatus === "clean" ||
+      proposal.staleTermScanStatus === "review_required") &&
     Array.isArray(proposal.changes) &&
     proposal.changes.every(
       (change) => {
@@ -296,6 +408,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           chatSessionId: workspaceContext.chatSessionId,
           mode,
           model: get().model,
+          productMode: get().productMode,
           projectId: workspaceContext.projectId,
           workspace: {
             activeFileContent: workspaceContext.activeFileContent,

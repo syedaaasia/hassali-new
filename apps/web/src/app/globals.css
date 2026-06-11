@@ -28,6 +28,18 @@
   --light-active-element: #e2e8f0;
   --light-opera-red: #e6004c;
   --light-rich-teal: #00a3af;
+  --premium-canvas: 220 27% 96%;
+  --premium-void: 220 27% 96%;
+  --premium-panel: 0 0% 100%;
+  --premium-panel-strong: 0 0% 100%;
+  --premium-border: 218 22% 28% / 0.12;
+  --premium-paper: 222 26% 11%;
+  --premium-muted: 218 14% 42%;
+  --premium-accent: 248 88% 62%;
+  --premium-accent-soft: 248 100% 72%;
+  --premium-teal: 184 100% 34%;
+  --premium-danger: 340 100% 45%;
+  --premium-radius: 28px;
 }
 
 .dark {
@@ -38,17 +50,17 @@
   --surface-foreground: 36 20% 88%;
   --muted: 0 0% 10%;
   --muted-foreground: 30 7% 64%;
-  --accent: 354 86% 60%;
+  --accent: 248 88% 62%;
   --accent-foreground: 0 0% 100%;
   --border: 0 0% 17%;
   --royal-black: 0 0% 3%;
   --royal-surface: 0 0% 6%;
   --royal-panel: 0 0% 8%;
   --royal-panel-raised: 0 0% 12%;
-  --royal-border: 354 86% 58% / 0.22;
+  --royal-border: 248 88% 62% / 0.2;
   --royal-border-soft: 0 0% 100% / 0.08;
-  --gold: 354 86% 60%;
-  --emerald: 156 54% 50%;
+  --gold: 248 88% 62%;
+  --emerald: 184 84% 44%;
   --magenta: 316 82% 58%;
   --cream: 36 20% 88%;
   --light-canvas-base: #f3f5f9;
@@ -56,6 +68,18 @@
   --light-active-element: #e2e8f0;
   --light-opera-red: #e6004c;
   --light-rich-teal: #00a3af;
+  --premium-canvas: 0 0% 2%;
+  --premium-void: 0 0% 3%;
+  --premium-panel: 0 0% 7%;
+  --premium-panel-strong: 0 0% 10%;
+  --premium-border: 0 0% 100% / 0.075;
+  --premium-paper: 42 35% 93%;
+  --premium-muted: 34 10% 65%;
+  --premium-accent: 248 88% 62%;
+  --premium-accent-soft: 248 100% 74%;
+  --premium-teal: 184 84% 44%;
+  --premium-danger: 349 84% 60%;
+  --premium-radius: 28px;
 }
 
 .light {
@@ -98,8 +122,8 @@ body {
 body {
   margin: 0;
   background:
-    radial-gradient(circle at 18% -10%, hsl(var(--accent) / 0.12), transparent 28rem),
-    radial-gradient(circle at 88% 12%, hsl(var(--emerald) / 0.1), transparent 26rem),
+    radial-gradient(circle at 18% -10%, hsl(var(--premium-accent) / 0.11), transparent 28rem),
+    radial-gradient(circle at 88% 12%, hsl(var(--premium-teal) / 0.08), transparent 26rem),
     hsl(var(--background));
   color: hsl(var(--foreground));
   font-family:
@@ -110,6 +134,29 @@ body {
   letter-spacing: 0;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+.hassali-noise {
+  position: relative;
+}
+
+.hassali-noise::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  opacity: 0.07;
+  background-image:
+    radial-gradient(circle at 1px 1px, hsl(var(--premium-paper) / 0.5) 1px, transparent 0);
+  background-size: 22px 22px;
+  mix-blend-mode: soft-light;
+}
+
+.hassali-focus-ring:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px hsl(var(--premium-void)),
+    0 0 0 4px hsl(var(--premium-accent) / 0.5);
 }
 
 button,
@@ -206,4 +253,42 @@ textarea {
 
 .hassali-hero-thread {
   animation: hassali-thread-rise 8s ease-in-out infinite;
+}
+
+.hassali-globe {
+  background:
+    radial-gradient(circle at 50% 44%, hsl(var(--premium-accent) / 0.3), transparent 0.5rem),
+    radial-gradient(circle at 48% 45%, hsl(var(--premium-teal) / 0.08), transparent 10rem),
+    radial-gradient(circle at 50% 50%, hsl(var(--premium-panel-strong)), hsl(var(--premium-void)) 64%);
+}
+
+.hassali-globe::before {
+  content: "";
+  position: absolute;
+  inset: 8%;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--premium-accent) / 0.18);
+  background:
+    linear-gradient(90deg, transparent 48%, hsl(var(--premium-accent) / 0.2) 49%, transparent 51%),
+    linear-gradient(0deg, transparent 48%, hsl(var(--premium-teal) / 0.14) 49%, transparent 51%),
+    repeating-radial-gradient(circle at 50% 50%, transparent 0 18px, hsl(var(--premium-paper) / 0.055) 19px 20px),
+    repeating-linear-gradient(90deg, transparent 0 26px, hsl(var(--premium-paper) / 0.045) 27px 28px);
+  box-shadow:
+    inset 0 0 60px hsl(var(--premium-accent) / 0.12),
+    0 0 80px hsl(var(--premium-accent) / 0.14);
+}
+
+.hassali-globe::after {
+  content: "";
+  position: absolute;
+  inset: 20%;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--premium-teal) / 0.22);
+  transform: rotate(-24deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hassali-globe::before {
+    animation: hassali-field-drift 22s ease-in-out infinite;
+  }
 }

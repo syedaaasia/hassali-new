@@ -232,6 +232,18 @@ function classifyIndustry(promptText: string, businessPhrase: string | null) {
       terms: ["inventory", "stock", "warehouse", "factory inventory"]
     },
     {
+      industry: "customer relationship management software",
+      label: "CRM system",
+      productCategory: "customers, leads, pipeline, auth, database, dashboard, billing, reports",
+      terms: ["crm", "customer relationship", "lead pipeline", "sales pipeline", "customer records", "billing", "auth", "database"]
+    },
+    {
+      industry: "coffee hospitality and cafe retail",
+      label: "coffee shop",
+      productCategory: "espresso, latte, cold brew, signature drinks, pastries, pickup, cafe seating",
+      terms: ["coffee", "coffee shop", "cafe", "café", "espresso", "latte", "cold brew", "barista", "roastery"]
+    },
+    {
       industry: "real estate operations",
       label: "real estate",
       productCategory: "properties, agents, locations, leads, viewings",
@@ -351,6 +363,18 @@ function pagesForBlueprint(capabilityPath: CapabilityPath, label: string) {
     return ["dashboard", "products", "suppliers", "reports"];
   }
 
+  if (label.includes("crm")) {
+    return ["dashboard", "customers", "pipeline", "billing", "settings"];
+  }
+
+  if (label.includes("coffee")) {
+    return ["home", "menu", "about", "locations", "contact"];
+  }
+
+  if (label.includes("dentist")) {
+    return ["home", "services", "about", "blog", "contact"];
+  }
+
   if (label.includes("ice cream")) {
     return ["home", "flavors", "catering", "about", "contact"];
   }
@@ -419,6 +443,10 @@ function sectionsForBlueprint(label: string, productCategory: string, capability
     return ["hero", "product lineup", "retailer/distributor network", "campaigns", "logistics", "contact CTA"];
   }
 
+  if (label.includes("coffee")) {
+    return ["hero", "signature drinks", "menu highlights", "pastries and food", "pickup and ordering", "location hours CTA"];
+  }
+
   if (label.includes("dentist")) {
     return ["hero", "dental services", "doctors", "appointment CTA", "hygiene trust", "clinic location"];
   }
@@ -427,7 +455,7 @@ function sectionsForBlueprint(label: string, productCategory: string, capability
     "hero",
     `${productCategory.split(",")[0] ?? label} highlights`,
     `${label} services`,
-    "customer proof",
+    "customer trust",
     "booking CTA",
     "contact"
   ];
@@ -474,6 +502,18 @@ function brandFallbackForLabel(label: string) {
     return "Scoop House";
   }
 
+  if (label.includes("coffee")) {
+    return "North Roast";
+  }
+
+  if (label.includes("dentist")) {
+    return "North Dental";
+  }
+
+  if (label.includes("crm")) {
+    return "CustomerOS";
+  }
+
   if (label.includes("perfume")) {
     return "Scent Atelier";
   }
@@ -500,8 +540,12 @@ export function buildDomainBlueprint(input: BlueprintInput): DomainBlueprint {
         ? ["operators", "staff", "owners", "managers"]
         : domainLabel.includes("television")
           ? ["home cinema buyers", "families", "showroom visitors", "installation customers"]
-          : domainLabel.includes("perfume")
+        : domainLabel.includes("dentist")
+          ? ["families", "new patients", "cosmetic dental patients", "hygiene appointment seekers"]
+        : domainLabel.includes("perfume")
             ? ["fragrance lovers", "gift buyers", "luxury shoppers", "scent explorers"]
+          : domainLabel.includes("coffee")
+            ? ["local coffee drinkers", "office workers", "weekend visitors", "pickup customers"]
           : domainLabel.includes("motorbike")
             ? ["riders", "commuters", "touring customers", "service customers"]
           : domainLabel === "bike shop"
@@ -516,8 +560,12 @@ export function buildDomainBlueprint(input: BlueprintInput): DomainBlueprint {
         ? ["reduce manual work", "track records accurately", "make daily operations visible"]
         : domainLabel.includes("television")
           ? ["product comparison", "showroom visits", "installation bookings", "warranty confidence"]
-          : domainLabel.includes("perfume")
+        : domainLabel.includes("dentist")
+          ? ["appointment bookings", "patient trust", "treatment clarity", "family care confidence"]
+        : domainLabel.includes("perfume")
             ? ["signature scent discovery", "gift conversion", "collection trust", "consultation bookings"]
+          : domainLabel.includes("coffee")
+            ? ["menu discovery", "shop visits", "pickup orders", "community loyalty"]
           : domainLabel.includes("motorbike")
             ? ["bike sales", "service bookings", "rider gear sales", "test ride leads"]
           : domainLabel === "bike shop"
@@ -526,7 +574,7 @@ export function buildDomainBlueprint(input: BlueprintInput): DomainBlueprint {
           ? ["service bookings", "bike sales", "rider confidence", "community trust"]
           : domainLabel.includes("cola")
             ? ["product discovery", "retailer inquiries", "distribution leads", "campaign awareness"]
-            : ["specific offer clarity", "conversion", "customer confidence", "practical domain details"],
+            : ["clear services", "conversion", "customer confidence", "practical domain details"],
     capabilityPath,
     ambiguity: ambiguityForLabel(domainLabel),
     brandFallback: brandFallbackForLabel(domainLabel),
@@ -538,6 +586,10 @@ export function buildDomainBlueprint(input: BlueprintInput): DomainBlueprint {
           ? ["Explore flavors", "Visit the shop", "Book catering"]
         : domainLabel.includes("television")
             ? ["Compare TVs", "Book installation", "Visit showroom"]
+          : domainLabel.includes("dentist")
+            ? ["Book an appointment", "Meet the dentists", "Explore treatments"]
+          : domainLabel.includes("coffee")
+            ? ["View the menu", "Order pickup", "Visit the cafe"]
           : domainLabel.includes("perfume")
             ? ["Explore scents", "Find your signature", "Book a scent consultation"]
           : domainLabel.includes("motorbike")
@@ -578,6 +630,10 @@ export function buildDomainBlueprint(input: BlueprintInput): DomainBlueprint {
     visualMood:
       domainLabel.includes("ice cream")
         ? ["playful premium", "creamy", "bright", "family-friendly"]
+        : domainLabel.includes("coffee")
+          ? ["warm editorial", "premium cafe", "inviting", "crafted"]
+        : domainLabel.includes("dentist")
+          ? ["calm clinical", "modern care", "trust-led", "clean"]
         : domainLabel.includes("perfume")
           ? ["luxury editorial", "sensory", "soft glass", "gift-ready"]
         : domainLabel.includes("television")

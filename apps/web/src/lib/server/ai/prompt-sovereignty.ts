@@ -39,10 +39,6 @@ function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function includesAny(text: string, terms: string[]) {
-  return terms.some((term) => text.includes(term));
-}
-
 function pageToPath(page: string) {
   const normalized = page.toLowerCase().trim();
   const pageMap: Record<string, string> = {
@@ -87,17 +83,26 @@ function expectedCapabilityFor(decision: DecisionPlan): PromptSovereigntyContrac
     return "data_tool";
   }
 
+  if (decision.requestType === "code_system_generation") {
+    return "web_app";
+  }
+
   if (decision.requestType === "website_generation" || decision.requestType === "multi_page_generation") {
     return "business_website";
   }
 
-  return decision.domain === "code/tooling project" ? "web_app" : "business_website";
+  return "business_website";
 }
 
 function expectedTermsForDomain(domain: string, baseTerms: string[]) {
   const domainText = lower(domain);
   const domainTerms: Record<string, string[]> = {
     inventory: ["inventory", "stock", "suppliers", "sales", "reports", "dashboard", "products"],
+    crm: ["crm", "customers", "leads", "pipeline", "auth", "database", "dashboard", "billing"],
+    "coffee shop": ["coffee", "cafe", "espresso", "latte", "cold brew", "barista", "menu", "pastries"],
+    coffee: ["coffee", "cafe", "espresso", "latte", "cold brew", "barista", "menu", "pastries"],
+    "dentist clinic": ["dental", "dentist", "clinic", "appointment", "hygiene", "treatment", "smile"],
+    dental: ["dental", "dentist", "clinic", "appointment", "hygiene", "treatment", "smile"],
     perfume: ["perfume", "fragrance", "scent", "bottles", "oud", "floral", "citrus", "musk", "testers", "gift"],
     television: ["television", "tv", "smart tv", "oled", "qled", "home cinema", "wall mounting", "warranty"],
     tv: ["television", "tv", "smart tv", "oled", "qled", "home cinema", "wall mounting", "warranty"],
@@ -119,7 +124,7 @@ function contradictoryTermsFor(domain: string, capability: PromptSovereigntyCont
   const domainText = lower(domain);
   const contradictions: string[] = [];
 
-  if (!domainText.includes("inventory")) {
+  if (!domainText.includes("inventory") && !domainText.includes("crm")) {
     contradictions.push(
       "inventory system studio",
       "inventory system",
@@ -129,6 +134,22 @@ function contradictoryTermsFor(domain: string, capability: PromptSovereigntyCont
       "stock",
       "suppliers"
     );
+  }
+
+  if (capability === "web_app" && !domainText.includes("crm")) {
+    contradictions.push(
+      "reduce manual work studio",
+      "records services",
+      "request detected"
+    );
+  }
+
+  if (!domainText.includes("coffee") && !domainText.includes("cafe")) {
+    contradictions.push("coffee shop", "espresso", "latte", "cold brew", "barista", "pastries", "canadian coffee customers");
+  }
+
+  if (!domainText.includes("dentist") && !domainText.includes("dental")) {
+    contradictions.push("dentist clinic", "dental services", "root canal", "orthodontic", "hygiene visits");
   }
 
   if (!domainText.includes("perfume") && !domainText.includes("fragrance")) {
@@ -154,6 +175,26 @@ function contentFor(changes: PromptAcceptanceChange[]) {
   );
 }
 
+function publicCopyLeakIssues(content: string) {
+  const patterns: Array<[RegExp, string]> = [
+    [/\bexplain\s+[a-z0-9 /-]{2,80}\s+with domain-specific proof/i, "public copy contains internal explain/domain-proof wording"],
+    [/\bconnect\s+[a-z0-9 ,/-]{2,120}\s+with\s+[a-z0-9 ,/-]{2,120}\s+through a practical next step/i, "public copy contains internal connect-through-step wording"],
+    [/\bspecific offer clarity\b/i, "public copy contains specific offer clarity filler"],
+    [/\bdomain-specific proof\b/i, "public copy contains domain-specific proof filler"],
+    [/\bdomain-specific positioning\b/i, "public copy contains domain-specific positioning filler"],
+    [/\brequest detected\b/i, "public copy contains request detected filler"],
+    [/\bdetected\s+\d+-page\b/i, "public copy contains detected page-count filler"],
+    [/\bhero for business\b/i, "public copy contains hero placeholder wording"],
+    [/\bpage hero\b/i, "public copy contains page hero placeholder wording"],
+    [/\bcustomer outcomes\b/i, "public copy contains generic customer outcomes filler"],
+    [/\bcustomer proof\b/i, "public copy contains generic customer proof filler"]
+  ];
+
+  return patterns
+    .filter(([pattern]) => pattern.test(content))
+    .map(([, issue]) => issue);
+}
+
 export function buildPromptSovereigntyContract(input: {
   composition: CompositionStrategy;
   decision: DecisionPlan;
@@ -163,14 +204,17 @@ export function buildPromptSovereigntyContract(input: {
   const promptText = lower(input.prompt);
   const blueprint = buildDomainBlueprint({ prompt: input.prompt });
   const routedCapability = expectedCapabilityFor(input.decision);
+  const promptAsWebsite = /\b(?:website|site|landing page|marketing page|product page)\b/.test(promptText);
   const expectedCapability =
-    routedCapability === "business_website" && blueprint.capabilityPath === "web_app"
+    routedCapability === "business_website" && blueprint.capabilityPath === "web_app" && !promptAsWebsite
       ? "web_app"
       : routedCapability;
   const explicitPages = input.intent.requestedPages.map(pageToPath);
   const requiredFiles =
-    explicitPages.length > 0
-      ? unique([...explicitPages, ...(expectedCapability === "business_website" || expectedCapability === "web_app" ? ["styles.css", "main.js"] : [])])
+    expectedCapability === "web_app"
+      ? input.decision.requiredFiles
+      : explicitPages.length > 0
+        ? unique([...explicitPages, ...(expectedCapability === "business_website" ? ["styles.css", "main.js"] : [])])
       : input.decision.requiredFiles;
   const expectedTerms = expectedTermsForDomain(
     blueprint.domainLabel,
@@ -199,6 +243,9 @@ export function validatePromptSovereignty(input: {
   const content = contentFor(input.changes);
   const paths = new Set(input.changes.map((change) => change.path).filter(Boolean) as string[]);
   const fileChanges = input.changes.filter((change) => change.path);
+  const copyLeakIssues = publicCopyLeakIssues(content);
+
+  issues.push(...copyLeakIssues);
 
   if (input.contract.expectedCapability === "rename") {
     if (fileChanges.length === 0) {
@@ -234,10 +281,21 @@ export function validatePromptSovereignty(input: {
         issues.push(`missing prompt-required file ${requiredFile}`);
       }
     }
+  }
 
+  if (input.contract.expectedCapability === "business_website") {
     if (!paths.has("styles.css") || !paths.has("main.js")) {
       issues.push("website proposal must include styles.css and main.js");
     }
+  }
+
+  if (
+    input.contract.expectedCapability === "web_app" &&
+    paths.has("index.html") &&
+    paths.has("styles.css") &&
+    paths.has("main.js")
+  ) {
+    issues.push("CODE/web app request was converted into a static website scaffold");
   }
 
   if (input.contract.isExplicitNewBuild) {

@@ -315,6 +315,7 @@ function ProposalReviewState({ proposal }: { proposal: DiffProposal }) {
   const visibleReasons = (proposal.proposalRoutingReasons ?? [])
     .filter((reason) => reason.severity !== "info")
     .slice(0, 3);
+  const kernelDecision = proposal.kernelRoutingDecision;
 
   return (
     <div className="mt-3 rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.28)] p-3">
@@ -352,6 +353,70 @@ function ProposalReviewState({ proposal }: { proposal: DiffProposal }) {
         <details className="mt-3 text-[11px] text-muted-foreground">
           <summary className="cursor-pointer text-foreground/80">Intelligence summary</summary>
           <p className="mt-2 leading-5">{proposal.intelligenceKernelSummary}</p>
+        </details>
+      ) : null}
+
+      {kernelDecision ? (
+        <details className="mt-3 text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer text-foreground/80">Kernel routing evidence</summary>
+          <div className="mt-3 grid gap-2 rounded-2xl border border-[hsl(var(--premium-border))] bg-black/24 p-3 sm:grid-cols-2">
+            <div>
+              <span className="text-foreground/75">Kernel Mode:</span> {kernelDecision.mode}
+            </div>
+            <div>
+              <span className="text-foreground/75">Task Type:</span> {kernelDecision.taskType}
+            </div>
+            <div>
+              <span className="text-foreground/75">Confidence:</span>{" "}
+              {Math.round(kernelDecision.confidence * 100)}%
+            </div>
+            <div>
+              <span className="text-foreground/75">Mutation Policy:</span>{" "}
+              {kernelDecision.mutationPolicy}
+            </div>
+            <div>
+              <span className="text-foreground/75">Provider Hint:</span>{" "}
+              {kernelDecision.providerProfileHint ?? "none"}
+            </div>
+            <div>
+              <span className="text-foreground/75">Framework Hint:</span>{" "}
+              {kernelDecision.frameworkHint ?? "none"}
+            </div>
+          </div>
+          <p className="mt-2 leading-5">{kernelDecision.routingExplanation}</p>
+
+          {kernelDecision.constraints.length > 0 ? (
+            <div className="mt-3">
+              <div className="text-foreground/75">Extracted Constraints</div>
+              <ul className="mt-1 space-y-1">
+                {kernelDecision.constraints.slice(0, 6).map((item) => (
+                  <li key={item}>- {item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {kernelDecision.risks.length > 0 ? (
+            <div className="mt-3">
+              <div className="text-foreground/75">Risks</div>
+              <ul className="mt-1 space-y-1">
+                {kernelDecision.risks.slice(0, 6).map((item) => (
+                  <li key={item}>- {item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {kernelDecision.requiredChecks.length > 0 ? (
+            <div className="mt-3">
+              <div className="text-foreground/75">Required Checks</div>
+              <ul className="mt-1 space-y-1">
+                {kernelDecision.requiredChecks.slice(0, 7).map((item) => (
+                  <li key={item}>- {item}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </details>
       ) : null}
     </div>
@@ -567,8 +632,8 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   };
 
   return (
-    <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0d0d0d]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 px-4 py-1.5">
+    <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-transparent">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] bg-black/10 px-4 py-1.5">
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             {productMode === "ASK" ? "Ask" : productMode === "WEBSITE" ? "Website" : "Code"}
@@ -577,7 +642,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             {modeHints[productMode]}
           </div>
         </div>
-        <div className="order-3 grid w-full grid-cols-3 gap-1 rounded-full border border-white/10 bg-black/35 p-0.5 md:order-none md:w-[29rem]">
+        <div className="order-3 grid w-full grid-cols-3 gap-1 rounded-full border border-[hsl(var(--premium-border))] bg-black/35 p-0.5 md:order-none md:w-[29rem]">
           {productModes.map((item) => {
             const isActive = item.label === productMode;
 
@@ -585,7 +650,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               <button
                 className={`rounded-full px-3 py-1 text-center transition ${
                   isActive
-                    ? "bg-[#f4f1e8] text-black shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+                    ? "bg-[hsl(var(--premium-paper))] text-black shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
                     : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
                 }`}
                 key={item.label}
@@ -602,14 +667,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         {productMode !== "ASK" ? (
           <div className="flex shrink-0 items-center gap-2">
             <button
-              className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-muted-foreground hover:border-[#7c6cff]/50 hover:text-foreground"
+              className="rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-muted-foreground hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-foreground"
               onClick={onToggleEditor}
               type="button"
             >
               {isEditorOpen ? "Hide files" : "Files"}
             </button>
             <button
-              className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-muted-foreground hover:border-[#7c6cff]/50 hover:text-foreground"
+              className="rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-muted-foreground hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-foreground"
               onClick={togglePreview}
               type="button"
             >
@@ -628,7 +693,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               transition={{ duration: 0.16, ease: "easeOut" }}
               className={`mx-auto w-full max-w-4xl rounded-2xl border px-4 py-3 text-[13px] leading-6 ${
                 message.role === "user"
-                  ? "border-[#7c6cff]/25 bg-[#7c6cff]/10 text-[#f4f1e8]"
+                  ? "border-[hsl(var(--premium-accent)/0.25)] bg-[hsl(var(--premium-accent)/0.1)] text-[hsl(var(--premium-paper))]"
                   : "border-white/10 bg-white/[0.035] text-[#c7c1b4]"
               }`}
             >

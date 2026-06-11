@@ -78,6 +78,10 @@ function isWebsiteCreationRequest(promptText: string) {
 }
 
 function isRenameRequest(promptText: string) {
+  if (/\b(?:do not|don't|dont|no)\s+rename\b/i.test(promptText)) {
+    return false;
+  }
+
   return (
     /\b(?:rename|replace)\b/i.test(promptText) ||
     /\bchange(?:\s+the)?\s+(?:name|text|brand|title)\b/i.test(promptText) ||

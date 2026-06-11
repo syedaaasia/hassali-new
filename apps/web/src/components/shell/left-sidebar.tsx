@@ -278,7 +278,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
 
   if (collapsed) {
     return (
-      <Panel className="hidden w-14 shrink-0 flex-col items-center border border-white/10 bg-[#080808] py-2 md:flex">
+      <Panel className="hidden w-14 shrink-0 flex-col items-center rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.72)] py-2 backdrop-blur-xl md:flex">
         <button
           aria-label="Open sidebar"
           className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/[0.04] hover:border-[#7c6cff]/50"
@@ -315,8 +315,8 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
   }
 
   return (
-    <Panel className="hidden w-40 shrink-0 flex-col rounded-[22px] border border-white/10 bg-[#070707] md:flex lg:w-[10.5rem] 2xl:w-44">
-      <div className="border-b border-white/10 px-3 py-3">
+    <Panel className="hidden w-40 shrink-0 flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.74)] backdrop-blur-xl md:flex lg:w-[10.5rem] 2xl:w-44">
+      <div className="border-b border-[hsl(var(--premium-border))] px-3 py-3">
         <div className="flex items-center justify-between gap-2">
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Project
@@ -335,7 +335,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
         </div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-        <div className="rounded-2xl bg-white/[0.025] p-2">
+        <div className="rounded-2xl border border-white/[0.055] bg-white/[0.025] p-2">
           <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium">
             <button
               aria-expanded={expandedSections.projects}
@@ -371,7 +371,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
                 <button
                   className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${
                     isActive
-                      ? "bg-[#7c6cff]/15 text-[#f4f1e8] shadow-[inset_0_0_0_1px_rgba(124,108,255,0.24)]"
+                      ? "bg-[hsl(var(--premium-accent)/0.15)] text-[hsl(var(--premium-paper))] shadow-[inset_0_0_0_1px_hsl(var(--premium-accent)/0.24)]"
                       : "text-muted-foreground hover:bg-white/[0.045] hover:text-foreground"
                   } disabled:cursor-not-allowed disabled:opacity-60`}
                   disabled={isLoading || isActive}
@@ -396,7 +396,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
           )}
           {error ? <p className="mt-2 px-1 text-xs leading-5 text-destructive">{error}</p> : null}
         </div>
-        <div className="rounded-2xl bg-white/[0.025] p-2">
+        <div className="rounded-2xl border border-white/[0.055] bg-white/[0.025] p-2">
           <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium">
             <button
               aria-expanded={expandedSections.workspace}
@@ -460,7 +460,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
           </>
           ) : null}
         </div>
-        <div className="mt-auto rounded-2xl bg-white/[0.018] p-2">
+        <div className="mt-auto rounded-2xl border border-white/[0.045] bg-white/[0.018] p-2">
           <button
             aria-expanded={expandedSections.git}
             className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-[#8b7cf6]"
@@ -479,7 +479,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
             <div className="mt-2 px-1 text-xs leading-5 text-muted-foreground">Status placeholder</div>
           ) : null}
         </div>
-        <div className="rounded-2xl bg-white/[0.018] p-2">
+        <div className="rounded-2xl border border-white/[0.045] bg-white/[0.018] p-2">
           <button
             aria-expanded={expandedSections.search}
             className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-[#8b7cf6]"

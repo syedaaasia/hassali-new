@@ -17,9 +17,13 @@ export type ProposalRoutingWarning = {
 export type ProposalRoutingMetadata = {
   confidence: number;
   critiquePassed: boolean;
+  kernelMode: IntelligenceKernelResult["routingDecision"]["mode"];
   kernelSummary: string;
+  mutationPolicy: IntelligenceKernelResult["routingDecision"]["mutationPolicy"];
+  providerProfileHint?: IntelligenceKernelResult["routingDecision"]["providerProfileHint"];
   riskScore: number;
   selectedPlan: string;
+  taskType: string;
   verificationChecks: string[];
 };
 
@@ -63,6 +67,7 @@ export function scoreRoutingRisk(kernel: IntelligenceKernelResult) {
   const risk = kernel.riskAssessment;
   const critiquePenalty = kernel.critiqueResult.passed ? 0 : 0.14;
   const confidencePenalty = kernel.confidence < 0.68 ? 0.12 : 0;
+  const policyPenalty = kernel.routingDecision.mutationPolicy === "safe_auto_apply_blocked" ? 0.2 : 0;
 
   return roundRisk(
     Math.min(
@@ -75,7 +80,8 @@ export function scoreRoutingRisk(kernel: IntelligenceKernelResult) {
         risk.overgenerationRisk
       ) +
         critiquePenalty +
-        confidencePenalty
+        confidencePenalty +
+        policyPenalty
     )
   );
 }
@@ -124,6 +130,30 @@ export function buildRoutingWarnings(kernel: IntelligenceKernelResult): Proposal
     });
   }
 
+  if (kernel.routingDecision.mutationPolicy === "answer_only") {
+    warnings.push({
+      code: "answer_only_policy",
+      message: "Kernel says this request should be answered without file mutation.",
+      risk: "medium"
+    });
+  }
+
+  if (kernel.routingDecision.mode === "WEBSITE" && !isWebsitePlan(kernel) && kernel.executionProposal.canMutateFiles) {
+    warnings.push({
+      code: "website_mode_without_website_files",
+      message: "Website mode should produce website-specific files or a targeted website edit.",
+      risk: "medium"
+    });
+  }
+
+  if (kernel.routingDecision.mode === "CODE" && kernel.routingDecision.taskType.startsWith("website_")) {
+    warnings.push({
+      code: "code_mode_website_routing_review",
+      message: "Code mode received a website-shaped plan; review whether this should be a software/system proposal.",
+      risk: "medium"
+    });
+  }
+
   if (hasRequestedVisualStyle(kernel, "apple glass") && isWebsitePlan(kernel)) {
     warnings.push({
       code: "apple_glass_quality_check",
@@ -152,6 +182,13 @@ export function buildRoutingReasons(kernel: IntelligenceKernelResult): ProposalR
       severity: "info"
     },
     {
+      code: "kernel_routing_decision",
+      message:
+        `${kernel.routingDecision.mode} / ${kernel.routingDecision.taskType} / ` +
+        `${kernel.routingDecision.mutationPolicy}: ${kernel.routingDecision.routingExplanation}`,
+      severity: "info"
+    },
+    {
       code: "approval_first",
       message: kernel.executionProposal.approvalRequired
         ? "Approval-first safety remains active."
@@ -165,6 +202,14 @@ export function buildRoutingReasons(kernel: IntelligenceKernelResult): ProposalR
       code: "kernel_needs_review",
       message: "The intelligence kernel marked this plan as needing review.",
       severity: "medium"
+    });
+  }
+
+  if (kernel.routingDecision.mutationPolicy === "answer_only" && kernel.executionProposal.canMutateFiles) {
+    reasons.push({
+      code: "answer_only_mutation_block",
+      message: "Kernel classified this as answer-only, so file mutation proposals must be blocked.",
+      severity: "high"
     });
   }
 
@@ -218,7 +263,9 @@ export function summarizeRoutingMetadata(
 ): string {
   return (
     `routing=${mode}; risk=${routingRisk.toFixed(2)}; confidence=${kernel.confidence.toFixed(2)}; ` +
-    `plan=${kernel.selectedPlan.title}; proceed=${kernel.shouldProceed ? "yes" : "review"}`
+    `mode=${kernel.routingDecision.mode}; task=${kernel.routingDecision.taskType}; ` +
+    `policy=${kernel.routingDecision.mutationPolicy}; plan=${kernel.selectedPlan.title}; ` +
+    `proceed=${kernel.shouldProceed ? "yes" : "review"}`
   );
 }
 
@@ -229,6 +276,8 @@ export function buildProposalRoutingDecision(kernel: IntelligenceKernelResult): 
   const hasHighReason = reasons.some((reason) => reason.severity === "high");
   const shouldBlockExecution =
     hasHighReason ||
+    kernel.routingDecision.mutationPolicy === "answer_only" ||
+    kernel.routingDecision.mutationPolicy === "safe_auto_apply_blocked" ||
     isHigh(routingRisk) ||
     isHigh(kernel.riskAssessment.projectIsolationRisk) ||
     isHigh(kernel.riskAssessment.wrongDomainRisk) ||

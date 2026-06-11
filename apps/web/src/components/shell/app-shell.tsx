@@ -52,19 +52,20 @@ export function AppShell() {
   };
 
   return (
-    <div className="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-[#050505] text-[13px] text-foreground">
+    <div className="relative flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-[hsl(var(--premium-void))] text-[13px] text-foreground">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_28%_0%,hsl(var(--premium-accent)/0.12),transparent_28rem),radial-gradient(circle_at_92%_20%,hsl(var(--premium-teal)/0.07),transparent_26rem)]" />
       <WorkspaceHydrator />
       <TopBar />
-      <div className="flex min-h-0 flex-1 gap-2 overflow-hidden bg-[#050505] p-1.5 pt-0">
+      <div className="relative z-10 flex min-h-0 flex-1 gap-2 overflow-hidden p-1.5 pt-0">
         <LeftSidebar collapsed={isSidebarCollapsed} onToggleCollapsed={toggleSidebar} />
-        <div className="flex min-w-0 flex-[1.8] flex-col overflow-hidden rounded-[22px] border border-white/10 bg-[#0d0d0d] shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+        <div className="flex min-w-0 flex-[1.8] flex-col overflow-hidden rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.74)] shadow-[0_0_0_1px_hsl(var(--premium-paper)/0.02),0_28px_90px_hsl(0_0%_0%/0.35)] backdrop-blur-xl">
           <RightSidebar
             isEditorOpen={allowsTools && isEditorOpen}
             onToggleEditor={() => setIsEditorOpen((current) => !current)}
           />
         </div>
         {allowsTools && isEditorOpen ? (
-          <div className="hidden w-[19rem] shrink-0 flex-col overflow-hidden rounded-[22px] border border-white/10 bg-[#0b0b0b] shadow-[0_0_0_1px_rgba(255,255,255,0.02)] lg:flex xl:w-[21rem] 2xl:w-[23rem]">
+          <div className="hidden w-[19rem] shrink-0 flex-col overflow-hidden rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.72)] shadow-[0_24px_90px_hsl(0_0%_0%/0.32)] backdrop-blur-xl lg:flex xl:w-[21rem] 2xl:w-[23rem]">
             <EditorPanel />
             <BottomPanel />
           </div>

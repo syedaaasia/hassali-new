@@ -66,7 +66,7 @@ export function TopBar() {
   };
 
   return (
-    <header className="flex h-10 shrink-0 items-center justify-between border-b border-white/10 bg-[#050505]/95 px-4 backdrop-blur-xl">
+    <header className="relative z-20 flex h-11 shrink-0 items-center justify-between border-b border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-void)/0.88)] px-4 backdrop-blur-xl">
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full">
           <img
@@ -83,8 +83,8 @@ export function TopBar() {
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <div className="hidden items-center gap-2 px-1.5 py-1 text-[11px] font-medium text-[#f4f1e8] md:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-[#8b7cf6] shadow-[0_0_12px_rgba(139,124,246,0.45)]" />
+        <div className="hidden items-center gap-2 px-1.5 py-1 text-[11px] font-medium text-[hsl(var(--premium-paper))] md:flex">
+          <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--premium-accent))] shadow-[0_0_12px_hsl(var(--premium-accent)/0.45)]" />
           {productMode}
         </div>
         <div className="hidden items-center gap-2 px-1.5 py-1 text-[11px] font-medium text-muted-foreground lg:flex">
@@ -94,11 +94,11 @@ export function TopBar() {
         <details className="group relative">
           <summary
             aria-label="Settings"
-            className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-full text-muted-foreground hover:bg-white/[0.06] hover:text-foreground [.light_&]:hover:bg-slate-200 [.light_&]:hover:text-slate-950 [&::-webkit-details-marker]:hidden"
+            className="hassali-focus-ring flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full text-muted-foreground hover:bg-white/[0.06] hover:text-foreground [.light_&]:hover:bg-slate-200 [.light_&]:hover:text-slate-950 [&::-webkit-details-marker]:hidden"
           >
             <SettingsIcon />
           </summary>
-          <div className="absolute right-0 top-9 z-20 w-48 rounded-2xl border border-white/10 bg-[#111] p-2 shadow-[0_20px_80px_rgba(0,0,0,0.45)] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-950">
+          <div className="absolute right-0 top-10 z-20 w-48 rounded-2xl border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel-strong))] p-2 shadow-[0_20px_80px_rgba(0,0,0,0.45)] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-950">
             <button
               className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs text-muted-foreground hover:bg-white/[0.05] hover:text-foreground [.light_&]:hover:bg-slate-100 [.light_&]:hover:text-slate-950"
               onClick={toggleTheme}

@@ -1,11 +1,14 @@
 "use client";
 
 import { Panel } from "@/components/ui/panel";
+import { useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 
 export function PreviewPanel() {
   const files = useWorkspaceStore((state) => state.files);
+  const productMode = useChatStore((state) => state.productMode);
+  const proposal = useChatStore((state) => state.proposal);
   const projectId = useWorkspaceStore((state) => state.projectId);
   const error = useRuntimeStore((state) => state.error);
   const iframeVersion = useRuntimeStore((state) => state.iframeVersion);
@@ -18,10 +21,21 @@ export function PreviewPanel() {
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
   const iframeSource = previewUrl ? `${previewUrl}?v=${iframeVersion}` : null;
   const hasIndexHtml = Boolean(files["index.html"]);
+  const proposalDocFiles =
+    proposal?.changes
+      .map((change) => change.path)
+      .filter((path): path is string => typeof path === "string" && /\.(?:md|mdx|txt)$/i.test(path))
+      .slice(0, 4) ?? [];
+  const isCodePreviewContext = productMode === "CODE" || proposal?.previewMode === "code_plan";
+  const missingPreviewMessage = isCodePreviewContext
+    ? `CODE proposal ready. Review the architecture and implementation files in the proposal panel. Live preview is available for WEBSITE/static outputs.${
+        proposalDocFiles.length ? ` Planning docs: ${proposalDocFiles.join(", ")}.` : ""
+      }`
+    : "Preview needs index.html. Use WEBSITE mode to create a static website.";
 
   return (
-    <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 hidden w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-[22px] border border-white/10 bg-[#0b0b0b] shadow-[0_24px_90px_rgba(0,0,0,0.55)] lg:flex xl:w-[34rem] 2xl:w-[38rem]">
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3.5">
+    <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 hidden w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.82)] shadow-[0_24px_90px_rgba(0,0,0,0.55)] backdrop-blur-xl lg:flex xl:w-[34rem] 2xl:w-[38rem]">
+      <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--premium-border))] px-4 py-3.5">
         <div>
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Preview
@@ -52,7 +66,7 @@ export function PreviewPanel() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-white/10 p-3">
+      <div className="flex items-center gap-2 border-b border-[hsl(var(--premium-border))] p-3">
         <button
           className="rounded-full border border-[#7c6cff]/35 bg-[#7c6cff] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           disabled={isLoading || !projectId || !hasIndexHtml}
@@ -88,7 +102,7 @@ export function PreviewPanel() {
       <div className="min-h-0 flex-1 overflow-hidden bg-black/35 p-2">
         {iframeSource ? (
           <iframe
-            className="h-full min-h-0 w-full rounded-2xl border border-white/10 bg-white"
+            className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"
             key={iframeSource}
             src={iframeSource}
             title="Hassali local preview"
@@ -99,7 +113,7 @@ export function PreviewPanel() {
               ? "Create or select a project before starting preview."
               : hasIndexHtml
                 ? "Start preview when you are ready."
-                : "Preview needs index.html. Use WEBSITE mode to create a static website."}
+                : missingPreviewMessage}
           </div>
         )}
       </div>
