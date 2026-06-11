@@ -1,5 +1,6 @@
 import type { DecisionPlan } from "@/lib/server/ai/decision-engine";
 import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
+import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 
@@ -151,6 +152,7 @@ type IntelligenceKernelInput = {
   diagnostic: DiagnosticContext;
   intent: IntentIntelligence;
   mode: KernelMode;
+  translatedIntent?: TranslatedIntentSpec;
 };
 
 function clamp01(value: number) {
@@ -178,6 +180,12 @@ function isWebsiteRequest(decision: DecisionPlan) {
 
 function promptText(input: IntelligenceKernelInput) {
   return [
+    input.translatedIntent?.domain,
+    input.translatedIntent?.businessType,
+    input.translatedIntent?.style,
+    input.translatedIntent?.visualLanguage,
+    input.translatedIntent?.requestedFeatures.join(" "),
+    input.translatedIntent?.constraints.join(" "),
     input.intent.summary,
     input.decision.reason,
     input.composition.businessType,
@@ -194,6 +202,8 @@ function includesPromptAny(input: IntelligenceKernelInput, terms: string[]) {
 }
 
 function taskTypeFor(input: IntelligenceKernelInput) {
+  const translatedFeatures = input.translatedIntent?.requestedFeatures ?? [];
+
   if (input.mode === "ASK" || input.decision.requestType === "ask" || input.intent.userIntent === "question") {
     return "explanation_or_guidance";
   }
@@ -223,7 +233,9 @@ function taskTypeFor(input: IntelligenceKernelInput) {
   }
 
   if (input.mode === "CODE") {
-    return includesPromptAny(input, ["crm", "erp", "api", "auth", "database", "dashboard", "billing", "automation", "desktop app", "python", "mobile app", "iot", "hardware"])
+    return input.translatedIntent?.domain === "crm" ||
+      translatedFeatures.some((feature) => ["auth", "billing", "dashboard", "database", "inventory"].includes(feature)) ||
+      includesPromptAny(input, ["crm", "erp", "api", "auth", "database", "dashboard", "billing", "automation", "desktop app", "python", "mobile app", "iot", "hardware"])
       ? "code_system_generation"
       : "code_change";
   }
@@ -298,10 +310,20 @@ function frameworkHintFor(input: IntelligenceKernelInput, taskType: string): Ker
 }
 
 function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
+  const translated = input.translatedIntent;
+
   return Array.from(
     new Set([
       `mode:${input.mode}`,
       `task:${taskType}`,
+      translated?.domain ? `translated-domain:${translated.domain}` : null,
+      translated?.businessType ? `translated-business:${translated.businessType}` : null,
+      translated?.style ? `translated-style:${translated.style}` : null,
+      translated?.visualLanguage ? `translated-visual-language:${translated.visualLanguage}` : null,
+      translated?.country ? `translated-country:${translated.country}` : null,
+      translated?.pages.count ? `translated-pages:${translated.pages.count}` : null,
+      translated?.pages.names.length ? `translated-page-names:${translated.pages.names.join(", ")}` : null,
+      translated?.requestedFeatures.length ? `translated-features:${translated.requestedFeatures.slice(0, 8).join(", ")}` : null,
       `domain:${input.intent.domain}`,
       `business:${input.composition.businessType}`,
       input.intent.pageCount ? `pages:${input.intent.pageCount}` : null,
@@ -419,21 +441,25 @@ function expectedFilesFromComposition(composition: CompositionStrategy, decision
 }
 
 export function buildTaskUnderstanding(input: IntelligenceKernelInput): TaskUnderstanding {
+  const translatedPages = input.translatedIntent?.pages.names ?? [];
+  const requiredFeatures = Array.from(
+    new Set([...(input.translatedIntent?.requestedFeatures ?? []), ...input.intent.requiredFeatures])
+  );
   const taskUnderstanding: TaskUnderstanding = {
     brandName: input.intent.brandName,
-    businessType: input.composition.businessType,
-    domain: input.intent.domain,
+    businessType: input.translatedIntent?.businessType ?? input.composition.businessType,
+    domain: input.translatedIntent?.domain ?? input.intent.domain,
     mode: input.mode,
-    pageCount: input.intent.pageCount,
-    requestedPages: input.intent.requestedPages,
-    requiredFeatures: input.intent.requiredFeatures,
+    pageCount: input.translatedIntent?.pages.count ?? input.intent.pageCount,
+    requestedPages: translatedPages.length ? translatedPages : input.intent.requestedPages,
+    requiredFeatures,
     summary: "",
     userIntent: input.intent.userIntent
   };
 
   taskUnderstanding.summary =
     `${input.mode} request understood as ${input.intent.userIntent} for ` +
-    `${input.composition.businessType}. ${input.intent.summary}`;
+    `${taskUnderstanding.businessType}. ${input.intent.summary}`;
 
   return taskUnderstanding;
 }
@@ -479,6 +505,7 @@ export function buildReasoningTrace(
     ],
     confidenceFactors: [
       `intent=${input.intent.confidence.toFixed(2)}`,
+      input.translatedIntent ? `translated=${input.translatedIntent.confidence.toFixed(2)}` : "translated=none",
       `decision=${input.decision.confidence.toFixed(2)}`,
       `domain=${taskUnderstanding.domain}`,
       `editScope=${contextDiagnosis.editScope}`
@@ -493,6 +520,9 @@ export function buildReasoningTrace(
     observations: [
       taskUnderstanding.summary,
       contextDiagnosis.summary,
+      input.translatedIntent
+        ? `Intent translator normalized current prompt as domain=${input.translatedIntent.domain ?? "unknown"}, business=${input.translatedIntent.businessType ?? "unknown"}, features=${input.translatedIntent.requestedFeatures.join(", ") || "none"}, constraints=${input.translatedIntent.constraints.join(", ") || "none"}.`
+        : "Intent translator was not available for this request.",
       input.composition.reasoningSummary,
       input.decision.reason
     ],
@@ -777,6 +807,7 @@ export function buildIntelligenceKernel(input: IntelligenceKernelInput): Intelli
   const confidence = clamp01(
     average([
       input.intent.confidence,
+      input.translatedIntent?.confidence ?? input.intent.confidence,
       input.decision.confidence,
       selectedPlan.confidence,
       critiqueResult.score / 100,

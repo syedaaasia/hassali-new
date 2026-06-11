@@ -31,6 +31,11 @@ import {
   type IntentIntelligence
 } from "@/lib/server/ai/intent-intelligence";
 import {
+  summarizeTranslatedIntent,
+  translateIntent,
+  type TranslatedIntentSpec
+} from "@/lib/server/ai/intent-translator";
+import {
   buildIntelligenceKernel,
   type IntelligenceKernelResult,
   type KernelRoutingDecision
@@ -122,6 +127,8 @@ type DiffProposal = {
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
   id: string;
+  intentConfidence?: number;
+  intentTranslationStatus?: "available" | "low_confidence" | "unavailable";
   intelligenceKernelSummary?: string;
   kernelRoutingDecision?: KernelRoutingDecision;
   modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
@@ -139,6 +146,10 @@ type DiffProposal = {
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
   status: "pending";
   summary: string;
+  translatedBusinessType?: string | null;
+  translatedDomain?: string | null;
+  translatedFeatures?: string[];
+  translatedStyle?: string | null;
 };
 
 type CodeAppPreview = {
@@ -2047,6 +2058,25 @@ function compactIntelligenceKernel(kernel: IntelligenceKernelResult) {
   };
 }
 
+function compactTranslatedIntent(translatedIntent: TranslatedIntentSpec) {
+  return {
+    businessType: translatedIntent.businessType,
+    confidence: translatedIntent.confidence,
+    constraints: translatedIntent.constraints,
+    country: translatedIntent.country,
+    domain: translatedIntent.domain,
+    extractedEntities: translatedIntent.extractedEntities,
+    features: translatedIntent.requestedFeatures,
+    mode: translatedIntent.mode,
+    pages: translatedIntent.pages,
+    status: translatedIntent.confidence >= 0.55 ? "available" : "low_confidence",
+    style: translatedIntent.style,
+    theme: translatedIntent.theme,
+    vibe: translatedIntent.vibe,
+    visualLanguage: translatedIntent.visualLanguage
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2107,12 +2137,15 @@ function attachProposalRoutingMetadata(
   routing: ProposalRoutingDecision,
   intent?: IntentIntelligence,
   composition?: CompositionStrategy,
-  prompt?: string
+  prompt?: string,
+  translatedIntent?: TranslatedIntentSpec
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
-  const detectedDomain = composition?.businessType ?? intent?.domain;
+  const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
   const domainSource =
-    intent?.domain && intent.domain !== "generic website"
+    translatedIntent?.domain
+      ? "current_user_prompt"
+      : intent?.domain && intent.domain !== "generic website"
       ? "current_user_prompt"
       : detectedDomain
         ? "inferred"
@@ -2123,8 +2156,14 @@ function attachProposalRoutingMetadata(
     ...compactProposalRouting(kernel, routing),
     contradictionStatus: "clear",
     detectedDomain,
-    domainConfidence: intent?.confidence,
+    domainConfidence: translatedIntent?.confidence ?? intent?.confidence,
     domainSource,
+    intentConfidence: translatedIntent?.confidence,
+    intentTranslationStatus: translatedIntent
+      ? translatedIntent.confidence >= 0.55
+        ? "available"
+        : "low_confidence"
+      : "unavailable",
     modeObedienceStatus: "obeyed",
     previewMode: proposal.previewMode ??
       (kernel.routingDecision.mode === "CODE"
@@ -2144,7 +2183,11 @@ function attachProposalRoutingMetadata(
       extraWarnings.length > 0 && routing.mode === "normal" ? "review_required" : routing.mode,
     requiresExtraReview: routing.shouldRequireExtraReview || extraWarnings.length > 0,
     sectionCopyQualityStatus: "clean",
-    staleTermScanStatus: "clean"
+    staleTermScanStatus: "clean",
+    translatedBusinessType: translatedIntent?.businessType,
+    translatedDomain: translatedIntent?.domain,
+    translatedFeatures: translatedIntent?.requestedFeatures,
+    translatedStyle: translatedIntent?.style
   };
 }
 
@@ -2342,6 +2385,7 @@ async function createFallbackProposalResponse(input: {
   projectContract: ProjectContract | null;
   reason: string;
   routing: ProposalRoutingDecision;
+  translatedIntent: TranslatedIntentSpec;
   workspace: WorkspaceContext;
 }) {
   const proposal = createLocalProposal(
@@ -2379,7 +2423,8 @@ async function createFallbackProposalResponse(input: {
       input.routing,
       input.intent,
       input.composition,
-      input.prompt
+      input.prompt,
+      input.translatedIntent
     )
   });
   let persistence = input.persistence;
@@ -2395,6 +2440,7 @@ async function createFallbackProposalResponse(input: {
       composition: input.composition,
       intent: input.intent,
       intelligenceKernel: compactIntelligenceKernel(input.kernel),
+      intentTranslation: compactTranslatedIntent(input.translatedIntent),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
@@ -2563,6 +2609,11 @@ export async function POST(request: Request) {
   const projectContractContext = projectContractSystemContext(projectContract);
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const effectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
+  const translatedIntent = translateIntent({
+    contract: projectContract,
+    mode: productMode,
+    prompt: effectiveUserPrompt
+  });
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -2587,7 +2638,8 @@ export async function POST(request: Request) {
     decision,
     diagnostic,
     intent,
-    mode: productMode
+    mode: productMode,
+    translatedIntent
   });
   const routing = buildProposalRoutingDecision(kernel);
   const askRuntimeContext = buildAskRuntimeContext();
@@ -2595,6 +2647,7 @@ export async function POST(request: Request) {
 
   if (mode === "SUGGEST" || mode === "EXECUTE") {
     console.info("intent intelligence", intent);
+    console.info("intent translation", summarizeTranslatedIntent(translatedIntent));
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
     console.info("kernel routing decision", kernel.routingDecision);
@@ -2625,6 +2678,7 @@ export async function POST(request: Request) {
         fileList: workspace.fileList,
         inferredDomain: diagnostic.inferredDomain,
         intent,
+        intentTranslation: compactTranslatedIntent(translatedIntent),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         kernelRoutingDecision: kernel.routingDecision,
         proposalRouting: compactProposalRouting(kernel, routing),
@@ -2725,7 +2779,8 @@ export async function POST(request: Request) {
         routing,
         intent,
         composition,
-        effectiveUserPrompt
+        effectiveUserPrompt,
+        translatedIntent
       )
     });
     const visibleSummary =
@@ -2739,6 +2794,7 @@ export async function POST(request: Request) {
         composition,
         model,
         intent,
+        intentTranslation: compactTranslatedIntent(translatedIntent),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -2785,6 +2841,7 @@ export async function POST(request: Request) {
                 `If Product mode is CODE or kernel task is code_system_generation, do not create a fake static website or index.html/styles.css/main.js unless the user explicitly asks for a static landing page. Prefer architecture, implementation, data model, and security plan files. ` +
                 `For vague create/build website requests without clear web files, propose standard static files: index.html, styles.css, and main.js. ` +
                 `For multi-page requests, satisfy the required page files exactly. Decision plan: ${JSON.stringify(decision)}. ` +
+                `Intent translator spec from current prompt, higher priority than project contract: ${JSON.stringify(translatedIntent)}. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
@@ -2817,6 +2874,7 @@ export async function POST(request: Request) {
         projectContract,
         reason: "openrouter_network_error",
         routing,
+        translatedIntent,
         workspace
       });
     }
@@ -2835,6 +2893,7 @@ export async function POST(request: Request) {
         projectContract,
         reason: `openrouter_${response.status}`,
         routing,
+        translatedIntent,
         workspace
       });
     }
@@ -2870,6 +2929,7 @@ export async function POST(request: Request) {
         projectContract,
         reason: "invalid_or_empty_model_proposal",
         routing,
+        translatedIntent,
         workspace
       });
     }
@@ -2922,7 +2982,8 @@ export async function POST(request: Request) {
         routing,
         intent,
         composition,
-        effectiveUserPrompt
+        effectiveUserPrompt,
+        translatedIntent
       )
     });
 
@@ -2944,6 +3005,7 @@ export async function POST(request: Request) {
         projectContract,
         reason: "prompt_sovereignty_repair",
         routing,
+        translatedIntent,
         workspace
       });
     }
@@ -2970,6 +3032,7 @@ export async function POST(request: Request) {
         projectContract,
         reason: `quality_score_${quality.score}_${quality.issues.join(",")}`,
         routing,
+        translatedIntent,
         workspace
       });
     }
@@ -2979,6 +3042,7 @@ export async function POST(request: Request) {
       metadata: {
         composition,
         intent,
+        intentTranslation: compactTranslatedIntent(translatedIntent),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

@@ -85,6 +85,8 @@ export type DiffProposal = {
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
   id: string;
+  intentConfidence?: number;
+  intentTranslationStatus?: "available" | "low_confidence" | "unavailable";
   intelligenceKernelSummary?: string;
   kernelRoutingDecision?: KernelRoutingDecision;
   modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
@@ -102,6 +104,10 @@ export type DiffProposal = {
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
   status: "pending" | "approved" | "rejected";
   summary: string;
+  translatedBusinessType?: string | null;
+  translatedDomain?: string | null;
+  translatedFeatures?: string[];
+  translatedStyle?: string | null;
   changes: Array<{
     action: ProposalAction;
     path?: string;
@@ -313,6 +319,12 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.domainSource === "unknown") &&
     (typeof proposal.intelligenceKernelSummary === "undefined" ||
       typeof proposal.intelligenceKernelSummary === "string") &&
+    (typeof proposal.intentConfidence === "undefined" ||
+      typeof proposal.intentConfidence === "number") &&
+    (typeof proposal.intentTranslationStatus === "undefined" ||
+      proposal.intentTranslationStatus === "available" ||
+      proposal.intentTranslationStatus === "low_confidence" ||
+      proposal.intentTranslationStatus === "unavailable") &&
     (typeof proposal.kernelRoutingDecision === "undefined" ||
       isKernelRoutingDecision(proposal.kernelRoutingDecision)) &&
     (typeof proposal.modeObedienceStatus === "undefined" ||
@@ -353,6 +365,18 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.staleTermScanStatus === "blocked" ||
       proposal.staleTermScanStatus === "clean" ||
       proposal.staleTermScanStatus === "review_required") &&
+    (typeof proposal.translatedBusinessType === "undefined" ||
+      proposal.translatedBusinessType === null ||
+      typeof proposal.translatedBusinessType === "string") &&
+    (typeof proposal.translatedDomain === "undefined" ||
+      proposal.translatedDomain === null ||
+      typeof proposal.translatedDomain === "string") &&
+    (typeof proposal.translatedFeatures === "undefined" ||
+      (Array.isArray(proposal.translatedFeatures) &&
+        proposal.translatedFeatures.every((feature) => typeof feature === "string"))) &&
+    (typeof proposal.translatedStyle === "undefined" ||
+      proposal.translatedStyle === null ||
+      typeof proposal.translatedStyle === "string") &&
     Array.isArray(proposal.changes) &&
     proposal.changes.every(
       (change) => {
