@@ -3,6 +3,7 @@ import {
   domainTitle,
   isTechnicalBlueprint
 } from "@/lib/server/ai/capability-domain-blueprint";
+import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 
@@ -2083,12 +2084,18 @@ function layoutCssForClass(layoutClass: string) {
 
 export function generateComposedSiteFiles(input: {
   composition: CompositionStrategy;
+  generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
 }): Record<string, string> {
   const brandName = brandNameForIntent(input.intent, input.composition);
-  const pages = input.composition.siteArchitecture.pages.length
-    ? input.composition.siteArchitecture.pages
-    : ["home"];
+  const contractPages = input.generatorContract?.generatorMode === "website_generation"
+    ? input.generatorContract.requiredPages
+    : [];
+  const pages = contractPages.length
+    ? contractPages
+    : input.composition.siteArchitecture.pages.length
+      ? input.composition.siteArchitecture.pages
+      : ["home"];
   const navigation = navForComposition(pages);
   const images = imageSetForComposition(input.intent, input.composition);
   const files: Record<string, string> = {

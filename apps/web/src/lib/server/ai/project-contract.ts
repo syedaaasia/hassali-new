@@ -1,4 +1,5 @@
 import type { DecisionPlan } from "@/lib/server/ai/decision-engine";
+import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { IntelligenceKernelResult } from "@/lib/server/ai/intelligence-kernel";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
@@ -164,12 +165,15 @@ export function buildUpdatedProjectContract(input: {
   composition: CompositionStrategy;
   contract: ProjectContract | null;
   decision: DecisionPlan;
+  generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
   kernel: IntelligenceKernelResult;
   prompt: string;
 }): ProjectContract {
   const mode = input.kernel.routingDecision.mode;
   const promptDomain =
+    input.generatorContract?.authoritativeBusinessType ||
+    input.generatorContract?.authoritativeDomain ||
     input.composition.businessType ||
     (input.intent.domain !== "generic website" ? input.intent.domain : null);
   const brandName = input.intent.brandName || input.contract?.brandName || null;
@@ -210,6 +214,7 @@ export function buildUpdatedProjectContract(input: {
       `Decision: ${input.decision.requestType}`,
       `Domain: ${promptDomain ?? "unknown"}`,
       `Preview: ${previewType}`,
+      ...(input.generatorContract ? [`Generator contract: ${input.generatorContract.contractId}`] : []),
       ...(input.decision.requiredFiles.length ? [`Required files: ${input.decision.requiredFiles.join(", ")}`] : [])
     ]).slice(0, 10),
     previewType,
