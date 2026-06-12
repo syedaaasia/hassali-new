@@ -42,6 +42,10 @@ import {
   type DomainValidationResult
 } from "@/lib/server/ai/domain-validator";
 import {
+  buildProposalQualityGate,
+  type ProposalQualityGateResult
+} from "@/lib/server/ai/proposal-quality-gate";
+import {
   generateComposedSiteFiles,
   generateDomainSite,
   type SiteDomain
@@ -202,13 +206,27 @@ type DiffProposal = {
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
   previewDriftDetected?: boolean;
+  approvalRecommendation?: "approve" | "reject" | "review";
+  completenessScore?: number;
+  contentScore?: number;
+  fakeContentDetected?: boolean;
+  loremDetected?: boolean;
+  placeholderDetected?: boolean;
+  proposalQualityScore?: number;
+  proposalQualityStatus?: "blocked" | "passed" | "review_required" | "warning";
+  qualityBlockCount?: number;
+  qualityFailureCount?: number;
+  qualityWarningCount?: number;
   publicCopyCleanStatus?: "blocked" | "clean" | "review_required";
   requiresExtraReview?: boolean;
+  repeatedContentDetected?: boolean;
   sectionCopyQualityStatus?: "blocked" | "clean" | "review_required";
   shouldBlockExecution?: boolean;
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
+  structureScore?: number;
   status: "pending";
   suppressedContextCount?: number;
+  todoDetected?: boolean;
   summary: string;
   executionStrategy?: "answer_only" | "docs_first_then_source" | "phased_code_plan" | "phased_proposal" | "single_proposal" | "single_targeted_edit" | "single_targeted_patch" | "static_site_build";
   milestoneCount?: number;
@@ -2282,6 +2300,40 @@ function compactDomainValidation(domainValidation: DomainValidationResult) {
   };
 }
 
+function compactProposalQualityGate(qualityGate: ProposalQualityGateResult) {
+  return {
+    approvalDisabled: qualityGate.approvalDisabled,
+    approvalRecommendation: qualityGate.approvalRecommendation,
+    blocks: qualityGate.blocks,
+    completenessScore: qualityGate.completenessScore,
+    confidence: qualityGate.confidence,
+    contentScore: qualityGate.contentScore,
+    fakeContentDetected: qualityGate.fakeContentDetected,
+    failures: qualityGate.failures,
+    loremDetected: qualityGate.loremDetected,
+    missingContact: qualityGate.missingContact,
+    missingCTA: qualityGate.missingCTA,
+    missingEntities: qualityGate.missingEntities,
+    missingFooter: qualityGate.missingFooter,
+    missingHero: qualityGate.missingHero,
+    missingModules: qualityGate.missingModules,
+    missingNavigation: qualityGate.missingNavigation,
+    missingPages: qualityGate.missingPages,
+    missingSections: qualityGate.missingSections,
+    missingTrustSignals: qualityGate.missingTrustSignals,
+    placeholderDetected: qualityGate.placeholderDetected,
+    qualityId: qualityGate.qualityId,
+    qualityScore: qualityGate.qualityScore,
+    qualityStatus: qualityGate.qualityStatus,
+    repeatedContentDetected: qualityGate.repeatedContentDetected,
+    repairHints: qualityGate.repairHints,
+    requiredChecks: qualityGate.requiredChecks,
+    structureScore: qualityGate.structureScore,
+    todoDetected: qualityGate.todoDetected,
+    warnings: qualityGate.warnings
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2594,6 +2646,58 @@ function applyDomainValidationMetadata(
   };
 }
 
+function applyProposalQualityMetadata(
+  proposal: DiffProposal,
+  qualityGate: ProposalQualityGateResult
+): DiffProposal {
+  const reasons: ProposalRoutingReason[] = qualityGate.blocks.map((block) => ({
+    code: "proposal_quality_block",
+    message: `${block.message} ${block.evidence}`.trim(),
+    severity: "high"
+  }));
+  const warnings: ProposalRoutingWarning[] = [
+    ...qualityGate.failures,
+    ...qualityGate.warnings
+  ].map((item) => ({
+    code: "proposal_quality_warning",
+    message: `${item.message} ${item.repairHint}`.trim(),
+    risk: item.severity === "failure" ? "high" : "medium"
+  }));
+
+  return {
+    ...proposal,
+    approvalRecommendation: qualityGate.approvalRecommendation,
+    blockedReason: qualityGate.approvalDisabled
+      ? qualityGate.repairHints.join("; ") || "Proposal quality gate blocked this proposal."
+      : proposal.blockedReason,
+    completenessScore: qualityGate.completenessScore,
+    contentScore: qualityGate.contentScore,
+    fakeContentDetected: qualityGate.fakeContentDetected,
+    loremDetected: qualityGate.loremDetected,
+    placeholderDetected: qualityGate.placeholderDetected,
+    proposalQualityScore: qualityGate.qualityScore,
+    proposalQualityStatus: qualityGate.qualityStatus,
+    proposalRoutingMode: qualityGate.approvalDisabled
+      ? "blocked"
+      : qualityGate.qualityStatus === "review_required" && proposal.proposalRoutingMode === "normal"
+        ? "review_required"
+        : proposal.proposalRoutingMode,
+    proposalRoutingReasons: [...(proposal.proposalRoutingReasons ?? []), ...reasons],
+    proposalRoutingWarnings: [...(proposal.proposalRoutingWarnings ?? []), ...warnings],
+    qualityBlockCount: qualityGate.blocks.length,
+    qualityFailureCount: qualityGate.failures.length,
+    qualityWarningCount: qualityGate.warnings.length,
+    repeatedContentDetected: qualityGate.repeatedContentDetected,
+    requiresExtraReview: proposal.requiresExtraReview || qualityGate.qualityStatus !== "passed",
+    shouldBlockExecution: proposal.shouldBlockExecution || qualityGate.approvalDisabled,
+    structureScore: qualityGate.structureScore,
+    todoDetected: qualityGate.todoDetected,
+    summary: qualityGate.approvalDisabled
+      ? `${proposal.summary} Proposal quality gate blocked this proposal: ${qualityGate.blocks[0]?.message ?? "quality issues detected"}.`
+      : proposal.summary
+  };
+}
+
 function proposedFilesFromChanges(changes: DiffProposal["changes"]) {
   return Object.fromEntries(
     changes
@@ -2627,6 +2731,35 @@ function validateProposalContent(input: {
     taskDecomposition: input.decomposition,
     translatedIntent: input.translatedIntent,
     validationMode: "proposal_content"
+  });
+}
+
+function validateProposalQuality(input: {
+  blueprint: BusinessBlueprint;
+  compositionPlan: CompositionPlan;
+  contextPriority: ContextPriorityResult;
+  decomposition: TaskDecomposition;
+  domainValidation: DomainValidationResult;
+  executionPlan: ExecutionPlan;
+  productMode: "ASK" | "CODE" | "WEBSITE";
+  projectContract: ProjectContract | null;
+  prompt: string;
+  proposal: DiffProposal;
+  translatedIntent: TranslatedIntentSpec;
+}) {
+  return buildProposalQualityGate({
+    businessBlueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    currentPrompt: input.prompt,
+    domainValidation: input.domainValidation,
+    executionPlan: input.executionPlan,
+    productMode: input.productMode,
+    projectContract: input.projectContract,
+    proposedFiles: proposedFilesFromChanges(input.proposal.changes),
+    proposalSummary: input.proposal.summary,
+    taskDecomposition: input.decomposition,
+    translatedIntent: input.translatedIntent
   });
 }
 
@@ -2825,6 +2958,20 @@ async function createFallbackProposalResponse(input: {
     translatedIntent: input.translatedIntent
   });
   const proposalWithValidation = applyDomainValidationMetadata(proposalWithRouting, proposalValidation);
+  const proposalQuality = validateProposalQuality({
+    blueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    decomposition: input.decomposition,
+    domainValidation: proposalValidation,
+    executionPlan: input.executionPlan,
+    productMode: input.contextPriority.authoritativeMode,
+    projectContract: input.projectContract,
+    prompt: input.prompt,
+    proposal: proposalWithValidation,
+    translatedIntent: input.translatedIntent
+  });
+  const proposalWithQuality = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
   let persistence = input.persistence;
   const visibleSummary =
     input.mode === "EXECUTE"
@@ -2845,16 +2992,17 @@ async function createFallbackProposalResponse(input: {
       executionPlan: compactExecutionPlan(input.executionPlan),
       compositionPlan: compactCompositionPlan(input.compositionPlan),
       domainValidation: compactDomainValidation(proposalValidation),
+      proposalQuality: compactProposalQualityGate(proposalQuality),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
       model: input.model,
-      proposal: proposalWithValidation
+      proposal: proposalWithQuality
     },
     role: "assistant"
   });
 
-  return createProposalStream(proposalWithValidation, persistence?.sessionId);
+  return createProposalStream(proposalWithQuality, persistence?.sessionId);
 }
 
 function createOpenRouterTextStream(
@@ -3278,7 +3426,21 @@ export async function POST(request: Request) {
       proposal: routedProposal,
       translatedIntent
     });
-    const proposal = applyDomainValidationMetadata(routedProposal, proposalValidation);
+    const proposalWithValidation = applyDomainValidationMetadata(routedProposal, proposalValidation);
+    const proposalQuality = validateProposalQuality({
+      blueprint,
+      compositionPlan,
+      contextPriority,
+      decomposition,
+      domainValidation: proposalValidation,
+      executionPlan,
+      productMode,
+      projectContract,
+      prompt: effectiveUserPrompt,
+      proposal: proposalWithValidation,
+      translatedIntent
+    });
+    const proposal = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
     const visibleSummary =
       mode === "EXECUTE"
         ? "I prepared an execution proposal for review. Nothing runs until you approve it."
@@ -3297,6 +3459,7 @@ export async function POST(request: Request) {
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
         domainValidation: compactDomainValidation(proposalValidation),
+        proposalQuality: compactProposalQualityGate(proposalQuality),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -3530,7 +3693,21 @@ export async function POST(request: Request) {
       proposal: routedProposal,
       translatedIntent
     });
-    const proposal: DiffProposal = applyDomainValidationMetadata(routedProposal, proposalValidation);
+    const proposalWithValidation = applyDomainValidationMetadata(routedProposal, proposalValidation);
+    const proposalQuality = validateProposalQuality({
+      blueprint,
+      compositionPlan,
+      contextPriority,
+      decomposition,
+      domainValidation: proposalValidation,
+      executionPlan,
+      productMode,
+      projectContract,
+      prompt: effectiveUserPrompt,
+      proposal: proposalWithValidation,
+      translatedIntent
+    });
+    const proposal: DiffProposal = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
 
     if (
       proposal.shouldBlockExecution &&
@@ -3606,6 +3783,7 @@ export async function POST(request: Request) {
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
         domainValidation: compactDomainValidation(proposalValidation),
+        proposalQuality: compactProposalQualityGate(proposalQuality),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

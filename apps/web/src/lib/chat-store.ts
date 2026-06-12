@@ -130,14 +130,28 @@ export type DiffProposal = {
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
   previewDriftDetected?: boolean;
+  approvalRecommendation?: "approve" | "reject" | "review";
+  completenessScore?: number;
+  contentScore?: number;
+  fakeContentDetected?: boolean;
+  loremDetected?: boolean;
+  placeholderDetected?: boolean;
+  proposalQualityScore?: number;
+  proposalQualityStatus?: "blocked" | "passed" | "review_required" | "warning";
+  qualityBlockCount?: number;
+  qualityFailureCount?: number;
+  qualityWarningCount?: number;
   publicCopyCleanStatus?: "blocked" | "clean" | "review_required";
   requiresExtraReview?: boolean;
+  repeatedContentDetected?: boolean;
   sectionCopyQualityStatus?: "blocked" | "clean" | "review_required";
   shouldBlockExecution?: boolean;
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
+  structureScore?: number;
   status: "pending" | "approved" | "rejected";
   suppressedContextCount?: number;
   summary: string;
+  todoDetected?: boolean;
   executionStrategy?: "answer_only" | "docs_first_then_source" | "phased_code_plan" | "phased_proposal" | "single_proposal" | "single_targeted_edit" | "single_targeted_patch" | "static_site_build";
   milestoneCount?: number;
   recommendedExecutionPolicy?: "answer_only" | "docs_first_then_source" | "phased_proposal" | "single_proposal" | "single_targeted_patch";
@@ -485,8 +499,37 @@ function isDiffProposal(value: unknown): value is DiffProposal {
         proposal.proposalRoutingReasons.every(isProposalRoutingReason))) &&
     (typeof proposal.previewDriftDetected === "undefined" ||
       typeof proposal.previewDriftDetected === "boolean") &&
+    (typeof proposal.approvalRecommendation === "undefined" ||
+      proposal.approvalRecommendation === "approve" ||
+      proposal.approvalRecommendation === "reject" ||
+      proposal.approvalRecommendation === "review") &&
+    (typeof proposal.completenessScore === "undefined" ||
+      typeof proposal.completenessScore === "number") &&
+    (typeof proposal.contentScore === "undefined" ||
+      typeof proposal.contentScore === "number") &&
+    (typeof proposal.fakeContentDetected === "undefined" ||
+      typeof proposal.fakeContentDetected === "boolean") &&
+    (typeof proposal.loremDetected === "undefined" ||
+      typeof proposal.loremDetected === "boolean") &&
+    (typeof proposal.placeholderDetected === "undefined" ||
+      typeof proposal.placeholderDetected === "boolean") &&
+    (typeof proposal.proposalQualityScore === "undefined" ||
+      typeof proposal.proposalQualityScore === "number") &&
+    (typeof proposal.proposalQualityStatus === "undefined" ||
+      proposal.proposalQualityStatus === "blocked" ||
+      proposal.proposalQualityStatus === "passed" ||
+      proposal.proposalQualityStatus === "review_required" ||
+      proposal.proposalQualityStatus === "warning") &&
+    (typeof proposal.qualityBlockCount === "undefined" ||
+      typeof proposal.qualityBlockCount === "number") &&
+    (typeof proposal.qualityFailureCount === "undefined" ||
+      typeof proposal.qualityFailureCount === "number") &&
+    (typeof proposal.qualityWarningCount === "undefined" ||
+      typeof proposal.qualityWarningCount === "number") &&
     (typeof proposal.requiresExtraReview === "undefined" ||
       typeof proposal.requiresExtraReview === "boolean") &&
+    (typeof proposal.repeatedContentDetected === "undefined" ||
+      typeof proposal.repeatedContentDetected === "boolean") &&
     (typeof proposal.publicCopyCleanStatus === "undefined" ||
       proposal.publicCopyCleanStatus === "blocked" ||
       proposal.publicCopyCleanStatus === "clean" ||
@@ -501,6 +544,8 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.staleTermScanStatus === "blocked" ||
       proposal.staleTermScanStatus === "clean" ||
       proposal.staleTermScanStatus === "review_required") &&
+    (typeof proposal.structureScore === "undefined" ||
+      typeof proposal.structureScore === "number") &&
     (typeof proposal.suppressedContextCount === "undefined" ||
       typeof proposal.suppressedContextCount === "number") &&
     (typeof proposal.executionStrategy === "undefined" ||
@@ -542,6 +587,8 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     (typeof proposal.translatedStyle === "undefined" ||
       proposal.translatedStyle === null ||
       typeof proposal.translatedStyle === "string") &&
+    (typeof proposal.todoDetected === "undefined" ||
+      typeof proposal.todoDetected === "boolean") &&
     (typeof proposal.validationIssueCount === "undefined" ||
       typeof proposal.validationIssueCount === "number") &&
     Array.isArray(proposal.changes) &&
