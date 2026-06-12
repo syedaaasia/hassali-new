@@ -37,6 +37,11 @@ import {
   type SiteDomain
 } from "@/lib/server/ai/domain-site-generator";
 import {
+  buildExecutionPlan,
+  summarizeExecutionPlan,
+  type ExecutionPlan
+} from "@/lib/server/ai/execution-planner";
+import {
   buildIntentIntelligence,
   type IntentIntelligence
 } from "@/lib/server/ai/intent-intelligence";
@@ -155,6 +160,11 @@ type DiffProposal = {
   detectedDomain?: string;
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
+  executionMode?: "ASK" | "CODE" | "WEBSITE";
+  executionPlanId?: string;
+  executionPlanStatus?: "answer_only" | "planned" | "targeted";
+  executionRiskLevel?: "high" | "low" | "medium";
+  executionStageCount?: number;
   id: string;
   intentConfidence?: number;
   intentTranslationStatus?: "available" | "low_confidence" | "unavailable";
@@ -176,8 +186,9 @@ type DiffProposal = {
   status: "pending";
   suppressedContextCount?: number;
   summary: string;
-  executionStrategy?: "answer_only" | "phased_code_plan" | "single_targeted_edit" | "static_site_build";
+  executionStrategy?: "answer_only" | "docs_first_then_source" | "phased_code_plan" | "phased_proposal" | "single_proposal" | "single_targeted_edit" | "single_targeted_patch" | "static_site_build";
   milestoneCount?: number;
+  recommendedExecutionPolicy?: "answer_only" | "docs_first_then_source" | "phased_proposal" | "single_proposal" | "single_targeted_patch";
   recommendedPhasePolicy?: "multi_phase" | "single_pass" | "targeted_only";
   taskKind?: "answer_plan" | "code_app_build" | "targeted_text_replacement" | "visual_edit" | "website_generation";
   translatedBusinessType?: string | null;
@@ -2171,6 +2182,27 @@ function compactTaskDecomposition(decomposition: TaskDecomposition) {
   };
 }
 
+function compactExecutionPlan(executionPlan: ExecutionPlan) {
+  return {
+    approvalCheckpoints: executionPlan.approvalCheckpoints,
+    blockers: executionPlan.blockers,
+    completionChecks: executionPlan.completionChecks,
+    confidence: executionPlan.confidence,
+    executionMode: executionPlan.executionMode,
+    executionPlanId: executionPlan.executionPlanId,
+    executionPlanStatus: executionPlan.executionPlanStatus,
+    executionStageCount: executionPlan.executionStages.length,
+    executionStages: executionPlan.executionStages,
+    executionStrategy: executionPlan.executionStrategy,
+    parallelTasks: executionPlan.parallelTasks,
+    prerequisites: executionPlan.prerequisites,
+    recommendedExecutionPolicy: executionPlan.recommendedExecutionPolicy,
+    riskLevel: executionPlan.riskLevel,
+    rollbackChecks: executionPlan.rollbackChecks,
+    sequentialTasks: executionPlan.sequentialTasks
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2235,7 +2267,8 @@ function attachProposalRoutingMetadata(
   translatedIntent?: TranslatedIntentSpec,
   blueprint?: BusinessBlueprint,
   contextPriority?: ContextPriorityResult,
-  decomposition?: TaskDecomposition
+  decomposition?: TaskDecomposition,
+  executionPlan?: ExecutionPlan
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
   const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
@@ -2269,6 +2302,11 @@ function attachProposalRoutingMetadata(
     detectedDomain,
     domainConfidence: translatedIntent?.confidence ?? intent?.confidence,
     domainSource,
+    executionMode: executionPlan?.executionMode,
+    executionPlanId: executionPlan?.executionPlanId,
+    executionPlanStatus: executionPlan?.executionPlanStatus,
+    executionRiskLevel: executionPlan?.riskLevel,
+    executionStageCount: executionPlan?.executionStages.length,
     intentConfidence: translatedIntent?.confidence,
     intentTranslationStatus: translatedIntent
       ? translatedIntent.confidence >= 0.55
@@ -2312,8 +2350,9 @@ function attachProposalRoutingMetadata(
     translatedDomain: translatedIntent?.domain,
     translatedFeatures: translatedIntent?.requestedFeatures,
     translatedStyle: translatedIntent?.style,
-    executionStrategy: decomposition?.executionStrategy,
+    executionStrategy: executionPlan?.executionStrategy ?? decomposition?.executionStrategy,
     milestoneCount: decomposition?.milestones.length,
+    recommendedExecutionPolicy: executionPlan?.recommendedExecutionPolicy,
     recommendedPhasePolicy: decomposition?.recommendedPhasePolicy,
     taskKind: decomposition?.taskKind
   };
@@ -2517,6 +2556,7 @@ async function createFallbackProposalResponse(input: {
   blueprint: BusinessBlueprint;
   contextPriority: ContextPriorityResult;
   decomposition: TaskDecomposition;
+  executionPlan: ExecutionPlan;
   workspace: WorkspaceContext;
 }) {
   const proposal = createLocalProposal(
@@ -2558,7 +2598,8 @@ async function createFallbackProposalResponse(input: {
       input.translatedIntent,
       input.blueprint,
       input.contextPriority,
-      input.decomposition
+      input.decomposition,
+      input.executionPlan
     )
   });
   let persistence = input.persistence;
@@ -2578,6 +2619,7 @@ async function createFallbackProposalResponse(input: {
       blueprint: compactBusinessBlueprint(input.blueprint),
       contextPriority: compactContextPriority(input.contextPriority),
       taskDecomposition: compactTaskDecomposition(input.decomposition),
+      executionPlan: compactExecutionPlan(input.executionPlan),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
@@ -2776,6 +2818,15 @@ export async function POST(request: Request) {
     projectContract,
     translatedIntent
   });
+  const executionPlan = buildExecutionPlan({
+    businessBlueprint: blueprint,
+    contextPriority,
+    currentPrompt: effectiveUserPrompt,
+    productMode,
+    projectContract,
+    taskDecomposition: decomposition,
+    translatedIntent
+  });
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -2802,6 +2853,7 @@ export async function POST(request: Request) {
     decision,
     decomposition,
     diagnostic,
+    executionPlan,
     intent,
     mode: productMode,
     translatedIntent
@@ -2816,6 +2868,7 @@ export async function POST(request: Request) {
     console.info("business blueprint", summarizeBusinessBlueprint(blueprint));
     console.info("context priority", summarizeContextPriority(contextPriority));
     console.info("task decomposition", summarizeTaskDecomposition(decomposition));
+    console.info("execution plan", summarizeExecutionPlan(executionPlan));
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
     console.info("kernel routing decision", kernel.routingDecision);
@@ -2853,6 +2906,7 @@ export async function POST(request: Request) {
         proposalRouting: compactProposalRouting(kernel, routing),
         productMode,
         taskDecomposition: compactTaskDecomposition(decomposition),
+        executionPlan: compactExecutionPlan(executionPlan),
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -2953,7 +3007,8 @@ export async function POST(request: Request) {
         translatedIntent,
         blueprint,
         contextPriority,
-        decomposition
+        decomposition,
+        executionPlan
       )
     });
     const visibleSummary =
@@ -2971,6 +3026,7 @@ export async function POST(request: Request) {
         blueprint: compactBusinessBlueprint(blueprint),
         contextPriority: compactContextPriority(contextPriority),
         taskDecomposition: compactTaskDecomposition(decomposition),
+        executionPlan: compactExecutionPlan(executionPlan),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -3021,6 +3077,7 @@ export async function POST(request: Request) {
                 `Business/app blueprint matched from translated intent: ${JSON.stringify(blueprint)}. Use it for sections, screens, components, copy blocks, file strategy, must-include, must-avoid, and acceptance checks. ` +
                 `Context priority result: ${JSON.stringify(contextPriority)}. Obey authoritativeMode, authoritativeDomain, authoritativeIntentFamily, authoritativePreviewType, suppressedContext, and conflicts. Current prompt and selected product mode outrank HASSALI.md, old proposals, fallback defaults, and examples. ` +
                 `Task decomposition: ${JSON.stringify(decomposition)}. Obey orderedTasks, milestones, fileTargets, recommendedPhasePolicy, validationChecks, and blockedUntil. Small edits must remain targeted; CODE apps should be phased; ASK should not mutate files. ` +
+                `Execution plan: ${JSON.stringify(executionPlan)}. Obey executionStages, sequentialTasks, parallelTasks, approvalCheckpoints, completionChecks, rollbackChecks, blockers, and recommendedExecutionPolicy. Do not skip approval-first safety. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
@@ -3057,6 +3114,7 @@ export async function POST(request: Request) {
         blueprint,
         contextPriority,
         decomposition,
+        executionPlan,
         workspace
       });
     }
@@ -3079,6 +3137,7 @@ export async function POST(request: Request) {
         blueprint,
         contextPriority,
         decomposition,
+        executionPlan,
         workspace
       });
     }
@@ -3118,6 +3177,7 @@ export async function POST(request: Request) {
         blueprint,
         contextPriority,
         decomposition,
+        executionPlan,
         workspace
       });
     }
@@ -3174,7 +3234,8 @@ export async function POST(request: Request) {
         translatedIntent,
         blueprint,
         contextPriority,
-        decomposition
+        decomposition,
+        executionPlan
       )
     });
 
@@ -3200,6 +3261,7 @@ export async function POST(request: Request) {
         blueprint,
         contextPriority,
         decomposition,
+        executionPlan,
         workspace
       });
     }
@@ -3230,6 +3292,7 @@ export async function POST(request: Request) {
         blueprint,
         contextPriority,
         decomposition,
+        executionPlan,
         workspace
       });
     }
@@ -3243,6 +3306,7 @@ export async function POST(request: Request) {
         blueprint: compactBusinessBlueprint(blueprint),
         contextPriority: compactContextPriority(contextPriority),
         taskDecomposition: compactTaskDecomposition(decomposition),
+        executionPlan: compactExecutionPlan(executionPlan),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

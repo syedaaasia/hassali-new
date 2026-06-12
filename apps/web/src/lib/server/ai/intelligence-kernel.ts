@@ -2,6 +2,7 @@ import type { DecisionPlan } from "@/lib/server/ai/decision-engine";
 import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
 import type { BusinessBlueprint } from "@/lib/server/ai/blueprint-matcher";
 import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-engine";
+import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
@@ -156,6 +157,7 @@ type IntelligenceKernelInput = {
   blueprint?: BusinessBlueprint;
   contextPriority?: ContextPriorityResult;
   decomposition?: TaskDecomposition;
+  executionPlan?: ExecutionPlan;
   intent: IntentIntelligence;
   mode: KernelMode;
   translatedIntent?: TranslatedIntentSpec;
@@ -203,6 +205,9 @@ function promptText(input: IntelligenceKernelInput) {
     input.decomposition?.taskKind,
     input.decomposition?.orderedTasks.join(" "),
     input.decomposition?.validationChecks.join(" "),
+    input.executionPlan?.executionStrategy,
+    input.executionPlan?.sequentialTasks.join(" "),
+    input.executionPlan?.completionChecks.join(" "),
     input.intent.summary,
     input.decision.reason,
     input.composition.businessType,
@@ -331,6 +336,7 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
   const blueprint = input.blueprint;
   const priority = input.contextPriority;
   const decomposition = input.decomposition;
+  const executionPlan = input.executionPlan;
 
   return Array.from(
     new Set([
@@ -359,6 +365,10 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
       decomposition ? `execution-strategy:${decomposition.executionStrategy}` : null,
       decomposition ? `milestones:${decomposition.milestones.length}` : null,
       decomposition ? `phase-policy:${decomposition.recommendedPhasePolicy}` : null,
+      executionPlan ? `execution-plan:${executionPlan.executionPlanId}` : null,
+      executionPlan ? `execution-strategy:${executionPlan.executionStrategy}` : null,
+      executionPlan ? `execution-stages:${executionPlan.executionStages.length}` : null,
+      executionPlan ? `execution-risk:${executionPlan.riskLevel}` : null,
       `domain:${input.intent.domain}`,
       `business:${input.composition.businessType}`,
       input.intent.pageCount ? `pages:${input.intent.pageCount}` : null,
@@ -567,6 +577,9 @@ export function buildReasoningTrace(
       input.decomposition
         ? `Task decomposer selected ${input.decomposition.taskKind} with ${input.decomposition.milestones.length} milestone(s), strategy=${input.decomposition.executionStrategy}, policy=${input.decomposition.recommendedPhasePolicy}.`
         : "Task decomposition was not available for this request.",
+      input.executionPlan
+        ? `Execution planner selected ${input.executionPlan.executionStrategy} with ${input.executionPlan.executionStages.length} stage(s), risk=${input.executionPlan.riskLevel}, policy=${input.executionPlan.recommendedExecutionPolicy}.`
+        : "Execution planning was not available for this request.",
       input.composition.reasoningSummary,
       input.decision.reason
     ],

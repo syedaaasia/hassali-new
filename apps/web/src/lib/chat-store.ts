@@ -98,6 +98,11 @@ export type DiffProposal = {
   detectedDomain?: string;
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
+  executionMode?: "ASK" | "CODE" | "WEBSITE";
+  executionPlanId?: string;
+  executionPlanStatus?: "answer_only" | "planned" | "targeted";
+  executionRiskLevel?: "high" | "low" | "medium";
+  executionStageCount?: number;
   id: string;
   intentConfidence?: number;
   intentTranslationStatus?: "available" | "low_confidence" | "unavailable";
@@ -119,8 +124,9 @@ export type DiffProposal = {
   status: "pending" | "approved" | "rejected";
   suppressedContextCount?: number;
   summary: string;
-  executionStrategy?: "answer_only" | "phased_code_plan" | "single_targeted_edit" | "static_site_build";
+  executionStrategy?: "answer_only" | "docs_first_then_source" | "phased_code_plan" | "phased_proposal" | "single_proposal" | "single_targeted_edit" | "single_targeted_patch" | "static_site_build";
   milestoneCount?: number;
+  recommendedExecutionPolicy?: "answer_only" | "docs_first_then_source" | "phased_proposal" | "single_proposal" | "single_targeted_patch";
   recommendedPhasePolicy?: "multi_phase" | "single_pass" | "targeted_only";
   taskKind?: "answer_plan" | "code_app_build" | "targeted_text_replacement" | "visual_edit" | "website_generation";
   translatedBusinessType?: string | null;
@@ -365,6 +371,22 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.decompositionStatus === "answer_only" ||
       proposal.decompositionStatus === "decomposed" ||
       proposal.decompositionStatus === "targeted") &&
+    (typeof proposal.executionMode === "undefined" ||
+      proposal.executionMode === "ASK" ||
+      proposal.executionMode === "CODE" ||
+      proposal.executionMode === "WEBSITE") &&
+    (typeof proposal.executionPlanId === "undefined" ||
+      typeof proposal.executionPlanId === "string") &&
+    (typeof proposal.executionPlanStatus === "undefined" ||
+      proposal.executionPlanStatus === "answer_only" ||
+      proposal.executionPlanStatus === "planned" ||
+      proposal.executionPlanStatus === "targeted") &&
+    (typeof proposal.executionRiskLevel === "undefined" ||
+      proposal.executionRiskLevel === "high" ||
+      proposal.executionRiskLevel === "low" ||
+      proposal.executionRiskLevel === "medium") &&
+    (typeof proposal.executionStageCount === "undefined" ||
+      typeof proposal.executionStageCount === "number") &&
     (typeof proposal.projectId === "string" || proposal.projectId === null) &&
     typeof proposal.summary === "string" &&
     (typeof proposal.blockedReason === "undefined" || typeof proposal.blockedReason === "string") &&
@@ -431,11 +453,21 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       typeof proposal.suppressedContextCount === "number") &&
     (typeof proposal.executionStrategy === "undefined" ||
       proposal.executionStrategy === "answer_only" ||
+      proposal.executionStrategy === "docs_first_then_source" ||
       proposal.executionStrategy === "phased_code_plan" ||
+      proposal.executionStrategy === "phased_proposal" ||
+      proposal.executionStrategy === "single_proposal" ||
       proposal.executionStrategy === "single_targeted_edit" ||
+      proposal.executionStrategy === "single_targeted_patch" ||
       proposal.executionStrategy === "static_site_build") &&
     (typeof proposal.milestoneCount === "undefined" ||
       typeof proposal.milestoneCount === "number") &&
+    (typeof proposal.recommendedExecutionPolicy === "undefined" ||
+      proposal.recommendedExecutionPolicy === "answer_only" ||
+      proposal.recommendedExecutionPolicy === "docs_first_then_source" ||
+      proposal.recommendedExecutionPolicy === "phased_proposal" ||
+      proposal.recommendedExecutionPolicy === "single_proposal" ||
+      proposal.recommendedExecutionPolicy === "single_targeted_patch") &&
     (typeof proposal.recommendedPhasePolicy === "undefined" ||
       proposal.recommendedPhasePolicy === "multi_phase" ||
       proposal.recommendedPhasePolicy === "single_pass" ||
