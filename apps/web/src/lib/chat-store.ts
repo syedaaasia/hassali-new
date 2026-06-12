@@ -79,6 +79,9 @@ export type DiffProposal = {
     mockDataNotice: string;
     screens: string[];
   };
+  assetDriftDetected?: boolean;
+  assetScore?: number;
+  assetValidationStatus?: "blocked" | "passed" | "review_required" | "warning";
   blueprintConfidence?: number;
   blueprintId?: string;
   blueprintKind?: "answer" | "code_app" | "website";
@@ -130,6 +133,7 @@ export type DiffProposal = {
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
   previewDriftDetected?: boolean;
+  heroAssetMismatch?: boolean;
   approvalRecommendation?: "approve" | "reject" | "review";
   completenessScore?: number;
   contentScore?: number;
@@ -152,6 +156,13 @@ export type DiffProposal = {
   suppressedContextCount?: number;
   summary: string;
   todoDetected?: boolean;
+  placeholderOnlyVisualDetected?: boolean;
+  visualBlockCount?: number;
+  visualDriftDetected?: boolean;
+  visualFailureCount?: number;
+  visualScore?: number;
+  visualValidationStatus?: "blocked" | "passed" | "review_required" | "warning";
+  visualWarningCount?: number;
   executionStrategy?: "answer_only" | "docs_first_then_source" | "phased_code_plan" | "phased_proposal" | "single_proposal" | "single_targeted_edit" | "single_targeted_patch" | "static_site_build";
   milestoneCount?: number;
   recommendedExecutionPolicy?: "answer_only" | "docs_first_then_source" | "phased_proposal" | "single_proposal" | "single_targeted_patch";
@@ -357,6 +368,15 @@ function isDiffProposal(value: unknown): value is DiffProposal {
   return (
     typeof proposal.id === "string" &&
     (typeof proposal.appPreview === "undefined" || isAppPreview(proposal.appPreview)) &&
+    (typeof proposal.assetDriftDetected === "undefined" ||
+      typeof proposal.assetDriftDetected === "boolean") &&
+    (typeof proposal.assetScore === "undefined" ||
+      typeof proposal.assetScore === "number") &&
+    (typeof proposal.assetValidationStatus === "undefined" ||
+      proposal.assetValidationStatus === "blocked" ||
+      proposal.assetValidationStatus === "passed" ||
+      proposal.assetValidationStatus === "review_required" ||
+      proposal.assetValidationStatus === "warning") &&
     (typeof proposal.blueprintConfidence === "undefined" ||
       typeof proposal.blueprintConfidence === "number") &&
     (typeof proposal.blueprintId === "undefined" || typeof proposal.blueprintId === "string") &&
@@ -499,6 +519,8 @@ function isDiffProposal(value: unknown): value is DiffProposal {
         proposal.proposalRoutingReasons.every(isProposalRoutingReason))) &&
     (typeof proposal.previewDriftDetected === "undefined" ||
       typeof proposal.previewDriftDetected === "boolean") &&
+    (typeof proposal.heroAssetMismatch === "undefined" ||
+      typeof proposal.heroAssetMismatch === "boolean") &&
     (typeof proposal.approvalRecommendation === "undefined" ||
       proposal.approvalRecommendation === "approve" ||
       proposal.approvalRecommendation === "reject" ||
@@ -589,6 +611,23 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       typeof proposal.translatedStyle === "string") &&
     (typeof proposal.todoDetected === "undefined" ||
       typeof proposal.todoDetected === "boolean") &&
+    (typeof proposal.placeholderOnlyVisualDetected === "undefined" ||
+      typeof proposal.placeholderOnlyVisualDetected === "boolean") &&
+    (typeof proposal.visualBlockCount === "undefined" ||
+      typeof proposal.visualBlockCount === "number") &&
+    (typeof proposal.visualDriftDetected === "undefined" ||
+      typeof proposal.visualDriftDetected === "boolean") &&
+    (typeof proposal.visualFailureCount === "undefined" ||
+      typeof proposal.visualFailureCount === "number") &&
+    (typeof proposal.visualScore === "undefined" ||
+      typeof proposal.visualScore === "number") &&
+    (typeof proposal.visualValidationStatus === "undefined" ||
+      proposal.visualValidationStatus === "blocked" ||
+      proposal.visualValidationStatus === "passed" ||
+      proposal.visualValidationStatus === "review_required" ||
+      proposal.visualValidationStatus === "warning") &&
+    (typeof proposal.visualWarningCount === "undefined" ||
+      typeof proposal.visualWarningCount === "number") &&
     (typeof proposal.validationIssueCount === "undefined" ||
       typeof proposal.validationIssueCount === "number") &&
     Array.isArray(proposal.changes) &&

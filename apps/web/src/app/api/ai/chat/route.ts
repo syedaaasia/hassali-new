@@ -11,6 +11,10 @@ import {
   formatAskRuntimeContext
 } from "@/lib/server/ai/ask-context";
 import {
+  validateAssetVisuals,
+  type AssetVisualValidationResult
+} from "@/lib/server/ai/asset-visual-validator";
+import {
   matchBusinessBlueprint,
   summarizeBusinessBlueprint,
   type BusinessBlueprint
@@ -154,6 +158,9 @@ type ProposalRoutingWarning = {
 
 type DiffProposal = {
   appPreview?: CodeAppPreview;
+  assetDriftDetected?: boolean;
+  assetScore?: number;
+  assetValidationStatus?: "blocked" | "passed" | "review_required" | "warning";
   blueprintConfidence?: number;
   blueprintId?: string;
   blueprintKind?: "answer" | "code_app" | "website";
@@ -206,6 +213,7 @@ type DiffProposal = {
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
   previewDriftDetected?: boolean;
+  heroAssetMismatch?: boolean;
   approvalRecommendation?: "approve" | "reject" | "review";
   completenessScore?: number;
   contentScore?: number;
@@ -228,6 +236,13 @@ type DiffProposal = {
   suppressedContextCount?: number;
   todoDetected?: boolean;
   summary: string;
+  placeholderOnlyVisualDetected?: boolean;
+  visualBlockCount?: number;
+  visualDriftDetected?: boolean;
+  visualFailureCount?: number;
+  visualScore?: number;
+  visualValidationStatus?: "blocked" | "passed" | "review_required" | "warning";
+  visualWarningCount?: number;
   executionStrategy?: "answer_only" | "docs_first_then_source" | "phased_code_plan" | "phased_proposal" | "single_proposal" | "single_targeted_edit" | "single_targeted_patch" | "static_site_build";
   milestoneCount?: number;
   recommendedExecutionPolicy?: "answer_only" | "docs_first_then_source" | "phased_proposal" | "single_proposal" | "single_targeted_patch";
@@ -2334,6 +2349,36 @@ function compactProposalQualityGate(qualityGate: ProposalQualityGateResult) {
   };
 }
 
+function compactAssetVisualValidation(assetValidation: AssetVisualValidationResult) {
+  return {
+    acceptanceChecks: assetValidation.acceptanceChecks,
+    allowedAssetCategories: assetValidation.allowedAssetCategories,
+    assetDriftDetected: assetValidation.assetDriftDetected,
+    assetScore: assetValidation.assetScore,
+    assetValidationId: assetValidation.assetValidationId,
+    assetValidationStatus: assetValidation.assetValidationStatus,
+    blockedAssetCategories: assetValidation.blockedAssetCategories,
+    confidence: assetValidation.confidence,
+    detectedVisualSignals: assetValidation.detectedVisualSignals,
+    expectedVisualSignals: assetValidation.expectedVisualSignals,
+    galleryAssetMismatch: assetValidation.galleryAssetMismatch,
+    heroAssetMismatch: assetValidation.heroAssetMismatch,
+    logoMismatch: assetValidation.logoMismatch,
+    mismatchedAssets: assetValidation.mismatchedAssets,
+    missingAssets: assetValidation.missingAssets,
+    placeholderOnlyVisualDetected: assetValidation.placeholderOnlyVisualDetected,
+    productAssetMismatch: assetValidation.productAssetMismatch,
+    repairHints: assetValidation.repairHints,
+    shouldBlockVisualApproval: assetValidation.shouldBlockVisualApproval,
+    visualBlocks: assetValidation.visualBlocks,
+    visualDriftDetected: assetValidation.visualDriftDetected,
+    visualFailures: assetValidation.visualFailures,
+    visualScore: assetValidation.visualScore,
+    visualValidationStatus: assetValidation.visualValidationStatus,
+    visualWarnings: assetValidation.visualWarnings
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2698,6 +2743,55 @@ function applyProposalQualityMetadata(
   };
 }
 
+function applyAssetVisualValidationMetadata(
+  proposal: DiffProposal,
+  validation: AssetVisualValidationResult
+): DiffProposal {
+  const reasons: ProposalRoutingReason[] = validation.visualBlocks.map((block) => ({
+    code: "proposal_visual_block",
+    message: `${block.message} ${block.evidence}`.trim(),
+    severity: "high"
+  }));
+  const warnings: ProposalRoutingWarning[] = [
+    ...validation.visualFailures,
+    ...validation.visualWarnings
+  ].map((item) => ({
+    code: "proposal_visual_warning",
+    message: `${item.message} ${item.repairHint}`.trim(),
+    risk: item.severity === "failure" ? "high" : "medium"
+  }));
+
+  return {
+    ...proposal,
+    assetDriftDetected: validation.assetDriftDetected,
+    assetScore: validation.assetScore,
+    assetValidationStatus: validation.assetValidationStatus,
+    blockedReason: validation.shouldBlockVisualApproval
+      ? validation.repairHints.join("; ") || "Asset visual validator blocked this proposal."
+      : proposal.blockedReason,
+    heroAssetMismatch: validation.heroAssetMismatch,
+    placeholderOnlyVisualDetected: validation.placeholderOnlyVisualDetected,
+    proposalRoutingMode: validation.shouldBlockVisualApproval
+      ? "blocked"
+      : validation.visualValidationStatus === "review_required" && proposal.proposalRoutingMode === "normal"
+        ? "review_required"
+        : proposal.proposalRoutingMode,
+    proposalRoutingReasons: [...(proposal.proposalRoutingReasons ?? []), ...reasons],
+    proposalRoutingWarnings: [...(proposal.proposalRoutingWarnings ?? []), ...warnings],
+    requiresExtraReview: proposal.requiresExtraReview || validation.visualValidationStatus !== "passed",
+    shouldBlockExecution: proposal.shouldBlockExecution || validation.shouldBlockVisualApproval,
+    summary: validation.shouldBlockVisualApproval
+      ? `${proposal.summary} Asset visual validator blocked this proposal: ${validation.visualBlocks[0]?.message ?? "visual mismatch detected"}.`
+      : proposal.summary,
+    visualBlockCount: validation.visualBlocks.length,
+    visualDriftDetected: validation.visualDriftDetected,
+    visualFailureCount: validation.visualFailures.length,
+    visualScore: validation.visualScore,
+    visualValidationStatus: validation.visualValidationStatus,
+    visualWarningCount: validation.visualWarnings.length
+  };
+}
+
 function proposedFilesFromChanges(changes: DiffProposal["changes"]) {
   return Object.fromEntries(
     changes
@@ -2758,6 +2852,37 @@ function validateProposalQuality(input: {
     projectContract: input.projectContract,
     proposedFiles: proposedFilesFromChanges(input.proposal.changes),
     proposalSummary: input.proposal.summary,
+    taskDecomposition: input.decomposition,
+    translatedIntent: input.translatedIntent
+  });
+}
+
+function validateProposalAssets(input: {
+  blueprint: BusinessBlueprint;
+  compositionPlan: CompositionPlan;
+  contextPriority: ContextPriorityResult;
+  decomposition: TaskDecomposition;
+  domainValidation: DomainValidationResult;
+  executionPlan: ExecutionPlan;
+  productMode: "ASK" | "CODE" | "WEBSITE";
+  projectContract: ProjectContract | null;
+  prompt: string;
+  proposal: DiffProposal;
+  proposalQuality: ProposalQualityGateResult;
+  translatedIntent: TranslatedIntentSpec;
+}) {
+  return validateAssetVisuals({
+    businessBlueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    currentPrompt: input.prompt,
+    domainValidation: input.domainValidation,
+    executionPlan: input.executionPlan,
+    productMode: input.productMode,
+    projectContract: input.projectContract,
+    proposalQuality: input.proposalQuality,
+    proposalSummary: input.proposal.summary,
+    proposedFiles: proposedFilesFromChanges(input.proposal.changes),
     taskDecomposition: input.decomposition,
     translatedIntent: input.translatedIntent
   });
@@ -2972,6 +3097,21 @@ async function createFallbackProposalResponse(input: {
     translatedIntent: input.translatedIntent
   });
   const proposalWithQuality = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
+  const assetValidation = validateProposalAssets({
+    blueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    decomposition: input.decomposition,
+    domainValidation: proposalValidation,
+    executionPlan: input.executionPlan,
+    productMode: input.contextPriority.authoritativeMode,
+    projectContract: input.projectContract,
+    prompt: input.prompt,
+    proposal: proposalWithQuality,
+    proposalQuality,
+    translatedIntent: input.translatedIntent
+  });
+  const proposalWithAssets = applyAssetVisualValidationMetadata(proposalWithQuality, assetValidation);
   let persistence = input.persistence;
   const visibleSummary =
     input.mode === "EXECUTE"
@@ -2993,16 +3133,17 @@ async function createFallbackProposalResponse(input: {
       compositionPlan: compactCompositionPlan(input.compositionPlan),
       domainValidation: compactDomainValidation(proposalValidation),
       proposalQuality: compactProposalQualityGate(proposalQuality),
+      assetVisualValidation: compactAssetVisualValidation(assetValidation),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
       model: input.model,
-      proposal: proposalWithQuality
+      proposal: proposalWithAssets
     },
     role: "assistant"
   });
 
-  return createProposalStream(proposalWithQuality, persistence?.sessionId);
+  return createProposalStream(proposalWithAssets, persistence?.sessionId);
 }
 
 function createOpenRouterTextStream(
@@ -3440,7 +3581,22 @@ export async function POST(request: Request) {
       proposal: proposalWithValidation,
       translatedIntent
     });
-    const proposal = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
+    const proposalWithQuality = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
+    const assetValidation = validateProposalAssets({
+      blueprint,
+      compositionPlan,
+      contextPriority,
+      decomposition,
+      domainValidation: proposalValidation,
+      executionPlan,
+      productMode,
+      projectContract,
+      prompt: effectiveUserPrompt,
+      proposal: proposalWithQuality,
+      proposalQuality,
+      translatedIntent
+    });
+    const proposal = applyAssetVisualValidationMetadata(proposalWithQuality, assetValidation);
     const visibleSummary =
       mode === "EXECUTE"
         ? "I prepared an execution proposal for review. Nothing runs until you approve it."
@@ -3460,6 +3616,7 @@ export async function POST(request: Request) {
         compositionPlan: compactCompositionPlan(compositionPlan),
         domainValidation: compactDomainValidation(proposalValidation),
         proposalQuality: compactProposalQualityGate(proposalQuality),
+        assetVisualValidation: compactAssetVisualValidation(assetValidation),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -3707,7 +3864,22 @@ export async function POST(request: Request) {
       proposal: proposalWithValidation,
       translatedIntent
     });
-    const proposal: DiffProposal = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
+    const proposalWithQuality = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
+    const assetValidation = validateProposalAssets({
+      blueprint,
+      compositionPlan,
+      contextPriority,
+      decomposition,
+      domainValidation: proposalValidation,
+      executionPlan,
+      productMode,
+      projectContract,
+      prompt: effectiveUserPrompt,
+      proposal: proposalWithQuality,
+      proposalQuality,
+      translatedIntent
+    });
+    const proposal: DiffProposal = applyAssetVisualValidationMetadata(proposalWithQuality, assetValidation);
 
     if (
       proposal.shouldBlockExecution &&
@@ -3784,6 +3956,7 @@ export async function POST(request: Request) {
         compositionPlan: compactCompositionPlan(compositionPlan),
         domainValidation: compactDomainValidation(proposalValidation),
         proposalQuality: compactProposalQualityGate(proposalQuality),
+        assetVisualValidation: compactAssetVisualValidation(assetValidation),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),
