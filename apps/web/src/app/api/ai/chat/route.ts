@@ -37,6 +37,11 @@ import {
   type DecisionPlan
 } from "@/lib/server/ai/decision-engine";
 import {
+  summarizeDomainValidation,
+  validateDomain,
+  type DomainValidationResult
+} from "@/lib/server/ai/domain-validator";
+import {
   generateComposedSiteFiles,
   generateDomainSite,
   type SiteDomain
@@ -170,8 +175,12 @@ type DiffProposal = {
   decompositionId?: string;
   decompositionStatus?: "answer_only" | "decomposed" | "targeted";
   detectedDomain?: string;
+  domainDriftDetected?: boolean;
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
+  domainValidationScore?: number;
+  domainValidationSeverity?: "high" | "low" | "medium";
+  domainValidationStatus?: "blocked" | "passed" | "review_required";
   executionMode?: "ASK" | "CODE" | "WEBSITE";
   executionPlanId?: string;
   executionPlanStatus?: "answer_only" | "planned" | "targeted";
@@ -182,7 +191,9 @@ type DiffProposal = {
   intentTranslationStatus?: "available" | "low_confidence" | "unavailable";
   intelligenceKernelSummary?: string;
   kernelRoutingDecision?: KernelRoutingDecision;
+  genericCopyDetected?: boolean;
   modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
+  modeDriftDetected?: boolean;
   mode: "SUGGEST" | "EXECUTE";
   previewMode?: "answer_only" | "code_plan" | "static_preview";
   previewType?: "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
@@ -190,6 +201,7 @@ type DiffProposal = {
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
+  previewDriftDetected?: boolean;
   publicCopyCleanStatus?: "blocked" | "clean" | "review_required";
   requiresExtraReview?: boolean;
   sectionCopyQualityStatus?: "blocked" | "clean" | "review_required";
@@ -207,6 +219,7 @@ type DiffProposal = {
   translatedDomain?: string | null;
   translatedFeatures?: string[];
   translatedStyle?: string | null;
+  validationIssueCount?: number;
 };
 
 type CodeAppPreview = {
@@ -2241,6 +2254,34 @@ function compactCompositionPlan(compositionPlan: CompositionPlan) {
   };
 }
 
+function compactDomainValidation(domainValidation: DomainValidationResult) {
+  return {
+    acceptanceChecks: domainValidation.acceptanceChecks,
+    authoritativeDomain: domainValidation.authoritativeDomain,
+    confidence: domainValidation.confidence,
+    detectedContractContamination: domainValidation.detectedContractContamination,
+    detectedDomainDrift: domainValidation.detectedDomainDrift,
+    detectedForbiddenSignals: domainValidation.detectedForbiddenSignals,
+    detectedGenericCopy: domainValidation.detectedGenericCopy,
+    detectedModeDrift: domainValidation.detectedModeDrift,
+    detectedPreviewDrift: domainValidation.detectedPreviewDrift,
+    expectedSignals: domainValidation.expectedSignals,
+    fileStrategyIssues: domainValidation.fileStrategyIssues,
+    forbiddenSignals: domainValidation.forbiddenSignals,
+    missingSignals: domainValidation.missingSignals,
+    pageIssues: domainValidation.pageIssues,
+    repairHints: domainValidation.repairHints,
+    requiredSignals: domainValidation.requiredSignals,
+    sectionIssues: domainValidation.sectionIssues,
+    severity: domainValidation.severity,
+    shouldBlockProposal: domainValidation.shouldBlockProposal,
+    validationId: domainValidation.validationId,
+    validationMode: domainValidation.validationMode,
+    validationScore: domainValidation.validationScore,
+    validationStatus: domainValidation.validationStatus
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2307,7 +2348,8 @@ function attachProposalRoutingMetadata(
   contextPriority?: ContextPriorityResult,
   decomposition?: TaskDecomposition,
   executionPlan?: ExecutionPlan,
-  compositionPlan?: CompositionPlan
+  compositionPlan?: CompositionPlan,
+  domainValidation?: DomainValidationResult
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
   const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
@@ -2346,8 +2388,12 @@ function attachProposalRoutingMetadata(
     decompositionId: decomposition?.decompositionId,
     decompositionStatus: decomposition?.decompositionStatus,
     detectedDomain,
+    domainDriftDetected: domainValidation ? domainValidation.detectedDomainDrift.length > 0 : undefined,
     domainConfidence: translatedIntent?.confidence ?? intent?.confidence,
     domainSource,
+    domainValidationScore: domainValidation?.validationScore,
+    domainValidationSeverity: domainValidation?.severity,
+    domainValidationStatus: domainValidation?.validationStatus,
     executionMode: executionPlan?.executionMode,
     executionPlanId: executionPlan?.executionPlanId,
     executionPlanStatus: executionPlan?.executionPlanStatus,
@@ -2360,6 +2406,8 @@ function attachProposalRoutingMetadata(
         : "low_confidence"
       : "unavailable",
     modeObedienceStatus: "obeyed",
+    genericCopyDetected: domainValidation ? domainValidation.detectedGenericCopy.length > 0 : undefined,
+    modeDriftDetected: domainValidation ? domainValidation.detectedModeDrift.length > 0 : undefined,
     previewMode: proposal.previewMode ??
       (kernel.routingDecision.mode === "CODE"
         ? "code_plan"
@@ -2385,6 +2433,7 @@ function attachProposalRoutingMetadata(
           ? "none"
           : "website_static_preview"),
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
+    previewDriftDetected: domainValidation ? domainValidation.detectedPreviewDrift.length > 0 : undefined,
     publicCopyCleanStatus: "clean",
     proposalRoutingMode:
       extraWarnings.length > 0 && routing.mode === "normal" ? "review_required" : routing.mode,
@@ -2396,6 +2445,15 @@ function attachProposalRoutingMetadata(
     translatedDomain: translatedIntent?.domain,
     translatedFeatures: translatedIntent?.requestedFeatures,
     translatedStyle: translatedIntent?.style,
+    validationIssueCount: domainValidation
+      ? domainValidation.detectedDomainDrift.length +
+        domainValidation.detectedModeDrift.length +
+        domainValidation.detectedPreviewDrift.length +
+        domainValidation.detectedGenericCopy.length +
+        domainValidation.fileStrategyIssues.length +
+        domainValidation.pageIssues.length +
+        domainValidation.sectionIssues.length
+      : undefined,
     executionStrategy: executionPlan?.executionStrategy ?? decomposition?.executionStrategy,
     milestoneCount: decomposition?.milestones.length,
     recommendedExecutionPolicy: executionPlan?.recommendedExecutionPolicy,
@@ -2468,6 +2526,108 @@ function applyPromptAcceptanceMetadata(
         ? `${proposal.summary} Prompt sovereignty blocked this proposal: ${acceptance.issues.join("; ")}.`
         : proposal.summary
   };
+}
+
+function applyDomainValidationMetadata(
+  proposal: DiffProposal,
+  validation: DomainValidationResult
+): DiffProposal {
+  const reasons: ProposalRoutingReason[] = validation.shouldBlockProposal
+    ? [
+        {
+          code: "domain_validation_block",
+          message: [
+            ...validation.detectedDomainDrift,
+            ...validation.detectedModeDrift,
+            ...validation.fileStrategyIssues,
+            ...validation.detectedGenericCopy
+          ].join("; ") || "Domain validation blocked this proposal.",
+          severity: "high"
+        }
+      ]
+    : [];
+  const warnings: ProposalRoutingWarning[] = validation.validationStatus === "review_required"
+    ? validation.repairHints.map((hint) => ({
+        code: "domain_validation_warning",
+        message: hint,
+        risk: "medium"
+      }))
+    : [];
+
+  return {
+    ...proposal,
+    blockedReason: validation.shouldBlockProposal
+      ? validation.repairHints.join("; ") || "Domain validation blocked this proposal."
+      : proposal.blockedReason,
+    contradictionStatus: validation.shouldBlockProposal
+      ? "blocked"
+      : validation.validationStatus === "review_required"
+        ? "review_required"
+        : proposal.contradictionStatus,
+    domainDriftDetected: validation.detectedDomainDrift.length > 0,
+    domainValidationScore: validation.validationScore,
+    domainValidationSeverity: validation.severity,
+    domainValidationStatus: validation.validationStatus,
+    genericCopyDetected: validation.detectedGenericCopy.length > 0,
+    modeDriftDetected: validation.detectedModeDrift.length > 0,
+    previewDriftDetected: validation.detectedPreviewDrift.length > 0,
+    proposalRoutingMode: validation.shouldBlockProposal
+      ? "blocked"
+      : validation.validationStatus === "review_required" && proposal.proposalRoutingMode === "normal"
+        ? "review_required"
+        : proposal.proposalRoutingMode,
+    proposalRoutingReasons: [...(proposal.proposalRoutingReasons ?? []), ...reasons],
+    proposalRoutingWarnings: [...(proposal.proposalRoutingWarnings ?? []), ...warnings],
+    requiresExtraReview: proposal.requiresExtraReview || validation.validationStatus !== "passed",
+    shouldBlockExecution: proposal.shouldBlockExecution || validation.shouldBlockProposal,
+    validationIssueCount:
+      validation.detectedDomainDrift.length +
+      validation.detectedModeDrift.length +
+      validation.detectedPreviewDrift.length +
+      validation.detectedGenericCopy.length +
+      validation.fileStrategyIssues.length +
+      validation.pageIssues.length +
+      validation.sectionIssues.length,
+    summary: validation.shouldBlockProposal
+      ? `${proposal.summary} Domain validation blocked this proposal: ${reasons[0]?.message ?? "domain drift detected"}.`
+      : proposal.summary
+  };
+}
+
+function proposedFilesFromChanges(changes: DiffProposal["changes"]) {
+  return Object.fromEntries(
+    changes
+      .filter((change) => isFileProposalAction(change.action) && change.path && change.proposedContent)
+      .map((change) => [change.path as string, change.proposedContent as string])
+  );
+}
+
+function validateProposalContent(input: {
+  blueprint: BusinessBlueprint;
+  compositionPlan: CompositionPlan;
+  contextPriority: ContextPriorityResult;
+  decomposition: TaskDecomposition;
+  executionPlan: ExecutionPlan;
+  productMode: "ASK" | "CODE" | "WEBSITE";
+  projectContract: ProjectContract | null;
+  prompt: string;
+  proposal: DiffProposal;
+  translatedIntent: TranslatedIntentSpec;
+}) {
+  return validateDomain({
+    businessBlueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    currentPrompt: input.prompt,
+    executionPlan: input.executionPlan,
+    productMode: input.productMode,
+    projectContract: input.projectContract,
+    proposalSummary: input.proposal.summary,
+    proposedFiles: proposedFilesFromChanges(input.proposal.changes),
+    taskDecomposition: input.decomposition,
+    translatedIntent: input.translatedIntent,
+    validationMode: "proposal_content"
+  });
 }
 
 function enforcePromptSovereignty(input: {
@@ -2603,6 +2763,7 @@ async function createFallbackProposalResponse(input: {
   compositionPlan: CompositionPlan;
   contextPriority: ContextPriorityResult;
   decomposition: TaskDecomposition;
+  domainValidation: DomainValidationResult;
   executionPlan: ExecutionPlan;
   workspace: WorkspaceContext;
 }) {
@@ -2647,9 +2808,23 @@ async function createFallbackProposalResponse(input: {
       input.contextPriority,
       input.decomposition,
       input.executionPlan,
-      input.compositionPlan
+      input.compositionPlan,
+      input.domainValidation
     )
   });
+  const proposalValidation = validateProposalContent({
+    blueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    decomposition: input.decomposition,
+    executionPlan: input.executionPlan,
+    productMode: input.contextPriority.authoritativeMode,
+    projectContract: input.projectContract,
+    prompt: input.prompt,
+    proposal: proposalWithRouting,
+    translatedIntent: input.translatedIntent
+  });
+  const proposalWithValidation = applyDomainValidationMetadata(proposalWithRouting, proposalValidation);
   let persistence = input.persistence;
   const visibleSummary =
     input.mode === "EXECUTE"
@@ -2669,16 +2844,17 @@ async function createFallbackProposalResponse(input: {
       taskDecomposition: compactTaskDecomposition(input.decomposition),
       executionPlan: compactExecutionPlan(input.executionPlan),
       compositionPlan: compactCompositionPlan(input.compositionPlan),
+      domainValidation: compactDomainValidation(proposalValidation),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
       model: input.model,
-      proposal: proposalWithRouting
+      proposal: proposalWithValidation
     },
     role: "assistant"
   });
 
-  return createProposalStream(proposalWithRouting, persistence?.sessionId);
+  return createProposalStream(proposalWithValidation, persistence?.sessionId);
 }
 
 function createOpenRouterTextStream(
@@ -2886,6 +3062,18 @@ export async function POST(request: Request) {
     taskDecomposition: decomposition,
     translatedIntent
   });
+  const domainValidation = validateDomain({
+    businessBlueprint: blueprint,
+    compositionPlan,
+    contextPriority,
+    currentPrompt: effectiveUserPrompt,
+    executionPlan,
+    productMode,
+    projectContract,
+    taskDecomposition: decomposition,
+    translatedIntent,
+    validationMode: "pre_proposal_context"
+  });
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -2913,6 +3101,7 @@ export async function POST(request: Request) {
     decision,
     decomposition,
     diagnostic,
+    domainValidation,
     executionPlan,
     intent,
     mode: productMode,
@@ -2930,6 +3119,7 @@ export async function POST(request: Request) {
     console.info("task decomposition", summarizeTaskDecomposition(decomposition));
     console.info("execution plan", summarizeExecutionPlan(executionPlan));
     console.info("composition plan", summarizeCompositionPlan(compositionPlan));
+    console.info("domain validation", summarizeDomainValidation(domainValidation));
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
     console.info("kernel routing decision", kernel.routingDecision);
@@ -2969,6 +3159,7 @@ export async function POST(request: Request) {
         taskDecomposition: compactTaskDecomposition(decomposition),
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
+        domainValidation: compactDomainValidation(domainValidation),
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -3049,7 +3240,7 @@ export async function POST(request: Request) {
       proposal: localProposal,
       workspace
     });
-    const proposal = enforcePromptSovereignty({
+    const routedProposal = enforcePromptSovereignty({
       composition,
       decision,
       intent,
@@ -3071,9 +3262,23 @@ export async function POST(request: Request) {
         contextPriority,
         decomposition,
         executionPlan,
-        compositionPlan
+        compositionPlan,
+        domainValidation
       )
     });
+    const proposalValidation = validateProposalContent({
+      blueprint,
+      compositionPlan,
+      contextPriority,
+      decomposition,
+      executionPlan,
+      productMode,
+      projectContract,
+      prompt: effectiveUserPrompt,
+      proposal: routedProposal,
+      translatedIntent
+    });
+    const proposal = applyDomainValidationMetadata(routedProposal, proposalValidation);
     const visibleSummary =
       mode === "EXECUTE"
         ? "I prepared an execution proposal for review. Nothing runs until you approve it."
@@ -3091,6 +3296,7 @@ export async function POST(request: Request) {
         taskDecomposition: compactTaskDecomposition(decomposition),
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
+        domainValidation: compactDomainValidation(proposalValidation),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -3143,6 +3349,7 @@ export async function POST(request: Request) {
                 `Task decomposition: ${JSON.stringify(decomposition)}. Obey orderedTasks, milestones, fileTargets, recommendedPhasePolicy, validationChecks, and blockedUntil. Small edits must remain targeted; CODE apps should be phased; ASK should not mutate files. ` +
                 `Execution plan: ${JSON.stringify(executionPlan)}. Obey executionStages, sequentialTasks, parallelTasks, approvalCheckpoints, completionChecks, rollbackChecks, blockers, and recommendedExecutionPolicy. Do not skip approval-first safety. ` +
                 `Composition plan: ${JSON.stringify(compositionPlan)}. Obey pagePlans, requiredSections, forbiddenSections, productOrServiceEntities, visualIntent, assetIntent, layoutIntent, CTAs, trustSignals, and acceptanceChecks. This is guidance only; do not invent stale domains. ` +
+                `Domain validation pre-check: ${JSON.stringify(domainValidation)}. Obey requiredSignals, forbiddenSignals, repairHints, and acceptanceChecks. Proposal content that violates these signals may be blocked before approval. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
@@ -3180,6 +3387,7 @@ export async function POST(request: Request) {
         compositionPlan,
         contextPriority,
         decomposition,
+        domainValidation,
         executionPlan,
         workspace
       });
@@ -3204,6 +3412,7 @@ export async function POST(request: Request) {
         compositionPlan,
         contextPriority,
         decomposition,
+        domainValidation,
         executionPlan,
         workspace
       });
@@ -3245,12 +3454,13 @@ export async function POST(request: Request) {
         compositionPlan,
         contextPriority,
         decomposition,
+        domainValidation,
         executionPlan,
         workspace
       });
     }
 
-    const proposal: DiffProposal = enforcePromptSovereignty({
+    const routedProposal: DiffProposal = enforcePromptSovereignty({
       composition,
       decision,
       intent,
@@ -3304,9 +3514,23 @@ export async function POST(request: Request) {
         contextPriority,
         decomposition,
         executionPlan,
-        compositionPlan
+        compositionPlan,
+        domainValidation
       )
     });
+    const proposalValidation = validateProposalContent({
+      blueprint,
+      compositionPlan,
+      contextPriority,
+      decomposition,
+      executionPlan,
+      productMode,
+      projectContract,
+      prompt: effectiveUserPrompt,
+      proposal: routedProposal,
+      translatedIntent
+    });
+    const proposal: DiffProposal = applyDomainValidationMetadata(routedProposal, proposalValidation);
 
     if (
       proposal.shouldBlockExecution &&
@@ -3331,6 +3555,7 @@ export async function POST(request: Request) {
         compositionPlan,
         contextPriority,
         decomposition,
+        domainValidation,
         executionPlan,
         workspace
       });
@@ -3363,6 +3588,7 @@ export async function POST(request: Request) {
         compositionPlan,
         contextPriority,
         decomposition,
+        domainValidation,
         executionPlan,
         workspace
       });
@@ -3379,6 +3605,7 @@ export async function POST(request: Request) {
         taskDecomposition: compactTaskDecomposition(decomposition),
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
+        domainValidation: compactDomainValidation(proposalValidation),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

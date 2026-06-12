@@ -103,8 +103,12 @@ export type DiffProposal = {
   decompositionId?: string;
   decompositionStatus?: "answer_only" | "decomposed" | "targeted";
   detectedDomain?: string;
+  domainDriftDetected?: boolean;
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
+  domainValidationScore?: number;
+  domainValidationSeverity?: "high" | "low" | "medium";
+  domainValidationStatus?: "blocked" | "passed" | "review_required";
   executionMode?: "ASK" | "CODE" | "WEBSITE";
   executionPlanId?: string;
   executionPlanStatus?: "answer_only" | "planned" | "targeted";
@@ -115,7 +119,9 @@ export type DiffProposal = {
   intentTranslationStatus?: "available" | "low_confidence" | "unavailable";
   intelligenceKernelSummary?: string;
   kernelRoutingDecision?: KernelRoutingDecision;
+  genericCopyDetected?: boolean;
   modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
+  modeDriftDetected?: boolean;
   mode: "SUGGEST" | "EXECUTE";
   previewMode?: "answer_only" | "code_plan" | "static_preview";
   previewType?: "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
@@ -123,6 +129,7 @@ export type DiffProposal = {
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
+  previewDriftDetected?: boolean;
   publicCopyCleanStatus?: "blocked" | "clean" | "review_required";
   requiresExtraReview?: boolean;
   sectionCopyQualityStatus?: "blocked" | "clean" | "review_required";
@@ -140,6 +147,7 @@ export type DiffProposal = {
   translatedDomain?: string | null;
   translatedFeatures?: string[];
   translatedStyle?: string | null;
+  validationIssueCount?: number;
   changes: Array<{
     action: ProposalAction;
     path?: string;
@@ -421,12 +429,24 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.contradictionStatus === "clear" ||
       proposal.contradictionStatus === "review_required") &&
     (typeof proposal.detectedDomain === "undefined" || typeof proposal.detectedDomain === "string") &&
+    (typeof proposal.domainDriftDetected === "undefined" ||
+      typeof proposal.domainDriftDetected === "boolean") &&
     (typeof proposal.domainConfidence === "undefined" || typeof proposal.domainConfidence === "number") &&
     (typeof proposal.domainSource === "undefined" ||
       proposal.domainSource === "current_user_prompt" ||
       proposal.domainSource === "existing_project" ||
       proposal.domainSource === "inferred" ||
       proposal.domainSource === "unknown") &&
+    (typeof proposal.domainValidationScore === "undefined" ||
+      typeof proposal.domainValidationScore === "number") &&
+    (typeof proposal.domainValidationSeverity === "undefined" ||
+      proposal.domainValidationSeverity === "high" ||
+      proposal.domainValidationSeverity === "low" ||
+      proposal.domainValidationSeverity === "medium") &&
+    (typeof proposal.domainValidationStatus === "undefined" ||
+      proposal.domainValidationStatus === "blocked" ||
+      proposal.domainValidationStatus === "passed" ||
+      proposal.domainValidationStatus === "review_required") &&
     (typeof proposal.intelligenceKernelSummary === "undefined" ||
       typeof proposal.intelligenceKernelSummary === "string") &&
     (typeof proposal.intentConfidence === "undefined" ||
@@ -437,10 +457,14 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.intentTranslationStatus === "unavailable") &&
     (typeof proposal.kernelRoutingDecision === "undefined" ||
       isKernelRoutingDecision(proposal.kernelRoutingDecision)) &&
+    (typeof proposal.genericCopyDetected === "undefined" ||
+      typeof proposal.genericCopyDetected === "boolean") &&
     (typeof proposal.modeObedienceStatus === "undefined" ||
       proposal.modeObedienceStatus === "blocked" ||
       proposal.modeObedienceStatus === "obeyed" ||
       proposal.modeObedienceStatus === "review_required") &&
+    (typeof proposal.modeDriftDetected === "undefined" ||
+      typeof proposal.modeDriftDetected === "boolean") &&
     (typeof proposal.proposalRoutingMode === "undefined" ||
       isProposalRoutingMode(proposal.proposalRoutingMode)) &&
     (typeof proposal.previewMode === "undefined" ||
@@ -459,6 +483,8 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     (typeof proposal.proposalRoutingReasons === "undefined" ||
       (Array.isArray(proposal.proposalRoutingReasons) &&
         proposal.proposalRoutingReasons.every(isProposalRoutingReason))) &&
+    (typeof proposal.previewDriftDetected === "undefined" ||
+      typeof proposal.previewDriftDetected === "boolean") &&
     (typeof proposal.requiresExtraReview === "undefined" ||
       typeof proposal.requiresExtraReview === "boolean") &&
     (typeof proposal.publicCopyCleanStatus === "undefined" ||
@@ -516,6 +542,8 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     (typeof proposal.translatedStyle === "undefined" ||
       proposal.translatedStyle === null ||
       typeof proposal.translatedStyle === "string") &&
+    (typeof proposal.validationIssueCount === "undefined" ||
+      typeof proposal.validationIssueCount === "number") &&
     Array.isArray(proposal.changes) &&
     proposal.changes.every(
       (change) => {

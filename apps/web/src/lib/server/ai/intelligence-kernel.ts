@@ -3,6 +3,7 @@ import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
 import type { BusinessBlueprint } from "@/lib/server/ai/blueprint-matcher";
 import type { CompositionPlan } from "@/lib/server/ai/composition-engine";
 import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-engine";
+import type { DomainValidationResult } from "@/lib/server/ai/domain-validator";
 import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
@@ -158,6 +159,7 @@ type IntelligenceKernelInput = {
   blueprint?: BusinessBlueprint;
   compositionPlan?: CompositionPlan;
   contextPriority?: ContextPriorityResult;
+  domainValidation?: DomainValidationResult;
   decomposition?: TaskDecomposition;
   executionPlan?: ExecutionPlan;
   intent: IntentIntelligence;
@@ -203,6 +205,9 @@ function promptText(input: IntelligenceKernelInput) {
     input.compositionPlan?.compositionKind,
     input.compositionPlan?.requiredSections.map((section) => section.title).join(" "),
     input.compositionPlan?.productOrServiceEntities.join(" "),
+    input.domainValidation?.validationStatus,
+    input.domainValidation?.requiredSignals.join(" "),
+    input.domainValidation?.forbiddenSignals.join(" "),
     input.contextPriority?.authoritativeDomain,
     input.contextPriority?.authoritativeBusinessType,
     input.contextPriority?.authoritativeIntentFamily,
@@ -340,6 +345,7 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
   const translated = input.translatedIntent;
   const blueprint = input.blueprint;
   const compositionPlan = input.compositionPlan;
+  const domainValidation = input.domainValidation;
   const priority = input.contextPriority;
   const decomposition = input.decomposition;
   const executionPlan = input.executionPlan;
@@ -366,6 +372,10 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
       compositionPlan ? `composition-pages:${compositionPlan.pageCount}` : null,
       compositionPlan ? `composition-required-sections:${compositionPlan.requiredSections.length}` : null,
       compositionPlan?.productOrServiceEntities.length ? `composition-entities:${compositionPlan.productOrServiceEntities.slice(0, 10).join(", ")}` : null,
+      domainValidation ? `domain-validation:${domainValidation.validationStatus}` : null,
+      domainValidation ? `domain-validation-score:${domainValidation.validationScore}` : null,
+      domainValidation ? `domain-validation-severity:${domainValidation.severity}` : null,
+      domainValidation?.repairHints.length ? `domain-repair-hints:${domainValidation.repairHints.join("; ")}` : null,
       priority ? `authoritative-mode:${priority.authoritativeMode}` : null,
       priority?.authoritativeDomain ? `authoritative-domain:${priority.authoritativeDomain}` : null,
       priority ? `authoritative-intent:${priority.authoritativeIntentFamily}` : null,
@@ -585,6 +595,9 @@ export function buildReasoningTrace(
       input.compositionPlan
         ? `Composition engine selected ${input.compositionPlan.compositionKind} (${input.compositionPlan.compositionId}) with ${input.compositionPlan.pageCount} page(s), ${input.compositionPlan.requiredSections.length} required section(s), and ${input.compositionPlan.productOrServiceEntities.length} entity/entities.`
         : "Composition plan was not available for this request.",
+      input.domainValidation
+        ? `Domain validator pre-check status=${input.domainValidation.validationStatus}, score=${input.domainValidation.validationScore}, severity=${input.domainValidation.severity}, required=${input.domainValidation.requiredSignals.slice(0, 8).join(", ") || "none"}.`
+        : "Domain validation was not available for this request.",
       input.contextPriority
         ? `Context priority selected mode=${input.contextPriority.authoritativeMode}, domain=${input.contextPriority.authoritativeDomain ?? "unknown"}, intent=${input.contextPriority.authoritativeIntentFamily}, preview=${input.contextPriority.authoritativePreviewType}, suppressed=${input.contextPriority.suppressedContext.length}.`
         : "Context priority engine was not available for this request.",
