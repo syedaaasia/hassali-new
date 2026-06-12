@@ -150,6 +150,14 @@ export type DiffProposal = {
   placeholderDetected?: boolean;
   proposalQualityScore?: number;
   proposalQualityStatus?: "blocked" | "passed" | "review_required" | "warning";
+  proposalRepairActionCount?: number;
+  proposalRepairApplied?: boolean;
+  proposalRepairAttempted?: boolean;
+  proposalRepairConfidence?: number;
+  proposalRepairStatus?: "failed" | "keep_blocked" | "not_needed" | "partial_repair" | "repaired";
+  proposalRepairStrategy?: string;
+  proposalRevalidationPassed?: boolean;
+  proposalUnresolvedIssueCount?: number;
   qualityBlockCount?: number;
   qualityFailureCount?: number;
   qualityWarningCount?: number;
@@ -572,6 +580,26 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.proposalQualityStatus === "passed" ||
       proposal.proposalQualityStatus === "review_required" ||
       proposal.proposalQualityStatus === "warning") &&
+    (typeof proposal.proposalRepairActionCount === "undefined" ||
+      typeof proposal.proposalRepairActionCount === "number") &&
+    (typeof proposal.proposalRepairApplied === "undefined" ||
+      typeof proposal.proposalRepairApplied === "boolean") &&
+    (typeof proposal.proposalRepairAttempted === "undefined" ||
+      typeof proposal.proposalRepairAttempted === "boolean") &&
+    (typeof proposal.proposalRepairConfidence === "undefined" ||
+      typeof proposal.proposalRepairConfidence === "number") &&
+    (typeof proposal.proposalRepairStatus === "undefined" ||
+      proposal.proposalRepairStatus === "failed" ||
+      proposal.proposalRepairStatus === "keep_blocked" ||
+      proposal.proposalRepairStatus === "not_needed" ||
+      proposal.proposalRepairStatus === "partial_repair" ||
+      proposal.proposalRepairStatus === "repaired") &&
+    (typeof proposal.proposalRepairStrategy === "undefined" ||
+      typeof proposal.proposalRepairStrategy === "string") &&
+    (typeof proposal.proposalRevalidationPassed === "undefined" ||
+      typeof proposal.proposalRevalidationPassed === "boolean") &&
+    (typeof proposal.proposalUnresolvedIssueCount === "undefined" ||
+      typeof proposal.proposalUnresolvedIssueCount === "number") &&
     (typeof proposal.qualityBlockCount === "undefined" ||
       typeof proposal.qualityBlockCount === "number") &&
     (typeof proposal.qualityFailureCount === "undefined" ||

@@ -65,6 +65,10 @@ import {
   type GeneratorContract
 } from "@/lib/server/ai/generator-contract";
 import {
+  repairProposal,
+  type ProposalRepairResult
+} from "@/lib/server/ai/proposal-repair-engine";
+import {
   buildIntentIntelligence,
   type IntentIntelligence
 } from "@/lib/server/ai/intent-intelligence";
@@ -235,6 +239,14 @@ type DiffProposal = {
   placeholderDetected?: boolean;
   proposalQualityScore?: number;
   proposalQualityStatus?: "blocked" | "passed" | "review_required" | "warning";
+  proposalRepairActionCount?: number;
+  proposalRepairApplied?: boolean;
+  proposalRepairAttempted?: boolean;
+  proposalRepairConfidence?: number;
+  proposalRepairStatus?: "failed" | "keep_blocked" | "not_needed" | "partial_repair" | "repaired";
+  proposalRepairStrategy?: string;
+  proposalRevalidationPassed?: boolean;
+  proposalUnresolvedIssueCount?: number;
   qualityBlockCount?: number;
   qualityFailureCount?: number;
   qualityWarningCount?: number;
@@ -2436,6 +2448,26 @@ function compactAssetVisualValidation(assetValidation: AssetVisualValidationResu
   };
 }
 
+function compactProposalRepair(repair: ProposalRepairResult) {
+  return {
+    originalBlockReasons: repair.originalBlockReasons,
+    repairActions: repair.repairActions,
+    repairApplied: repair.repairApplied,
+    repairAttempted: repair.repairAttempted,
+    repairConfidence: repair.repairConfidence,
+    repairId: repair.repairId,
+    repairSeverity: repair.repairSeverity,
+    repairStatus: repair.repairStatus,
+    repairStrategy: repair.repairStrategy,
+    repairWarnings: repair.repairWarnings,
+    revalidationPassed: repair.revalidationPassed,
+    revalidationRequired: repair.revalidationRequired,
+    shouldKeepBlocked: repair.shouldKeepBlocked,
+    shouldPresentRepairedProposal: repair.shouldPresentRepairedProposal,
+    unresolvedIssues: repair.unresolvedIssues
+  };
+}
+
 function compactGeneratorContract(generatorContract: GeneratorContract) {
   return {
     acceptanceChecks: generatorContract.acceptanceChecks,
@@ -2983,6 +3015,238 @@ function validateProposalAssets(input: {
   });
 }
 
+function applyProposalRepairMetadata(
+  proposal: DiffProposal,
+  repair: ProposalRepairResult
+): DiffProposal {
+  const repairWarnings: ProposalRoutingWarning[] = repair.repairWarnings.map((warning) => ({
+    code: "proposal_repair_warning",
+    message: warning,
+    risk: "medium"
+  }));
+  const unresolvedReasons: ProposalRoutingReason[] = repair.unresolvedIssues.map((issue) => ({
+    code: "proposal_repair_unresolved",
+    message: issue,
+    severity: "high"
+  }));
+
+  return {
+    ...proposal,
+    blockedReason: repair.shouldKeepBlocked && repair.unresolvedIssues.length
+      ? repair.unresolvedIssues.join("; ")
+      : proposal.blockedReason,
+    proposalRepairActionCount: repair.repairActions.length,
+    proposalRepairApplied: repair.repairApplied,
+    proposalRepairAttempted: repair.repairAttempted,
+    proposalRepairConfidence: repair.repairConfidence,
+    proposalRepairStatus: repair.repairStatus,
+    proposalRepairStrategy: repair.repairStrategy,
+    proposalRevalidationPassed: repair.revalidationPassed,
+    proposalUnresolvedIssueCount: repair.unresolvedIssues.length,
+    proposalRoutingMode: repair.shouldKeepBlocked ? "blocked" : proposal.proposalRoutingMode,
+    proposalRoutingReasons: [
+      ...(proposal.proposalRoutingReasons ?? []),
+      ...unresolvedReasons
+    ],
+    proposalRoutingWarnings: [
+      ...(proposal.proposalRoutingWarnings ?? []),
+      ...repairWarnings
+    ],
+    requiresExtraReview: proposal.requiresExtraReview || repair.repairApplied || repair.shouldKeepBlocked,
+    shouldBlockExecution: proposal.shouldBlockExecution || repair.shouldKeepBlocked,
+    summary: repair.repairApplied ? repair.repairedSummary : proposal.summary
+  };
+}
+
+function applyRepairedFilesToProposal(
+  proposal: DiffProposal,
+  repair: ProposalRepairResult
+): DiffProposal {
+  if (!repair.repairApplied) {
+    return proposal;
+  }
+
+  const shouldReplaceFileSet =
+    repair.repairStrategy === "ask_mutation_suppression" ||
+    repair.repairStrategy === "code_file_strategy_repair" ||
+    repair.repairStrategy === "small_edit_scope_repair";
+  const nextChanges: DiffProposal["changes"] = [];
+  const seen = new Set<string>();
+
+  for (const change of proposal.changes) {
+    if (!isFileProposalAction(change.action) || !change.path) {
+      if (!shouldReplaceFileSet) {
+        nextChanges.push(change);
+      }
+      continue;
+    }
+
+    const repairedContent = repair.repairedFiles[change.path];
+
+    if (typeof repairedContent === "string") {
+      nextChanges.push({
+        ...change,
+        diffPreview: createDiffPreview(change.action, change.path, repairedContent),
+        proposedContent: repairedContent,
+        summary: `${change.summary} Repaired before approval.`
+      });
+      seen.add(change.path);
+    } else if (!shouldReplaceFileSet) {
+      nextChanges.push(change);
+    }
+  }
+
+  for (const [path, content] of Object.entries(repair.repairedFiles)) {
+    if (seen.has(path)) {
+      continue;
+    }
+
+    const action: FileProposalAction = proposal.changes.some((change) => change.path === path)
+      ? "update"
+      : "create";
+    nextChanges.push({
+      action,
+      diffPreview: createDiffPreview(action, path, content),
+      path,
+      proposedContent: content,
+      summary: "Adds repaired proposal content required by the generator contract."
+    });
+  }
+
+  return {
+    ...proposal,
+    changes: nextChanges,
+    summary: repair.repairedSummary
+  };
+}
+
+function evaluateAndRepairProposal(input: {
+  blueprint: BusinessBlueprint;
+  compositionPlan: CompositionPlan;
+  contextPriority: ContextPriorityResult;
+  decomposition: TaskDecomposition;
+  executionPlan: ExecutionPlan;
+  generatorContract: GeneratorContract;
+  productMode: "ASK" | "CODE" | "WEBSITE";
+  projectContract: ProjectContract | null;
+  prompt: string;
+  proposal: DiffProposal;
+  translatedIntent: TranslatedIntentSpec;
+}) {
+  const domainValidation = validateProposalContent({
+    blueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    decomposition: input.decomposition,
+    executionPlan: input.executionPlan,
+    productMode: input.productMode,
+    projectContract: input.projectContract,
+    prompt: input.prompt,
+    proposal: input.proposal,
+    translatedIntent: input.translatedIntent
+  });
+  const proposalWithValidation = applyDomainValidationMetadata(input.proposal, domainValidation);
+  const proposalQuality = validateProposalQuality({
+    blueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    decomposition: input.decomposition,
+    domainValidation,
+    executionPlan: input.executionPlan,
+    productMode: input.productMode,
+    projectContract: input.projectContract,
+    prompt: input.prompt,
+    proposal: proposalWithValidation,
+    translatedIntent: input.translatedIntent
+  });
+  const proposalWithQuality = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
+  const assetVisualValidation = validateProposalAssets({
+    blueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    decomposition: input.decomposition,
+    domainValidation,
+    executionPlan: input.executionPlan,
+    productMode: input.productMode,
+    projectContract: input.projectContract,
+    prompt: input.prompt,
+    proposal: proposalWithQuality,
+    proposalQuality,
+    translatedIntent: input.translatedIntent
+  });
+  const proposalWithAssets = applyAssetVisualValidationMetadata(proposalWithQuality, assetVisualValidation);
+  const repair = repairProposal({
+    assetVisualValidation,
+    businessBlueprint: input.blueprint,
+    compositionPlan: input.compositionPlan,
+    contextPriority: input.contextPriority,
+    currentPrompt: input.prompt,
+    domainValidation,
+    executionPlan: input.executionPlan,
+    generatorContract: input.generatorContract,
+    productMode: input.productMode,
+    projectContract: input.projectContract,
+    proposalQuality,
+    proposalSummary: proposalWithAssets.summary,
+    proposedFiles: proposedFilesFromChanges(proposalWithAssets.changes),
+    taskDecomposition: input.decomposition,
+    translatedIntent: input.translatedIntent
+  });
+
+  if (!repair.repairApplied) {
+    return {
+      assetVisualValidation,
+      domainValidation,
+      proposal: applyProposalRepairMetadata(proposalWithAssets, repair),
+      proposalQuality,
+      proposalRepair: repair
+    };
+  }
+
+  const repairedProposal = applyRepairedFilesToProposal(input.proposal, repair);
+  const repairedDomainValidation = validateProposalContent({
+    ...input,
+    proposal: repairedProposal
+  });
+  const repairedWithValidation = applyDomainValidationMetadata(repairedProposal, repairedDomainValidation);
+  const repairedProposalQuality = validateProposalQuality({
+    ...input,
+    domainValidation: repairedDomainValidation,
+    proposal: repairedWithValidation
+  });
+  const repairedWithQuality = applyProposalQualityMetadata(repairedWithValidation, repairedProposalQuality);
+  const repairedAssetValidation = validateProposalAssets({
+    ...input,
+    domainValidation: repairedDomainValidation,
+    proposal: repairedWithQuality,
+    proposalQuality: repairedProposalQuality
+  });
+  const repairedWithAssets = applyAssetVisualValidationMetadata(repairedWithQuality, repairedAssetValidation);
+  const revalidationPassed = !repairedWithAssets.shouldBlockExecution;
+  const finalizedRepair: ProposalRepairResult = {
+    ...repair,
+    repairStatus: revalidationPassed ? "repaired" : "partial_repair",
+    revalidationPassed,
+    shouldKeepBlocked: !revalidationPassed,
+    shouldPresentRepairedProposal: revalidationPassed,
+    unresolvedIssues: revalidationPassed
+      ? []
+      : [
+          ...(repairedWithAssets.proposalRoutingReasons ?? [])
+            .filter((reason) => reason.severity === "high")
+            .map((reason) => reason.message)
+        ]
+  };
+
+  return {
+    assetVisualValidation: repairedAssetValidation,
+    domainValidation: repairedDomainValidation,
+    proposal: applyProposalRepairMetadata(repairedWithAssets, finalizedRepair),
+    proposalQuality: repairedProposalQuality,
+    proposalRepair: finalizedRepair
+  };
+}
+
 function enforcePromptSovereignty(input: {
   composition: CompositionStrategy;
   decision: DecisionPlan;
@@ -3171,48 +3435,19 @@ async function createFallbackProposalResponse(input: {
       input.generatorContract
     )
   });
-  const proposalValidation = validateProposalContent({
+  const evaluatedProposal = evaluateAndRepairProposal({
     blueprint: input.blueprint,
     compositionPlan: input.compositionPlan,
     contextPriority: input.contextPriority,
     decomposition: input.decomposition,
     executionPlan: input.executionPlan,
     productMode: input.contextPriority.authoritativeMode,
+    generatorContract: input.generatorContract,
     projectContract: input.projectContract,
     prompt: input.prompt,
     proposal: proposalWithRouting,
     translatedIntent: input.translatedIntent
   });
-  const proposalWithValidation = applyDomainValidationMetadata(proposalWithRouting, proposalValidation);
-  const proposalQuality = validateProposalQuality({
-    blueprint: input.blueprint,
-    compositionPlan: input.compositionPlan,
-    contextPriority: input.contextPriority,
-    decomposition: input.decomposition,
-    domainValidation: proposalValidation,
-    executionPlan: input.executionPlan,
-    productMode: input.contextPriority.authoritativeMode,
-    projectContract: input.projectContract,
-    prompt: input.prompt,
-    proposal: proposalWithValidation,
-    translatedIntent: input.translatedIntent
-  });
-  const proposalWithQuality = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
-  const assetValidation = validateProposalAssets({
-    blueprint: input.blueprint,
-    compositionPlan: input.compositionPlan,
-    contextPriority: input.contextPriority,
-    decomposition: input.decomposition,
-    domainValidation: proposalValidation,
-    executionPlan: input.executionPlan,
-    productMode: input.contextPriority.authoritativeMode,
-    projectContract: input.projectContract,
-    prompt: input.prompt,
-    proposal: proposalWithQuality,
-    proposalQuality,
-    translatedIntent: input.translatedIntent
-  });
-  const proposalWithAssets = applyAssetVisualValidationMetadata(proposalWithQuality, assetValidation);
   let persistence = input.persistence;
   const visibleSummary =
     input.mode === "EXECUTE"
@@ -3232,20 +3467,21 @@ async function createFallbackProposalResponse(input: {
       taskDecomposition: compactTaskDecomposition(input.decomposition),
       executionPlan: compactExecutionPlan(input.executionPlan),
       compositionPlan: compactCompositionPlan(input.compositionPlan),
-      domainValidation: compactDomainValidation(proposalValidation),
+      domainValidation: compactDomainValidation(evaluatedProposal.domainValidation),
       generatorContract: compactGeneratorContract(input.generatorContract),
-      proposalQuality: compactProposalQualityGate(proposalQuality),
-      assetVisualValidation: compactAssetVisualValidation(assetValidation),
+      proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
+      assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
+      proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
       model: input.model,
-      proposal: proposalWithAssets
+      proposal: evaluatedProposal.proposal
     },
     role: "assistant"
   });
 
-  return createProposalStream(proposalWithAssets, persistence?.sessionId);
+  return createProposalStream(evaluatedProposal.proposal, persistence?.sessionId);
 }
 
 function createOpenRouterTextStream(
@@ -3674,48 +3910,20 @@ export async function POST(request: Request) {
         generatorContract
       )
     });
-    const proposalValidation = validateProposalContent({
+    const evaluatedProposal = evaluateAndRepairProposal({
       blueprint,
       compositionPlan,
       contextPriority,
       decomposition,
       executionPlan,
       productMode,
+      generatorContract,
       projectContract,
       prompt: effectiveUserPrompt,
       proposal: routedProposal,
       translatedIntent
     });
-    const proposalWithValidation = applyDomainValidationMetadata(routedProposal, proposalValidation);
-    const proposalQuality = validateProposalQuality({
-      blueprint,
-      compositionPlan,
-      contextPriority,
-      decomposition,
-      domainValidation: proposalValidation,
-      executionPlan,
-      productMode,
-      projectContract,
-      prompt: effectiveUserPrompt,
-      proposal: proposalWithValidation,
-      translatedIntent
-    });
-    const proposalWithQuality = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
-    const assetValidation = validateProposalAssets({
-      blueprint,
-      compositionPlan,
-      contextPriority,
-      decomposition,
-      domainValidation: proposalValidation,
-      executionPlan,
-      productMode,
-      projectContract,
-      prompt: effectiveUserPrompt,
-      proposal: proposalWithQuality,
-      proposalQuality,
-      translatedIntent
-    });
-    const proposal = applyAssetVisualValidationMetadata(proposalWithQuality, assetValidation);
+    const proposal = evaluatedProposal.proposal;
     const visibleSummary =
       mode === "EXECUTE"
         ? "I prepared an execution proposal for review. Nothing runs until you approve it."
@@ -3733,10 +3941,11 @@ export async function POST(request: Request) {
         taskDecomposition: compactTaskDecomposition(decomposition),
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
-        domainValidation: compactDomainValidation(proposalValidation),
+        domainValidation: compactDomainValidation(evaluatedProposal.domainValidation),
         generatorContract: compactGeneratorContract(generatorContract),
-        proposalQuality: compactProposalQualityGate(proposalQuality),
-        assetVisualValidation: compactAssetVisualValidation(assetValidation),
+        proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
+        assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
+        proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -3964,48 +4173,20 @@ export async function POST(request: Request) {
         generatorContract
       )
     });
-    const proposalValidation = validateProposalContent({
+    const evaluatedProposal = evaluateAndRepairProposal({
       blueprint,
       compositionPlan,
       contextPriority,
       decomposition,
       executionPlan,
       productMode,
+      generatorContract,
       projectContract,
       prompt: effectiveUserPrompt,
       proposal: routedProposal,
       translatedIntent
     });
-    const proposalWithValidation = applyDomainValidationMetadata(routedProposal, proposalValidation);
-    const proposalQuality = validateProposalQuality({
-      blueprint,
-      compositionPlan,
-      contextPriority,
-      decomposition,
-      domainValidation: proposalValidation,
-      executionPlan,
-      productMode,
-      projectContract,
-      prompt: effectiveUserPrompt,
-      proposal: proposalWithValidation,
-      translatedIntent
-    });
-    const proposalWithQuality = applyProposalQualityMetadata(proposalWithValidation, proposalQuality);
-    const assetValidation = validateProposalAssets({
-      blueprint,
-      compositionPlan,
-      contextPriority,
-      decomposition,
-      domainValidation: proposalValidation,
-      executionPlan,
-      productMode,
-      projectContract,
-      prompt: effectiveUserPrompt,
-      proposal: proposalWithQuality,
-      proposalQuality,
-      translatedIntent
-    });
-    const proposal: DiffProposal = applyAssetVisualValidationMetadata(proposalWithQuality, assetValidation);
+    const proposal: DiffProposal = evaluatedProposal.proposal;
 
     if (
       proposal.shouldBlockExecution &&
@@ -4082,10 +4263,11 @@ export async function POST(request: Request) {
         taskDecomposition: compactTaskDecomposition(decomposition),
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
-        domainValidation: compactDomainValidation(proposalValidation),
+        domainValidation: compactDomainValidation(evaluatedProposal.domainValidation),
         generatorContract: compactGeneratorContract(generatorContract),
-        proposalQuality: compactProposalQualityGate(proposalQuality),
-        assetVisualValidation: compactAssetVisualValidation(assetValidation),
+        proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
+        assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
+        proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),
