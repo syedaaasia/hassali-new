@@ -123,6 +123,13 @@ export type DiffProposal = {
   intelligenceKernelSummary?: string;
   kernelRoutingDecision?: KernelRoutingDecision;
   genericCopyDetected?: boolean;
+  generatorContractBlockCount?: number;
+  generatorContractId?: string;
+  generatorContractStatus?: "blocked" | "ready" | "warning";
+  generatorContractWarningCount?: number;
+  generatorForbiddenTermCount?: number;
+  generatorMode?: "answer_only" | "code_generation" | "small_edit" | "website_generation";
+  generatorRequiredSectionCount?: number;
   modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
   modeDriftDetected?: boolean;
   mode: "SUGGEST" | "EXECUTE";
@@ -133,6 +140,7 @@ export type DiffProposal = {
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
   previewDriftDetected?: boolean;
+  requiredPageCount?: number | null;
   heroAssetMismatch?: boolean;
   approvalRecommendation?: "approve" | "reject" | "review";
   completenessScore?: number;
@@ -493,6 +501,25 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       isKernelRoutingDecision(proposal.kernelRoutingDecision)) &&
     (typeof proposal.genericCopyDetected === "undefined" ||
       typeof proposal.genericCopyDetected === "boolean") &&
+    (typeof proposal.generatorContractBlockCount === "undefined" ||
+      typeof proposal.generatorContractBlockCount === "number") &&
+    (typeof proposal.generatorContractId === "undefined" ||
+      typeof proposal.generatorContractId === "string") &&
+    (typeof proposal.generatorContractStatus === "undefined" ||
+      proposal.generatorContractStatus === "blocked" ||
+      proposal.generatorContractStatus === "ready" ||
+      proposal.generatorContractStatus === "warning") &&
+    (typeof proposal.generatorContractWarningCount === "undefined" ||
+      typeof proposal.generatorContractWarningCount === "number") &&
+    (typeof proposal.generatorForbiddenTermCount === "undefined" ||
+      typeof proposal.generatorForbiddenTermCount === "number") &&
+    (typeof proposal.generatorMode === "undefined" ||
+      proposal.generatorMode === "answer_only" ||
+      proposal.generatorMode === "code_generation" ||
+      proposal.generatorMode === "small_edit" ||
+      proposal.generatorMode === "website_generation") &&
+    (typeof proposal.generatorRequiredSectionCount === "undefined" ||
+      typeof proposal.generatorRequiredSectionCount === "number") &&
     (typeof proposal.modeObedienceStatus === "undefined" ||
       proposal.modeObedienceStatus === "blocked" ||
       proposal.modeObedienceStatus === "obeyed" ||
@@ -519,6 +546,9 @@ function isDiffProposal(value: unknown): value is DiffProposal {
         proposal.proposalRoutingReasons.every(isProposalRoutingReason))) &&
     (typeof proposal.previewDriftDetected === "undefined" ||
       typeof proposal.previewDriftDetected === "boolean") &&
+    (typeof proposal.requiredPageCount === "undefined" ||
+      proposal.requiredPageCount === null ||
+      typeof proposal.requiredPageCount === "number") &&
     (typeof proposal.heroAssetMismatch === "undefined" ||
       typeof proposal.heroAssetMismatch === "boolean") &&
     (typeof proposal.approvalRecommendation === "undefined" ||

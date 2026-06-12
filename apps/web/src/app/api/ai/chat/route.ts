@@ -60,6 +60,11 @@ import {
   type ExecutionPlan
 } from "@/lib/server/ai/execution-planner";
 import {
+  buildGeneratorContract,
+  summarizeGeneratorContract,
+  type GeneratorContract
+} from "@/lib/server/ai/generator-contract";
+import {
   buildIntentIntelligence,
   type IntentIntelligence
 } from "@/lib/server/ai/intent-intelligence";
@@ -203,6 +208,13 @@ type DiffProposal = {
   intelligenceKernelSummary?: string;
   kernelRoutingDecision?: KernelRoutingDecision;
   genericCopyDetected?: boolean;
+  generatorContractBlockCount?: number;
+  generatorContractId?: string;
+  generatorContractStatus?: "blocked" | "ready" | "warning";
+  generatorContractWarningCount?: number;
+  generatorForbiddenTermCount?: number;
+  generatorMode?: "answer_only" | "code_generation" | "small_edit" | "website_generation";
+  generatorRequiredSectionCount?: number;
   modeObedienceStatus?: "blocked" | "obeyed" | "review_required";
   modeDriftDetected?: boolean;
   mode: "SUGGEST" | "EXECUTE";
@@ -213,6 +225,7 @@ type DiffProposal = {
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
   previewDriftDetected?: boolean;
+  requiredPageCount?: number | null;
   heroAssetMismatch?: boolean;
   approvalRecommendation?: "approve" | "reject" | "review";
   completenessScore?: number;
@@ -1257,7 +1270,8 @@ function createLocalProposal(
   diagnostic: DiagnosticContext,
   decision: DecisionPlan,
   intent: IntentIntelligence,
-  composition: CompositionStrategy
+  composition: CompositionStrategy,
+  generatorContract?: GeneratorContract
 ): DiffProposal {
   const renameRequest = detectRenameRequest(prompt);
 
@@ -1890,7 +1904,50 @@ if ("IntersectionObserver" in window) {
   }
 
   if (decision.requestType === "website_generation" || decision.requestType === "multi_page_generation") {
-    const websiteFiles = generateComposedSiteFiles({ composition, intent });
+    if (generatorContract?.contractBlocks.length) {
+      return {
+        changes: [],
+        id: `proposal-${Date.now()}`,
+        mode,
+        projectId: diagnostic.projectId,
+        proposalRoutingMode: "blocked",
+        proposalRoutingReasons: generatorContract.contractBlocks.map((block) => ({
+          code: "generator_contract_block",
+          message: block,
+          severity: "high"
+        })),
+        requiresExtraReview: true,
+        shouldBlockExecution: true,
+        status: "pending",
+        summary: `Generator contract blocked local website generation: ${generatorContract.contractBlocks.join("; ")}.`
+      };
+    }
+
+    const websiteFiles = generateComposedSiteFiles({ composition, generatorContract, intent });
+    const forbiddenHits = generatorContract
+      ? generatorContract.forbiddenTerms.filter((term) =>
+          Object.values(websiteFiles).some((content) => content.toLowerCase().includes(term.toLowerCase()))
+        )
+      : [];
+
+    if (forbiddenHits.length > 0) {
+      return {
+        changes: [],
+        id: `proposal-${Date.now()}`,
+        mode,
+        projectId: diagnostic.projectId,
+        proposalRoutingMode: "blocked",
+        proposalRoutingReasons: [{
+          code: "generator_contract_block",
+          message: `Generated content still contained forbidden terms: ${forbiddenHits.slice(0, 8).join(", ")}.`,
+          severity: "high"
+        }],
+        requiresExtraReview: true,
+        shouldBlockExecution: true,
+        status: "pending",
+        summary: "Generator contract blocked local website generation because forbidden terms remained in the proposed output."
+      };
+    }
     const generatedFileNames = Object.keys(websiteFiles);
     const standardFiles = Object.entries(websiteFiles).map(([path, content]) => ({
       content,
@@ -2379,6 +2436,35 @@ function compactAssetVisualValidation(assetValidation: AssetVisualValidationResu
   };
 }
 
+function compactGeneratorContract(generatorContract: GeneratorContract) {
+  return {
+    acceptanceChecks: generatorContract.acceptanceChecks,
+    authoritativeBusinessType: generatorContract.authoritativeBusinessType,
+    authoritativeDomain: generatorContract.authoritativeDomain,
+    confidence: generatorContract.confidence,
+    contractBlocks: generatorContract.contractBlocks,
+    contractId: generatorContract.contractId,
+    contractStatus: generatorContract.contractStatus,
+    contractWarnings: generatorContract.contractWarnings,
+    copyRules: generatorContract.copyRules,
+    forbiddenFileStrategies: generatorContract.forbiddenFileStrategies,
+    forbiddenSections: generatorContract.forbiddenSections,
+    forbiddenTerms: generatorContract.forbiddenTerms,
+    generatorMode: generatorContract.generatorMode,
+    modeRules: generatorContract.modeRules,
+    pageRules: generatorContract.pageRules,
+    regenerationRules: generatorContract.regenerationRules,
+    requiredCopySignals: generatorContract.requiredCopySignals,
+    requiredEntities: generatorContract.requiredEntities,
+    requiredFileStrategy: generatorContract.requiredFileStrategy,
+    requiredPageCount: generatorContract.requiredPageCount,
+    requiredPages: generatorContract.requiredPages,
+    requiredSections: generatorContract.requiredSections,
+    requiredVisualSignals: generatorContract.requiredVisualSignals,
+    visualRules: generatorContract.visualRules
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2446,7 +2532,8 @@ function attachProposalRoutingMetadata(
   decomposition?: TaskDecomposition,
   executionPlan?: ExecutionPlan,
   compositionPlan?: CompositionPlan,
-  domainValidation?: DomainValidationResult
+  domainValidation?: DomainValidationResult,
+  generatorContract?: GeneratorContract
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
   const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
@@ -2504,6 +2591,13 @@ function attachProposalRoutingMetadata(
       : "unavailable",
     modeObedienceStatus: "obeyed",
     genericCopyDetected: domainValidation ? domainValidation.detectedGenericCopy.length > 0 : undefined,
+    generatorContractBlockCount: generatorContract?.contractBlocks.length,
+    generatorContractId: generatorContract?.contractId,
+    generatorContractStatus: generatorContract?.contractStatus,
+    generatorContractWarningCount: generatorContract?.contractWarnings.length,
+    generatorForbiddenTermCount: generatorContract?.forbiddenTerms.length,
+    generatorMode: generatorContract?.generatorMode,
+    generatorRequiredSectionCount: generatorContract?.requiredSections.length,
     modeDriftDetected: domainValidation ? domainValidation.detectedModeDrift.length > 0 : undefined,
     previewMode: proposal.previewMode ??
       (kernel.routingDecision.mode === "CODE"
@@ -2531,6 +2625,7 @@ function attachProposalRoutingMetadata(
           : "website_static_preview"),
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
     previewDriftDetected: domainValidation ? domainValidation.detectedPreviewDrift.length > 0 : undefined,
+    requiredPageCount: generatorContract?.requiredPageCount,
     publicCopyCleanStatus: "clean",
     proposalRoutingMode:
       extraWarnings.length > 0 && routing.mode === "normal" ? "review_required" : routing.mode,
@@ -2961,6 +3056,7 @@ function withProjectContractUpdate(input: {
   composition: CompositionStrategy;
   contract: ProjectContract | null;
   decision: DecisionPlan;
+  generatorContract: GeneratorContract;
   intent: IntentIntelligence;
   kernel: IntelligenceKernelResult;
   prompt: string;
@@ -2975,6 +3071,7 @@ function withProjectContractUpdate(input: {
     composition: input.composition,
     contract: input.contract,
     decision: input.decision,
+    generatorContract: input.generatorContract,
     intent: input.intent,
     kernel: input.kernel,
     prompt: input.prompt
@@ -3023,6 +3120,7 @@ async function createFallbackProposalResponse(input: {
   decomposition: TaskDecomposition;
   domainValidation: DomainValidationResult;
   executionPlan: ExecutionPlan;
+  generatorContract: GeneratorContract;
   workspace: WorkspaceContext;
 }) {
   const proposal = createLocalProposal(
@@ -3032,13 +3130,15 @@ async function createFallbackProposalResponse(input: {
     input.diagnostic,
     input.decision,
     input.intent,
-    input.composition
+    input.composition,
+    input.generatorContract
   );
   const proposalWithIntent = addCompositionDebugSummary(
     withProjectContractUpdate({
       composition: input.composition,
       contract: input.projectContract,
       decision: input.decision,
+      generatorContract: input.generatorContract,
       intent: input.intent,
       kernel: input.kernel,
       prompt: input.prompt,
@@ -3067,7 +3167,8 @@ async function createFallbackProposalResponse(input: {
       input.decomposition,
       input.executionPlan,
       input.compositionPlan,
-      input.domainValidation
+      input.domainValidation,
+      input.generatorContract
     )
   });
   const proposalValidation = validateProposalContent({
@@ -3132,6 +3233,7 @@ async function createFallbackProposalResponse(input: {
       executionPlan: compactExecutionPlan(input.executionPlan),
       compositionPlan: compactCompositionPlan(input.compositionPlan),
       domainValidation: compactDomainValidation(proposalValidation),
+      generatorContract: compactGeneratorContract(input.generatorContract),
       proposalQuality: compactProposalQualityGate(proposalQuality),
       assetVisualValidation: compactAssetVisualValidation(assetValidation),
       projectContract: summarizeProjectContract(input.projectContract),
@@ -3363,6 +3465,18 @@ export async function POST(request: Request) {
     translatedIntent,
     validationMode: "pre_proposal_context"
   });
+  const generatorContract = buildGeneratorContract({
+    businessBlueprint: blueprint,
+    compositionPlan,
+    contextPriority,
+    currentPrompt: effectiveUserPrompt,
+    domainValidation,
+    executionPlan,
+    productMode,
+    projectContract,
+    taskDecomposition: decomposition,
+    translatedIntent
+  });
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -3409,6 +3523,7 @@ export async function POST(request: Request) {
     console.info("execution plan", summarizeExecutionPlan(executionPlan));
     console.info("composition plan", summarizeCompositionPlan(compositionPlan));
     console.info("domain validation", summarizeDomainValidation(domainValidation));
+    console.info("generator contract", summarizeGeneratorContract(generatorContract));
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
     console.info("kernel routing decision", kernel.routingDecision);
@@ -3449,6 +3564,7 @@ export async function POST(request: Request) {
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
         domainValidation: compactDomainValidation(domainValidation),
+        generatorContract: compactGeneratorContract(generatorContract),
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -3517,12 +3633,14 @@ export async function POST(request: Request) {
       diagnostic,
       decision,
       intent,
-      composition
+      composition,
+      generatorContract
     );
     const proposalWithContract = withProjectContractUpdate({
       composition,
       contract: projectContract,
       decision,
+      generatorContract,
       intent,
       kernel,
       prompt: effectiveUserPrompt,
@@ -3552,7 +3670,8 @@ export async function POST(request: Request) {
         decomposition,
         executionPlan,
         compositionPlan,
-        domainValidation
+        domainValidation,
+        generatorContract
       )
     });
     const proposalValidation = validateProposalContent({
@@ -3615,6 +3734,7 @@ export async function POST(request: Request) {
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
         domainValidation: compactDomainValidation(proposalValidation),
+        generatorContract: compactGeneratorContract(generatorContract),
         proposalQuality: compactProposalQualityGate(proposalQuality),
         assetVisualValidation: compactAssetVisualValidation(assetValidation),
         intelligenceKernel: compactIntelligenceKernel(kernel),
@@ -3670,6 +3790,7 @@ export async function POST(request: Request) {
                 `Execution plan: ${JSON.stringify(executionPlan)}. Obey executionStages, sequentialTasks, parallelTasks, approvalCheckpoints, completionChecks, rollbackChecks, blockers, and recommendedExecutionPolicy. Do not skip approval-first safety. ` +
                 `Composition plan: ${JSON.stringify(compositionPlan)}. Obey pagePlans, requiredSections, forbiddenSections, productOrServiceEntities, visualIntent, assetIntent, layoutIntent, CTAs, trustSignals, and acceptanceChecks. This is guidance only; do not invent stale domains. ` +
                 `Domain validation pre-check: ${JSON.stringify(domainValidation)}. Obey requiredSignals, forbiddenSignals, repairHints, and acceptanceChecks. Proposal content that violates these signals may be blocked before approval. ` +
+                `${generatorContract.enforcementPrompt} ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
@@ -3709,6 +3830,7 @@ export async function POST(request: Request) {
         decomposition,
         domainValidation,
         executionPlan,
+        generatorContract,
         workspace
       });
     }
@@ -3734,6 +3856,7 @@ export async function POST(request: Request) {
         decomposition,
         domainValidation,
         executionPlan,
+        generatorContract,
         workspace
       });
     }
@@ -3776,6 +3899,7 @@ export async function POST(request: Request) {
         decomposition,
         domainValidation,
         executionPlan,
+        generatorContract,
         workspace
       });
     }
@@ -3790,6 +3914,7 @@ export async function POST(request: Request) {
           composition,
           contract: projectContract,
           decision,
+          generatorContract,
           intent,
           kernel,
           prompt: effectiveUserPrompt,
@@ -3835,7 +3960,8 @@ export async function POST(request: Request) {
         decomposition,
         executionPlan,
         compositionPlan,
-        domainValidation
+        domainValidation,
+        generatorContract
       )
     });
     const proposalValidation = validateProposalContent({
@@ -3906,6 +4032,7 @@ export async function POST(request: Request) {
         decomposition,
         domainValidation,
         executionPlan,
+        generatorContract,
         workspace
       });
     }
@@ -3939,6 +4066,7 @@ export async function POST(request: Request) {
         decomposition,
         domainValidation,
         executionPlan,
+        generatorContract,
         workspace
       });
     }
@@ -3955,6 +4083,7 @@ export async function POST(request: Request) {
         executionPlan: compactExecutionPlan(executionPlan),
         compositionPlan: compactCompositionPlan(compositionPlan),
         domainValidation: compactDomainValidation(proposalValidation),
+        generatorContract: compactGeneratorContract(generatorContract),
         proposalQuality: compactProposalQualityGate(proposalQuality),
         assetVisualValidation: compactAssetVisualValidation(assetValidation),
         intelligenceKernel: compactIntelligenceKernel(kernel),

@@ -332,8 +332,11 @@ function ProposalReviewState({ proposal }: { proposal: DiffProposal }) {
 
       {warnings.length > 0 ? (
         <div className="mt-3 space-y-1.5">
-          {warnings.slice(0, 4).map((warning) => (
-            <div className="text-[11px] leading-5 text-muted-foreground" key={warning.code}>
+          {warnings.slice(0, 4).map((warning, index) => (
+            <div
+              className="text-[11px] leading-5 text-muted-foreground"
+              key={`${warning.code}-${warning.message ?? "warning"}-${index}`}
+            >
               <span className={warning.risk === "high" ? "text-red-200" : "text-amber-100"}>
                 {warning.risk === "high" ? "High" : "Review"}:
               </span>{" "}
