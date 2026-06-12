@@ -21,6 +21,11 @@ import {
   type ContextPriorityResult
 } from "@/lib/server/ai/context-priority-engine";
 import {
+  buildCompositionPlan,
+  summarizeCompositionPlan,
+  type CompositionPlan
+} from "@/lib/server/ai/composition-engine";
+import {
   buildDiagnosticContext,
   formatDiagnosticContext,
   type DiagnosticContext
@@ -155,6 +160,13 @@ type DiffProposal = {
   contextConflictCount?: number;
   contextPriorityStatus?: "clear" | "conflicts_resolved" | "low_confidence";
   contradictionStatus?: "blocked" | "clear" | "review_required";
+  compositionEntityCount?: number;
+  compositionId?: string;
+  compositionKind?: "answer_composition" | "app_composition" | "targeted_edit_composition" | "website_composition";
+  compositionPageCount?: number;
+  compositionRequiredSectionCount?: number;
+  compositionStatus?: "answer_only" | "planned" | "targeted";
+  compositionWarningCount?: number;
   decompositionId?: string;
   decompositionStatus?: "answer_only" | "decomposed" | "targeted";
   detectedDomain?: string;
@@ -2203,6 +2215,32 @@ function compactExecutionPlan(executionPlan: ExecutionPlan) {
   };
 }
 
+function compactCompositionPlan(compositionPlan: CompositionPlan) {
+  return {
+    acceptanceChecks: compositionPlan.acceptanceChecks,
+    assetIntent: compositionPlan.assetIntent,
+    authoritativeDomain: compositionPlan.authoritativeDomain,
+    compositionId: compositionPlan.compositionId,
+    compositionKind: compositionPlan.compositionKind,
+    compositionStatus: compositionPlan.compositionStatus,
+    compositionWarnings: compositionPlan.compositionWarnings,
+    confidence: compositionPlan.confidence,
+    contentAngles: compositionPlan.contentAngles,
+    forbiddenSections: compositionPlan.forbiddenSections,
+    globalSections: compositionPlan.globalSections,
+    layoutIntent: compositionPlan.layoutIntent,
+    optionalSections: compositionPlan.optionalSections,
+    pageCount: compositionPlan.pageCount,
+    pagePlans: compositionPlan.pagePlans,
+    primaryCTA: compositionPlan.primaryCTA,
+    productOrServiceEntities: compositionPlan.productOrServiceEntities,
+    requiredSections: compositionPlan.requiredSections,
+    secondaryCTA: compositionPlan.secondaryCTA,
+    trustSignals: compositionPlan.trustSignals,
+    visualIntent: compositionPlan.visualIntent
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2268,7 +2306,8 @@ function attachProposalRoutingMetadata(
   blueprint?: BusinessBlueprint,
   contextPriority?: ContextPriorityResult,
   decomposition?: TaskDecomposition,
-  executionPlan?: ExecutionPlan
+  executionPlan?: ExecutionPlan,
+  compositionPlan?: CompositionPlan
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
   const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
@@ -2297,6 +2336,13 @@ function attachProposalRoutingMetadata(
     contextConflictCount: contextPriority?.conflicts.length,
     contextPriorityStatus: contextPriority?.priorityStatus,
     contradictionStatus: "clear",
+    compositionEntityCount: compositionPlan?.productOrServiceEntities.length,
+    compositionId: compositionPlan?.compositionId,
+    compositionKind: compositionPlan?.compositionKind,
+    compositionPageCount: compositionPlan?.pageCount,
+    compositionRequiredSectionCount: compositionPlan?.requiredSections.length,
+    compositionStatus: compositionPlan?.compositionStatus,
+    compositionWarningCount: compositionPlan?.compositionWarnings.length,
     decompositionId: decomposition?.decompositionId,
     decompositionStatus: decomposition?.decompositionStatus,
     detectedDomain,
@@ -2554,6 +2600,7 @@ async function createFallbackProposalResponse(input: {
   routing: ProposalRoutingDecision;
   translatedIntent: TranslatedIntentSpec;
   blueprint: BusinessBlueprint;
+  compositionPlan: CompositionPlan;
   contextPriority: ContextPriorityResult;
   decomposition: TaskDecomposition;
   executionPlan: ExecutionPlan;
@@ -2599,7 +2646,8 @@ async function createFallbackProposalResponse(input: {
       input.blueprint,
       input.contextPriority,
       input.decomposition,
-      input.executionPlan
+      input.executionPlan,
+      input.compositionPlan
     )
   });
   let persistence = input.persistence;
@@ -2620,6 +2668,7 @@ async function createFallbackProposalResponse(input: {
       contextPriority: compactContextPriority(input.contextPriority),
       taskDecomposition: compactTaskDecomposition(input.decomposition),
       executionPlan: compactExecutionPlan(input.executionPlan),
+      compositionPlan: compactCompositionPlan(input.compositionPlan),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
@@ -2827,6 +2876,16 @@ export async function POST(request: Request) {
     taskDecomposition: decomposition,
     translatedIntent
   });
+  const compositionPlan = buildCompositionPlan({
+    businessBlueprint: blueprint,
+    contextPriority,
+    currentPrompt: effectiveUserPrompt,
+    executionPlan,
+    productMode,
+    projectContract,
+    taskDecomposition: decomposition,
+    translatedIntent
+  });
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -2849,6 +2908,7 @@ export async function POST(request: Request) {
   const kernel = buildIntelligenceKernel({
     blueprint,
     composition,
+    compositionPlan,
     contextPriority,
     decision,
     decomposition,
@@ -2869,6 +2929,7 @@ export async function POST(request: Request) {
     console.info("context priority", summarizeContextPriority(contextPriority));
     console.info("task decomposition", summarizeTaskDecomposition(decomposition));
     console.info("execution plan", summarizeExecutionPlan(executionPlan));
+    console.info("composition plan", summarizeCompositionPlan(compositionPlan));
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
     console.info("kernel routing decision", kernel.routingDecision);
@@ -2907,6 +2968,7 @@ export async function POST(request: Request) {
         productMode,
         taskDecomposition: compactTaskDecomposition(decomposition),
         executionPlan: compactExecutionPlan(executionPlan),
+        compositionPlan: compactCompositionPlan(compositionPlan),
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -3008,7 +3070,8 @@ export async function POST(request: Request) {
         blueprint,
         contextPriority,
         decomposition,
-        executionPlan
+        executionPlan,
+        compositionPlan
       )
     });
     const visibleSummary =
@@ -3027,6 +3090,7 @@ export async function POST(request: Request) {
         contextPriority: compactContextPriority(contextPriority),
         taskDecomposition: compactTaskDecomposition(decomposition),
         executionPlan: compactExecutionPlan(executionPlan),
+        compositionPlan: compactCompositionPlan(compositionPlan),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -3078,6 +3142,7 @@ export async function POST(request: Request) {
                 `Context priority result: ${JSON.stringify(contextPriority)}. Obey authoritativeMode, authoritativeDomain, authoritativeIntentFamily, authoritativePreviewType, suppressedContext, and conflicts. Current prompt and selected product mode outrank HASSALI.md, old proposals, fallback defaults, and examples. ` +
                 `Task decomposition: ${JSON.stringify(decomposition)}. Obey orderedTasks, milestones, fileTargets, recommendedPhasePolicy, validationChecks, and blockedUntil. Small edits must remain targeted; CODE apps should be phased; ASK should not mutate files. ` +
                 `Execution plan: ${JSON.stringify(executionPlan)}. Obey executionStages, sequentialTasks, parallelTasks, approvalCheckpoints, completionChecks, rollbackChecks, blockers, and recommendedExecutionPolicy. Do not skip approval-first safety. ` +
+                `Composition plan: ${JSON.stringify(compositionPlan)}. Obey pagePlans, requiredSections, forbiddenSections, productOrServiceEntities, visualIntent, assetIntent, layoutIntent, CTAs, trustSignals, and acceptanceChecks. This is guidance only; do not invent stale domains. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
@@ -3112,6 +3177,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        compositionPlan,
         contextPriority,
         decomposition,
         executionPlan,
@@ -3135,6 +3201,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        compositionPlan,
         contextPriority,
         decomposition,
         executionPlan,
@@ -3175,6 +3242,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        compositionPlan,
         contextPriority,
         decomposition,
         executionPlan,
@@ -3235,7 +3303,8 @@ export async function POST(request: Request) {
         blueprint,
         contextPriority,
         decomposition,
-        executionPlan
+        executionPlan,
+        compositionPlan
       )
     });
 
@@ -3259,6 +3328,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        compositionPlan,
         contextPriority,
         decomposition,
         executionPlan,
@@ -3290,6 +3360,7 @@ export async function POST(request: Request) {
         routing,
         translatedIntent,
         blueprint,
+        compositionPlan,
         contextPriority,
         decomposition,
         executionPlan,
@@ -3307,6 +3378,7 @@ export async function POST(request: Request) {
         contextPriority: compactContextPriority(contextPriority),
         taskDecomposition: compactTaskDecomposition(decomposition),
         executionPlan: compactExecutionPlan(executionPlan),
+        compositionPlan: compactCompositionPlan(compositionPlan),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

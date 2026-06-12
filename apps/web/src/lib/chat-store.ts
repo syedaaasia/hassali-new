@@ -93,6 +93,13 @@ export type DiffProposal = {
   contextConflictCount?: number;
   contextPriorityStatus?: "clear" | "conflicts_resolved" | "low_confidence";
   contradictionStatus?: "blocked" | "clear" | "review_required";
+  compositionEntityCount?: number;
+  compositionId?: string;
+  compositionKind?: "answer_composition" | "app_composition" | "targeted_edit_composition" | "website_composition";
+  compositionPageCount?: number;
+  compositionRequiredSectionCount?: number;
+  compositionStatus?: "answer_only" | "planned" | "targeted";
+  compositionWarningCount?: number;
   decompositionId?: string;
   decompositionStatus?: "answer_only" | "decomposed" | "targeted";
   detectedDomain?: string;
@@ -365,6 +372,25 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.contextPriorityStatus === "clear" ||
       proposal.contextPriorityStatus === "conflicts_resolved" ||
       proposal.contextPriorityStatus === "low_confidence") &&
+    (typeof proposal.compositionEntityCount === "undefined" ||
+      typeof proposal.compositionEntityCount === "number") &&
+    (typeof proposal.compositionId === "undefined" ||
+      typeof proposal.compositionId === "string") &&
+    (typeof proposal.compositionKind === "undefined" ||
+      proposal.compositionKind === "answer_composition" ||
+      proposal.compositionKind === "app_composition" ||
+      proposal.compositionKind === "targeted_edit_composition" ||
+      proposal.compositionKind === "website_composition") &&
+    (typeof proposal.compositionPageCount === "undefined" ||
+      typeof proposal.compositionPageCount === "number") &&
+    (typeof proposal.compositionRequiredSectionCount === "undefined" ||
+      typeof proposal.compositionRequiredSectionCount === "number") &&
+    (typeof proposal.compositionStatus === "undefined" ||
+      proposal.compositionStatus === "answer_only" ||
+      proposal.compositionStatus === "planned" ||
+      proposal.compositionStatus === "targeted") &&
+    (typeof proposal.compositionWarningCount === "undefined" ||
+      typeof proposal.compositionWarningCount === "number") &&
     (typeof proposal.decompositionId === "undefined" ||
       typeof proposal.decompositionId === "string") &&
     (typeof proposal.decompositionStatus === "undefined" ||

@@ -1,6 +1,7 @@
 import type { DecisionPlan } from "@/lib/server/ai/decision-engine";
 import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
 import type { BusinessBlueprint } from "@/lib/server/ai/blueprint-matcher";
+import type { CompositionPlan } from "@/lib/server/ai/composition-engine";
 import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-engine";
 import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
@@ -155,6 +156,7 @@ type IntelligenceKernelInput = {
   decision: DecisionPlan;
   diagnostic: DiagnosticContext;
   blueprint?: BusinessBlueprint;
+  compositionPlan?: CompositionPlan;
   contextPriority?: ContextPriorityResult;
   decomposition?: TaskDecomposition;
   executionPlan?: ExecutionPlan;
@@ -198,6 +200,9 @@ function promptText(input: IntelligenceKernelInput) {
     input.blueprint?.sections.join(" "),
     input.blueprint?.screens.join(" "),
     input.blueprint?.mustInclude.join(" "),
+    input.compositionPlan?.compositionKind,
+    input.compositionPlan?.requiredSections.map((section) => section.title).join(" "),
+    input.compositionPlan?.productOrServiceEntities.join(" "),
     input.contextPriority?.authoritativeDomain,
     input.contextPriority?.authoritativeBusinessType,
     input.contextPriority?.authoritativeIntentFamily,
@@ -334,6 +339,7 @@ function frameworkHintFor(input: IntelligenceKernelInput, taskType: string): Ker
 function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
   const translated = input.translatedIntent;
   const blueprint = input.blueprint;
+  const compositionPlan = input.compositionPlan;
   const priority = input.contextPriority;
   const decomposition = input.decomposition;
   const executionPlan = input.executionPlan;
@@ -355,6 +361,11 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
       blueprint ? `blueprint-preview:${blueprint.previewType}` : null,
       blueprint?.sections.length ? `blueprint-sections:${blueprint.sections.slice(0, 8).join(", ")}` : null,
       blueprint?.screens.length ? `blueprint-screens:${blueprint.screens.slice(0, 8).join(", ")}` : null,
+      compositionPlan ? `composition-plan:${compositionPlan.compositionId}` : null,
+      compositionPlan ? `composition-kind:${compositionPlan.compositionKind}` : null,
+      compositionPlan ? `composition-pages:${compositionPlan.pageCount}` : null,
+      compositionPlan ? `composition-required-sections:${compositionPlan.requiredSections.length}` : null,
+      compositionPlan?.productOrServiceEntities.length ? `composition-entities:${compositionPlan.productOrServiceEntities.slice(0, 10).join(", ")}` : null,
       priority ? `authoritative-mode:${priority.authoritativeMode}` : null,
       priority?.authoritativeDomain ? `authoritative-domain:${priority.authoritativeDomain}` : null,
       priority ? `authoritative-intent:${priority.authoritativeIntentFamily}` : null,
@@ -571,6 +582,9 @@ export function buildReasoningTrace(
       input.blueprint
         ? `Blueprint matcher selected ${input.blueprint.blueprintName} (${input.blueprint.blueprintId}) with ${input.blueprint.blueprintStatus} status and preview ${input.blueprint.previewType}.`
         : "Blueprint matcher was not available for this request.",
+      input.compositionPlan
+        ? `Composition engine selected ${input.compositionPlan.compositionKind} (${input.compositionPlan.compositionId}) with ${input.compositionPlan.pageCount} page(s), ${input.compositionPlan.requiredSections.length} required section(s), and ${input.compositionPlan.productOrServiceEntities.length} entity/entities.`
+        : "Composition plan was not available for this request.",
       input.contextPriority
         ? `Context priority selected mode=${input.contextPriority.authoritativeMode}, domain=${input.contextPriority.authoritativeDomain ?? "unknown"}, intent=${input.contextPriority.authoritativeIntentFamily}, preview=${input.contextPriority.authoritativePreviewType}, suppressed=${input.contextPriority.suppressedContext.length}.`
         : "Context priority engine was not available for this request.",
