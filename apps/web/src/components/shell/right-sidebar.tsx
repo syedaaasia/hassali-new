@@ -264,6 +264,12 @@ function createSaferProposalPrompt(proposal: DiffProposal, originalRequest: stri
 - do not introduce unrelated pages, business copy, or domain changes
 - do not change execution behavior
 - produce a corrected proposal only after risks are fixed`;
+  const repairContext = `Repair context:
+- previous repair status: ${proposal.proposalRepairStatus ?? "unknown"}
+- previous repair strategy: ${proposal.proposalRepairStrategy ?? "none"}
+- previous repair attempted: ${proposal.proposalRepairAttempted ? "yes" : "no"}
+- unresolved repair issues: ${proposal.proposalUnresolvedIssueCount ?? 0}
+- treat every blocked reason and warning above as hard forbidden output unless the original request explicitly requires it`;
 
   return `Please regenerate a safer proposal.
 
@@ -282,6 +288,8 @@ ${intent}
 ${typeSpecificCorrections}
 
 ${preservationRules}
+
+${repairContext}
 
 Return a corrected proposal that keeps the original request intact and fixes the blocked risks.`;
 }
