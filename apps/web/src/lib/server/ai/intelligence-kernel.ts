@@ -5,6 +5,7 @@ import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-eng
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
+import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
 
 export type KernelMode = "ASK" | "CODE" | "WEBSITE";
 export type KernelMutationPolicy = "answer_only" | "proposal_required" | "safe_auto_apply_blocked";
@@ -154,6 +155,7 @@ type IntelligenceKernelInput = {
   diagnostic: DiagnosticContext;
   blueprint?: BusinessBlueprint;
   contextPriority?: ContextPriorityResult;
+  decomposition?: TaskDecomposition;
   intent: IntentIntelligence;
   mode: KernelMode;
   translatedIntent?: TranslatedIntentSpec;
@@ -198,6 +200,9 @@ function promptText(input: IntelligenceKernelInput) {
     input.contextPriority?.authoritativeBusinessType,
     input.contextPriority?.authoritativeIntentFamily,
     input.contextPriority?.authoritativeFeatures.join(" "),
+    input.decomposition?.taskKind,
+    input.decomposition?.orderedTasks.join(" "),
+    input.decomposition?.validationChecks.join(" "),
     input.intent.summary,
     input.decision.reason,
     input.composition.businessType,
@@ -325,6 +330,7 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
   const translated = input.translatedIntent;
   const blueprint = input.blueprint;
   const priority = input.contextPriority;
+  const decomposition = input.decomposition;
 
   return Array.from(
     new Set([
@@ -348,6 +354,11 @@ function routingConstraints(input: IntelligenceKernelInput, taskType: string) {
       priority ? `authoritative-intent:${priority.authoritativeIntentFamily}` : null,
       priority ? `authoritative-preview:${priority.authoritativePreviewType}` : null,
       priority?.conflicts.length ? `context-conflicts:${priority.conflicts.length}` : null,
+      decomposition ? `decomposition:${decomposition.decompositionId}` : null,
+      decomposition ? `task-kind:${decomposition.taskKind}` : null,
+      decomposition ? `execution-strategy:${decomposition.executionStrategy}` : null,
+      decomposition ? `milestones:${decomposition.milestones.length}` : null,
+      decomposition ? `phase-policy:${decomposition.recommendedPhasePolicy}` : null,
       `domain:${input.intent.domain}`,
       `business:${input.composition.businessType}`,
       input.intent.pageCount ? `pages:${input.intent.pageCount}` : null,
@@ -553,6 +564,9 @@ export function buildReasoningTrace(
       input.contextPriority
         ? `Context priority selected mode=${input.contextPriority.authoritativeMode}, domain=${input.contextPriority.authoritativeDomain ?? "unknown"}, intent=${input.contextPriority.authoritativeIntentFamily}, preview=${input.contextPriority.authoritativePreviewType}, suppressed=${input.contextPriority.suppressedContext.length}.`
         : "Context priority engine was not available for this request.",
+      input.decomposition
+        ? `Task decomposer selected ${input.decomposition.taskKind} with ${input.decomposition.milestones.length} milestone(s), strategy=${input.decomposition.executionStrategy}, policy=${input.decomposition.recommendedPhasePolicy}.`
+        : "Task decomposition was not available for this request.",
       input.composition.reasoningSummary,
       input.decision.reason
     ],

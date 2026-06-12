@@ -46,6 +46,11 @@ import {
   type TranslatedIntentSpec
 } from "@/lib/server/ai/intent-translator";
 import {
+  decomposeTask,
+  summarizeTaskDecomposition,
+  type TaskDecomposition
+} from "@/lib/server/ai/task-decomposer";
+import {
   buildIntelligenceKernel,
   type IntelligenceKernelResult,
   type KernelRoutingDecision
@@ -145,6 +150,8 @@ type DiffProposal = {
   contextConflictCount?: number;
   contextPriorityStatus?: "clear" | "conflicts_resolved" | "low_confidence";
   contradictionStatus?: "blocked" | "clear" | "review_required";
+  decompositionId?: string;
+  decompositionStatus?: "answer_only" | "decomposed" | "targeted";
   detectedDomain?: string;
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
@@ -169,6 +176,10 @@ type DiffProposal = {
   status: "pending";
   suppressedContextCount?: number;
   summary: string;
+  executionStrategy?: "answer_only" | "phased_code_plan" | "single_targeted_edit" | "static_site_build";
+  milestoneCount?: number;
+  recommendedPhasePolicy?: "multi_phase" | "single_pass" | "targeted_only";
+  taskKind?: "answer_plan" | "code_app_build" | "targeted_text_replacement" | "visual_edit" | "website_generation";
   translatedBusinessType?: string | null;
   translatedDomain?: string | null;
   translatedFeatures?: string[];
@@ -2141,6 +2152,25 @@ function compactContextPriority(contextPriority: ContextPriorityResult) {
   };
 }
 
+function compactTaskDecomposition(decomposition: TaskDecomposition) {
+  return {
+    blockedUntil: decomposition.blockedUntil,
+    confidence: decomposition.confidence,
+    decompositionId: decomposition.decompositionId,
+    decompositionStatus: decomposition.decompositionStatus,
+    dependencies: decomposition.dependencies,
+    executionStrategy: decomposition.executionStrategy,
+    fileTargets: decomposition.fileTargets,
+    milestoneCount: decomposition.milestones.length,
+    milestones: decomposition.milestones,
+    orderedTasks: decomposition.orderedTasks,
+    recommendedPhasePolicy: decomposition.recommendedPhasePolicy,
+    riskNotes: decomposition.riskNotes,
+    taskKind: decomposition.taskKind,
+    validationChecks: decomposition.validationChecks
+  };
+}
+
 function compactProposalRouting(
   kernel: IntelligenceKernelResult,
   routing: ProposalRoutingDecision
@@ -2204,7 +2234,8 @@ function attachProposalRoutingMetadata(
   prompt?: string,
   translatedIntent?: TranslatedIntentSpec,
   blueprint?: BusinessBlueprint,
-  contextPriority?: ContextPriorityResult
+  contextPriority?: ContextPriorityResult,
+  decomposition?: TaskDecomposition
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
   const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
@@ -2233,6 +2264,8 @@ function attachProposalRoutingMetadata(
     contextConflictCount: contextPriority?.conflicts.length,
     contextPriorityStatus: contextPriority?.priorityStatus,
     contradictionStatus: "clear",
+    decompositionId: decomposition?.decompositionId,
+    decompositionStatus: decomposition?.decompositionStatus,
     detectedDomain,
     domainConfidence: translatedIntent?.confidence ?? intent?.confidence,
     domainSource,
@@ -2278,7 +2311,11 @@ function attachProposalRoutingMetadata(
     translatedBusinessType: translatedIntent?.businessType,
     translatedDomain: translatedIntent?.domain,
     translatedFeatures: translatedIntent?.requestedFeatures,
-    translatedStyle: translatedIntent?.style
+    translatedStyle: translatedIntent?.style,
+    executionStrategy: decomposition?.executionStrategy,
+    milestoneCount: decomposition?.milestones.length,
+    recommendedPhasePolicy: decomposition?.recommendedPhasePolicy,
+    taskKind: decomposition?.taskKind
   };
 }
 
@@ -2479,6 +2516,7 @@ async function createFallbackProposalResponse(input: {
   translatedIntent: TranslatedIntentSpec;
   blueprint: BusinessBlueprint;
   contextPriority: ContextPriorityResult;
+  decomposition: TaskDecomposition;
   workspace: WorkspaceContext;
 }) {
   const proposal = createLocalProposal(
@@ -2519,7 +2557,8 @@ async function createFallbackProposalResponse(input: {
       input.prompt,
       input.translatedIntent,
       input.blueprint,
-      input.contextPriority
+      input.contextPriority,
+      input.decomposition
     )
   });
   let persistence = input.persistence;
@@ -2538,6 +2577,7 @@ async function createFallbackProposalResponse(input: {
       intentTranslation: compactTranslatedIntent(input.translatedIntent),
       blueprint: compactBusinessBlueprint(input.blueprint),
       contextPriority: compactContextPriority(input.contextPriority),
+      taskDecomposition: compactTaskDecomposition(input.decomposition),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
@@ -2728,6 +2768,14 @@ export async function POST(request: Request) {
     translatedIntent,
     workspaceContextSummary: `${workspace.fileList.length} file(s); active=${workspace.activePath}; project=${workspace.projectName ?? "unknown"}`
   });
+  const decomposition = decomposeTask({
+    businessBlueprint: blueprint,
+    contextPriority,
+    currentPrompt: effectiveUserPrompt,
+    productMode,
+    projectContract,
+    translatedIntent
+  });
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -2752,6 +2800,7 @@ export async function POST(request: Request) {
     composition,
     contextPriority,
     decision,
+    decomposition,
     diagnostic,
     intent,
     mode: productMode,
@@ -2766,6 +2815,7 @@ export async function POST(request: Request) {
     console.info("intent translation", summarizeTranslatedIntent(translatedIntent));
     console.info("business blueprint", summarizeBusinessBlueprint(blueprint));
     console.info("context priority", summarizeContextPriority(contextPriority));
+    console.info("task decomposition", summarizeTaskDecomposition(decomposition));
     console.info("composition strategy", composition);
     console.info("intelligence kernel", kernel.summary);
     console.info("kernel routing decision", kernel.routingDecision);
@@ -2802,6 +2852,7 @@ export async function POST(request: Request) {
         kernelRoutingDecision: kernel.routingDecision,
         proposalRouting: compactProposalRouting(kernel, routing),
         productMode,
+        taskDecomposition: compactTaskDecomposition(decomposition),
         promptIntent: diagnostic.promptIntent
       }
     },
@@ -2901,7 +2952,8 @@ export async function POST(request: Request) {
         effectiveUserPrompt,
         translatedIntent,
         blueprint,
-        contextPriority
+        contextPriority,
+        decomposition
       )
     });
     const visibleSummary =
@@ -2918,6 +2970,7 @@ export async function POST(request: Request) {
         intentTranslation: compactTranslatedIntent(translatedIntent),
         blueprint: compactBusinessBlueprint(blueprint),
         contextPriority: compactContextPriority(contextPriority),
+        taskDecomposition: compactTaskDecomposition(decomposition),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -2967,6 +3020,7 @@ export async function POST(request: Request) {
                 `Intent translator spec from current prompt, higher priority than project contract: ${JSON.stringify(translatedIntent)}. ` +
                 `Business/app blueprint matched from translated intent: ${JSON.stringify(blueprint)}. Use it for sections, screens, components, copy blocks, file strategy, must-include, must-avoid, and acceptance checks. ` +
                 `Context priority result: ${JSON.stringify(contextPriority)}. Obey authoritativeMode, authoritativeDomain, authoritativeIntentFamily, authoritativePreviewType, suppressedContext, and conflicts. Current prompt and selected product mode outrank HASSALI.md, old proposals, fallback defaults, and examples. ` +
+                `Task decomposition: ${JSON.stringify(decomposition)}. Obey orderedTasks, milestones, fileTargets, recommendedPhasePolicy, validationChecks, and blockedUntil. Small edits must remain targeted; CODE apps should be phased; ASK should not mutate files. ` +
                 `Intent intelligence: ${JSON.stringify(intent)}. ` +
                 `Reasoning composition: ${JSON.stringify(composition)}. ` +
                 `Product mode: ${productMode}. Intelligence kernel: ${kernel.summary}. ` +
@@ -3002,6 +3056,7 @@ export async function POST(request: Request) {
         translatedIntent,
         blueprint,
         contextPriority,
+        decomposition,
         workspace
       });
     }
@@ -3023,6 +3078,7 @@ export async function POST(request: Request) {
         translatedIntent,
         blueprint,
         contextPriority,
+        decomposition,
         workspace
       });
     }
@@ -3061,6 +3117,7 @@ export async function POST(request: Request) {
         translatedIntent,
         blueprint,
         contextPriority,
+        decomposition,
         workspace
       });
     }
@@ -3116,7 +3173,8 @@ export async function POST(request: Request) {
         effectiveUserPrompt,
         translatedIntent,
         blueprint,
-        contextPriority
+        contextPriority,
+        decomposition
       )
     });
 
@@ -3141,6 +3199,7 @@ export async function POST(request: Request) {
         translatedIntent,
         blueprint,
         contextPriority,
+        decomposition,
         workspace
       });
     }
@@ -3170,6 +3229,7 @@ export async function POST(request: Request) {
         translatedIntent,
         blueprint,
         contextPriority,
+        decomposition,
         workspace
       });
     }
@@ -3182,6 +3242,7 @@ export async function POST(request: Request) {
         intentTranslation: compactTranslatedIntent(translatedIntent),
         blueprint: compactBusinessBlueprint(blueprint),
         contextPriority: compactContextPriority(contextPriority),
+        taskDecomposition: compactTaskDecomposition(decomposition),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

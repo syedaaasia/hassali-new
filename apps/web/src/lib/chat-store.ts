@@ -93,6 +93,8 @@ export type DiffProposal = {
   contextConflictCount?: number;
   contextPriorityStatus?: "clear" | "conflicts_resolved" | "low_confidence";
   contradictionStatus?: "blocked" | "clear" | "review_required";
+  decompositionId?: string;
+  decompositionStatus?: "answer_only" | "decomposed" | "targeted";
   detectedDomain?: string;
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
@@ -117,6 +119,10 @@ export type DiffProposal = {
   status: "pending" | "approved" | "rejected";
   suppressedContextCount?: number;
   summary: string;
+  executionStrategy?: "answer_only" | "phased_code_plan" | "single_targeted_edit" | "static_site_build";
+  milestoneCount?: number;
+  recommendedPhasePolicy?: "multi_phase" | "single_pass" | "targeted_only";
+  taskKind?: "answer_plan" | "code_app_build" | "targeted_text_replacement" | "visual_edit" | "website_generation";
   translatedBusinessType?: string | null;
   translatedDomain?: string | null;
   translatedFeatures?: string[];
@@ -353,6 +359,12 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.contextPriorityStatus === "clear" ||
       proposal.contextPriorityStatus === "conflicts_resolved" ||
       proposal.contextPriorityStatus === "low_confidence") &&
+    (typeof proposal.decompositionId === "undefined" ||
+      typeof proposal.decompositionId === "string") &&
+    (typeof proposal.decompositionStatus === "undefined" ||
+      proposal.decompositionStatus === "answer_only" ||
+      proposal.decompositionStatus === "decomposed" ||
+      proposal.decompositionStatus === "targeted") &&
     (typeof proposal.projectId === "string" || proposal.projectId === null) &&
     typeof proposal.summary === "string" &&
     (typeof proposal.blockedReason === "undefined" || typeof proposal.blockedReason === "string") &&
@@ -417,6 +429,23 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.staleTermScanStatus === "review_required") &&
     (typeof proposal.suppressedContextCount === "undefined" ||
       typeof proposal.suppressedContextCount === "number") &&
+    (typeof proposal.executionStrategy === "undefined" ||
+      proposal.executionStrategy === "answer_only" ||
+      proposal.executionStrategy === "phased_code_plan" ||
+      proposal.executionStrategy === "single_targeted_edit" ||
+      proposal.executionStrategy === "static_site_build") &&
+    (typeof proposal.milestoneCount === "undefined" ||
+      typeof proposal.milestoneCount === "number") &&
+    (typeof proposal.recommendedPhasePolicy === "undefined" ||
+      proposal.recommendedPhasePolicy === "multi_phase" ||
+      proposal.recommendedPhasePolicy === "single_pass" ||
+      proposal.recommendedPhasePolicy === "targeted_only") &&
+    (typeof proposal.taskKind === "undefined" ||
+      proposal.taskKind === "answer_plan" ||
+      proposal.taskKind === "code_app_build" ||
+      proposal.taskKind === "targeted_text_replacement" ||
+      proposal.taskKind === "visual_edit" ||
+      proposal.taskKind === "website_generation") &&
     (typeof proposal.translatedBusinessType === "undefined" ||
       proposal.translatedBusinessType === null ||
       typeof proposal.translatedBusinessType === "string") &&
