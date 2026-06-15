@@ -50,8 +50,8 @@ import {
   type ProposalQualityGateResult
 } from "@/lib/server/ai/proposal-quality-gate";
 import {
-  generateComposedSiteFiles,
   generateDomainSite,
+  generatePlannedWebsiteFiles,
   type SiteDomain
 } from "@/lib/server/ai/domain-site-generator";
 import {
@@ -109,6 +109,13 @@ import {
   buildCompositionStrategy,
   type CompositionStrategy
 } from "@/lib/server/ai/reasoning-composition";
+import {
+  buildPreviewRuntime
+} from "@/lib/server/preview/preview-runtime";
+import type {
+  PreviewRuntimeResult,
+  PreviewType
+} from "@/lib/server/preview/preview-types";
 import { getRuntimeStatus } from "@/lib/server/runtime-manager";
 
 export const runtime = "nodejs";
@@ -164,6 +171,9 @@ type ProposalRoutingWarning = {
   message: string;
   risk: "high" | "medium";
 };
+
+type LegacyPreviewType = "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
+type ProposalPreviewType = LegacyPreviewType | PreviewType;
 
 type DiffProposal = {
   appPreview?: CodeAppPreview;
@@ -223,7 +233,19 @@ type DiffProposal = {
   modeDriftDetected?: boolean;
   mode: "SUGGEST" | "EXECUTE";
   previewMode?: "answer_only" | "code_plan" | "static_preview";
-  previewType?: "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
+  previewCapabilities?: string[];
+  previewClassification?: {
+    confidence: number;
+    previewType: PreviewType;
+    reason: string;
+    rendererId: string;
+    signals: string[];
+  };
+  previewConfidence?: number;
+  previewMetadata?: Record<string, unknown>;
+  previewRuntimeState?: "empty" | "metadata_only" | "none" | "ready" | "unsupported";
+  previewType?: ProposalPreviewType;
+  previewWarnings?: string[];
   projectId: string | null;
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
@@ -278,6 +300,13 @@ type DiffProposal = {
   translatedFeatures?: string[];
   translatedStyle?: string | null;
   validationIssueCount?: number;
+  websiteAudience?: string;
+  websiteGoal?: string;
+  websiteIndustry?: string;
+  websiteLayoutType?: string;
+  websiteSectionCount?: number;
+  websiteValidationPassed?: boolean;
+  websiteVisualStrategy?: string;
 };
 
 type CodeAppPreview = {
@@ -1935,7 +1964,35 @@ if ("IntersectionObserver" in window) {
       };
     }
 
-    const websiteFiles = generateComposedSiteFiles({ composition, generatorContract, intent });
+    const websiteGeneration = generatePlannedWebsiteFiles({ composition, generatorContract, intent });
+    const websiteFiles = websiteGeneration.files;
+
+    if (!websiteGeneration.validation.passed) {
+      return {
+        changes: [],
+        id: `proposal-${Date.now()}`,
+        mode,
+        projectId: diagnostic.projectId,
+        proposalRoutingMode: "blocked",
+        proposalRoutingReasons: websiteGeneration.validation.blockedReasons.map((reason) => ({
+          code: "website_validation_block",
+          message: reason,
+          severity: "high"
+        })),
+        requiresExtraReview: true,
+        shouldBlockExecution: true,
+        status: "pending",
+        summary: `Website validator blocked local website generation: ${websiteGeneration.validation.blockedReasons.join("; ")}.`,
+        websiteAudience: websiteGeneration.plan.audience,
+        websiteGoal: websiteGeneration.plan.goal,
+        websiteIndustry: websiteGeneration.plan.industry,
+        websiteLayoutType: websiteGeneration.plan.layoutType,
+        websiteSectionCount: websiteGeneration.plan.requiredSections.length,
+        websiteValidationPassed: false,
+        websiteVisualStrategy: websiteGeneration.plan.visualStrategy
+      };
+    }
+
     const forbiddenHits = generatorContract
       ? generatorContract.forbiddenTerms.filter((term) =>
           Object.values(websiteFiles).some((content) => content.toLowerCase().includes(term.toLowerCase()))
@@ -1957,7 +2014,14 @@ if ("IntersectionObserver" in window) {
         requiresExtraReview: true,
         shouldBlockExecution: true,
         status: "pending",
-        summary: "Generator contract blocked local website generation because forbidden terms remained in the proposed output."
+        summary: "Generator contract blocked local website generation because forbidden terms remained in the proposed output.",
+        websiteAudience: websiteGeneration.plan.audience,
+        websiteGoal: websiteGeneration.plan.goal,
+        websiteIndustry: websiteGeneration.plan.industry,
+        websiteLayoutType: websiteGeneration.plan.layoutType,
+        websiteSectionCount: websiteGeneration.plan.requiredSections.length,
+        websiteValidationPassed: false,
+        websiteVisualStrategy: websiteGeneration.plan.visualStrategy
       };
     }
     const generatedFileNames = Object.keys(websiteFiles);
@@ -1993,6 +2057,13 @@ if ("IntersectionObserver" in window) {
           : hasStandardWebFiles(diagnostic.fileList)
             ? `Using composition-driven generation for ${composition.businessType}. I will update ${generatedFileNames.join(", ")}.`
             : `Using composition-driven generation for ${composition.businessType}. I will create ${generatedFileNames.join(", ")}.`,
+      websiteAudience: websiteGeneration.plan.audience,
+      websiteGoal: websiteGeneration.plan.goal,
+      websiteIndustry: websiteGeneration.plan.industry,
+      websiteLayoutType: websiteGeneration.plan.layoutType,
+      websiteSectionCount: websiteGeneration.plan.requiredSections.length,
+      websiteValidationPassed: websiteGeneration.validation.passed,
+      websiteVisualStrategy: websiteGeneration.plan.visualStrategy,
       changes: [
         ...changes.map((change) => ({
           ...change,
@@ -2356,6 +2427,44 @@ function compactCompositionPlan(compositionPlan: CompositionPlan) {
   };
 }
 
+function compactPreviewClassification(previewRuntime: PreviewRuntimeResult) {
+  return {
+    confidence: previewRuntime.classification.confidence,
+    previewType: previewRuntime.classification.previewType,
+    reason: previewRuntime.classification.reason,
+    rendererId: previewRuntime.registryEntry.rendererId,
+    signals: previewRuntime.classification.signals
+  };
+}
+
+function compactPreviewRuntime(previewRuntime: PreviewRuntimeResult) {
+  return {
+    capabilities: previewRuntime.capabilities,
+    classification: compactPreviewClassification(previewRuntime),
+    metadata: previewRuntime.metadata,
+    state: previewRuntime.state,
+    warnings: previewRuntime.warnings
+  };
+}
+
+function buildProposalPreviewRuntime(
+  proposal: DiffProposal,
+  productMode: "ASK" | "CODE" | "WEBSITE",
+  projectType?: string | null
+) {
+  return buildPreviewRuntime({
+    generatedFiles: proposedFilesFromChanges(proposal.changes),
+    productMode,
+    projectType,
+    proposal: {
+      appPreview: proposal.appPreview,
+      changes: proposal.changes,
+      previewType: proposal.previewType,
+      summary: proposal.summary
+    }
+  });
+}
+
 function compactDomainValidation(domainValidation: DomainValidationResult) {
   return {
     acceptanceChecks: domainValidation.acceptanceChecks,
@@ -2577,6 +2686,21 @@ function attachProposalRoutingMetadata(
       : detectedDomain
         ? "inferred"
         : "unknown";
+  const previewRuntime = buildPreviewRuntime({
+    generatedFiles: proposedFilesFromChanges(proposal.changes),
+    productMode: kernel.routingDecision.mode,
+    projectType: contextPriority?.authoritativeIntentFamily ?? blueprint?.blueprintKind ?? null,
+    proposal: {
+      appPreview: proposal.appPreview,
+      changes: proposal.changes,
+      previewType: proposal.previewType,
+      summary: proposal.summary
+    },
+    runtimeMetadata: {
+      authoritativePreviewType: contextPriority?.authoritativePreviewType,
+      blueprintPreviewType: blueprint?.previewType
+    }
+  });
 
   return {
     ...proposal,
@@ -2631,30 +2755,18 @@ function attachProposalRoutingMetadata(
     generatorMode: generatorContract?.generatorMode,
     generatorRequiredSectionCount: generatorContract?.requiredSections.length,
     modeDriftDetected: domainValidation ? domainValidation.detectedModeDrift.length > 0 : undefined,
-    previewMode: proposal.previewMode ??
-      (kernel.routingDecision.mode === "CODE"
-        ? "code_plan"
-        : kernel.routingDecision.mode === "ASK"
-          ? "answer_only"
-          : "static_preview"),
-    previewType: proposal.previewType ??
-      (contextPriority?.authoritativePreviewType === "code_app_preview"
-        ? "code_app_preview"
-        : contextPriority?.authoritativePreviewType === "code_plan_preview"
-          ? "code_plan_preview"
-          : contextPriority?.authoritativePreviewType === "none"
-            ? "none"
-            : blueprint?.previewType === "code_app_preview"
-        ? "code_app_preview"
-        : blueprint?.previewType === "code_plan_preview"
-          ? "code_plan_preview"
-          : blueprint?.previewType === "none"
-            ? "none"
-            : kernel.routingDecision.mode === "CODE"
-        ? "code_plan_preview"
-        : kernel.routingDecision.mode === "ASK"
-          ? "none"
-          : "website_static_preview"),
+    previewCapabilities: previewRuntime.capabilities,
+    previewClassification: compactPreviewClassification(previewRuntime),
+    previewConfidence: previewRuntime.classification.confidence,
+    previewMetadata: previewRuntime.metadata,
+    previewMode: previewRuntime.classification.previewType === "none"
+      ? "answer_only"
+      : previewRuntime.classification.previewType === "website"
+        ? "static_preview"
+        : "code_plan",
+    previewRuntimeState: previewRuntime.state,
+    previewType: previewRuntime.classification.previewType,
+    previewWarnings: previewRuntime.warnings,
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
     previewDriftDetected: domainValidation ? domainValidation.detectedPreviewDrift.length > 0 : undefined,
     requiredPageCount: generatorContract?.requiredPageCount,
@@ -3472,6 +3584,11 @@ async function createFallbackProposalResponse(input: {
       proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
       assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
       proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
+      previewRuntime: compactPreviewRuntime(buildProposalPreviewRuntime(
+        evaluatedProposal.proposal,
+        input.contextPriority.authoritativeMode,
+        input.contextPriority.authoritativeIntentFamily
+      )),
       projectContract: summarizeProjectContract(input.projectContract),
       ...compactProposalRouting(input.kernel, input.routing),
       qualityDecision: input.decision,
@@ -3946,6 +4063,11 @@ export async function POST(request: Request) {
         proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
         assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
         proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
+        previewRuntime: compactPreviewRuntime(buildProposalPreviewRuntime(
+          proposal,
+          contextPriority.authoritativeMode,
+          contextPriority.authoritativeIntentFamily
+        )),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         projectContract: summarizeProjectContract(projectContract),
         ...compactProposalRouting(kernel, routing),
@@ -4268,6 +4390,11 @@ export async function POST(request: Request) {
         proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
         assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
         proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
+        previewRuntime: compactPreviewRuntime(buildProposalPreviewRuntime(
+          proposal,
+          contextPriority.authoritativeMode,
+          contextPriority.authoritativeIntentFamily
+        )),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         model,
         projectContract: summarizeProjectContract(projectContract),

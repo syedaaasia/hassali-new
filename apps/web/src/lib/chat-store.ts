@@ -44,6 +44,9 @@ type FileProposalAction = "create" | "update";
 type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "stop_runtime";
 type ProposalAction = FileProposalAction | RuntimeProposalAction;
 type ProposalRoutingMode = "blocked" | "normal" | "review_required";
+type UnifiedPreviewType = "application" | "architecture" | "component" | "dashboard" | "mobile" | "none" | "website";
+type LegacyPreviewType = "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
+type ProposalPreviewType = LegacyPreviewType | UnifiedPreviewType;
 
 export type ProposalRoutingReason = {
   code: string;
@@ -134,7 +137,19 @@ export type DiffProposal = {
   modeDriftDetected?: boolean;
   mode: "SUGGEST" | "EXECUTE";
   previewMode?: "answer_only" | "code_plan" | "static_preview";
-  previewType?: "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
+  previewCapabilities?: string[];
+  previewClassification?: {
+    confidence: number;
+    previewType: UnifiedPreviewType;
+    reason: string;
+    rendererId: string;
+    signals: string[];
+  };
+  previewConfidence?: number;
+  previewMetadata?: Record<string, unknown>;
+  previewRuntimeState?: "empty" | "metadata_only" | "none" | "ready" | "unsupported";
+  previewType?: ProposalPreviewType;
+  previewWarnings?: string[];
   projectId: string | null;
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
@@ -189,6 +204,13 @@ export type DiffProposal = {
   translatedFeatures?: string[];
   translatedStyle?: string | null;
   validationIssueCount?: number;
+  websiteAudience?: string;
+  websiteGoal?: string;
+  websiteIndustry?: string;
+  websiteLayoutType?: string;
+  websiteSectionCount?: number;
+  websiteValidationPassed?: boolean;
+  websiteVisualStrategy?: string;
   changes: Array<{
     action: ProposalAction;
     path?: string;
@@ -216,6 +238,46 @@ function isAppPreview(value: unknown): value is NonNullable<DiffProposal["appPre
     isStringArray(preview.integrations) &&
     typeof preview.mockDataNotice === "string" &&
     isStringArray(preview.screens)
+  );
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isUnifiedPreviewType(value: unknown): value is UnifiedPreviewType {
+  return (
+    value === "application" ||
+    value === "architecture" ||
+    value === "component" ||
+    value === "dashboard" ||
+    value === "mobile" ||
+    value === "none" ||
+    value === "website"
+  );
+}
+
+function isProposalPreviewType(value: unknown): value is ProposalPreviewType {
+  return (
+    isUnifiedPreviewType(value) ||
+    value === "code_app_preview" ||
+    value === "code_plan_preview" ||
+    value === "docs_preview" ||
+    value === "website_static_preview"
+  );
+}
+
+function isPreviewClassification(value: unknown): value is NonNullable<DiffProposal["previewClassification"]> {
+  if (!isPlainRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.confidence === "number" &&
+    isUnifiedPreviewType(value.previewType) &&
+    typeof value.reason === "string" &&
+    typeof value.rendererId === "string" &&
+    isStringArray(value.signals)
   );
 }
 
@@ -540,12 +602,26 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.previewMode === "answer_only" ||
       proposal.previewMode === "code_plan" ||
       proposal.previewMode === "static_preview") &&
+    (typeof proposal.previewCapabilities === "undefined" ||
+      (Array.isArray(proposal.previewCapabilities) &&
+        proposal.previewCapabilities.every((capability) => typeof capability === "string"))) &&
+    (typeof proposal.previewClassification === "undefined" ||
+      isPreviewClassification(proposal.previewClassification)) &&
+    (typeof proposal.previewConfidence === "undefined" ||
+      typeof proposal.previewConfidence === "number") &&
+    (typeof proposal.previewMetadata === "undefined" ||
+      isPlainRecord(proposal.previewMetadata)) &&
+    (typeof proposal.previewRuntimeState === "undefined" ||
+      proposal.previewRuntimeState === "empty" ||
+      proposal.previewRuntimeState === "metadata_only" ||
+      proposal.previewRuntimeState === "none" ||
+      proposal.previewRuntimeState === "ready" ||
+      proposal.previewRuntimeState === "unsupported") &&
     (typeof proposal.previewType === "undefined" ||
-      proposal.previewType === "code_app_preview" ||
-      proposal.previewType === "code_plan_preview" ||
-      proposal.previewType === "docs_preview" ||
-      proposal.previewType === "none" ||
-      proposal.previewType === "website_static_preview") &&
+      isProposalPreviewType(proposal.previewType)) &&
+    (typeof proposal.previewWarnings === "undefined" ||
+      (Array.isArray(proposal.previewWarnings) &&
+        proposal.previewWarnings.every((warning) => typeof warning === "string"))) &&
     (typeof proposal.proposalRoutingWarnings === "undefined" ||
       (Array.isArray(proposal.proposalRoutingWarnings) &&
         proposal.proposalRoutingWarnings.every(isProposalRoutingWarning))) &&
@@ -688,6 +764,20 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       typeof proposal.visualWarningCount === "number") &&
     (typeof proposal.validationIssueCount === "undefined" ||
       typeof proposal.validationIssueCount === "number") &&
+    (typeof proposal.websiteAudience === "undefined" ||
+      typeof proposal.websiteAudience === "string") &&
+    (typeof proposal.websiteGoal === "undefined" ||
+      typeof proposal.websiteGoal === "string") &&
+    (typeof proposal.websiteIndustry === "undefined" ||
+      typeof proposal.websiteIndustry === "string") &&
+    (typeof proposal.websiteLayoutType === "undefined" ||
+      typeof proposal.websiteLayoutType === "string") &&
+    (typeof proposal.websiteSectionCount === "undefined" ||
+      typeof proposal.websiteSectionCount === "number") &&
+    (typeof proposal.websiteValidationPassed === "undefined" ||
+      typeof proposal.websiteValidationPassed === "boolean") &&
+    (typeof proposal.websiteVisualStrategy === "undefined" ||
+      typeof proposal.websiteVisualStrategy === "string") &&
     Array.isArray(proposal.changes) &&
     proposal.changes.every(
       (change) => {

@@ -5,6 +5,40 @@ import { useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 
+type UnifiedPreviewType = "application" | "architecture" | "component" | "dashboard" | "mobile" | "none" | "website";
+
+function normalizePreviewType(value: string | undefined, productMode: string): UnifiedPreviewType {
+  if (
+    value === "application" ||
+    value === "architecture" ||
+    value === "component" ||
+    value === "dashboard" ||
+    value === "mobile" ||
+    value === "none" ||
+    value === "website"
+  ) {
+    return value;
+  }
+
+  if (value === "website_static_preview") return "website";
+  if (value === "code_app_preview") return "dashboard";
+  if (value === "code_plan_preview" || value === "docs_preview") return "architecture";
+  if (productMode === "ASK") return "none";
+  if (productMode === "WEBSITE") return "website";
+
+  return "architecture";
+}
+
+function previewLabel(type: UnifiedPreviewType) {
+  return type === "none" ? "No preview" : `${type.charAt(0).toUpperCase()}${type.slice(1)} preview`;
+}
+
+function metadataArray(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 6) : [];
+}
+
 export function PreviewPanel() {
   const files = useWorkspaceStore((state) => state.files);
   const productMode = useChatStore((state) => state.productMode);
@@ -21,6 +55,10 @@ export function PreviewPanel() {
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
   const iframeSource = previewUrl ? `${previewUrl}?v=${iframeVersion}` : null;
   const hasIndexHtml = Boolean(files["index.html"]);
+  const unifiedPreviewType = proposal?.previewClassification?.previewType ??
+    normalizePreviewType(proposal?.previewType, productMode);
+  const isWebsitePreview = unifiedPreviewType === "website";
+  const canStartStaticPreview = isWebsitePreview && hasIndexHtml;
   const proposalDocFiles =
     proposal?.changes
       .map((change) => change.path)
@@ -29,11 +67,32 @@ export function PreviewPanel() {
   const appPreview = proposal?.appPreview;
   const isCodePreviewContext =
     productMode === "CODE" ||
+    unifiedPreviewType === "application" ||
+    unifiedPreviewType === "architecture" ||
+    unifiedPreviewType === "component" ||
+    unifiedPreviewType === "dashboard" ||
+    unifiedPreviewType === "mobile" ||
     proposal?.previewMode === "code_plan" ||
     proposal?.previewType === "code_app_preview" ||
     proposal?.previewType === "code_plan_preview";
+  const structuredPreviewFields =
+    unifiedPreviewType === "dashboard"
+      ? ["screens", "widgets", "charts", "panels"]
+      : unifiedPreviewType === "mobile"
+        ? ["screens", "navigation", "flows"]
+        : unifiedPreviewType === "component"
+          ? ["components", "props", "states"]
+          : unifiedPreviewType === "application"
+            ? ["routes", "modules", "features"]
+            : ["services", "endpoints", "dataFlow"];
+  const structuredPreviewItems = structuredPreviewFields
+    .map((field) => ({
+      field,
+      values: metadataArray(proposal?.previewMetadata, field)
+    }))
+    .filter((item) => item.values.length > 0);
   const missingPreviewMessage = isCodePreviewContext
-    ? `CODE proposal ready. Review the architecture and implementation files in the proposal panel. Live preview is available for WEBSITE/static outputs.${
+    ? `${previewLabel(unifiedPreviewType)} ready. Review the proposal files and metadata. Live iframe preview is available for WEBSITE/static outputs.${
         proposalDocFiles.length ? ` Planning docs: ${proposalDocFiles.join(", ")}.` : ""
       }`
     : "Preview needs index.html. Use WEBSITE mode to create a static website.";
@@ -46,7 +105,7 @@ export function PreviewPanel() {
             Preview
           </div>
           <div className="mt-1 text-xs text-foreground">
-            {status === "running" ? "Local static runtime" : "Stopped"}
+            {status === "running" ? "Local static runtime" : previewLabel(unifiedPreviewType)}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -74,7 +133,7 @@ export function PreviewPanel() {
       <div className="flex items-center gap-2 border-b border-[hsl(var(--premium-border))] p-3">
         <button
           className="rounded-full border border-[#7c6cff]/35 bg-[#7c6cff] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isLoading || !projectId || !hasIndexHtml}
+          disabled={isLoading || !projectId || !canStartStaticPreview}
           onClick={() => {
             void startPreview(projectId);
           }}
@@ -178,6 +237,50 @@ export function PreviewPanel() {
                 </p>
               </section>
             </div>
+          </div>
+        ) : proposal && isCodePreviewContext && unifiedPreviewType !== "none" ? (
+          <div className="flex h-full min-h-0 flex-col overflow-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.55)] p-4 text-xs text-foreground">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                  Unified preview
+                </p>
+                <h3 className="mt-1 text-lg font-semibold">{previewLabel(unifiedPreviewType)}</h3>
+                <p className="mt-1 text-muted-foreground">
+                  {proposal.previewClassification?.reason ?? "Metadata-only preview is available for this CODE proposal."}
+                </p>
+              </div>
+              <span className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] uppercase text-muted-foreground">
+                {proposal.previewRuntimeState ?? "metadata"}
+              </span>
+            </div>
+            {structuredPreviewItems.length ? (
+              <div className="space-y-3">
+                {structuredPreviewItems.map((item) => (
+                  <div className="rounded-xl border border-white/10 bg-black/20 p-3" key={item.field}>
+                    <p className="mb-2 text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
+                      {item.field}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {item.values.map((value) => (
+                        <span className="rounded-full border border-white/10 px-2.5 py-1" key={`${item.field}-${value}`}>
+                          {value}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-xl border border-white/10 bg-black/20 p-3 text-muted-foreground">
+                Preview metadata is empty. Review the proposal files for architecture details.
+              </p>
+            )}
+            {proposal.previewWarnings?.length ? (
+              <p className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/10 p-3 text-amber-100">
+                {proposal.previewWarnings[0]}
+              </p>
+            ) : null}
           </div>
         ) : (
           <div className="flex h-full items-center justify-center rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.5)] p-6 text-center text-xs leading-5 text-muted-foreground">
