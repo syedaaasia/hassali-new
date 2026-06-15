@@ -9,11 +9,41 @@ import {
   validateRuntimeApprovalRequest,
   type RuntimeApprovalBody
 } from "@/lib/server/runtime/runtime-approval-plan";
+import { routeRuntimeWorker } from "@/lib/server/runtime/worker-router";
+import type {
+  WorkerRouterProductMode,
+  WorkerRouterRiskLevel,
+  WorkerRouterSnapshotStatus
+} from "@/lib/server/runtime/worker-router-types";
 
 export const runtime = "nodejs";
 
 function errorResponse(error: string, status = 400, extra?: Record<string, unknown>) {
   return Response.json({ error, ...extra }, { status });
+}
+
+function productModeFromBody(value: unknown): WorkerRouterProductMode {
+  return value === "ASK" || value === "WEBSITE" || value === "CODE" ? value : "CODE";
+}
+
+function snapshotStatusFromBody(value: unknown): WorkerRouterSnapshotStatus | undefined {
+  return value === "available" || value === "failed" || value === "missing" || value === "unavailable"
+    ? value
+    : undefined;
+}
+
+function riskLevelFromBody(value: unknown): WorkerRouterRiskLevel | undefined {
+  return value === "high" || value === "medium" || value === "low" ? value : undefined;
+}
+
+function metadataFromBody(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function workerTypeFromBody(value: unknown) {
+  return typeof value === "string" ? value : null;
 }
 
 export async function POST(request: Request) {
@@ -53,6 +83,17 @@ export async function POST(request: Request) {
     proposalId: parsed.proposalId,
     workspaceRoot: workspaceBinding.workspaceRoot
   });
+  const workerRouter = routeRuntimeWorker({
+    plan,
+    productMode: productModeFromBody(body.productMode),
+    projectId: parsed.projectId,
+    proposalMetadata: metadataFromBody(body.proposalMetadata),
+    requestedWorkerType: workerTypeFromBody(body.workerType),
+    riskLevel: riskLevelFromBody(body.riskLevel),
+    snapshotStatus: snapshotStatusFromBody(body.snapshotStatus),
+    taskKind: typeof body.taskKind === "string" ? body.taskKind : undefined,
+    workspaceRoot: workspaceBinding.workspaceRoot
+  });
 
   if (blockedReasons.length > 0) {
     return Response.json({
@@ -65,11 +106,15 @@ export async function POST(request: Request) {
       events: [],
       runnerId: null,
       runnerStatus: "blocked",
-      requestedWorkerType: parsed.workerType,
+      rejectedWorkers: workerRouter.rejectedWorkers,
+      requestedWorkerType: workerRouter.requestedWorkerType ?? parsed.workerType,
       selectedWorkerType: null,
       skippedSteps: skippedSummaries,
       snapshot: null,
       verification: null,
+      workerRouterStatus: workerRouter.routerStatus,
+      workerRouterWarnings: workerRouter.routerWarnings,
+      workerSelectionReason: workerRouter.selectionReason,
       workerFallbackReason: null,
       workerResult: null,
       workspaceBindingStatus: workspaceBinding.registryStatus,
@@ -80,7 +125,7 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
 
-  const adapterSelection = selectRuntimeAdapter(parsed.workerType);
+  const adapterSelection = selectRuntimeAdapter(workerRouter);
   const adapter = adapterSelection.adapter;
   const session = await adapter.startSession({
     projectId: parsed.projectId,
@@ -98,15 +143,19 @@ export async function POST(request: Request) {
     })),
     errors: result.blockedReasons.map((reason) => reason.message),
     events: result.events,
+    rejectedWorkers: workerRouter.rejectedWorkers,
     runnerId: session.id,
     runnerStatus: result.ok ? "completed" : "blocked",
-    requestedWorkerType: adapterSelection.requestedWorkerType,
-    selectedWorkerType: adapterSelection.selectedWorkerType,
+    requestedWorkerType: workerRouter.requestedWorkerType ?? adapterSelection.requestedWorkerType,
+    selectedWorkerType: workerRouter.selectedWorkerType,
     skippedSteps: result.events
       .filter((event) => event.type === "step_skipped" && event.stepId)
       .map((event) => event.stepId),
     snapshot: result.snapshot ?? null,
     verification: result.verification ?? null,
+    workerRouterStatus: workerRouter.routerStatus,
+    workerRouterWarnings: workerRouter.routerWarnings,
+    workerSelectionReason: workerRouter.selectionReason,
     workerFallbackReason: adapterSelection.fallbackReason,
     workerResult: result.workerResult ?? null,
     workspaceBindingStatus: workspaceBinding.registryStatus,

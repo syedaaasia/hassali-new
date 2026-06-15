@@ -18,6 +18,11 @@ export type RuntimeApprovalBody = {
   changes?: unknown;
   projectId?: unknown;
   proposalId?: unknown;
+  productMode?: unknown;
+  proposalMetadata?: unknown;
+  riskLevel?: unknown;
+  snapshotStatus?: unknown;
+  taskKind?: unknown;
   workerType?: unknown;
   workspaceRoot?: unknown;
 };

@@ -6,6 +6,7 @@ import { isOpenCodeWorkerEnabled } from "@/lib/server/runtime/workers/opencode-w
 import { createOpenCodeRuntimeAdapter } from "@/lib/server/runtime/workers/opencode-worker";
 import { isOpenHandsSandboxEnabled } from "@/lib/server/runtime/workers/openhands-sandbox-config";
 import { createOpenHandsSandboxAdapter } from "@/lib/server/runtime/workers/openhands-sandbox-adapter";
+import type { WorkerRouterOutput } from "@/lib/server/runtime/worker-router-types";
 
 export type RuntimeWorkerType = "aider" | "local" | "opencode" | "openhands";
 
@@ -24,7 +25,13 @@ export function normalizeRuntimeWorkerType(value: unknown): RuntimeWorkerType {
   return "local";
 }
 
-export function selectRuntimeAdapter(workerType: RuntimeWorkerType): RuntimeAdapterSelection {
+function workerTypeFromSelection(input: RuntimeWorkerType | WorkerRouterOutput): RuntimeWorkerType {
+  return typeof input === "string" ? input : input.selectedWorkerType;
+}
+
+export function selectRuntimeAdapter(input: RuntimeWorkerType | WorkerRouterOutput): RuntimeAdapterSelection {
+  const workerType = workerTypeFromSelection(input);
+
   if (workerType === "aider" && isAiderWorkerEnabled()) {
     return {
       adapter: createAiderRuntimeAdapter(),
