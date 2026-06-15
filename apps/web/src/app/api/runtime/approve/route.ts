@@ -1,4 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
+import {
+  isWorkspaceBindingError,
+  resolveProjectWorkspace
+} from "@/lib/server/runtime/project-workspace-registry";
 import { createLocalApprovedFileRunnerAdapter } from "@/lib/server/runtime/local-approved-file-runner-adapter";
 import {
   buildApprovedPlanFromProposal,
@@ -20,17 +24,34 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as RuntimeApprovalBody | null;
+
+  if (!body) {
+    return errorResponse("Invalid runtime approval request.", 400);
+  }
+
   const parsed = validateRuntimeApprovalRequest(body);
 
   if ("error" in parsed) {
     return errorResponse(parsed.error, parsed.status ?? 400);
   }
 
+  const workspaceBinding = await resolveProjectWorkspace(parsed.projectId);
+
+  if (isWorkspaceBindingError(workspaceBinding)) {
+    return errorResponse(workspaceBinding.error, workspaceBinding.status);
+  }
+
+  const workspaceWarnings = [
+    ...workspaceBinding.warnings,
+    ...(typeof body.workspaceRoot === "string" && body.workspaceRoot.trim().length > 0
+      ? ["Client-supplied workspaceRoot was ignored; Hassali resolved the project workspace server-side."]
+      : [])
+  ];
   const { blockedReasons, plan, skippedSummaries } = buildApprovedPlanFromProposal({
     changes: parsed.changes,
     projectId: parsed.projectId,
     proposalId: parsed.proposalId,
-    workspaceRoot: parsed.workspaceRoot
+    workspaceRoot: workspaceBinding.workspaceRoot
   });
 
   if (blockedReasons.length > 0) {
@@ -47,6 +68,10 @@ export async function POST(request: Request) {
       skippedSteps: skippedSummaries,
       snapshot: null,
       verification: null,
+      workspaceBindingStatus: workspaceBinding.registryStatus,
+      workspaceCreated: workspaceBinding.created,
+      workspaceRoot: workspaceBinding.workspaceRoot,
+      workspaceWarnings,
       writtenFiles: []
     }, { status: 400 });
   }
@@ -54,7 +79,7 @@ export async function POST(request: Request) {
   const adapter = createLocalApprovedFileRunnerAdapter();
   const session = await adapter.startSession({
     projectId: parsed.projectId,
-    workspaceRoot: parsed.workspaceRoot
+    workspaceRoot: workspaceBinding.workspaceRoot
   });
   const result = await adapter.sendApprovedPlan(session, plan);
 
@@ -75,6 +100,10 @@ export async function POST(request: Request) {
       .map((event) => event.stepId),
     snapshot: result.snapshot ?? null,
     verification: result.verification ?? null,
+    workspaceBindingStatus: workspaceBinding.registryStatus,
+    workspaceCreated: workspaceBinding.created,
+    workspaceRoot: workspaceBinding.workspaceRoot,
+    workspaceWarnings,
     writtenFiles: result.events
       .filter((event) => event.type === "file_written")
       .map((event) => String(event.metadata?.path ?? ""))

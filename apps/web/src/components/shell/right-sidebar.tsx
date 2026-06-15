@@ -80,6 +80,34 @@ function isRuntimeProposalAction(action: string) {
   return action === "restart_runtime" || action === "reload_preview" || action === "stop_runtime";
 }
 
+type RuntimeApprovalResponse = {
+  appliedSteps?: string[];
+  blockedSteps?: Array<{
+    reasons?: Array<{
+      message?: string;
+    }>;
+    stepId?: string;
+  }>;
+  errors?: string[];
+  events?: Array<{
+    message?: string;
+    type?: string;
+  }>;
+  runnerId?: string | null;
+  runnerStatus?: string;
+  skippedSteps?: string[];
+  snapshot?: unknown;
+  verification?: {
+    details?: string[];
+    ok?: boolean;
+  } | null;
+  workspaceBindingStatus?: string;
+  workspaceCreated?: boolean;
+  workspaceRoot?: string;
+  workspaceWarnings?: string[];
+  writtenFiles?: string[];
+};
+
 function normalizeProposalPath(value: unknown) {
   if (typeof value !== "string") {
     return null;
@@ -114,6 +142,10 @@ function validateProposalForApproval(proposal: DiffProposal, selectedProjectId: 
     return "This proposal was marked unsafe. Reject it and ask Hassali to recreate a safer proposal.";
   }
 
+  if (proposal.changes.length === 0) {
+    return "This proposal has no approved changes to apply.";
+  }
+
   if (!proposal.projectId) {
     return "This proposal is missing projectId. Recreate it before approving.";
   }
@@ -143,6 +175,55 @@ function validateProposalForApproval(proposal: DiffProposal, selectedProjectId: 
   }
 
   return null;
+}
+
+function fileProposalChanges(proposal: DiffProposal) {
+  return proposal.changes.filter((change) => isFileProposalAction(change.action));
+}
+
+function runtimeApprovalMessage(status: number, payload: RuntimeApprovalResponse | null) {
+  const backendError =
+    payload?.errors?.find((item) => item.trim().length > 0) ??
+    payload?.blockedSteps
+      ?.flatMap((step) => step.reasons ?? [])
+      .map((reason) => reason.message)
+      .find((message): message is string => Boolean(message?.trim()));
+
+  return `Runtime approval failed. Backend returned ${status}: ${backendError ?? "Approved file runner rejected the proposal."} Proposal was not applied.`;
+}
+
+async function approveProposalThroughRuntime(proposal: DiffProposal, selectedProjectId: string) {
+  const fileChanges = fileProposalChanges(proposal);
+
+  if (fileChanges.length === 0) {
+    return null;
+  }
+
+  const response = await fetch("/api/runtime/approve", {
+    body: JSON.stringify({
+      changes: proposal.changes.map((change) => ({
+        action: change.action,
+        path: change.path,
+        proposedContent: change.proposedContent,
+        summary: change.summary
+      })),
+      projectId: selectedProjectId,
+      proposalId: proposal.id
+    }),
+    headers: {
+      "Content-Type": "application/json"
+    },
+    method: "POST"
+  });
+  const payload = (await response.json().catch(() => null)) as RuntimeApprovalResponse | null;
+
+  if (!response.ok || payload?.runnerStatus === "blocked" || payload?.verification?.ok === false) {
+    throw new Error(runtimeApprovalMessage(response.status, payload));
+  }
+
+  console.info("runtime approval result", payload);
+
+  return payload;
 }
 
 function isBlockedProposal(proposal: DiffProposal) {
@@ -506,8 +587,12 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const [blockedRegenerationAttempts, setBlockedRegenerationAttempts] = useState(0);
   const [isListening, setIsListening] = useState(false);
   const [manualReviewMessage, setManualReviewMessage] = useState<string | null>(null);
+  const [runtimeApprovalResult, setRuntimeApprovalResult] =
+    useState<RuntimeApprovalResponse | null>(null);
 
   useEffect(() => {
+    setRuntimeApprovalResult(null);
+
     if (!proposal) {
       if (!regenerationInFlightRef.current) {
         setBlockedRegenerationAttempts(0);
@@ -617,7 +702,21 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
       return;
     }
 
+    const selectedProjectId = projectId;
+
+    if (!selectedProjectId) {
+      setWorkspaceError("Select a project before approving this proposal.");
+      return;
+    }
+
     try {
+      setRuntimeApprovalResult(null);
+      const runtimeResult = await approveProposalThroughRuntime(proposal, selectedProjectId);
+
+      if (runtimeResult) {
+        setRuntimeApprovalResult(runtimeResult);
+      }
+
       for (const change of proposal.changes) {
         if (isFileProposalAction(change.action)) {
           await applyFileContent(change.path ?? "", change.proposedContent ?? "", proposal.projectId, {
@@ -777,6 +876,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               </div>
 
               {manualReviewMessage ? <ManualReviewNotice message={manualReviewMessage} /> : null}
+              {runtimeApprovalResult ? (
+                <div className="mt-3 rounded-xl border border-[hsl(var(--royal-border-soft))] bg-black/20 px-3 py-2 text-[11px] text-muted-foreground">
+                  Runtime approval {runtimeApprovalResult.runnerStatus ?? "completed"}.
+                  {runtimeApprovalResult.writtenFiles?.length
+                    ? ` Verified ${runtimeApprovalResult.writtenFiles.length} file change(s).`
+                    : null}
+                </div>
+              ) : null}
 
               <div className="mt-3 flex items-center justify-end gap-2">
                 {isApprovalBlocked ? (

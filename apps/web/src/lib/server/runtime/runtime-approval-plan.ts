@@ -29,11 +29,10 @@ export type RuntimeApprovalValidationResult =
       changes: RuntimeApprovalChange[];
       projectId: string;
       proposalId: string;
-      workspaceRoot: string;
     };
 
 const supportedWriteActions = new Set(["create", "modify", "update", "write_file"]);
-const metadataActions = new Set(["reload_preview", "restart_preview", "restart_runtime"]);
+const metadataActions = new Set(["reload_preview", "restart_preview", "restart_runtime", "stop_runtime"]);
 const blockedDeleteActions = new Set(["delete", "remove", "unlink"]);
 
 function normalizeChangePath(value: unknown) {
@@ -204,15 +203,10 @@ export function buildApprovedPlanFromProposal(input: {
 
 export function validateRuntimeApprovalRequest(body: RuntimeApprovalBody | null): RuntimeApprovalValidationResult {
   const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
-  const workspaceRoot = typeof body?.workspaceRoot === "string" ? body.workspaceRoot.trim() : "";
   const proposalId = typeof body?.proposalId === "string" ? body.proposalId.trim() : "";
 
   if (!projectId) {
     return { error: "projectId is required.", status: 400 };
-  }
-
-  if (!workspaceRoot || !isAbsolute(workspaceRoot)) {
-    return { error: "An absolute workspaceRoot is required.", status: 400 };
   }
 
   if (!proposalId) {
@@ -226,7 +220,6 @@ export function validateRuntimeApprovalRequest(body: RuntimeApprovalBody | null)
   return {
     changes: body.changes as RuntimeApprovalChange[],
     projectId,
-    proposalId,
-    workspaceRoot
+    proposalId
   };
 }
