@@ -9,6 +9,7 @@ export type WorkerRouterRiskLevel = "high" | "low" | "medium";
 
 export type WorkerRouterFeatureFlags = {
   aider: boolean;
+  goose: boolean;
   opencode: boolean;
   openhands: boolean;
 };
@@ -28,7 +29,7 @@ export type WorkerRouterInput = {
 
 export type RejectedWorker = {
   reason: string;
-  workerType: RuntimeWorkerType | "goose" | "unknown";
+  workerType: RuntimeWorkerType | "unknown";
 };
 
 export type WorkerRouterOutput = {
@@ -37,7 +38,7 @@ export type WorkerRouterOutput = {
   isDryRun: boolean;
   isExternalWorker: boolean;
   rejectedWorkers: RejectedWorker[];
-  requestedWorkerType: RuntimeWorkerType | "goose" | "unknown" | null;
+  requestedWorkerType: RuntimeWorkerType | "unknown" | null;
   requiresFeatureFlag: boolean;
   routerStatus: "fallback" | "selected" | "warning";
   routerWarnings: string[];

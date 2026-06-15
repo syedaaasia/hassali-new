@@ -6,9 +6,11 @@ import { isOpenCodeWorkerEnabled } from "@/lib/server/runtime/workers/opencode-w
 import { createOpenCodeRuntimeAdapter } from "@/lib/server/runtime/workers/opencode-worker";
 import { isOpenHandsSandboxEnabled } from "@/lib/server/runtime/workers/openhands-sandbox-config";
 import { createOpenHandsSandboxAdapter } from "@/lib/server/runtime/workers/openhands-sandbox-adapter";
+import { isGooseDelegationEnabled } from "@/lib/server/runtime/workers/goose-delegation-config";
+import { createGooseDelegationAdapter } from "@/lib/server/runtime/workers/goose-delegation-adapter";
 import type { WorkerRouterOutput } from "@/lib/server/runtime/worker-router-types";
 
-export type RuntimeWorkerType = "aider" | "local" | "opencode" | "openhands";
+export type RuntimeWorkerType = "aider" | "goose" | "local" | "opencode" | "openhands";
 
 export type RuntimeAdapterSelection = {
   adapter: RuntimeAdapter;
@@ -18,7 +20,7 @@ export type RuntimeAdapterSelection = {
 };
 
 export function normalizeRuntimeWorkerType(value: unknown): RuntimeWorkerType {
-  if (value === "aider" || value === "opencode" || value === "openhands") {
+  if (value === "aider" || value === "goose" || value === "opencode" || value === "openhands") {
     return value;
   }
 
@@ -59,6 +61,15 @@ export function selectRuntimeAdapter(input: RuntimeWorkerType | WorkerRouterOutp
     };
   }
 
+  if (workerType === "goose" && isGooseDelegationEnabled()) {
+    return {
+      adapter: createGooseDelegationAdapter(),
+      fallbackReason: null,
+      requestedWorkerType: workerType,
+      selectedWorkerType: "goose"
+    };
+  }
+
   return {
     adapter: createLocalApprovedFileRunnerAdapter(),
     fallbackReason:
@@ -68,7 +79,9 @@ export function selectRuntimeAdapter(input: RuntimeWorkerType | WorkerRouterOutp
           ? "OpenCode worker was requested but ENABLE_OPENCODE_WORKER is not true; using the default local approved file runner."
           : workerType === "openhands"
             ? "OpenHands sandbox was requested but ENABLE_OPENHANDS_SANDBOX is not true; using the default local approved file runner."
-            : null,
+            : workerType === "goose"
+              ? "Goose delegation was requested but ENABLE_GOOSE_DELEGATION is not true; using the default local approved file runner."
+              : null,
     requestedWorkerType: workerType,
     selectedWorkerType: "local"
   };

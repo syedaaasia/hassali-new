@@ -1,4 +1,5 @@
 import { isAiderWorkerEnabled } from "@/lib/server/runtime/workers/aider-worker-config";
+import { isGooseDelegationEnabled } from "@/lib/server/runtime/workers/goose-delegation-config";
 import { isOpenCodeWorkerEnabled } from "@/lib/server/runtime/workers/opencode-worker-config";
 import { isOpenHandsSandboxEnabled } from "@/lib/server/runtime/workers/openhands-sandbox-config";
 import type { RuntimeWorkerType } from "@/lib/server/runtime/runtime-adapter-selector";
@@ -15,6 +16,7 @@ const localReason = "Local approved file runner is the default safest worker.";
 function defaultFeatureFlags(): WorkerRouterFeatureFlags {
   return {
     aider: isAiderWorkerEnabled(),
+    goose: isGooseDelegationEnabled(),
     opencode: isOpenCodeWorkerEnabled(),
     openhands: isOpenHandsSandboxEnabled()
   };
@@ -27,13 +29,9 @@ function featureFlags(input?: Partial<WorkerRouterFeatureFlags>): WorkerRouterFe
   };
 }
 
-function requestedWorker(value: unknown): RuntimeWorkerType | "goose" | "unknown" | null {
-  if (value === "local" || value === "aider" || value === "opencode" || value === "openhands") {
+function requestedWorker(value: unknown): RuntimeWorkerType | "unknown" | null {
+  if (value === "local" || value === "aider" || value === "goose" || value === "opencode" || value === "openhands") {
     return value;
-  }
-
-  if (value === "goose") {
-    return "goose";
   }
 
   if (typeof value === "string" && value.trim()) {
@@ -75,6 +73,10 @@ function requestedFlag(worker: RuntimeWorkerType, flags: WorkerRouterFeatureFlag
     return flags.opencode;
   }
 
+  if (worker === "goose") {
+    return flags.goose;
+  }
+
   if (worker === "openhands") {
     return flags.openhands;
   }
@@ -95,11 +97,15 @@ function workerStrength(worker: RuntimeWorkerType) {
     return "OpenHands sandbox is suitable for sandboxed verification plans and remains dry-run only in this phase.";
   }
 
+  if (worker === "goose") {
+    return "Goose delegation is suitable for future CODE worker-chain and MCP delegation planning; it remains dry-run only in this phase.";
+  }
+
   return localReason;
 }
 
 function needsSnapshot(worker: RuntimeWorkerType) {
-  return worker === "aider" || worker === "opencode" || worker === "openhands";
+  return worker === "aider" || worker === "goose" || worker === "opencode" || worker === "openhands";
 }
 
 function isSnapshotAvailable(snapshotStatus: WorkerRouterSnapshotStatus | undefined) {
@@ -112,9 +118,9 @@ function externalOutput(input: {
   warnings?: string[];
 }): WorkerRouterOutput {
   return {
-    confidence: input.requested === "openhands" ? 0.8 : 0.82,
+    confidence: input.requested === "goose" ? 0.76 : input.requested === "openhands" ? 0.8 : 0.82,
     fallbackWorkerType: null,
-    isDryRun: input.requested === "openhands",
+    isDryRun: input.requested === "goose" || input.requested === "openhands",
     isExternalWorker: input.requested !== "local",
     rejectedWorkers: [],
     requestedWorkerType: input.requested,
@@ -138,11 +144,11 @@ export function routeRuntimeWorker(input: WorkerRouterInput): WorkerRouterOutput
     });
   }
 
-  if (requested === "unknown" || requested === "goose") {
+  if (requested === "unknown") {
     return localOutput({
       reason: "Unknown or unavailable worker requested; falling back to local approved file runner.",
       rejectedWorkers: [{
-        reason: requested === "goose" ? "Goose is reserved for a future phase." : "Worker type is not registered.",
+        reason: "Worker type is not registered.",
         workerType: requested
       }],
       requested,
@@ -248,8 +254,10 @@ export function routeRuntimeWorker(input: WorkerRouterInput): WorkerRouterOutput
   return externalOutput({
     reason: workerStrength(requested),
     requested,
-    warnings: requested === "openhands"
-      ? ["OpenHands sandbox is dry-run only in this phase."]
+    warnings: requested === "goose"
+      ? ["Goose delegation is dry-run only in this phase."]
+      : requested === "openhands"
+        ? ["OpenHands sandbox is dry-run only in this phase."]
       : []
   });
 }
