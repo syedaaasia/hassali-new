@@ -95,12 +95,16 @@ type RuntimeApprovalResponse = {
   }>;
   runnerId?: string | null;
   runnerStatus?: string;
+  requestedWorkerType?: string;
+  selectedWorkerType?: string | null;
   skippedSteps?: string[];
   snapshot?: unknown;
   verification?: {
     details?: string[];
     ok?: boolean;
   } | null;
+  workerFallbackReason?: string | null;
+  workerResult?: unknown;
   workspaceBindingStatus?: string;
   workspaceCreated?: boolean;
   workspaceRoot?: string;

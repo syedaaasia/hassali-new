@@ -17,6 +17,7 @@ export type RuntimeApprovalBody = {
   changes?: unknown;
   projectId?: unknown;
   proposalId?: unknown;
+  workerType?: unknown;
   workspaceRoot?: unknown;
 };
 
@@ -29,6 +30,7 @@ export type RuntimeApprovalValidationResult =
       changes: RuntimeApprovalChange[];
       projectId: string;
       proposalId: string;
+      workerType: "aider" | "local";
     };
 
 const supportedWriteActions = new Set(["create", "modify", "update", "write_file"]);
@@ -204,6 +206,7 @@ export function buildApprovedPlanFromProposal(input: {
 export function validateRuntimeApprovalRequest(body: RuntimeApprovalBody | null): RuntimeApprovalValidationResult {
   const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
   const proposalId = typeof body?.proposalId === "string" ? body.proposalId.trim() : "";
+  const workerType = body?.workerType === "aider" ? "aider" : "local";
 
   if (!projectId) {
     return { error: "projectId is required.", status: 400 };
@@ -220,6 +223,7 @@ export function validateRuntimeApprovalRequest(body: RuntimeApprovalBody | null)
   return {
     changes: body.changes as RuntimeApprovalChange[],
     projectId,
-    proposalId
+    proposalId,
+    workerType
   };
 }

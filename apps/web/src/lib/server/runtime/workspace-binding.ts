@@ -80,6 +80,12 @@ export async function resolveWorkspaceBaseRoot() {
   return resolve(repoRoot, ".hassali", "workspaces");
 }
 
+export async function isServerOwnedProjectWorkspaceRoot(workspaceRoot: string) {
+  const baseRoot = await resolveWorkspaceBaseRoot();
+
+  return isInsidePath(resolve(workspaceRoot), baseRoot);
+}
+
 export async function bindProjectWorkspace(projectId: string): Promise<WorkspaceBindingResult | WorkspaceBindingError> {
   const safeProjectId = sanitizeProjectWorkspaceId(projectId);
 

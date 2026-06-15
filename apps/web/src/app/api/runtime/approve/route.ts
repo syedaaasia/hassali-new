@@ -3,7 +3,7 @@ import {
   isWorkspaceBindingError,
   resolveProjectWorkspace
 } from "@/lib/server/runtime/project-workspace-registry";
-import { createLocalApprovedFileRunnerAdapter } from "@/lib/server/runtime/local-approved-file-runner-adapter";
+import { selectRuntimeAdapter } from "@/lib/server/runtime/runtime-adapter-selector";
 import {
   buildApprovedPlanFromProposal,
   validateRuntimeApprovalRequest,
@@ -65,9 +65,13 @@ export async function POST(request: Request) {
       events: [],
       runnerId: null,
       runnerStatus: "blocked",
+      requestedWorkerType: parsed.workerType,
+      selectedWorkerType: null,
       skippedSteps: skippedSummaries,
       snapshot: null,
       verification: null,
+      workerFallbackReason: null,
+      workerResult: null,
       workspaceBindingStatus: workspaceBinding.registryStatus,
       workspaceCreated: workspaceBinding.created,
       workspaceRoot: workspaceBinding.workspaceRoot,
@@ -76,7 +80,8 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
 
-  const adapter = createLocalApprovedFileRunnerAdapter();
+  const adapterSelection = selectRuntimeAdapter(parsed.workerType);
+  const adapter = adapterSelection.adapter;
   const session = await adapter.startSession({
     projectId: parsed.projectId,
     workspaceRoot: workspaceBinding.workspaceRoot
@@ -95,11 +100,15 @@ export async function POST(request: Request) {
     events: result.events,
     runnerId: session.id,
     runnerStatus: result.ok ? "completed" : "blocked",
+    requestedWorkerType: adapterSelection.requestedWorkerType,
+    selectedWorkerType: adapterSelection.selectedWorkerType,
     skippedSteps: result.events
       .filter((event) => event.type === "step_skipped" && event.stepId)
       .map((event) => event.stepId),
     snapshot: result.snapshot ?? null,
     verification: result.verification ?? null,
+    workerFallbackReason: adapterSelection.fallbackReason,
+    workerResult: result.workerResult ?? null,
     workspaceBindingStatus: workspaceBinding.registryStatus,
     workspaceCreated: workspaceBinding.created,
     workspaceRoot: workspaceBinding.workspaceRoot,

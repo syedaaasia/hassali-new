@@ -17,8 +17,11 @@ export type RuntimeTool = {
 export type RuntimeBlockedReasonCode =
   | "external_path_blocked"
   | "missing_project_id"
+  | "missing_snapshot"
   | "missing_workspace_root"
   | "package_install_blocked"
+  | "runtime_worker_timeout"
+  | "runtime_worker_unavailable"
   | "shell_command_blocked"
   | "unapproved_step"
   | "unknown_tool"
@@ -81,6 +84,11 @@ export type RuntimeEvent = {
     | "blocked"
     | "completed"
     | "error"
+    | "aider_worker_completed"
+    | "aider_worker_failed"
+    | "aider_worker_started"
+    | "aider_worker_timeout"
+    | "aider_worker_unavailable"
     | "file_written"
     | "plan_received"
     | "rollback_applied"
@@ -120,4 +128,5 @@ export type RuntimeAdapterResult = {
   session: RuntimeSession;
   snapshot?: RuntimeSnapshotMetadata;
   verification?: RuntimeVerificationResult;
+  workerResult?: unknown;
 };
