@@ -1,6 +1,11 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, normalize, resolve } from "node:path";
 import {
+  createGitSnapshotSafety,
+  finalizeGitSnapshotSafety,
+  type GitSnapshotSafetyResult
+} from "@/lib/server/runtime/git-snapshot-safety";
+import {
   defaultRuntimePermissionPolicy,
   isPathInsideWorkspace,
   validateRuntimeStep
@@ -45,6 +50,7 @@ export type ApprovedFileRunnerOutput = {
   runnerId: string;
   runnerStatus: "blocked" | "completed" | "failed" | "partial";
   skippedSteps: string[];
+  snapshot: GitSnapshotSafetyResult;
   verification: RuntimeVerificationResult;
   writtenFiles: string[];
 };
@@ -174,6 +180,14 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
   const blockedSteps: ApprovedFileRunnerOutput["blockedSteps"] = [];
   const writtenFiles: string[] = [];
   const errors: string[] = [];
+  const snapshotBefore = await createGitSnapshotSafety({
+    planId: input.approvedPlan.id,
+    projectId: input.projectId,
+    runnerId,
+    workspaceRoot: input.workspaceRoot
+  });
+
+  events.push(...snapshotBefore.events);
 
   if (input.projectId !== input.approvedPlan.projectId) {
     blockedSteps.push({
@@ -251,6 +265,17 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
   }
 
   const verification = await verifyWrittenFiles(writtenFiles);
+  const snapshot = await finalizeGitSnapshotSafety(
+    {
+      planId: input.approvedPlan.id,
+      projectId: input.projectId,
+      runnerId,
+      workspaceRoot: input.workspaceRoot
+    },
+    snapshotBefore,
+    verification.ok && errors.length === 0
+  );
+  events.push(...snapshot.events.slice(snapshotBefore.events.length));
   events.push(event({
     message: verification.ok ? "Approved file runner verification passed." : "Approved file runner verification failed.",
     runnerId,
@@ -274,6 +299,7 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
     runnerId,
     runnerStatus,
     skippedSteps,
+    snapshot,
     verification,
     writtenFiles
   };

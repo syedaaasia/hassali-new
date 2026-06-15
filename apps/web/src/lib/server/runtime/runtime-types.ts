@@ -83,8 +83,14 @@ export type RuntimeEvent = {
     | "error"
     | "file_written"
     | "plan_received"
+    | "rollback_applied"
+    | "rollback_available"
+    | "rollback_failed"
     | "session_started"
     | "session_stopped"
+    | "snapshot_changed_files"
+    | "snapshot_created"
+    | "snapshot_unavailable"
     | "step_skipped"
     | "step_started"
     | "tool_noop"
@@ -97,10 +103,21 @@ export type RuntimeVerificationResult = {
   ok: boolean;
 };
 
+export type RuntimeSnapshotMetadata = {
+  afterRef: string | null;
+  beforeRef: string | null;
+  changedFiles: string[];
+  rollbackApplied: boolean;
+  rollbackAvailable: boolean;
+  snapshotId: string;
+  snapshotStatus: "available" | "failed" | "unavailable";
+};
+
 export type RuntimeAdapterResult = {
   blockedReasons: RuntimeBlockedReason[];
   events: RuntimeEvent[];
   ok: boolean;
   session: RuntimeSession;
+  snapshot?: RuntimeSnapshotMetadata;
   verification?: RuntimeVerificationResult;
 };

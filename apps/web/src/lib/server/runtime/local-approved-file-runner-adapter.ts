@@ -55,6 +55,7 @@ export class LocalApprovedFileRunnerAdapter implements RuntimeAdapter {
         ...session,
         status: output.runnerStatus === "completed" ? "completed" : output.runnerStatus === "failed" ? "failed" : "stopped"
       },
+      snapshot: output.snapshot,
       verification: output.verification
     };
   }
