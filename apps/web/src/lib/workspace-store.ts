@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import type { RuntimeSyncedFile } from "@/lib/runtime-result-sync";
 import { useRuntimeStore } from "@/lib/runtime-store";
 
 export type WorkspaceFile = {
@@ -77,6 +78,7 @@ type WorkspaceState = {
   loadWorkspace: (projectId?: string | null) => Promise<WorkspaceLoadResult | null>;
   renamePath: (path: string, newPath: string, kind: "file" | "folder") => Promise<void>;
   setError: (error: string | null) => void;
+  syncRuntimeFiles: (updates: RuntimeSyncedFile[]) => void;
   switchProject: (projectId: string) => Promise<WorkspaceLoadResult | null>;
   updateActiveFile: (content: string) => void;
   saveActiveFile: () => Promise<void>;
@@ -621,6 +623,48 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
   setError: (error) => set({ error }),
+  syncRuntimeFiles: (updates) => {
+    if (updates.length === 0) {
+      return;
+    }
+
+    set((state) => {
+      const files = { ...state.files };
+      const openedPaths = new Set(state.openTabs);
+      let preferredActivePath = state.activePath;
+
+      for (const update of updates) {
+        const normalizedPath = normalizeProjectFilePath(update.path);
+
+        if (!normalizedPath) {
+          continue;
+        }
+
+        files[normalizedPath] = {
+          content: update.content,
+          id: files[normalizedPath]?.id ?? normalizedPath,
+          language: files[normalizedPath]?.language ?? languageFromPath(normalizedPath),
+          path: normalizedPath,
+          savedContent: update.content
+        };
+
+        if (state.openTabs.includes(normalizedPath) || state.activePath === normalizedPath) {
+          openedPaths.add(normalizedPath);
+        }
+
+        if (!preferredActivePath || state.activePath === normalizedPath) {
+          preferredActivePath = normalizedPath;
+        }
+      }
+
+      return {
+        error: null,
+        files,
+        activePath: preferredActivePath,
+        openTabs: Array.from(openedPaths).filter((path) => files[path])
+      };
+    });
+  },
   switchProject: async (projectId) => get().loadWorkspace(projectId),
   updateActiveFile: (content) =>
     set((state) => ({

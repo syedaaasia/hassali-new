@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import type { RuntimeSyncMetadata } from "@/lib/runtime-result-sync";
 
 export type ChatRole = "user" | "assistant";
 export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
@@ -179,6 +180,14 @@ export type DiffProposal = {
   publicCopyCleanStatus?: "blocked" | "clean" | "review_required";
   requiresExtraReview?: boolean;
   repeatedContentDetected?: boolean;
+  runtimeRunnerId?: string | null;
+  runtimeRunnerStatus?: string | null;
+  runtimeSnapshotId?: string | null;
+  runtimeSnapshotStatus?: string | null;
+  runtimeSyncStatus?: "failed" | "partial" | "skipped" | "synced";
+  runtimeSyncedAt?: string;
+  runtimeVerificationOk?: boolean | null;
+  runtimeWrittenFiles?: string[];
   sectionCopyQualityStatus?: "blocked" | "clean" | "review_required";
   shouldBlockExecution?: boolean;
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
@@ -194,6 +203,8 @@ export type DiffProposal = {
   visualScore?: number;
   visualValidationStatus?: "blocked" | "passed" | "review_required" | "warning";
   visualWarningCount?: number;
+  workerExecutionDurationMs?: number | null;
+  workerExecutionStatus?: string | null;
   executionStrategy?: "answer_only" | "docs_first_then_source" | "phased_code_plan" | "phased_proposal" | "single_proposal" | "single_targeted_edit" | "single_targeted_patch" | "static_site_build";
   milestoneCount?: number;
   recommendedExecutionPolicy?: "answer_only" | "docs_first_then_source" | "phased_proposal" | "single_proposal" | "single_targeted_patch";
@@ -304,7 +315,7 @@ type ChatState = {
   setMode: (mode: AiMode) => void;
   setProductMode: (mode: ProductMode) => void;
   clearProposal: () => void;
-  markProposalApproved: () => void;
+  markProposalApproved: (metadata?: RuntimeSyncMetadata) => void;
   sendMessage: (workspaceContext: WorkspaceContext) => Promise<void>;
 };
 
@@ -846,7 +857,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ mode: productModeToAiMode(productMode), productMode });
   },
   clearProposal: () => set({ proposal: null }),
-  markProposalApproved: () => set({ proposal: null }),
+  markProposalApproved: (metadata) =>
+    set((state) => ({
+      proposal: state.proposal
+        ? {
+            ...state.proposal,
+            ...(metadata ?? {}),
+            status: "approved"
+          }
+        : null
+    })),
   sendMessage: async (workspaceContext) => {
     const prompt = get().input.trim();
     const mode = get().mode;

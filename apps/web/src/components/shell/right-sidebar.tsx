@@ -5,6 +5,10 @@ import { useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
 import { type ChatMessage, type DiffProposal, type ProductMode, useChatStore } from "@/lib/chat-store";
+import {
+  type RuntimeApprovalResponse,
+  syncRuntimeApprovalResult
+} from "@/lib/runtime-result-sync";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
 
@@ -79,38 +83,6 @@ function isFileProposalAction(action: string) {
 function isRuntimeProposalAction(action: string) {
   return action === "restart_runtime" || action === "reload_preview" || action === "stop_runtime";
 }
-
-type RuntimeApprovalResponse = {
-  appliedSteps?: string[];
-  blockedSteps?: Array<{
-    reasons?: Array<{
-      message?: string;
-    }>;
-    stepId?: string;
-  }>;
-  errors?: string[];
-  events?: Array<{
-    message?: string;
-    type?: string;
-  }>;
-  runnerId?: string | null;
-  runnerStatus?: string;
-  requestedWorkerType?: string;
-  selectedWorkerType?: string | null;
-  skippedSteps?: string[];
-  snapshot?: unknown;
-  verification?: {
-    details?: string[];
-    ok?: boolean;
-  } | null;
-  workerFallbackReason?: string | null;
-  workerResult?: unknown;
-  workspaceBindingStatus?: string;
-  workspaceCreated?: boolean;
-  workspaceRoot?: string;
-  workspaceWarnings?: string[];
-  writtenFiles?: string[];
-};
 
 function normalizeProposalPath(value: unknown) {
   if (typeof value !== "string") {
@@ -579,13 +551,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const activePath = useWorkspaceStore((state) => state.activePath);
   const projectId = useWorkspaceStore((state) => state.projectId);
   const projectName = useWorkspaceStore((state) => state.projectName);
-  const applyFileContent = useWorkspaceStore((state) => state.applyFileContent);
   const setWorkspaceError = useWorkspaceStore((state) => state.setError);
+  const syncRuntimeFiles = useWorkspaceStore((state) => state.syncRuntimeFiles);
   const activeFile = files[activePath];
   const visibleFileList = Object.keys(files).filter(
     (path) => !path.endsWith(`/${folderPlaceholderFileName}`)
   );
   const isApprovalBlocked = proposal ? isBlockedProposal(proposal) : false;
+  const isProposalApplied = proposal?.status === "approved";
   const regenerationInFlightRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const [blockedRegenerationAttempts, setBlockedRegenerationAttempts] = useState(0);
@@ -595,7 +568,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     useState<RuntimeApprovalResponse | null>(null);
 
   useEffect(() => {
-    setRuntimeApprovalResult(null);
+    if (proposal?.status !== "approved") {
+      setRuntimeApprovalResult(null);
+    }
 
     if (!proposal) {
       if (!regenerationInFlightRef.current) {
@@ -718,15 +693,34 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
       const runtimeResult = await approveProposalThroughRuntime(proposal, selectedProjectId);
 
       if (runtimeResult) {
-        setRuntimeApprovalResult(runtimeResult);
-      }
+        const syncResult = syncRuntimeApprovalResult({
+          activePath,
+          currentFiles: files,
+          projectId: selectedProjectId,
+          proposalChanges: proposal.changes,
+          proposalId: proposal.id,
+          runtimeResult
+        });
 
-      for (const change of proposal.changes) {
-        if (isFileProposalAction(change.action)) {
-          await applyFileContent(change.path ?? "", change.proposedContent ?? "", proposal.projectId, {
-            syncPreview: false
-          });
+        if (!syncResult.proposalApplied) {
+          throw new Error(
+            syncResult.errors[0] ??
+              syncResult.warnings[0] ??
+              "Runtime completed, but Hassali could not sync the written files."
+          );
         }
+
+        syncRuntimeFiles(syncResult.fileUpdates);
+        setRuntimeApprovalResult({
+          ...runtimeResult,
+          writtenFiles: syncResult.runtimeMetadata.runtimeWrittenFiles
+        });
+
+        if (syncResult.refreshedPreview) {
+          await syncPreview(selectedProjectId);
+        }
+
+        markProposalApproved(syncResult.runtimeMetadata);
       }
 
       for (const change of proposal.changes) {
@@ -739,7 +733,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         }
       }
 
-      markProposalApproved();
+      if (!runtimeResult) {
+        markProposalApproved();
+      }
     } catch (error) {
       setWorkspaceError(
         error instanceof Error
@@ -886,6 +882,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   {runtimeApprovalResult.writtenFiles?.length
                     ? ` Verified ${runtimeApprovalResult.writtenFiles.length} file change(s).`
                     : null}
+                  {proposal.runtimeSyncStatus
+                    ? ` Sync ${proposal.runtimeSyncStatus}.`
+                    : null}
                 </div>
               ) : null}
 
@@ -909,13 +908,13 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                 </button>
                 <button
                   className="rounded-xl border border-[#7c6cff]/35 bg-[#7c6cff] px-3 py-1.5 text-xs font-medium text-white shadow-[0_12px_30px_rgba(124,108,255,0.18)] hover:bg-[#8b7cf6] disabled:cursor-not-allowed disabled:border-red-500/20 disabled:bg-red-500/10 disabled:text-red-200/60 disabled:shadow-none disabled:hover:opacity-100"
-                  disabled={isApprovalBlocked}
+                  disabled={isApprovalBlocked || isProposalApplied}
                   onClick={() => {
                     void approveProposal();
                   }}
                   type="button"
                 >
-                  {isApprovalBlocked ? "Approval blocked" : "Approve"}
+                  {isApprovalBlocked ? "Approval blocked" : isProposalApplied ? "Applied" : "Approve"}
                 </button>
               </div>
             </motion.div>
