@@ -6,6 +6,15 @@ import {
 import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
+import { renderWebsitePlanFiles } from "@/lib/server/ai/website-layout-engine";
+import {
+  planWebsite,
+  type WebsitePlan
+} from "@/lib/server/ai/website-planner";
+import {
+  validateWebsitePlanAndFiles,
+  type WebsiteValidationResult
+} from "@/lib/server/ai/website-validator";
 
 export type SiteDomain =
   | "car rental"
@@ -40,6 +49,12 @@ type DomainSiteFiles = {
   indexHtml: string;
   mainJs: string;
   stylesCss: string;
+};
+
+export type PlannedWebsiteGeneration = {
+  files: Record<string, string>;
+  plan: WebsitePlan;
+  validation: WebsiteValidationResult;
 };
 
 const profiles: Record<SiteDomain, DomainProfile> = {
@@ -2083,6 +2098,37 @@ function layoutCssForClass(layoutClass: string) {
 }
 
 export function generateComposedSiteFiles(input: {
+  composition: CompositionStrategy;
+  generatorContract?: GeneratorContract;
+  intent: IntentIntelligence;
+}): Record<string, string> {
+  return generatePlannedWebsiteFiles(input).files;
+}
+
+export function generatePlannedWebsiteFiles(input: {
+  composition: CompositionStrategy;
+  generatorContract?: GeneratorContract;
+  intent: IntentIntelligence;
+}): PlannedWebsiteGeneration {
+  const brandName = brandNameForIntent(input.intent, input.composition);
+  const plan = planWebsite(input);
+  const plannedFiles = renderWebsitePlanFiles({
+    brandName,
+    plan
+  });
+  const validation = validateWebsitePlanAndFiles({
+    files: plannedFiles,
+    plan
+  });
+
+  return {
+    files: plannedFiles,
+    plan,
+    validation
+  };
+}
+
+export function generateLegacyComposedSiteFiles(input: {
   composition: CompositionStrategy;
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
