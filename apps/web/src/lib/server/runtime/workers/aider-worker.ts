@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
+import { access, rm } from "node:fs/promises";
+import { join } from "node:path";
 import type { RuntimeAdapter } from "@/lib/server/runtime/runtime-adapter";
 import {
   createGitSnapshotSafety,
-  finalizeGitSnapshotSafety
+  finalizeGitSnapshotSafety,
+  rollbackGitSnapshotFiles
 } from "@/lib/server/runtime/git-snapshot-safety";
 import {
   validateApprovedExecutionPlan
@@ -82,6 +85,76 @@ function approvedPlanToAiderTask(plan: ApprovedExecutionPlan) {
     "Approved steps:",
     steps || "No approved file-edit steps were provided."
   ].join("\n\n");
+}
+
+function rollbackFilesForApprovedPlan(plan: ApprovedExecutionPlan, changedFiles: string[]) {
+  const approvedPaths = plan.steps
+    .map((step) => step.path?.replace(/\\/g, "/"))
+    .filter((path): path is string => Boolean(path));
+
+  return changedFiles.filter((file) => {
+    const normalized = file.replace(/\\/g, "/");
+
+    return approvedPaths.some((approvedPath) =>
+      normalized === approvedPath ||
+      normalized.endsWith(`/${approvedPath}`) ||
+      approvedPath.endsWith(`/${normalized}`)
+    );
+  });
+}
+
+async function captureApprovedPathState(plan: ApprovedExecutionPlan) {
+  const entries = await Promise.all(
+    plan.steps
+      .map((step) => step.path?.replace(/\\/g, "/"))
+      .filter((path): path is string => Boolean(path))
+      .map(async (path) => {
+        try {
+          await access(join(plan.workspaceRoot, path));
+
+          return [path, true] as const;
+        } catch {
+          return [path, false] as const;
+        }
+      })
+  );
+
+  return new Map(entries);
+}
+
+async function removeNewApprovedFiles(input: {
+  pathState: Map<string, boolean>;
+  plan: ApprovedExecutionPlan;
+  sessionId: string;
+}) {
+  const events: RuntimeEvent[] = [];
+  const errors: string[] = [];
+
+  for (const [path, existedBefore] of input.pathState) {
+    if (existedBefore) {
+      continue;
+    }
+
+    try {
+      await rm(join(input.plan.workspaceRoot, path), { force: true });
+      events.push(event({
+        message: `Removed newly-created approved file '${path}' after failed Aider worker execution.`,
+        sessionId: input.sessionId,
+        type: "rollback_applied"
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Unable to remove '${path}' after failed Aider worker execution.`;
+
+      errors.push(message);
+      events.push(event({
+        message,
+        sessionId: input.sessionId,
+        type: "rollback_failed"
+      }));
+    }
+  }
+
+  return { errors, events };
 }
 
 function executeAiderCli(input: {
@@ -229,6 +302,7 @@ export async function runAiderWorker(input: AiderWorkerInput): Promise<AiderWork
   }
 
   const task = approvedPlanToAiderTask(input.plan);
+  const approvedPathState = await captureApprovedPathState(input.plan);
   const started = event({
     message: "Aider worker started for approved execution plan.",
     metadata: {
@@ -259,6 +333,39 @@ export async function runAiderWorker(input: AiderWorkerInput): Promise<AiderWork
     snapshotBefore,
     verification.ok
   );
+  const rollbackFiles = rollbackFilesForApprovedPlan(input.plan, snapshotAfter.changedFiles);
+  const rollback = !verification.ok && snapshotAfter.rollbackAvailable && snapshotAfter.beforeRef && rollbackFiles.length > 0
+    ? await rollbackGitSnapshotFiles({
+        beforeRef: snapshotAfter.beforeRef,
+        changedFiles: rollbackFiles,
+        runnerId: input.sessionId,
+        workspaceRoot: input.plan.workspaceRoot
+      })
+    : null;
+  const newFileCleanup = !verification.ok
+    ? await removeNewApprovedFiles({
+        pathState: approvedPathState,
+        plan: input.plan,
+        sessionId: input.sessionId
+      })
+    : null;
+  const finalSnapshot = rollback
+    ? {
+        ...snapshotAfter,
+        errors: [...snapshotAfter.errors, ...rollback.errors, ...(newFileCleanup?.errors ?? [])],
+        events: [...snapshotAfter.events, ...rollback.events, ...(newFileCleanup?.events ?? [])],
+        rollbackApplied: rollback.rollbackApplied || Boolean(newFileCleanup?.events.length),
+        rollbackAvailable: rollback.rollbackAvailable || Boolean(newFileCleanup?.errors.length)
+      }
+    : newFileCleanup
+      ? {
+          ...snapshotAfter,
+          errors: [...snapshotAfter.errors, ...newFileCleanup.errors],
+          events: [...snapshotAfter.events, ...newFileCleanup.events],
+          rollbackApplied: Boolean(newFileCleanup.events.length),
+          rollbackAvailable: Boolean(newFileCleanup.errors.length)
+        }
+      : snapshotAfter;
   const completedEventType: RuntimeEvent["type"] =
     status === "completed"
       ? "aider_worker_completed"
@@ -267,7 +374,7 @@ export async function runAiderWorker(input: AiderWorkerInput): Promise<AiderWork
         : "aider_worker_failed";
 
   return {
-    changedFiles: snapshotAfter.changedFiles,
+    changedFiles: finalSnapshot.changedFiles,
     durationMs: execution.durationMs,
     errors: status === "completed" ? [] : [execution.stderr || `Aider worker ${status}.`],
     events: [
@@ -276,26 +383,26 @@ export async function runAiderWorker(input: AiderWorkerInput): Promise<AiderWork
       event({
         message: `Aider worker ${status}.`,
         metadata: {
-          changedFileCount: snapshotAfter.changedFiles.length,
+          changedFileCount: finalSnapshot.changedFiles.length,
           durationMs: execution.durationMs,
           exitCode: execution.exitCode
         },
         sessionId: input.sessionId,
         type: completedEventType
       }),
-      ...snapshotAfter.events.slice(snapshotBefore.events.length)
+      ...finalSnapshot.events.slice(snapshotBefore.events.length)
     ],
     exitCode: execution.exitCode,
     snapshot: {
-      afterRef: snapshotAfter.afterRef,
-      beforeRef: snapshotAfter.beforeRef,
-      changedFiles: snapshotAfter.changedFiles,
-      rollbackApplied: snapshotAfter.rollbackApplied,
-      rollbackAvailable: snapshotAfter.rollbackAvailable,
-      snapshotId: snapshotAfter.snapshotId,
-      snapshotStatus: snapshotAfter.snapshotStatus
+      afterRef: finalSnapshot.afterRef,
+      beforeRef: finalSnapshot.beforeRef,
+      changedFiles: finalSnapshot.changedFiles,
+      rollbackApplied: finalSnapshot.rollbackApplied,
+      rollbackAvailable: finalSnapshot.rollbackAvailable,
+      snapshotId: finalSnapshot.snapshotId,
+      snapshotStatus: finalSnapshot.snapshotStatus
     },
-    snapshotId: snapshotAfter.snapshotId,
+    snapshotId: finalSnapshot.snapshotId,
     status,
     stderr: execution.stderr,
     stdout: execution.stdout,
