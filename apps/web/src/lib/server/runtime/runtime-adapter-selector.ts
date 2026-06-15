@@ -4,8 +4,10 @@ import { isAiderWorkerEnabled } from "@/lib/server/runtime/workers/aider-worker-
 import { createAiderRuntimeAdapter } from "@/lib/server/runtime/workers/aider-worker";
 import { isOpenCodeWorkerEnabled } from "@/lib/server/runtime/workers/opencode-worker-config";
 import { createOpenCodeRuntimeAdapter } from "@/lib/server/runtime/workers/opencode-worker";
+import { isOpenHandsSandboxEnabled } from "@/lib/server/runtime/workers/openhands-sandbox-config";
+import { createOpenHandsSandboxAdapter } from "@/lib/server/runtime/workers/openhands-sandbox-adapter";
 
-export type RuntimeWorkerType = "aider" | "local" | "opencode";
+export type RuntimeWorkerType = "aider" | "local" | "opencode" | "openhands";
 
 export type RuntimeAdapterSelection = {
   adapter: RuntimeAdapter;
@@ -15,7 +17,7 @@ export type RuntimeAdapterSelection = {
 };
 
 export function normalizeRuntimeWorkerType(value: unknown): RuntimeWorkerType {
-  if (value === "aider" || value === "opencode") {
+  if (value === "aider" || value === "opencode" || value === "openhands") {
     return value;
   }
 
@@ -41,6 +43,15 @@ export function selectRuntimeAdapter(workerType: RuntimeWorkerType): RuntimeAdap
     };
   }
 
+  if (workerType === "openhands" && isOpenHandsSandboxEnabled()) {
+    return {
+      adapter: createOpenHandsSandboxAdapter(),
+      fallbackReason: null,
+      requestedWorkerType: workerType,
+      selectedWorkerType: "openhands"
+    };
+  }
+
   return {
     adapter: createLocalApprovedFileRunnerAdapter(),
     fallbackReason:
@@ -48,7 +59,9 @@ export function selectRuntimeAdapter(workerType: RuntimeWorkerType): RuntimeAdap
         ? "Aider worker was requested but ENABLE_AIDER_WORKER is not true; using the default local approved file runner."
         : workerType === "opencode"
           ? "OpenCode worker was requested but ENABLE_OPENCODE_WORKER is not true; using the default local approved file runner."
-          : null,
+          : workerType === "openhands"
+            ? "OpenHands sandbox was requested but ENABLE_OPENHANDS_SANDBOX is not true; using the default local approved file runner."
+            : null,
     requestedWorkerType: workerType,
     selectedWorkerType: "local"
   };
