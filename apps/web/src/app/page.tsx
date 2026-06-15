@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { InteractiveSpotlightFooter } from "@/components/marketing/interactive-spotlight-footer";
 import { CommandCapsule, PremiumPanel, SystemBadge } from "@/components/ui/premium";
 
 const modes = [
@@ -282,6 +283,8 @@ export default function HomePage() {
           <CommandCapsule href="/dashboard" tone="primary">Open Hassali workspace</CommandCapsule>
         </div>
       </section>
+
+      <InteractiveSpotlightFooter />
     </main>
   );
 }
