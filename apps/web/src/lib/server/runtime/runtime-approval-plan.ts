@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { normalizeRuntimeWorkerType, type RuntimeWorkerType } from "@/lib/server/runtime/runtime-adapter-selector";
 import type {
   ApprovedExecutionPlan,
   ApprovedExecutionStep,
@@ -30,7 +31,7 @@ export type RuntimeApprovalValidationResult =
       changes: RuntimeApprovalChange[];
       projectId: string;
       proposalId: string;
-      workerType: "aider" | "local";
+      workerType: RuntimeWorkerType;
     };
 
 const supportedWriteActions = new Set(["create", "modify", "update", "write_file"]);
@@ -206,7 +207,7 @@ export function buildApprovedPlanFromProposal(input: {
 export function validateRuntimeApprovalRequest(body: RuntimeApprovalBody | null): RuntimeApprovalValidationResult {
   const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
   const proposalId = typeof body?.proposalId === "string" ? body.proposalId.trim() : "";
-  const workerType = body?.workerType === "aider" ? "aider" : "local";
+  const workerType = normalizeRuntimeWorkerType(body?.workerType);
 
   if (!projectId) {
     return { error: "projectId is required.", status: 400 };
