@@ -1,4 +1,8 @@
+import type { FrameworkId, FrameworkMatch } from "@/lib/server/preview/framework-preview-types";
+import type { DevServerRuntimeResult } from "@/lib/server/runtime/dev-server-runtime-types";
+
 export type ExecutablePreviewFramework =
+  | FrameworkId
   | "next_app"
   | "node_api"
   | "react_component"
@@ -54,8 +58,10 @@ export type ExecutablePreviewRuntimeResult = {
   capabilities: ExecutablePreviewCapability[];
   commandPlan: ExecutablePreviewCommandPlan;
   confidence: number;
+  devServerRuntime?: DevServerRuntimeResult;
   executablePreviewStatus: ExecutablePreviewStatus;
   framework: ExecutablePreviewFramework;
+  frameworkMatch?: FrameworkMatch;
   renderUrl?: null;
   signals: string[];
   warnings: string[];
@@ -69,5 +75,6 @@ export type ExecutablePreviewDetectionInput = {
 export type ExecutablePreviewDetection = {
   confidence: number;
   framework: ExecutablePreviewFramework;
+  frameworkMatch?: FrameworkMatch;
   signals: string[];
 };

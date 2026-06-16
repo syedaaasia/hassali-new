@@ -126,6 +126,13 @@ export type DiffProposal = {
   intentTranslationStatus?: "available" | "low_confidence" | "unavailable";
   intelligenceKernelSummary?: string;
   kernelRoutingDecision?: KernelRoutingDecision;
+  livePreviewCapabilities?: string[];
+  livePreviewClassification?: Record<string, unknown>;
+  livePreviewMetadata?: Record<string, unknown>;
+  livePreviewRuntimeState?: string | null;
+  livePreviewWarnings?: string[];
+  liveRealPreview?: Record<string, unknown>;
+  liveRuntimePreviewSyncedAt?: string | null;
   genericCopyDetected?: boolean;
   generatorContractBlockCount?: number;
   generatorContractId?: string;
@@ -216,6 +223,10 @@ export type DiffProposal = {
   translatedFeatures?: string[];
   translatedStyle?: string | null;
   validationIssueCount?: number;
+  designTokenCount?: number;
+  designTokenTheme?: string;
+  designTokenValidationPassed?: boolean;
+  tokensStudioExportAvailable?: boolean;
   websiteAudience?: string;
   websiteGoal?: string;
   websiteIndustry?: string;
@@ -581,6 +592,24 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       proposal.intentTranslationStatus === "unavailable") &&
     (typeof proposal.kernelRoutingDecision === "undefined" ||
       isKernelRoutingDecision(proposal.kernelRoutingDecision)) &&
+    (typeof proposal.livePreviewCapabilities === "undefined" ||
+      (Array.isArray(proposal.livePreviewCapabilities) &&
+        proposal.livePreviewCapabilities.every((capability) => typeof capability === "string"))) &&
+    (typeof proposal.livePreviewClassification === "undefined" ||
+      isPlainRecord(proposal.livePreviewClassification)) &&
+    (typeof proposal.livePreviewMetadata === "undefined" ||
+      isPlainRecord(proposal.livePreviewMetadata)) &&
+    (typeof proposal.livePreviewRuntimeState === "undefined" ||
+      proposal.livePreviewRuntimeState === null ||
+      typeof proposal.livePreviewRuntimeState === "string") &&
+    (typeof proposal.livePreviewWarnings === "undefined" ||
+      (Array.isArray(proposal.livePreviewWarnings) &&
+        proposal.livePreviewWarnings.every((warning) => typeof warning === "string"))) &&
+    (typeof proposal.liveRealPreview === "undefined" ||
+      isPlainRecord(proposal.liveRealPreview)) &&
+    (typeof proposal.liveRuntimePreviewSyncedAt === "undefined" ||
+      proposal.liveRuntimePreviewSyncedAt === null ||
+      typeof proposal.liveRuntimePreviewSyncedAt === "string") &&
     (typeof proposal.genericCopyDetected === "undefined" ||
       typeof proposal.genericCopyDetected === "boolean") &&
     (typeof proposal.generatorContractBlockCount === "undefined" ||
@@ -778,6 +807,14 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       typeof proposal.visualWarningCount === "number") &&
     (typeof proposal.validationIssueCount === "undefined" ||
       typeof proposal.validationIssueCount === "number") &&
+    (typeof proposal.designTokenCount === "undefined" ||
+      typeof proposal.designTokenCount === "number") &&
+    (typeof proposal.designTokenTheme === "undefined" ||
+      typeof proposal.designTokenTheme === "string") &&
+    (typeof proposal.designTokenValidationPassed === "undefined" ||
+      typeof proposal.designTokenValidationPassed === "boolean") &&
+    (typeof proposal.tokensStudioExportAvailable === "undefined" ||
+      typeof proposal.tokensStudioExportAvailable === "boolean") &&
     (typeof proposal.websiteAudience === "undefined" ||
       typeof proposal.websiteAudience === "string") &&
     (typeof proposal.websiteGoal === "undefined" ||

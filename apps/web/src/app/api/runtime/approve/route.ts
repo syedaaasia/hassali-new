@@ -4,12 +4,20 @@ import {
   resolveProjectWorkspace
 } from "@/lib/server/runtime/project-workspace-registry";
 import { createGitSnapshotSafety } from "@/lib/server/runtime/git-snapshot-safety";
+import { buildLiveRuntimePreviewMetadata } from "@/lib/server/runtime/live-runtime-sync";
 import { selectRuntimeAdapter } from "@/lib/server/runtime/runtime-adapter-selector";
+import { buildDevServerRuntime } from "@/lib/server/runtime/dev-server-runtime";
+import { buildBackendRuntimeEngine } from "@/lib/server/runtime/backend-runtime-engine";
+import { buildMobilePreviewRuntime } from "@/lib/server/preview/mobile-preview-runtime";
+import { startBackendRuntime } from "@/lib/server/runtime/backend-runtime-manager";
+import { buildMobileRuntimeCandidate } from "@/lib/server/runtime/mobile-runtime-manager";
+import { startNextRuntime } from "@/lib/server/runtime/next-runtime-manager";
 import {
   buildApprovedPlanFromProposal,
   validateRuntimeApprovalRequest,
   type RuntimeApprovalBody
 } from "@/lib/server/runtime/runtime-approval-plan";
+import { startViteRuntime } from "@/lib/server/runtime/vite-runtime-manager";
 import { routeRuntimeWorker } from "@/lib/server/runtime/worker-router";
 import type {
   RuntimeAdapterResult,
@@ -243,6 +251,90 @@ export async function POST(request: Request) {
     result,
     startedAt: workerExecutionStartedAt
   });
+  const writtenFiles = result.events
+    .filter((event) => event.type === "file_written")
+    .map((event) => String(event.metadata?.path ?? ""))
+    .filter(Boolean);
+  const liveRuntimePreview = result.ok
+    ? await buildLiveRuntimePreviewMetadata({
+        productMode,
+        projectId: parsed.projectId,
+        workspaceRoot: workspaceBinding.workspaceRoot,
+        writtenFiles
+      })
+    : null;
+  const devServerRuntime = liveRuntimePreview
+    ? buildDevServerRuntime({
+        generatedFiles: liveRuntimePreview.analysis.generatedFiles
+      })
+    : null;
+  const backendRuntime = liveRuntimePreview
+    ? buildBackendRuntimeEngine(liveRuntimePreview.analysis.generatedFiles)
+    : null;
+  const mobilePreview = liveRuntimePreview
+    ? buildMobilePreviewRuntime({
+        files: liveRuntimePreview.analysis.generatedFiles
+      })
+    : null;
+  const viteRuntime =
+    result.ok &&
+    productMode === "CODE" &&
+    workerRouter.selectedWorkerType === "local" &&
+    devServerRuntime?.framework === "react_vite"
+      ? await startViteRuntime({
+          devServerRuntime,
+          productMode,
+          projectId: parsed.projectId,
+          workerType: workerRouter.selectedWorkerType,
+          workspaceRoot: workspaceBinding.workspaceRoot
+        })
+      : null;
+  const nextRuntime =
+    result.ok &&
+    productMode === "CODE" &&
+    workerRouter.selectedWorkerType === "local" &&
+    devServerRuntime?.framework === "next_app"
+      ? await startNextRuntime({
+          devServerRuntime,
+          productMode,
+          projectId: parsed.projectId,
+          workerType: workerRouter.selectedWorkerType,
+          workspaceRoot: workspaceBinding.workspaceRoot
+        })
+      : null;
+  const backendExecutionRuntime =
+    result.ok &&
+    productMode === "CODE" &&
+    workerRouter.selectedWorkerType === "local" &&
+    !viteRuntime &&
+    !nextRuntime &&
+    backendRuntime?.detected &&
+    ["express", "fastify", "nestjs", "node"].includes(backendRuntime.match.framework)
+      ? await startBackendRuntime({
+          analysis: backendRuntime.analysis,
+          match: backendRuntime.match,
+          productMode,
+          projectId: parsed.projectId,
+          workerType: workerRouter.selectedWorkerType,
+          workspaceRoot: workspaceBinding.workspaceRoot
+        })
+      : null;
+  const mobileRuntime =
+    result.ok &&
+    productMode === "CODE" &&
+    workerRouter.selectedWorkerType === "local" &&
+    !viteRuntime &&
+    !nextRuntime &&
+    !backendExecutionRuntime &&
+    mobilePreview?.detected
+      ? await buildMobileRuntimeCandidate({
+          mobilePreview,
+          productMode,
+          projectId: parsed.projectId,
+          workerType: workerRouter.selectedWorkerType,
+          workspaceRoot: workspaceBinding.workspaceRoot
+        })
+      : null;
 
   return Response.json({
     appliedSteps: result.events
@@ -274,9 +366,11 @@ export async function POST(request: Request) {
     workspaceCreated: workspaceBinding.created,
     workspaceRoot: workspaceBinding.workspaceRoot,
     workspaceWarnings,
-    writtenFiles: result.events
-      .filter((event) => event.type === "file_written")
-      .map((event) => String(event.metadata?.path ?? ""))
-      .filter(Boolean)
+    backendExecutionRuntime,
+    liveRuntimePreview,
+    mobileRuntime,
+    nextRuntime,
+    viteRuntime,
+    writtenFiles
   }, { status: result.ok ? 200 : 400 });
 }

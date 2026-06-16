@@ -168,7 +168,11 @@ function runtimeApprovalMessage(status: number, payload: RuntimeApprovalResponse
   return `Runtime approval failed. Backend returned ${status}: ${backendError ?? "Approved file runner rejected the proposal."} Proposal was not applied.`;
 }
 
-async function approveProposalThroughRuntime(proposal: DiffProposal, selectedProjectId: string) {
+async function approveProposalThroughRuntime(
+  proposal: DiffProposal,
+  selectedProjectId: string,
+  productMode: ProductMode
+) {
   const fileChanges = fileProposalChanges(proposal);
 
   if (fileChanges.length === 0) {
@@ -183,6 +187,7 @@ async function approveProposalThroughRuntime(proposal: DiffProposal, selectedPro
         proposedContent: change.proposedContent,
         summary: change.summary
       })),
+      productMode,
       projectId: selectedProjectId,
       proposalId: proposal.id
     }),
@@ -543,6 +548,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const markProposalApproved = useChatStore((state) => state.markProposalApproved);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const isPreviewOpen = useRuntimeStore((state) => state.isPreviewOpen);
+  const applyRuntimePayload = useRuntimeStore((state) => state.applyRuntimePayload);
   const startPreview = useRuntimeStore((state) => state.startPreview);
   const stopPreview = useRuntimeStore((state) => state.stopPreview);
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
@@ -690,7 +696,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
     try {
       setRuntimeApprovalResult(null);
-      const runtimeResult = await approveProposalThroughRuntime(proposal, selectedProjectId);
+      const runtimeResult = await approveProposalThroughRuntime(proposal, selectedProjectId, productMode);
 
       if (runtimeResult) {
         const syncResult = syncRuntimeApprovalResult({
@@ -716,7 +722,50 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           writtenFiles: syncResult.runtimeMetadata.runtimeWrittenFiles
         });
 
-        if (syncResult.refreshedPreview) {
+        const viteRuntime = runtimeResult.viteRuntime;
+        const viteRuntimeStarted = viteRuntime?.runtimeStatus === "running" && viteRuntime.previewUrl;
+        const nextRuntime = runtimeResult.nextRuntime;
+        const nextRuntimeStarted = nextRuntime?.runtimeStatus === "running" && nextRuntime.previewUrl;
+        const backendRuntime = runtimeResult.backendExecutionRuntime;
+        const backendRuntimeStarted = backendRuntime?.runtimeStatus === "running" && backendRuntime.previewUrl;
+
+        if (viteRuntimeStarted) {
+          applyRuntimePayload({
+            error: viteRuntime.error,
+            logs: viteRuntime.logs,
+            port: viteRuntime.port,
+            previewUrl: viteRuntime.previewUrl,
+            projectId: selectedProjectId,
+            status: "running",
+            workspacePath: viteRuntime.workspaceRoot
+          });
+        }
+
+        if (nextRuntimeStarted) {
+          applyRuntimePayload({
+            error: nextRuntime.error,
+            logs: nextRuntime.logs,
+            port: nextRuntime.port,
+            previewUrl: nextRuntime.previewUrl,
+            projectId: selectedProjectId,
+            status: "running",
+            workspacePath: nextRuntime.workspaceRoot
+          });
+        }
+
+        if (backendRuntimeStarted) {
+          applyRuntimePayload({
+            error: backendRuntime.error,
+            logs: backendRuntime.logs,
+            port: backendRuntime.port,
+            previewUrl: backendRuntime.previewUrl,
+            projectId: selectedProjectId,
+            status: "running",
+            workspacePath: backendRuntime.workspaceRoot
+          });
+        }
+
+        if (syncResult.refreshedPreview && !viteRuntimeStarted && !nextRuntimeStarted && !backendRuntimeStarted) {
           await syncPreview(selectedProjectId);
         }
 

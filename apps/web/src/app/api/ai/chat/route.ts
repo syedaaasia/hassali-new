@@ -301,6 +301,10 @@ type DiffProposal = {
   translatedFeatures?: string[];
   translatedStyle?: string | null;
   validationIssueCount?: number;
+  designTokenCount?: number;
+  designTokenTheme?: string;
+  designTokenValidationPassed?: boolean;
+  tokensStudioExportAvailable?: boolean;
   websiteAudience?: string;
   websiteGoal?: string;
   websiteIndustry?: string;
@@ -1984,6 +1988,10 @@ if ("IntersectionObserver" in window) {
         shouldBlockExecution: true,
         status: "pending",
         summary: `Website validator blocked local website generation: ${websiteGeneration.validation.blockedReasons.join("; ")}.`,
+        designTokenCount: websiteGeneration.designTokenCount,
+        designTokenTheme: websiteGeneration.designTokenTheme,
+        designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
+        tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
         websiteAudience: websiteGeneration.plan.audience,
         websiteGoal: websiteGeneration.plan.goal,
         websiteIndustry: websiteGeneration.plan.industry,
@@ -2016,6 +2024,10 @@ if ("IntersectionObserver" in window) {
         shouldBlockExecution: true,
         status: "pending",
         summary: "Generator contract blocked local website generation because forbidden terms remained in the proposed output.",
+        designTokenCount: websiteGeneration.designTokenCount,
+        designTokenTheme: websiteGeneration.designTokenTheme,
+        designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
+        tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
         websiteAudience: websiteGeneration.plan.audience,
         websiteGoal: websiteGeneration.plan.goal,
         websiteIndustry: websiteGeneration.plan.industry,
@@ -2059,6 +2071,10 @@ if ("IntersectionObserver" in window) {
             ? `Using composition-driven generation for ${composition.businessType}. I will update ${generatedFileNames.join(", ")}.`
             : `Using composition-driven generation for ${composition.businessType}. I will create ${generatedFileNames.join(", ")}.`,
       websiteAudience: websiteGeneration.plan.audience,
+      designTokenCount: websiteGeneration.designTokenCount,
+      designTokenTheme: websiteGeneration.designTokenTheme,
+      designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
+      tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
       websiteGoal: websiteGeneration.plan.goal,
       websiteIndustry: websiteGeneration.plan.industry,
       websiteLayoutType: websiteGeneration.plan.layoutType,

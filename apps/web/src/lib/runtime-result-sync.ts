@@ -10,6 +10,22 @@ export type RuntimeProposalChange = {
 
 export type RuntimeApprovalResponse = {
   appliedSteps?: string[];
+  backendExecutionRuntime?: {
+    apiStatus: "candidate" | "failed" | "running";
+    endpointCount: number;
+    error: string | null;
+    framework: string;
+    healthStatus: "blocked" | "healthy" | "unknown";
+    logs: string[];
+    port: number | null;
+    previewUrl: string | null;
+    projectId: string;
+    routeCount: number;
+    runtimeId: string | null;
+    runtimeStatus: "blocked" | "error" | "running" | "starting" | "stopped";
+    startedAt: string | null;
+    workspaceRoot: string;
+  } | null;
   blockedSteps?: Array<{
     reasons?: Array<{
       message?: string;
@@ -35,6 +51,17 @@ export type RuntimeApprovalResponse = {
     details?: string[];
     ok?: boolean;
   } | null;
+  viteRuntime?: {
+    error: string | null;
+    logs: string[];
+    port: number | null;
+    previewUrl: string | null;
+    projectId: string;
+    runtimeId: string | null;
+    runtimeStatus: "blocked" | "error" | "running" | "starting" | "stopped";
+    startedAt: string | null;
+    workspaceRoot: string;
+  } | null;
   workerExecutionDurationMs?: number | null;
   workerExecutionExitCode?: number | null;
   workerExecutionFinishedAt?: string | null;
@@ -44,6 +71,46 @@ export type RuntimeApprovalResponse = {
   workerExecutionStdout?: string | null;
   workerFallbackReason?: string | null;
   workerResult?: unknown;
+  liveRuntimePreview?: {
+    liveRuntimePreviewSyncedAt?: string;
+    previewRuntime?: {
+      capabilities?: string[];
+      classification?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+      realPreview?: Record<string, unknown>;
+      state?: string;
+      warnings?: string[];
+    };
+    syncStatus?: string;
+  } | null;
+  nextRuntime?: {
+    error: string | null;
+    framework: "next_app";
+    logs: string[];
+    port: number | null;
+    previewUrl: string | null;
+    projectId: string;
+    routerKind: "app_router" | "mixed" | "pages_router" | "unknown";
+    runtimeId: string | null;
+    runtimeStatus: "blocked" | "error" | "running" | "starting" | "stopped";
+    startedAt: string | null;
+    workspaceRoot: string;
+  } | null;
+  mobileRuntime?: {
+    candidateCommands: string[];
+    capabilities: string[];
+    deviceType: string;
+    error: string | null;
+    framework: string;
+    logs: string[];
+    navigation: string[];
+    previewUrl: null;
+    projectId: string;
+    runtimeId: string;
+    screens: string[];
+    status: "blocked" | "candidate" | "metadata_only";
+    workspaceRoot: string;
+  } | null;
   workspaceBindingStatus?: string;
   workspaceCreated?: boolean;
   workspaceRoot?: string;
@@ -59,15 +126,31 @@ export type RuntimeSyncedFile = {
 export type RuntimeSyncMetadata = {
   runtimeRunnerId?: string | null;
   runtimeRunnerStatus?: string | null;
+  runtimeNextPreviewUrl?: string | null;
+  runtimeNextRouterKind?: string | null;
+  runtimeNextStatus?: string | null;
+  runtimeBackendPreviewUrl?: string | null;
+  runtimeBackendStatus?: string | null;
+  runtimeMobileFramework?: string | null;
+  runtimeMobileStatus?: string | null;
   runtimeSnapshotId?: string | null;
   runtimeSnapshotStatus?: string | null;
   runtimeSyncStatus: RuntimeSyncStatus;
   runtimeSyncedAt: string;
   runtimeVerificationOk?: boolean | null;
+  runtimeVitePreviewUrl?: string | null;
+  runtimeViteStatus?: string | null;
   runtimeWrittenFiles: string[];
   selectedWorkerType?: string | null;
   workerExecutionDurationMs?: number | null;
   workerExecutionStatus?: string | null;
+  livePreviewCapabilities?: string[];
+  livePreviewClassification?: Record<string, unknown>;
+  livePreviewMetadata?: Record<string, unknown>;
+  livePreviewRuntimeState?: string | null;
+  livePreviewWarnings?: string[];
+  liveRealPreview?: Record<string, unknown>;
+  liveRuntimePreviewSyncedAt?: string | null;
 };
 
 export type RuntimeSyncStatus = "failed" | "partial" | "skipped" | "synced";
@@ -185,13 +268,29 @@ export function syncRuntimeApprovalResult(
             ? "partial"
             : "failed";
   const runtimeMetadata: RuntimeSyncMetadata = {
+    livePreviewCapabilities: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.capabilities ?? [],
+    livePreviewClassification: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.classification,
+    livePreviewMetadata: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.metadata,
+    livePreviewRuntimeState: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.state ?? null,
+    livePreviewWarnings: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.warnings ?? [],
+    liveRealPreview: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.realPreview,
+    liveRuntimePreviewSyncedAt: input.runtimeResult?.liveRuntimePreview?.liveRuntimePreviewSyncedAt ?? null,
     runtimeRunnerId: input.runtimeResult?.runnerId ?? null,
     runtimeRunnerStatus: input.runtimeResult?.runnerStatus ?? null,
+    runtimeNextPreviewUrl: input.runtimeResult?.nextRuntime?.previewUrl ?? null,
+    runtimeNextRouterKind: input.runtimeResult?.nextRuntime?.routerKind ?? null,
+    runtimeNextStatus: input.runtimeResult?.nextRuntime?.runtimeStatus ?? null,
+    runtimeBackendPreviewUrl: input.runtimeResult?.backendExecutionRuntime?.previewUrl ?? null,
+    runtimeBackendStatus: input.runtimeResult?.backendExecutionRuntime?.runtimeStatus ?? null,
+    runtimeMobileFramework: input.runtimeResult?.mobileRuntime?.framework ?? null,
+    runtimeMobileStatus: input.runtimeResult?.mobileRuntime?.status ?? null,
     runtimeSnapshotId: input.runtimeResult?.snapshot?.snapshotId ?? null,
     runtimeSnapshotStatus: input.runtimeResult?.snapshot?.snapshotStatus ?? null,
     runtimeSyncStatus: syncStatus,
     runtimeSyncedAt: new Date().toISOString(),
     runtimeVerificationOk: input.runtimeResult?.verification?.ok ?? null,
+    runtimeVitePreviewUrl: input.runtimeResult?.viteRuntime?.previewUrl ?? null,
+    runtimeViteStatus: input.runtimeResult?.viteRuntime?.runtimeStatus ?? null,
     runtimeWrittenFiles: uniqueRuntimeWrittenFiles.length > 0 ? uniqueRuntimeWrittenFiles : syncedFiles,
     selectedWorkerType: input.runtimeResult?.selectedWorkerType ?? null,
     workerExecutionDurationMs: input.runtimeResult?.workerExecutionDurationMs ?? null,

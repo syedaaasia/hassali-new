@@ -20,7 +20,7 @@ function blockedReason(
 export function executablePreviewStatusFor(
   framework: ExecutablePreviewFramework
 ): ExecutablePreviewStatus {
-  if (framework === "static_html") return "static_ready";
+  if (framework === "static_html" || framework === "html") return "static_ready";
   if (framework === "unknown") return "unsupported";
 
   return "blocked_until_explicit_enablement";
@@ -36,7 +36,7 @@ export function buildExecutablePreviewPolicy(
     allowDevServerStart: false,
     allowExternalNetwork: false,
     allowPackageInstall: false,
-    allowStaticHtml: framework === "static_html",
+    allowStaticHtml: framework === "static_html" || framework === "html",
     status
   };
 }
@@ -44,7 +44,7 @@ export function buildExecutablePreviewPolicy(
 export function blockedReasonsForExecutablePreview(
   framework: ExecutablePreviewFramework
 ): ExecutablePreviewBlockedReason[] {
-  if (framework === "static_html") {
+  if (framework === "static_html" || framework === "html") {
     return [];
   }
 

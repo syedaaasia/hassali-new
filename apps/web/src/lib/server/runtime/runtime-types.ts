@@ -100,6 +100,9 @@ export type RuntimeEvent = {
     | "opencode_worker_started"
     | "opencode_worker_timeout"
     | "opencode_worker_unavailable"
+    | "next_runtime_error"
+    | "next_runtime_started"
+    | "next_runtime_stopped"
     | "openhands_sandbox_blocked"
     | "openhands_sandbox_failed"
     | "openhands_sandbox_planned"
@@ -117,6 +120,9 @@ export type RuntimeEvent = {
     | "step_skipped"
     | "step_started"
     | "tool_noop"
+    | "vite_runtime_error"
+    | "vite_runtime_started"
+    | "vite_runtime_stopped"
     | "verification";
 };
 

@@ -52,8 +52,12 @@ type DomainSiteFiles = {
 };
 
 export type PlannedWebsiteGeneration = {
+  designTokenCount: number;
+  designTokenTheme: string;
+  designTokenValidationPassed: boolean;
   files: Record<string, string>;
   plan: WebsitePlan;
+  tokensStudioExportAvailable: boolean;
   validation: WebsiteValidationResult;
 };
 
@@ -2122,8 +2126,12 @@ export function generatePlannedWebsiteFiles(input: {
   });
 
   return {
+    designTokenCount: plan.designTokenCount,
+    designTokenTheme: plan.designTokenTheme,
+    designTokenValidationPassed: plan.designTokenValidationPassed,
     files: plannedFiles,
     plan,
+    tokensStudioExportAvailable: plan.tokensStudioExportAvailable,
     validation
   };
 }

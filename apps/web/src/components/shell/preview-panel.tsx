@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { Panel } from "@/components/ui/panel";
 import { useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
@@ -44,8 +45,21 @@ type ExecutablePreviewResult = {
     status: string;
   };
   confidence: number;
+  devServerRuntime?: {
+    canRun: boolean;
+    frameworkDisplayName: string;
+    plannedCommand: string | null;
+    port: number | null;
+    previewUrl: string | null;
+    runtimeStatus: string;
+    startCommand: string | null;
+  };
   executablePreviewStatus: string;
-  framework: "next_app" | "node_api" | "react_component" | "react_vite" | "static_html" | "unknown";
+  framework: string;
+  frameworkMatch?: {
+    displayName?: string;
+    frameworkId?: string;
+  };
   warnings?: string[];
 };
 
@@ -131,6 +145,16 @@ function executablePreviewFrom(value: unknown): ExecutablePreviewResult | null {
   }
 
   return preview;
+}
+
+function previewTypeFromClassification(value: unknown): UnifiedPreviewType | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const previewType = (value as { previewType?: unknown }).previewType;
+
+  return typeof previewType === "string" ? normalizePreviewType(previewType, "CODE") : null;
 }
 
 function RealPreviewMock({ preview }: { preview: RealPreviewResult }) {
@@ -238,17 +262,29 @@ export function PreviewPanel() {
   const iframeVersion = useRuntimeStore((state) => state.iframeVersion);
   const isLoading = useRuntimeStore((state) => state.isLoading);
   const previewUrl = useRuntimeStore((state) => state.previewUrl);
+  const refreshRuntimeStatus = useRuntimeStore((state) => state.refreshRuntimeStatus);
+  const runtimeErrors = useRuntimeStore((state) => state.runtimeErrors);
+  const runtimeFramework = useRuntimeStore((state) => state.runtimeFramework);
+  const runtimeHealth = useRuntimeStore((state) => state.runtimeHealth);
+  const runtimeLastUpdatedAt = useRuntimeStore((state) => state.runtimeLastUpdatedAt);
+  const runtimeLogs = useRuntimeStore((state) => state.runtimeLogs);
+  const runtimePort = useRuntimeStore((state) => state.runtimePort);
+  const runtimePreviewUrl = useRuntimeStore((state) => state.runtimePreviewUrl);
+  const runtimeStatus = useRuntimeStore((state) => state.runtimeStatus);
   const setPreviewOpen = useRuntimeStore((state) => state.setPreviewOpen);
   const status = useRuntimeStore((state) => state.status);
   const startPreview = useRuntimeStore((state) => state.startPreview);
   const stopPreview = useRuntimeStore((state) => state.stopPreview);
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
-  const iframeSource = previewUrl ? `${previewUrl}?v=${iframeVersion}` : null;
+  const livePreviewUrl = runtimePreviewUrl ?? previewUrl;
+  const iframeSource = livePreviewUrl ? `${livePreviewUrl}?v=${iframeVersion}` : null;
   const hasIndexHtml = Boolean(files["index.html"]);
-  const unifiedPreviewType = proposal?.previewClassification?.previewType ??
+  const activePreviewMetadata = proposal?.livePreviewMetadata ?? proposal?.previewMetadata;
+  const unifiedPreviewType = previewTypeFromClassification(proposal?.livePreviewClassification) ??
+    proposal?.previewClassification?.previewType ??
     normalizePreviewType(proposal?.previewType, productMode);
-  const realPreview = realPreviewFrom(proposal?.realPreview);
-  const executablePreview = executablePreviewFrom(proposal?.previewMetadata?.executablePreview);
+  const realPreview = realPreviewFrom(proposal?.liveRealPreview) ?? realPreviewFrom(proposal?.realPreview);
+  const executablePreview = executablePreviewFrom(activePreviewMetadata?.executablePreview);
   const isWebsitePreview = unifiedPreviewType === "website";
   const canStartStaticPreview = isWebsitePreview && hasIndexHtml;
   const proposalDocFiles =
@@ -280,7 +316,7 @@ export function PreviewPanel() {
   const structuredPreviewItems = structuredPreviewFields
     .map((field) => ({
       field,
-      values: metadataArray(proposal?.previewMetadata, field)
+      values: metadataArray(activePreviewMetadata, field)
     }))
     .filter((item) => item.values.length > 0);
   const missingPreviewMessage = isCodePreviewContext
@@ -288,6 +324,20 @@ export function PreviewPanel() {
         proposalDocFiles.length ? ` Planning docs: ${proposalDocFiles.join(", ")}.` : ""
       }`
     : "Preview needs index.html. Use WEBSITE mode to create a static website.";
+
+  useEffect(() => {
+    if (!projectId) {
+      return;
+    }
+
+    void refreshRuntimeStatus(projectId);
+
+    const interval = setInterval(() => {
+      void refreshRuntimeStatus(projectId);
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [projectId, refreshRuntimeStatus]);
 
   return (
     <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 hidden w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.82)] shadow-[0_24px_90px_rgba(0,0,0,0.55)] backdrop-blur-xl lg:flex xl:w-[34rem] 2xl:w-[38rem]">
@@ -355,15 +405,68 @@ export function PreviewPanel() {
         </button>
       </div>
 
+      {runtimeFramework || runtimeLogs.length || runtimeErrors.length ? (
+        <div className="border-b border-[hsl(var(--premium-border))] px-4 py-3 text-[11px] leading-5 text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full border px-2 py-0.5 uppercase ${
+              runtimeStatus === "running"
+                ? "border-emerald-400/35 text-emerald-300"
+                : runtimeStatus === "error" || runtimeStatus === "blocked"
+                  ? "border-red-400/35 text-red-200"
+                  : "border-white/10 text-muted-foreground"
+            }`}>
+              {runtimeStatus}
+            </span>
+            <span>Framework: {runtimeFramework ?? "runtime"}</span>
+            {runtimePort ? <span>Port: {runtimePort}</span> : null}
+            {livePreviewUrl ? <span className="truncate">URL: {livePreviewUrl}</span> : null}
+          </div>
+          {runtimeErrors.at(-1) ? (
+            <div className="mt-2 rounded-lg border border-red-400/20 bg-red-400/10 px-2 py-1 text-red-100">
+              {runtimeErrors.at(-1)}
+            </div>
+          ) : null}
+          {runtimeLogs.length ? (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-foreground/80">
+                Recent runtime logs
+              </summary>
+              <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-black/35 p-2 font-mono text-[10px] leading-4">
+                {runtimeLogs.slice(-10).join("\n")}
+              </pre>
+            </details>
+          ) : null}
+          <div className="mt-2 text-[10px] text-muted-foreground">
+            {runtimeHealth ? `Health: ${runtimeHealth}` : null}
+            {runtimeLastUpdatedAt ? `${runtimeHealth ? " · " : ""}Updated: ${runtimeLastUpdatedAt}` : null}
+          </div>
+        </div>
+      ) : null}
+
       {executablePreview && executablePreview.framework !== "unknown" ? (
         <div className="border-b border-[hsl(var(--premium-border))] px-4 py-2 text-[11px] leading-5 text-muted-foreground">
-          Executable preview detected: {executablePreview.framework.replace(/_/g, " ")}.
-          {executablePreview.canExecuteNow
-            ? " Existing static iframe preview can render this output."
-            : " Runtime start is blocked until safe enablement."}
-          {executablePreview.commandPlan?.devCommand
-            ? ` Planned command metadata: ${executablePreview.commandPlan.devCommand} on port ${executablePreview.commandPlan.defaultPort}.`
-            : null}
+          {executablePreview.devServerRuntime ? (
+            <>
+              Framework: {executablePreview.devServerRuntime.frameworkDisplayName}. Runtime:{" "}
+              {executablePreview.devServerRuntime.runtimeStatus.replace(/_/g, " ")}.
+              {executablePreview.devServerRuntime.port
+                ? ` Port: ${executablePreview.devServerRuntime.port}.`
+                : null}
+              {executablePreview.devServerRuntime.startCommand
+                ? ` Command: ${executablePreview.devServerRuntime.startCommand}.`
+                : null}
+            </>
+          ) : (
+            <>
+              Executable preview detected: {(executablePreview.frameworkMatch?.displayName ?? executablePreview.framework).replace(/_/g, " ")}.
+              {executablePreview.canExecuteNow
+                ? " Existing static iframe preview can render this output."
+                : " Runtime start is blocked until safe enablement."}
+              {executablePreview.commandPlan?.devCommand
+                ? ` Planned command metadata: ${executablePreview.commandPlan.devCommand} on port ${executablePreview.commandPlan.defaultPort}.`
+                : null}
+            </>
+          )}
         </div>
       ) : null}
 

@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 
-type RuntimeStatus = "error" | "running" | "starting" | "stopped";
+type RuntimeStatus = "blocked" | "error" | "running" | "starting" | "stopped";
 
 type RuntimePayload = {
   error: string | null;
@@ -14,12 +14,35 @@ type RuntimePayload = {
   workspacePath: string | null;
 };
 
+type RuntimeStreamPayload = {
+  errors?: string[];
+  framework?: string;
+  lastHealthCheckAt?: string | null;
+  logs?: string[];
+  port?: number | null;
+  previewUrl?: string | null;
+  runtimeId?: string | null;
+  status?: RuntimeStatus;
+  updatedAt?: string | null;
+};
+
 type RuntimeState = RuntimePayload & {
+  applyRuntimePayload: (payload: RuntimePayload) => void;
   iframeVersion: number;
   isLoading: boolean;
   isPreviewOpen: boolean;
+  runtimeErrors: string[];
+  runtimeFramework: string | null;
+  runtimeHealth: string | null;
+  runtimeId: string | null;
+  runtimeLastUpdatedAt: string | null;
+  runtimeLogs: string[];
+  runtimePort: number | null;
+  runtimePreviewUrl: string | null;
+  runtimeStatus: RuntimeStatus;
   clearLogs: () => Promise<void>;
   refreshRuntime: () => Promise<void>;
+  refreshRuntimeStatus: (projectId: string | null) => Promise<void>;
   setPreviewOpen: (isPreviewOpen: boolean) => void;
   startPreview: (projectId: string | null) => Promise<void>;
   stopPreview: () => Promise<void>;
@@ -37,6 +60,18 @@ const initialPayload: RuntimePayload = {
   workspacePath: null
 };
 
+const initialStreamState = {
+  runtimeErrors: [] as string[],
+  runtimeFramework: null as string | null,
+  runtimeHealth: null as string | null,
+  runtimeId: null as string | null,
+  runtimeLastUpdatedAt: null as string | null,
+  runtimeLogs: [] as string[],
+  runtimePort: null as number | null,
+  runtimePreviewUrl: null as string | null,
+  runtimeStatus: "stopped" as RuntimeStatus
+};
+
 function isRuntimePayload(value: unknown): value is RuntimePayload {
   if (!value || typeof value !== "object") {
     return false;
@@ -45,7 +80,8 @@ function isRuntimePayload(value: unknown): value is RuntimePayload {
   const payload = value as RuntimePayload;
 
   return (
-    (payload.status === "error" ||
+    (payload.status === "blocked" ||
+      payload.status === "error" ||
       payload.status === "running" ||
       payload.status === "starting" ||
       payload.status === "stopped") &&
@@ -74,6 +110,18 @@ async function readRuntimeResponse(response: Response) {
 
 export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   ...initialPayload,
+  ...initialStreamState,
+  applyRuntimePayload: (payload) =>
+    set((state) => ({
+      ...payload,
+      iframeVersion: payload.previewUrl ? state.iframeVersion + 1 : state.iframeVersion,
+      isLoading: false,
+      runtimeErrors: payload.error ? [payload.error] : state.runtimeErrors,
+      runtimeLogs: payload.logs,
+      runtimePort: payload.port,
+      runtimePreviewUrl: payload.previewUrl,
+      runtimeStatus: payload.status
+    })),
   iframeVersion: 0,
   isLoading: false,
   isPreviewOpen: false,
@@ -93,6 +141,46 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       set(payload);
     } catch (error) {
       set({ error: error instanceof Error ? error.message : "Preview status unavailable." });
+    }
+  },
+  refreshRuntimeStatus: async (projectId) => {
+    if (!projectId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/runtime/status?projectId=${encodeURIComponent(projectId)}`);
+      const payload = (await response.json().catch(() => null)) as RuntimeStreamPayload | null;
+
+      if (!response.ok || !payload) {
+        return;
+      }
+
+      set((state) => {
+        const nextPreviewUrl = payload.previewUrl ?? state.previewUrl;
+
+        return {
+          error: payload.errors?.at(-1) ?? state.error,
+          iframeVersion: nextPreviewUrl && nextPreviewUrl !== state.previewUrl
+            ? state.iframeVersion + 1
+            : state.iframeVersion,
+          logs: payload.logs ?? state.logs,
+          port: payload.port ?? state.port,
+          previewUrl: nextPreviewUrl,
+          runtimeErrors: payload.errors ?? state.runtimeErrors,
+          runtimeFramework: payload.framework ?? state.runtimeFramework,
+          runtimeHealth: payload.lastHealthCheckAt ?? state.runtimeHealth,
+          runtimeId: payload.runtimeId ?? state.runtimeId,
+          runtimeLastUpdatedAt: payload.updatedAt ?? state.runtimeLastUpdatedAt,
+          runtimeLogs: payload.logs ?? state.runtimeLogs,
+          runtimePort: payload.port ?? state.runtimePort,
+          runtimePreviewUrl: payload.previewUrl ?? state.runtimePreviewUrl,
+          runtimeStatus: payload.status ?? state.runtimeStatus,
+          status: payload.status ?? state.status
+        };
+      });
+    } catch {
+      // Runtime streaming is best-effort; existing preview state remains usable.
     }
   },
   setPreviewOpen: (isPreviewOpen) => set({ isPreviewOpen }),

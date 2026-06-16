@@ -3,6 +3,7 @@ import {
   blockedReasonsForExecutablePreview,
   buildExecutablePreviewPolicy
 } from "@/lib/server/preview/executable-preview-policy";
+import { buildDevServerRuntime } from "@/lib/server/runtime/dev-server-runtime";
 import type {
   ExecutablePreviewCommandPlan,
   ExecutablePreviewDetectionInput,
@@ -11,7 +12,7 @@ import type {
 } from "@/lib/server/preview/executable-preview-types";
 
 function commandPlanFor(framework: ExecutablePreviewFramework): ExecutablePreviewCommandPlan {
-  if (framework === "static_html") {
+  if (framework === "static_html" || framework === "html") {
     return {
       defaultPort: null,
       devCommand: null,
@@ -21,7 +22,7 @@ function commandPlanFor(framework: ExecutablePreviewFramework): ExecutablePrevie
     };
   }
 
-  if (framework === "react_vite") {
+  if (framework === "react_vite" || framework === "vite") {
     return {
       defaultPort: 5173,
       devCommand: "npm run dev",
@@ -31,9 +32,44 @@ function commandPlanFor(framework: ExecutablePreviewFramework): ExecutablePrevie
     };
   }
 
-  if (framework === "next_app") {
+  if (framework === "next_app" || framework === "next") {
     return {
       defaultPort: 3000,
+      devCommand: "npm run dev",
+      installCommand: null,
+      renderMode: "dev_server_metadata",
+      status: "blocked_until_explicit_enablement"
+    };
+  }
+
+  if (framework === "nuxt" || framework === "remix") {
+    return {
+      defaultPort: 3000,
+      devCommand: "npm run dev",
+      installCommand: null,
+      renderMode: "dev_server_metadata",
+      status: "blocked_until_explicit_enablement"
+    };
+  }
+
+  if (framework === "astro") {
+    return {
+      defaultPort: 4321,
+      devCommand: "npm run dev",
+      installCommand: null,
+      renderMode: "dev_server_metadata",
+      status: "blocked_until_explicit_enablement"
+    };
+  }
+
+  if (
+    framework === "angular" ||
+    framework === "svelte" ||
+    framework === "sveltekit" ||
+    framework === "vue"
+  ) {
+    return {
+      defaultPort: framework === "angular" ? 4200 : 5173,
       devCommand: "npm run dev",
       installCommand: null,
       renderMode: "dev_server_metadata",
@@ -56,13 +92,16 @@ export function buildExecutablePreviewRuntime(
   const detection = detectExecutablePreviewFramework(input);
   const policy = buildExecutablePreviewPolicy(detection.framework);
   const commandPlan = commandPlanFor(detection.framework);
+  const devServerRuntime = buildDevServerRuntime(input);
   const blockedReasons = blockedReasonsForExecutablePreview(detection.framework);
-  const canExecuteNow = detection.framework === "static_html" && policy.allowStaticHtml;
+  const canExecuteNow =
+    (detection.framework === "static_html" || detection.framework === "html") &&
+    policy.allowStaticHtml;
   const capabilities: ExecutablePreviewRuntimeResult["capabilities"] = [
     "framework_detection",
     "command_plan_metadata",
     "no_execution",
-    ...(detection.framework === "static_html" ? ["static_iframe" as const] : ["safe_enablement_required" as const])
+    ...(canExecuteNow ? ["static_iframe" as const] : ["safe_enablement_required" as const])
   ];
 
   return {
@@ -71,8 +110,10 @@ export function buildExecutablePreviewRuntime(
     capabilities,
     commandPlan,
     confidence: detection.confidence,
+    devServerRuntime,
     executablePreviewStatus: policy.status,
     framework: detection.framework,
+    frameworkMatch: detection.frameworkMatch,
     renderUrl: null,
     signals: detection.signals,
     warnings: canExecuteNow

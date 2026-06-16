@@ -7,10 +7,19 @@ import {
   type WebsiteLayoutType,
   type WebsiteSectionDefinition
 } from "@/lib/server/ai/website-section-registry";
+import { generateDesignTokens } from "@/lib/server/design/tokens/design-token-generator";
+import type {
+  DesignTokenThemeId,
+  GeneratedDesignTokens
+} from "@/lib/server/design/tokens/design-token-types";
 
 export type WebsitePlan = {
   audience: string;
   contentStrategy: string[];
+  designTokenCount: number;
+  designTokenTheme: DesignTokenThemeId;
+  designTokenValidationPassed: boolean;
+  designTokens: GeneratedDesignTokens;
   goal: string;
   industry: WebsiteIndustry;
   layoutStrategy: string;
@@ -19,6 +28,7 @@ export type WebsitePlan = {
   pages: string[];
   requiredSections: WebsiteSectionDefinition[];
   sectionRegistryVersion: "11.2B";
+  tokensStudioExportAvailable: boolean;
   visualStrategy: string;
 };
 
@@ -113,10 +123,25 @@ export function planWebsite(input: {
     industry,
     requiredCount
   });
+  const designTokens = generateDesignTokens({
+    industry,
+    intentText: [
+      input.intent.domain,
+      input.intent.siteType ?? "",
+      input.composition.businessType,
+      input.composition.reasoningSummary,
+      input.generatorContract?.authoritativeDomain ?? "",
+      input.generatorContract?.authoritativeBusinessType ?? ""
+    ].join(" ")
+  });
 
   return {
     audience: profile.audience,
     contentStrategy: profile.contentStrategy,
+    designTokenCount: designTokens.tokenCount,
+    designTokenTheme: designTokens.theme,
+    designTokenValidationPassed: designTokens.validation.passed,
+    designTokens,
     goal: profile.goal,
     industry,
     layoutStrategy: `${profile.layoutType} layout with industry-specific section rhythm and no generic hero/features/pricing repetition.`,
@@ -125,6 +150,7 @@ export function planWebsite(input: {
     pages,
     requiredSections: profile.requiredSections,
     sectionRegistryVersion: "11.2B",
+    tokensStudioExportAvailable: true,
     visualStrategy: profile.visualStrategy
   };
 }

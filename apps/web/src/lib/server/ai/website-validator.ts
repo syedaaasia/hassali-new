@@ -55,7 +55,10 @@ export function validateWebsitePlanAndFiles(input: {
     genericLayoutDetected ? "Generic template language or layout detected." : "",
     placeholderDetected ? "Placeholder or remote image reference detected." : "",
     emptyFiles.length ? `Empty generated files: ${emptyFiles.join(", ")}.` : "",
-    input.plan.requiredSections.length < 4 ? "Website plan has too few industry-specific sections." : ""
+    input.plan.requiredSections.length < 4 ? "Website plan has too few industry-specific sections." : "",
+    !input.plan.designTokenValidationPassed
+      ? `Design token validation failed: ${input.plan.designTokens.validation.issues.map((issue) => issue.message).join("; ")}.`
+      : ""
   ].filter(Boolean);
 
   return {

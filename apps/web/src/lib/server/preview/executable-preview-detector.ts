@@ -1,3 +1,4 @@
+import { detectFramework } from "@/lib/server/preview/framework-registry";
 import type {
   ExecutablePreviewDetection,
   ExecutablePreviewDetectionInput,
@@ -37,11 +38,13 @@ function hasText(text: string, terms: string[]) {
 function detection(
   framework: ExecutablePreviewFramework,
   confidence: number,
-  signals: string[]
+  signals: string[],
+  frameworkMatch?: ExecutablePreviewDetection["frameworkMatch"]
 ): ExecutablePreviewDetection {
   return {
     confidence,
     framework,
+    frameworkMatch,
     signals
   };
 }
@@ -49,6 +52,19 @@ function detection(
 export function detectExecutablePreviewFramework(
   input: ExecutablePreviewDetectionInput
 ): ExecutablePreviewDetection {
+  const registryMatch = detectFramework({
+    files: collectFiles(input)
+  });
+
+  if (registryMatch.frameworkId !== "unknown") {
+    return detection(
+      registryMatch.frameworkId,
+      registryMatch.confidence,
+      registryMatch.signals,
+      registryMatch
+    );
+  }
+
   const files = fileNames(input);
   const text = allText(input);
   const hasPackageJson = hasFile(files, /(^|\/)package\.json$/);

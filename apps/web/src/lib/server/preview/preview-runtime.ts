@@ -1,8 +1,11 @@
 import { classifyPreview } from "@/lib/server/preview/preview-classifier";
 import { buildExecutablePreviewRuntime } from "@/lib/server/preview/executable-preview-runtime";
+import { renderFrameworkPreview } from "@/lib/server/preview/framework-preview-renderer";
+import { buildMobilePreviewRuntime } from "@/lib/server/preview/mobile-preview-runtime";
 import { getPreviewRegistryEntry } from "@/lib/server/preview/preview-registry";
 import { renderRealPreview } from "@/lib/server/preview/real-preview-renderer";
 import type {
+  PreviewClassification,
   PreviewMetadata,
   PreviewRuntimeInput,
   PreviewRuntimeResult,
@@ -132,17 +135,40 @@ function stateFor(type: PreviewType, metadata: PreviewMetadata, input: PreviewRu
 }
 
 export function buildPreviewRuntime(input: PreviewRuntimeInput): PreviewRuntimeResult {
-  const classification = classifyPreview(input);
+  const baseClassification = classifyPreview(input);
+  const proposedFiles = proposalFiles(input);
+  const mobilePreview = buildMobilePreviewRuntime({
+    files: {
+      ...(input.generatedFiles ?? {}),
+      ...proposedFiles
+    }
+  });
+  const classification: PreviewClassification =
+    input.productMode === "CODE" &&
+    mobilePreview.detected &&
+    baseClassification.previewType !== "none" &&
+    baseClassification.previewType !== "website"
+      ? {
+          confidence: Math.max(baseClassification.confidence, mobilePreview.confidence),
+          previewType: "mobile",
+          reason: `${mobilePreview.displayName} mobile project detected by the mobile preview runtime.`,
+          signals: mobilePreview.framework === "unknown" ? baseClassification.signals : [mobilePreview.framework, ...baseClassification.signals]
+        }
+      : baseClassification;
   const registryEntry = getPreviewRegistryEntry(classification.previewType);
   const executablePreview = buildExecutablePreviewRuntime({
     generatedFiles: input.generatedFiles,
-    proposalFiles: proposalFiles(input)
+    proposalFiles: proposedFiles
   });
   const metadata = {
     ...metadataFor(classification.previewType, input),
-    executablePreview
+    executablePreview,
+    mobilePreview
   };
-  const realPreview = renderRealPreview(input, classification, metadata);
+  const realPreview =
+    mobilePreview.realPreview ??
+    renderFrameworkPreview(input, classification, metadata, executablePreview) ??
+    renderRealPreview(input, classification, metadata);
   const state =
     classification.previewType !== "website" && realPreview.state === "ready"
       ? "ready"
@@ -166,8 +192,16 @@ export function buildPreviewRuntime(input: PreviewRuntimeInput): PreviewRuntimeR
     );
   }
 
+  if (mobilePreview.detected) {
+    warnings.push(`${mobilePreview.displayName} mobile preview is visual-only; no emulator or native toolchain was started.`);
+  }
+
   return {
-    capabilities: [...registryEntry.capabilities, "executable_preview_planning"],
+    capabilities: [
+      ...registryEntry.capabilities,
+      "executable_preview_planning",
+      ...(mobilePreview.detected ? ["mobile_framework_preview" as const] : [])
+    ],
     classification,
     metadata,
     realPreview,

@@ -1,5 +1,8 @@
 import type { ExecutablePreviewRuntimeResult } from "@/lib/server/preview/executable-preview-types";
+import type { MobilePreviewRuntimeResult } from "@/lib/server/preview/mobile-preview-types";
 import type { RealPreviewResult } from "@/lib/server/preview/real-preview-types";
+import type { BackendRuntimeEngineResult } from "@/lib/server/runtime/backend-runtime-types";
+import type { DatabaseRuntimeEngineResult } from "@/lib/server/runtime/database-runtime-types";
 
 export type ProductPreviewMode = "ASK" | "CODE" | "WEBSITE";
 
@@ -20,14 +23,17 @@ export type PreviewState =
   | "unsupported";
 
 export type PreviewMetadata = {
+  backendRuntime?: BackendRuntimeEngineResult;
   charts?: string[];
   components?: string[];
   dataFlow?: string[];
+  databaseRuntime?: DatabaseRuntimeEngineResult;
   endpoints?: string[];
   executablePreview?: ExecutablePreviewRuntimeResult;
   features?: string[];
   flows?: string[];
   hero?: string | null;
+  mobilePreview?: MobilePreviewRuntimeResult;
   modules?: string[];
   navigation?: string[];
   pages?: string[];
@@ -45,12 +51,15 @@ export type PreviewCapability =
   | "architecture_metadata"
   | "api_architecture_preview"
   | "application_mock_preview"
+  | "backend_runtime_analysis"
   | "component_metadata"
   | "component_mock_preview"
   | "dashboard_metadata"
   | "dashboard_mock_preview"
+  | "database_runtime_analysis"
   | "executable_preview_planning"
   | "mobile_metadata"
+  | "mobile_framework_preview"
   | "mobile_mock_preview"
   | "no_visual_preview"
   | "static_website_iframe"

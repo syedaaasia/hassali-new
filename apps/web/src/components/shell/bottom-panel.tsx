@@ -9,6 +9,7 @@ type ScrollableElement = {
 };
 
 const statusTone = {
+  blocked: "bg-red-400/80",
   error: "bg-destructive/80",
   running: "bg-emerald-400/80",
   starting: "bg-yellow-400/80",
