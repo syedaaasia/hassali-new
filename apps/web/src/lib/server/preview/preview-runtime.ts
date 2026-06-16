@@ -1,5 +1,7 @@
 import { classifyPreview } from "@/lib/server/preview/preview-classifier";
+import { buildExecutablePreviewRuntime } from "@/lib/server/preview/executable-preview-runtime";
 import { getPreviewRegistryEntry } from "@/lib/server/preview/preview-registry";
+import { renderRealPreview } from "@/lib/server/preview/real-preview-renderer";
 import type {
   PreviewMetadata,
   PreviewRuntimeInput,
@@ -16,6 +18,14 @@ function fileNames(input: PreviewRuntimeInput) {
     ...Object.keys(input.generatedFiles ?? {}),
     ...(input.proposal?.changes ?? []).map((change) => change.path ?? "")
   ]);
+}
+
+function proposalFiles(input: PreviewRuntimeInput) {
+  return Object.fromEntries(
+    (input.proposal?.changes ?? [])
+      .filter((change) => typeof change.path === "string" && typeof change.proposedContent === "string")
+      .map((change) => [change.path as string, change.proposedContent as string])
+  );
 }
 
 function pageNames(files: string[]) {
@@ -124,8 +134,19 @@ function stateFor(type: PreviewType, metadata: PreviewMetadata, input: PreviewRu
 export function buildPreviewRuntime(input: PreviewRuntimeInput): PreviewRuntimeResult {
   const classification = classifyPreview(input);
   const registryEntry = getPreviewRegistryEntry(classification.previewType);
-  const metadata = metadataFor(classification.previewType, input);
-  const state = stateFor(classification.previewType, metadata, input);
+  const executablePreview = buildExecutablePreviewRuntime({
+    generatedFiles: input.generatedFiles,
+    proposalFiles: proposalFiles(input)
+  });
+  const metadata = {
+    ...metadataFor(classification.previewType, input),
+    executablePreview
+  };
+  const realPreview = renderRealPreview(input, classification, metadata);
+  const state =
+    classification.previewType !== "website" && realPreview.state === "ready"
+      ? "ready"
+      : stateFor(classification.previewType, metadata, input);
   const warnings: string[] = [];
 
   if (classification.previewType === "website" && state !== "ready") {
@@ -133,15 +154,25 @@ export function buildPreviewRuntime(input: PreviewRuntimeInput): PreviewRuntimeR
   }
 
   if (classification.previewType !== "website" && classification.previewType !== "none") {
-    warnings.push("CODE preview is metadata-only in this phase; no code is executed.");
+    warnings.push("CODE preview is a safe static approximation; no code is executed.");
+  }
+
+  if (
+    executablePreview.framework === "react_vite" ||
+    executablePreview.framework === "next_app"
+  ) {
+    warnings.push(
+      `Executable preview detected: ${executablePreview.framework.replace(/_/g, " ")}. Runtime start is blocked until safe enablement.`
+    );
   }
 
   return {
-    capabilities: registryEntry.capabilities,
+    capabilities: [...registryEntry.capabilities, "executable_preview_planning"],
     classification,
     metadata,
+    realPreview,
     registryEntry,
     state,
-    warnings
+    warnings: [...warnings, ...realPreview.warnings.map((warning) => warning.message)]
   };
 }

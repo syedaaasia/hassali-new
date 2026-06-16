@@ -1,3 +1,6 @@
+import type { ExecutablePreviewRuntimeResult } from "@/lib/server/preview/executable-preview-types";
+import type { RealPreviewResult } from "@/lib/server/preview/real-preview-types";
+
 export type ProductPreviewMode = "ASK" | "CODE" | "WEBSITE";
 
 export type PreviewType =
@@ -21,6 +24,7 @@ export type PreviewMetadata = {
   components?: string[];
   dataFlow?: string[];
   endpoints?: string[];
+  executablePreview?: ExecutablePreviewRuntimeResult;
   features?: string[];
   flows?: string[];
   hero?: string | null;
@@ -39,9 +43,15 @@ export type PreviewMetadata = {
 
 export type PreviewCapability =
   | "architecture_metadata"
+  | "api_architecture_preview"
+  | "application_mock_preview"
   | "component_metadata"
+  | "component_mock_preview"
   | "dashboard_metadata"
+  | "dashboard_mock_preview"
+  | "executable_preview_planning"
   | "mobile_metadata"
+  | "mobile_mock_preview"
   | "no_visual_preview"
   | "static_website_iframe"
   | "structured_app_metadata";
@@ -98,6 +108,7 @@ export type PreviewRuntimeResult = {
   capabilities: PreviewCapability[];
   classification: PreviewClassification;
   metadata: PreviewMetadata;
+  realPreview: RealPreviewResult;
   registryEntry: PreviewRegistryEntry;
   state: PreviewState;
   warnings: string[];

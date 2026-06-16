@@ -246,6 +246,7 @@ type DiffProposal = {
   previewRuntimeState?: "empty" | "metadata_only" | "none" | "ready" | "unsupported";
   previewType?: ProposalPreviewType;
   previewWarnings?: string[];
+  realPreview?: Record<string, unknown>;
   projectId: string | null;
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
@@ -2442,6 +2443,7 @@ function compactPreviewRuntime(previewRuntime: PreviewRuntimeResult) {
     capabilities: previewRuntime.capabilities,
     classification: compactPreviewClassification(previewRuntime),
     metadata: previewRuntime.metadata,
+    realPreview: previewRuntime.realPreview,
     state: previewRuntime.state,
     warnings: previewRuntime.warnings
   };
@@ -2767,6 +2769,7 @@ function attachProposalRoutingMetadata(
     previewRuntimeState: previewRuntime.state,
     previewType: previewRuntime.classification.previewType,
     previewWarnings: previewRuntime.warnings,
+    realPreview: previewRuntime.realPreview,
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
     previewDriftDetected: domainValidation ? domainValidation.detectedPreviewDrift.length > 0 : undefined,
     requiredPageCount: generatorContract?.requiredPageCount,

@@ -17,32 +17,32 @@ const registry: PreviewRegistryEntry[] = [
     type: "website"
   },
   {
-    capabilities: ["dashboard_metadata"],
-    description: "Dashboard proposals render structured dashboard metadata without executing code.",
+    capabilities: ["dashboard_metadata", "dashboard_mock_preview"],
+    description: "Dashboard proposals render a safe static dashboard mock without executing code.",
     rendererId: "dashboard_metadata_renderer",
     type: "dashboard"
   },
   {
-    capabilities: ["structured_app_metadata"],
-    description: "Application proposals render routes, modules, and feature metadata.",
+    capabilities: ["structured_app_metadata", "application_mock_preview"],
+    description: "Application proposals render routes, modules, features, and a static app-shell mock.",
     rendererId: "structured_application_metadata_renderer",
     type: "application"
   },
   {
-    capabilities: ["mobile_metadata"],
-    description: "Mobile app proposals render screens, navigation, and user-flow metadata.",
+    capabilities: ["mobile_metadata", "mobile_mock_preview"],
+    description: "Mobile app proposals render screens, navigation, and a phone-frame mock.",
     rendererId: "mobile_metadata_renderer",
     type: "mobile"
   },
   {
-    capabilities: ["component_metadata"],
-    description: "Component proposals render component, prop, and state metadata.",
+    capabilities: ["component_metadata", "component_mock_preview"],
+    description: "Component proposals render component, prop, state metadata, and a static component mock.",
     rendererId: "component_metadata_renderer",
     type: "component"
   },
   {
-    capabilities: ["architecture_metadata"],
-    description: "Backend/API/system proposals render architecture metadata.",
+    capabilities: ["architecture_metadata", "api_architecture_preview"],
+    description: "Backend/API/system proposals render endpoint and architecture previews.",
     rendererId: "architecture_metadata_renderer",
     type: "architecture"
   }

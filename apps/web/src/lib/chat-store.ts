@@ -155,6 +155,7 @@ export type DiffProposal = {
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
+  realPreview?: Record<string, unknown>;
   previewDriftDetected?: boolean;
   requiredPageCount?: number | null;
   heroAssetMismatch?: boolean;
@@ -639,6 +640,8 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     (typeof proposal.proposalRoutingReasons === "undefined" ||
       (Array.isArray(proposal.proposalRoutingReasons) &&
         proposal.proposalRoutingReasons.every(isProposalRoutingReason))) &&
+    (typeof proposal.realPreview === "undefined" ||
+      isPlainRecord(proposal.realPreview)) &&
     (typeof proposal.previewDriftDetected === "undefined" ||
       typeof proposal.previewDriftDetected === "boolean") &&
     (typeof proposal.requiredPageCount === "undefined" ||
