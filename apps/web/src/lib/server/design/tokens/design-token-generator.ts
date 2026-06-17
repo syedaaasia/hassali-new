@@ -35,6 +35,10 @@ export function selectDesignTokenTheme(input: {
     return input.industry === "ecommerce" ? "luxury_ecommerce" : "default_dark";
   }
 
+  if (text.includes("seafood") || text.includes("ocean") || text.includes("fresh catch")) {
+    return "default_dark";
+  }
+
   return industryThemeMap[input.industry] ?? "default_dark";
 }
 

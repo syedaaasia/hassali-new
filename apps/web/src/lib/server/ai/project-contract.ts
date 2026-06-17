@@ -137,8 +137,9 @@ function previewTypeFor(input: {
 function fileStrategyFor(decision: DecisionPlan, mode: ProjectContractMode) {
   if (decision.requestType === "code_system_generation") {
     return [
-      "Use architecture/docs proposals before source mutations.",
-      "Do not create index.html/styles.css/main.js unless the user asks for a static landing page.",
+      "For app-building requests, include runnable source files plus architecture/security docs.",
+      "For Vite React apps, include package.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, src/styles.css, src/lib/mock-data.ts, and source components.",
+      "Do not run package installs; runtime may start only through approved runtime flow.",
       "Keep app/system work approval-first and project-scoped."
     ];
   }
@@ -171,27 +172,35 @@ export function buildUpdatedProjectContract(input: {
   prompt: string;
 }): ProjectContract {
   const mode = input.kernel.routingDecision.mode;
+  const isNewGeneration =
+    input.decision.requestType === "code_system_generation" ||
+    input.decision.requestType === "website_generation" ||
+    input.decision.requestType === "multi_page_generation";
   const promptDomain =
     input.generatorContract?.authoritativeBusinessType ||
     input.generatorContract?.authoritativeDomain ||
     input.composition.businessType ||
     (input.intent.domain !== "generic website" ? input.intent.domain : null);
-  const brandName = input.intent.brandName || input.contract?.brandName || null;
+  const brandName = input.intent.brandName || (isNewGeneration ? null : input.contract?.brandName) || null;
   const previewType = previewTypeFor({
     decision: input.decision,
     kernel: input.kernel
   });
+  const previousConstraints = isNewGeneration ? [] : input.contract?.acceptedConstraints ?? [];
+  const previousDesignRules = isNewGeneration ? [] : input.contract?.designRules ?? [];
+  const previousDoNotRules = isNewGeneration ? [] : input.contract?.doNotRules ?? [];
 
   return {
     acceptedConstraints: unique([
-      ...(input.contract?.acceptedConstraints ?? []),
+      ...previousConstraints,
       ...input.intent.requiredFeatures.slice(0, 6),
       ...input.intent.palette.map((color) => `palette:${color}`),
-      ...input.intent.requestedPages.map((page) => `page:${page}`)
+      ...input.intent.requestedPages.map((page) => `page:${page}`),
+      ...(input.generatorContract?.requiredPages ?? []).map((page) => `source-of-truth-page:${page}`)
     ]).slice(0, 14),
     brandName,
     designRules: unique([
-      ...(input.contract?.designRules ?? []),
+      ...previousDesignRules,
       ...input.composition.visualLanguage.style.map((style) => `style:${style}`),
       ...input.composition.visualLanguage.palette.map((color) => `color:${color}`),
       "Keep output responsive and low-spec friendly."
@@ -203,9 +212,9 @@ export function buildUpdatedProjectContract(input: {
       "Do not cross project boundaries.",
       ...(mode === "CODE" ? ["Do not convert CODE app/system requests into public static websites."] : []),
       ...(mode === "WEBSITE" ? ["Do not convert WEBSITE requests into app dashboards unless explicitly asked."] : []),
-      ...(input.contract?.doNotRules ?? [])
+      ...previousDoNotRules
     ]).slice(0, 14),
-    domain: promptDomain ?? input.contract?.domain ?? null,
+    domain: promptDomain ?? (isNewGeneration ? null : input.contract?.domain) ?? null,
     fileStrategy: unique(fileStrategyFor(input.decision, mode)).slice(0, 10),
     lastKnownSafeFacts: unique([
       `Last prompt: ${input.prompt}`,
@@ -214,6 +223,7 @@ export function buildUpdatedProjectContract(input: {
       `Decision: ${input.decision.requestType}`,
       `Domain: ${promptDomain ?? "unknown"}`,
       `Preview: ${previewType}`,
+      ...(input.generatorContract?.requiredPages.length ? [`Source-of-truth pages: ${input.generatorContract.requiredPages.join(", ")}`] : []),
       ...(input.generatorContract ? [`Generator contract: ${input.generatorContract.contractId}`] : []),
       ...(input.decision.requiredFiles.length ? [`Required files: ${input.decision.requiredFiles.join(", ")}`] : [])
     ]).slice(0, 10),

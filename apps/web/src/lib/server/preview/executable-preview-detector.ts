@@ -57,6 +57,18 @@ export function detectExecutablePreviewFramework(
   });
 
   if (registryMatch.frameworkId !== "unknown") {
+    const collectedFiles = fileNames(input);
+    const collectedText = allText(input);
+
+    if (
+      registryMatch.frameworkId === "vite" &&
+      (hasFile(collectedFiles, /(^|\/)src\/main\.(?:tsx|jsx)$/) ||
+        hasFile(collectedFiles, /(^|\/)src\/app\.(?:tsx|jsx)$/) ||
+        hasText(collectedText, ['"react"', "'react'", "react-dom/client"]))
+    ) {
+      return detection("react_vite", Math.max(0.92, registryMatch.confidence), ["registry:vite", "react_source"], registryMatch);
+    }
+
     return detection(
       registryMatch.frameworkId,
       registryMatch.confidence,

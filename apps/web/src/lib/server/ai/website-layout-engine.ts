@@ -39,6 +39,119 @@ function industryLabel(plan: WebsitePlan) {
   return plan.industry.replace(/_/g, " ");
 }
 
+function isSeafoodPlan(plan: WebsitePlan) {
+  return plan.sourceOfTruthDomain === "seafood_restaurant" ||
+    plan.sourceOfTruthDomain === "seafood" ||
+    plan.sourceOfTruthPages.includes("menu") && plan.sourceOfTruthPages.includes("gallery") && plan.industry === "restaurant";
+}
+
+function seafoodPageCopy(page: string) {
+  const copy: Record<string, {
+    cta: string;
+    eyebrow: string;
+    hero: string;
+    lede: string;
+    sections: Array<{
+      body: string;
+      title: string;
+      visual: string;
+    }>;
+  }> = {
+    about: {
+      cta: "Meet the kitchen",
+      eyebrow: "Seafood story / sourcing",
+      hero: "Coastal cooking with a responsible catch philosophy.",
+      lede: "Our kitchen works with trusted fishmongers, seasonal catches, and careful prep so every plate feels fresh, warm, and unmistakably ocean-led.",
+      sections: [
+        {
+          body: "From grilled local fish to chilled oysters, the menu changes with what is freshest and most sustainable.",
+          title: "Sourced with care",
+          visual: "chef selecting fresh seafood"
+        },
+        {
+          body: "Pearl-toned tables, soft lighting, and a calm dining room make the restaurant suited for date nights, family meals, and business dinners.",
+          title: "A relaxed dining atmosphere",
+          visual: "coastal restaurant ambience"
+        }
+      ]
+    },
+    contact: {
+      cta: "Reserve a table",
+      eyebrow: "Hours / reservations",
+      hero: "Plan your visit for fresh seafood, warm service, and easy reservations.",
+      lede: "Send a reservation request, check dinner hours, or contact the team for private dining and seasonal menu questions.",
+      sections: [
+        {
+          body: "Open Tuesday to Sunday for lunch and dinner, with extended evening seating on Fridays and Saturdays.",
+          title: "Hours and location",
+          visual: "seafood restaurant location block"
+        },
+        {
+          body: "Use the contact form for table requests, group bookings, allergy notes, and chef's tasting menu inquiries.",
+          title: "Reservation request form",
+          visual: "reservation contact form"
+        }
+      ]
+    },
+    gallery: {
+      cta: "View the menu",
+      eyebrow: "Gallery / dining room",
+      hero: "A visual taste of fresh plates, ocean textures, and coastal hospitality.",
+      lede: "Browse composed seafood plates, raw bar details, chef finishes, and dining-room moments without fake uploads or broken remote images.",
+      sections: [
+        {
+          body: "A grid of fresh oysters, grilled fish, lobster pasta, citrus salads, and chilled seafood platters.",
+          title: "Food gallery",
+          visual: "seafood dish gallery"
+        },
+        {
+          body: "Warm tables, deep navy accents, pearl surfaces, and subtle aqua highlights create the restaurant's ocean mood.",
+          title: "Ambience gallery",
+          visual: "ocean-inspired dining room"
+        }
+      ]
+    },
+    home: {
+      cta: "Reserve your table",
+      eyebrow: "Premium seafood dining",
+      hero: "Fresh seafood, ocean calm, and a table worth reserving.",
+      lede: "A refined seafood restaurant built around seasonal catch, chef-led specials, fresh oysters, grilled fish, and warm hospitality.",
+      sections: [
+        {
+          body: "Daily catch, oysters, lobster pasta, grilled prawns, citrus salads, and chef specials anchor the first screen.",
+          title: "Featured seafood specialties",
+          visual: "premium seafood hero platter"
+        },
+        {
+          body: "Guide guests from appetite to action with a clear reservation CTA, menu path, hours, and contact details.",
+          title: "Reservation-first dining path",
+          visual: "reservation CTA panel"
+        }
+      ]
+    },
+    menu: {
+      cta: "Reserve for dinner",
+      eyebrow: "Menu / seasonal catch",
+      hero: "Seafood categories, dish cards, pricing, and seasonal catch.",
+      lede: "Explore raw bar favorites, grilled fish, shellfish plates, seafood pasta, sides, desserts, and chef-selected seasonal catch.",
+      sections: [
+        {
+          body: "Raw bar, grilled catch, lobster and shellfish, seafood pasta, sides, desserts, and non-alcoholic pairings.",
+          title: "Seafood menu categories",
+          visual: "seafood menu category cards"
+        },
+        {
+          body: "Dish cards include short descriptions, clear pricing, sourcing notes, and seasonal availability.",
+          title: "Dish cards and pricing",
+          visual: "seasonal catch dish cards"
+        }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
 function renderVisual(label: string, index: number) {
   return `<div class="visual visual-${(index % 4) + 1}" aria-label="${escapeHtml(label)}">
             <span>${escapeHtml(label)}</span>
@@ -54,6 +167,17 @@ function renderPage(input: {
   const pageTitle = titleCase(input.page);
   const pageSections = sectionsForPage(input.plan, input.page);
   const leadSection = pageSections[0] ?? input.plan.requiredSections[0];
+  const seafoodCopy = isSeafoodPlan(input.plan) ? seafoodPageCopy(input.page) : null;
+  const heroTitle = seafoodCopy?.hero ?? (isHome ? leadSection.title : `${pageTitle} built around ${leadSection.title.toLowerCase()}`);
+  const lede = seafoodCopy?.lede ?? (isHome ? leadSection.intent : leadSection.contentAngle);
+  const cta = seafoodCopy?.cta ?? input.plan.goal;
+  const eyebrow = seafoodCopy?.eyebrow ?? `${industryLabel(input.plan)} / ${input.plan.layoutType.replace(/_/g, " ")}`;
+  const sectionCards = seafoodCopy?.sections.map((section, index) => ({
+    contentAngle: section.body,
+    id: `${input.page}-${index + 1}`,
+    title: section.title,
+    visualIntent: section.visual
+  })) ?? pageSections;
 
   return `<!doctype html>
 <html lang="en">
@@ -74,15 +198,15 @@ function renderPage(input: {
     <main>
       <section class="hero" data-section-id="${escapeHtml(leadSection.id)}">
         <div class="hero-copy">
-          <p class="eyebrow">${escapeHtml(industryLabel(input.plan))} / ${escapeHtml(input.plan.layoutType.replace(/_/g, " "))}</p>
-          <h1>${escapeHtml(isHome ? leadSection.title : `${pageTitle} built around ${leadSection.title.toLowerCase()}`)}</h1>
-          <p class="lede">${escapeHtml(isHome ? leadSection.intent : leadSection.contentAngle)}</p>
-          <a class="button" href="./${input.plan.pages.includes("contact") ? "contact.html" : pageToPath(input.plan.pages[input.plan.pages.length - 1] ?? "contact")}">${escapeHtml(input.plan.goal)}</a>
+          <p class="eyebrow">${escapeHtml(eyebrow)}</p>
+          <h1>${escapeHtml(heroTitle)}</h1>
+          <p class="lede">${escapeHtml(lede)}</p>
+          <a class="button" href="./${input.plan.pages.includes("contact") ? "contact.html" : pageToPath(input.plan.pages[input.plan.pages.length - 1] ?? "contact")}">${escapeHtml(cta)}</a>
         </div>
-        ${renderVisual(leadSection.visualIntent, 0)}
+        ${renderVisual(seafoodCopy?.sections[0]?.visual ?? leadSection.visualIntent, 0)}
       </section>
       <section class="section-grid" aria-label="${escapeHtml(pageTitle)} sections">
-${pageSections
+${sectionCards
   .map((section, index) => `        <article class="section-card" data-section-id="${escapeHtml(section.id)}">
           <span>${String(index + 1).padStart(2, "0")}</span>
           <p class="eyebrow">${escapeHtml(section.visualIntent)}</p>
@@ -92,10 +216,23 @@ ${pageSections
         </article>`)
   .join("\n")}
       </section>
+      ${seafoodCopy && input.page === "contact" ? `<section class="contact-form" aria-label="Reservation request">
+        <div>
+          <p class="eyebrow">Reservation request</p>
+          <h2>Tell us your preferred date, party size, and seafood notes.</h2>
+          <p>Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit.</p>
+        </div>
+        <form>
+          <label>Name <input type="text" name="name" autocomplete="name" /></label>
+          <label>Email <input type="email" name="email" autocomplete="email" /></label>
+          <label>Reservation notes <textarea name="notes" rows="4"></textarea></label>
+          <button class="button" type="button">Send reservation request</button>
+        </form>
+      </section>` : ""}
     </main>
     <footer>
       <span>${escapeHtml(input.brandName)}</span>
-      <span>${escapeHtml(input.plan.visualStrategy)}</span>
+      <span>${escapeHtml(seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : input.plan.visualStrategy)}</span>
       <a href="mailto:hello@example.com">hello@example.com</a>
     </footer>
     <script src="./main.js"></script>
@@ -219,6 +356,27 @@ h2 { margin-top: 0.5rem; font-size: clamp(1.35rem, 3vw, 2rem); line-height: 1.05
 }
 .section-card { display: grid; gap: 0.9rem; padding: var(--card-padding); }
 .section-card span { color: var(--accent-2); font-size: 0.76rem; font-weight: 900; }
+.contact-form {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(18rem, 1fr);
+  gap: var(--token-spacing-lg);
+  margin-top: var(--token-spacing-xl);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: var(--card-padding);
+}
+form { display: grid; gap: 0.85rem; }
+label { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.9rem; }
+input, textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--token-radius-md);
+  background: color-mix(in srgb, var(--surface-elevated) 70%, transparent);
+  color: var(--ink);
+  padding: 0.85rem 0.9rem;
+  font: inherit;
+}
 .visual {
   display: grid;
   min-height: 18rem;
@@ -238,6 +396,7 @@ body[data-layout="${plan.layoutType}"] .section-card:first-child { grid-column: 
 @media (max-width: 860px) {
   .site-header, footer { align-items: flex-start; flex-direction: column; }
   .hero { grid-template-columns: 1fr; }
+  .contact-form { grid-template-columns: 1fr; }
   body[data-layout="${plan.layoutType}"] .section-card:first-child { grid-column: span 1; }
 }
 `;

@@ -158,9 +158,10 @@ function detectMissing(text: string, requiredSignals: string[], mode: DomainVali
 function fileStrategyIssues(input: ValidateDomainInput) {
   const fileNames = Object.keys(input.proposedFiles ?? {});
   const hasStaticTrio = ["index.html", "styles.css", "main.js"].every((path) => fileNames.includes(path));
+  const hasRunnableAppSource = fileNames.some((path) => path === "vite.config.ts" || path === "vite.config.js" || path.startsWith("src/"));
   const issues: string[] = [];
 
-  if (input.contextPriority.authoritativeMode === "CODE" && hasStaticTrio && !input.currentPrompt.toLowerCase().includes("landing page")) {
+  if (input.contextPriority.authoritativeMode === "CODE" && hasStaticTrio && !hasRunnableAppSource && !input.currentPrompt.toLowerCase().includes("landing page")) {
     issues.push("CODE request produced static website trio.");
   }
 

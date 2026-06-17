@@ -28,6 +28,8 @@ export type WebsitePlan = {
   pages: string[];
   requiredSections: WebsiteSectionDefinition[];
   sectionRegistryVersion: "11.2B";
+  sourceOfTruthDomain: string | null;
+  sourceOfTruthPages: string[];
   tokensStudioExportAvailable: boolean;
   visualStrategy: string;
 };
@@ -52,7 +54,7 @@ export function detectWebsiteIndustry(input: {
 
   if (includesAny(text, ["ai product", "ai tool", "ai workspace", "automation ai", "assistant", "llm"])) return "ai_product";
   if (includesAny(text, ["real estate", "property", "properties", "realtor", "homes", "apartments"])) return "real_estate";
-  if (includesAny(text, ["restaurant", "cafe", "coffee", "menu", "food", "pizza", "burger", "dining"])) return "restaurant";
+  if (includesAny(text, ["seafood", "fresh catch", "oyster", "lobster", "restaurant", "cafe", "coffee", "menu", "food", "pizza", "burger", "dining"])) return "restaurant";
   if (includesAny(text, ["clinic", "dental", "health", "healthcare", "doctor", "patient", "medical"])) return "healthcare";
   if (includesAny(text, ["portfolio", "photographer", "designer", "artist", "creator", "agency portfolio"])) return "portfolio";
   if (includesAny(text, ["marketplace", "buyers", "sellers", "vendors", "multi vendor", "listings"])) return "marketplace";
@@ -95,6 +97,10 @@ function pagePlan(input: {
     saas: "features"
   };
   const base = ["home", industryPage[input.industry], "about", "contact"];
+  if (input.industry === "restaurant") {
+    const target = Math.max(input.requiredCount ?? 5, 4);
+    return ["home", "menu", "about", "gallery", "contact"].slice(0, target);
+  }
   const target = Math.max(input.requiredCount ?? base.length, base.length);
   const extras: Record<WebsiteIndustry, string[]> = {
     ai_product: ["security", "use-cases", "pricing"],
@@ -150,6 +156,8 @@ export function planWebsite(input: {
     pages,
     requiredSections: profile.requiredSections,
     sectionRegistryVersion: "11.2B",
+    sourceOfTruthDomain: input.generatorContract?.authoritativeDomain ?? input.intent.domain,
+    sourceOfTruthPages: pages,
     tokensStudioExportAvailable: true,
     visualStrategy: profile.visualStrategy
   };

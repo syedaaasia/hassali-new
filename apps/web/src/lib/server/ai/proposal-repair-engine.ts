@@ -313,7 +313,13 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
     };
   }
 
-  if (input.generatorContract.generatorMode === "code_generation" && ["index.html", "styles.css", "main.js"].every((path) => path in repairedFiles)) {
+  const hasRunnableAppSource = Object.keys(repairedFiles).some((path) =>
+    path === "vite.config.ts" ||
+    path === "vite.config.js" ||
+    path.startsWith("src/")
+  );
+
+  if (input.generatorContract.generatorMode === "code_generation" && !hasRunnableAppSource && ["index.html", "styles.css", "main.js"].every((path) => path in repairedFiles)) {
     strategies.push("code_file_strategy_repair");
     actions.push("Converted static website trio into docs-first CODE proposal files.");
     for (const path of Object.keys(repairedFiles)) delete repairedFiles[path];

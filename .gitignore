@@ -13,3 +13,5 @@ coverage/
 .env.production
 package-lock.json
 yarn.lock
+.hassali/runtime/
+.hassali/workspaces/

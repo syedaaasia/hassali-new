@@ -54,6 +54,7 @@ import {
   generatePlannedWebsiteFiles,
   type SiteDomain
 } from "@/lib/server/ai/domain-site-generator";
+import { generateCrmViteSource } from "@/lib/server/ai/code-app-source-generator";
 import {
   buildExecutionPlan,
   summarizeExecutionPlan,
@@ -100,6 +101,7 @@ import {
   summarizeProjectContract,
   type ProjectContract
 } from "@/lib/server/ai/project-contract";
+import { buildWebsiteSourceOfTruth } from "@/lib/server/ai/website-source-of-truth";
 import {
   buildPromptSovereigntyContract,
   validatePromptSovereignty,
@@ -305,6 +307,12 @@ type DiffProposal = {
   designTokenTheme?: string;
   designTokenValidationPassed?: boolean;
   tokensStudioExportAvailable?: boolean;
+  memoryIgnoredForNewProject?: boolean;
+  plannerGeneratorAligned?: boolean;
+  sourceOfTruthDomain?: string | null;
+  sourceOfTruthPages?: string[];
+  sourceOfTruthPrompt?: string;
+  validatorPlanAligned?: boolean;
   websiteAudience?: string;
   websiteGoal?: string;
   websiteIndustry?: string;
@@ -1345,6 +1353,33 @@ function createLocalProposal(
         "security and test plan"
       ].filter(Boolean) as string[])
     );
+    const sourceFiles = generateCrmViteSource({
+      appName: appPreview.appName,
+      prompt
+    });
+
+    return {
+      changes: sourceFiles.map((file) => ({
+        action: diagnostic.fileList.includes(file.path) ? ("update" as const) : ("create" as const),
+        diffPreview: createDiffPreview(
+          diagnostic.fileList.includes(file.path) ? "update" : "create",
+          file.path,
+          file.content
+        ),
+        path: file.path,
+        proposedContent: file.content,
+        summary: file.summary
+      })),
+      appPreview,
+      id: `proposal-${Date.now()}`,
+      mode,
+      previewMode: "code_plan",
+      previewType: "code_app_preview",
+      projectId: diagnostic.projectId,
+      status: "pending",
+      summary:
+        `Detected a CODE-mode ${appPreview.appName} ${systemName} request with ${requestedCapabilities.join(", ")}. I will create runnable Vite React CRM source files plus architecture, data model, and security docs. No package install or runtime command runs before approval.`
+    };
     const architecture = `# ${systemName.toUpperCase()} Architecture Plan
 
 Source request:
@@ -1991,7 +2026,13 @@ if ("IntersectionObserver" in window) {
         designTokenCount: websiteGeneration.designTokenCount,
         designTokenTheme: websiteGeneration.designTokenTheme,
         designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
+        memoryIgnoredForNewProject: true,
+        plannerGeneratorAligned: websiteGeneration.plannerGeneratorAligned,
+        sourceOfTruthDomain: websiteGeneration.sourceOfTruthDomain,
+        sourceOfTruthPages: websiteGeneration.sourceOfTruthPages,
+        sourceOfTruthPrompt: prompt,
         tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
+        validatorPlanAligned: websiteGeneration.validatorPlanAligned,
         websiteAudience: websiteGeneration.plan.audience,
         websiteGoal: websiteGeneration.plan.goal,
         websiteIndustry: websiteGeneration.plan.industry,
@@ -2027,7 +2068,13 @@ if ("IntersectionObserver" in window) {
         designTokenCount: websiteGeneration.designTokenCount,
         designTokenTheme: websiteGeneration.designTokenTheme,
         designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
+        memoryIgnoredForNewProject: true,
+        plannerGeneratorAligned: websiteGeneration.plannerGeneratorAligned,
+        sourceOfTruthDomain: websiteGeneration.sourceOfTruthDomain,
+        sourceOfTruthPages: websiteGeneration.sourceOfTruthPages,
+        sourceOfTruthPrompt: prompt,
         tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
+        validatorPlanAligned: websiteGeneration.validatorPlanAligned,
         websiteAudience: websiteGeneration.plan.audience,
         websiteGoal: websiteGeneration.plan.goal,
         websiteIndustry: websiteGeneration.plan.industry,
@@ -2074,7 +2121,13 @@ if ("IntersectionObserver" in window) {
       designTokenCount: websiteGeneration.designTokenCount,
       designTokenTheme: websiteGeneration.designTokenTheme,
       designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
+      memoryIgnoredForNewProject: true,
+      plannerGeneratorAligned: websiteGeneration.plannerGeneratorAligned,
+      sourceOfTruthDomain: websiteGeneration.sourceOfTruthDomain,
+      sourceOfTruthPages: websiteGeneration.sourceOfTruthPages,
+      sourceOfTruthPrompt: prompt,
       tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
+      validatorPlanAligned: websiteGeneration.validatorPlanAligned,
       websiteGoal: websiteGeneration.plan.goal,
       websiteIndustry: websiteGeneration.plan.industry,
       websiteLayoutType: websiteGeneration.plan.layoutType,
@@ -2304,6 +2357,62 @@ function createProposalStream(proposal: DiffProposal, sessionId?: string | null)
       headers: createResponseHeaders(sessionId)
     }
   );
+}
+
+function createHassaliReadyPromptAnswer(input: {
+  projectContract: ProjectContract | null;
+  prompt: string;
+  translatedIntent: TranslatedIntentSpec;
+}) {
+  if (!/\b(?:write|create|make|generate)\b[\s\S]{0,80}\bprompt\b/i.test(input.prompt)) {
+    return null;
+  }
+
+  const source = buildWebsiteSourceOfTruth({
+    contract: input.projectContract,
+    prompt: input.prompt,
+    translatedIntent: input.translatedIntent
+  });
+  const pages = source.pages.length ? source.pages : ["home", "menu", "about", "gallery", "contact"];
+  const domain = source.businessType ?? "Seafood Restaurant";
+  const design = source.domain === "seafood_restaurant"
+    ? "premium ocean-inspired dark design with deep navy, aqua/cyan highlights, pearl surfaces, elegant seafood photography intent, glass panels, and calm reservation-first hierarchy"
+    : source.visualStrategy;
+  const vocabulary = source.domain === "seafood_restaurant"
+    ? "fresh catch, seasonal catch, oysters, lobster, grilled fish, chef sourcing, sustainability, ocean atmosphere, reservations, hours, location"
+    : "domain-specific services, trust, conversion, visual identity, responsive layout";
+
+  return `Here is a Hassali-ready WEBSITE mode prompt:
+
+\`\`\`text
+Build me a beautiful premium ${domain.toLowerCase()} website with exactly ${pages.length} pages: ${pages.join(", ")}.
+
+Use this design direction:
+- ${design}
+- Use Hassali design tokens instead of random Tailwind values.
+- Make the first screen immediately communicate the restaurant/domain, the offer, and the main CTA.
+
+Required page behavior:
+- Home: premium hero, signature specialties, trust/atmosphere, reservation CTA.
+- Menu: domain-specific categories, item cards, pricing, seasonal highlights.
+- About: story, team/chef or sourcing, values, atmosphere.
+- Gallery: visual grid for food/ambience using safe domain-specific visual intent; no broken remote images.
+- Contact: contact form, hours, location block, reservation CTA.
+
+Use this vocabulary and content direction:
+- ${vocabulary}
+
+Conversion goals:
+- Encourage reservations.
+- Make menu exploration easy.
+- Build trust through sourcing, reviews, hours, and location.
+
+Forbidden mistakes:
+- Do not generate products.html or collections.html unless I explicitly ask for ecommerce.
+- Do not mention CRM, television, electronics, Local Service, generic services, or stale project memory.
+- Do not use placeholder text like lorem ipsum, TODO, or generic internal generator phrases.
+- Do not add upload features or fake image systems unless explicitly requested.
+\`\`\``;
 }
 
 function compactIntelligenceKernel(kernel: IntelligenceKernelResult) {
@@ -3773,11 +3882,16 @@ export async function POST(request: Request) {
         projectName: null
       };
   const projectContract = readProjectContractFromWorkspace(workspace);
-  const projectContractContext = projectContractSystemContext(projectContract);
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const effectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
+  const shouldIgnoreContractForPrompt =
+    (productMode === "WEBSITE" && /\b(?:build|create|generate|design|make)\b[\s\S]{0,80}\b(?:website|site|web page|landing page)\b/i.test(effectiveUserPrompt)) ||
+    (productMode === "CODE" && /\b(?:build|create|generate|make)\b[\s\S]{0,120}\b(?:app|crm|dashboard|system|tool)\b/i.test(effectiveUserPrompt));
+  const projectContractContext = shouldIgnoreContractForPrompt
+    ? "HASSALI.md exists, but this is a new generation request. Ignore stale contract facts unless the user explicitly says continue/refine/edit the existing project."
+    : projectContractSystemContext(projectContract);
   const translatedIntent = translateIntent({
-    contract: projectContract,
+    contract: shouldIgnoreContractForPrompt ? null : projectContract,
     mode: productMode,
     prompt: effectiveUserPrompt
   });
@@ -3944,6 +4058,27 @@ export async function POST(request: Request) {
   });
 
   if (mode === "ASK") {
+    const hassaliPromptAnswer = createHassaliReadyPromptAnswer({
+      projectContract,
+      prompt: effectiveUserPrompt,
+      translatedIntent
+    });
+
+    if (hassaliPromptAnswer) {
+      persistence = await persistChatMessage(persistence, {
+        content: hassaliPromptAnswer,
+        metadata: {
+          deterministic: true,
+          intentTranslation: compactTranslatedIntent(translatedIntent),
+          model,
+          projectContract: summarizeProjectContract(projectContract)
+        },
+        role: "assistant"
+      });
+
+      return createTextStream(hassaliPromptAnswer, persistence?.sessionId);
+    }
+
     const directAskAnswer = await createAskDirectAnswer(
       effectiveUserPrompt,
       askRuntimeContext

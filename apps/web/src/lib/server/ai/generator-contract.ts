@@ -8,6 +8,7 @@ import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { ProposalQualityGateResult } from "@/lib/server/ai/proposal-quality-gate";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
+import { buildWebsiteSourceOfTruth } from "@/lib/server/ai/website-source-of-truth";
 
 export type GeneratorContractStatus = "blocked" | "ready" | "warning";
 export type GeneratorMode = "answer_only" | "code_generation" | "small_edit" | "website_generation";
@@ -82,6 +83,12 @@ const domainSignals: Record<string, {
     pages: ["architecture", "data model", "dashboard", "customers", "billing"],
     visual: ["dashboard", "pipeline", "table UI", "charts", "business workflow"]
   },
+  seafood_restaurant: {
+    copy: ["seafood", "fresh catch", "seasonal catch", "oyster", "lobster", "grilled fish", "reservation", "chef", "sourcing", "sustainability", "ocean"],
+    label: "Seafood restaurant website",
+    pages: ["home", "menu", "about", "gallery", "contact"],
+    visual: ["ocean-inspired hero", "seafood dish cards", "fresh catch gallery", "coastal dining atmosphere", "reservation panel"]
+  },
   dental: {
     copy: ["dental", "dentist", "treatments", "appointment", "hygiene", "patient care"],
     label: "Dental clinic website",
@@ -142,6 +149,10 @@ function inferDomain(input: BuildGeneratorContractInput) {
     return "gaming_controller";
   }
 
+  if (prompt.includes("seafood") || prompt.includes("fresh catch") || prompt.includes("oyster") || prompt.includes("lobster")) {
+    return "seafood_restaurant";
+  }
+
   return domain;
 }
 
@@ -155,15 +166,24 @@ function generatorMode(input: BuildGeneratorContractInput): GeneratorMode {
 
 function requiredPages(input: BuildGeneratorContractInput, domain: string | null, mode: GeneratorMode) {
   if (mode !== "website_generation") return [];
-  const namedPages = input.translatedIntent.pages.names.length
-    ? input.translatedIntent.pages.names
+  const sourceOfTruth = buildWebsiteSourceOfTruth({
+    contract: input.projectContract,
+    prompt: input.currentPrompt,
+    translatedIntent: input.translatedIntent
+  });
+  const namedPages = sourceOfTruth.pages.length
+    ? sourceOfTruth.pages
     : input.compositionPlan.pagePlans.map((page) => page.title);
   const inferredPages = domain ? domainSignals[domain]?.pages ?? [] : [];
   const count = input.translatedIntent.pages.count ?? (input.compositionPlan.pageCount || null);
   const pages = unique(namedPages.length ? namedPages : inferredPages);
 
   if (count && pages.length < count) {
-    for (const page of ["home", "products", "collections", "gallery", "services", "support", "about", "contact"]) {
+    const fallback = domain === "restaurant" || domain === "seafood_restaurant"
+      ? ["home", "menu", "about", "gallery", "contact"]
+      : ["home", "products", "collections", "gallery", "services", "support", "about", "contact"];
+
+    for (const page of fallback) {
       if (pages.length >= count) break;
       if (!pages.includes(page)) pages.push(page);
     }
@@ -175,7 +195,20 @@ function requiredPages(input: BuildGeneratorContractInput, domain: string | null
 function fileStrategy(input: BuildGeneratorContractInput, mode: GeneratorMode, pages: string[]) {
   if (mode === "answer_only") return [];
   if (mode === "small_edit") return ["single_targeted_patch", "only files containing source text"];
-  if (mode === "code_generation") return ["docs_first_then_source", "architecture docs", "data model docs", "security/testing docs"];
+  if (mode === "code_generation") {
+    return [
+      "runnable_vite_react_app",
+      "package.json",
+      "vite.config.ts",
+      "index.html",
+      "src/main.tsx",
+      "src/App.tsx",
+      "src/styles.css",
+      "src/lib/mock-data.ts",
+      "src/components/*",
+      "architecture/data/security docs"
+    ];
+  }
 
   return unique(["styles.css", "main.js", ...pages.map((page) => (page === "home" ? "index.html" : `${page.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.html`))]);
 }
@@ -240,7 +273,11 @@ export function buildGeneratorContract(input: BuildGeneratorContractInput): Gene
       ]
     : [];
   const modeRules = mode === "code_generation"
-    ? ["Do not create index.html/styles.css/main.js unless the user asks for a landing page.", "Use CODE docs/source phased planning."]
+    ? [
+        "For app-building requests, create runnable app source files plus docs.",
+        "A Vite React app may include package.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and src/styles.css.",
+        "Do not create a public marketing website in place of CODE app source."
+      ]
     : mode === "small_edit"
       ? ["Use a single targeted patch.", "Do not regenerate pages or assets."]
       : mode === "answer_only"
@@ -285,7 +322,7 @@ export function buildGeneratorContract(input: BuildGeneratorContractInput): Gene
     contractWarnings,
     copyRules,
     enforcementPrompt,
-    forbiddenFileStrategies: mode === "code_generation" ? ["static website trio without landing-page request"] : [],
+    forbiddenFileStrategies: mode === "code_generation" ? ["public static marketing website without runnable app source"] : [],
     forbiddenSections: unique([...input.compositionPlan.forbiddenSections, "Local Service"]),
     forbiddenTerms: blockedTerms,
     generatorMode: mode,

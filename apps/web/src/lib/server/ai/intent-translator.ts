@@ -38,6 +38,11 @@ type DomainProfile = {
 
 const domainProfiles: DomainProfile[] = [
   {
+    businessType: "Seafood Restaurant",
+    domain: "seafood_restaurant",
+    terms: ["seafood restaurant", "seafood", "fresh catch", "oyster", "lobster", "fish grill", "daily catch"]
+  },
+  {
     businessType: "Dental Clinic",
     domain: "dental",
     terms: ["dental clinic", "dentist", "tooth", "teeth", "root canal", "orthodontic"]
@@ -145,7 +150,9 @@ const pageAliases: Record<string, string> = {
   "about us": "about",
   articles: "blog",
   blogs: "blog",
+  gallery: "gallery",
   home: "home",
+  menu: "menu",
   "our story": "story",
   service: "services"
 };
@@ -239,11 +246,17 @@ function extractPages(text: string): IntentPages {
     ?.split(/\s*,\s*|\s+and\s+/)
     .map(normalizePageName)
     .filter(Boolean) ?? [];
+  const directNames = unique(
+    ["home", "menu", "about", "gallery", "contact", "services", "pricing", "products", "blog", "shop"]
+      .filter((page) => new RegExp(`\\b${page}\\b`).test(text))
+      .map(normalizePageName)
+  );
+  const mergedNames = unique([...names, ...directNames]);
 
   return {
-    count: names.length || count ? Math.max(count ?? 0, names.length) || null : null,
-    kind: (count && count > 1) || names.length > 1 ? "multi_page" : count === 1 ? "single_page" : "unknown",
-    names: unique(names)
+    count: mergedNames.length || count ? Math.max(count ?? 0, mergedNames.length) || null : null,
+    kind: (count && count > 1) || mergedNames.length > 1 ? "multi_page" : count === 1 ? "single_page" : "unknown",
+    names: mergedNames
   };
 }
 

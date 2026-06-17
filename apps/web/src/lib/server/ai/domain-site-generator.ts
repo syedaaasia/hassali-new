@@ -56,9 +56,13 @@ export type PlannedWebsiteGeneration = {
   designTokenTheme: string;
   designTokenValidationPassed: boolean;
   files: Record<string, string>;
+  plannerGeneratorAligned: boolean;
   plan: WebsitePlan;
+  sourceOfTruthDomain: string | null;
+  sourceOfTruthPages: string[];
   tokensStudioExportAvailable: boolean;
   validation: WebsiteValidationResult;
+  validatorPlanAligned: boolean;
 };
 
 const profiles: Record<SiteDomain, DomainProfile> = {
@@ -2124,15 +2128,22 @@ export function generatePlannedWebsiteFiles(input: {
     files: plannedFiles,
     plan
   });
+  const expectedPaths = plan.pages.map((page) => page === "home" ? "index.html" : `${page}.html`);
+  const plannerGeneratorAligned = expectedPaths.every((path) => path in plannedFiles) &&
+    Object.keys(plannedFiles).filter((path) => path.endsWith(".html")).every((path) => expectedPaths.includes(path));
 
   return {
     designTokenCount: plan.designTokenCount,
     designTokenTheme: plan.designTokenTheme,
     designTokenValidationPassed: plan.designTokenValidationPassed,
     files: plannedFiles,
+    plannerGeneratorAligned,
     plan,
+    sourceOfTruthDomain: plan.sourceOfTruthDomain,
+    sourceOfTruthPages: plan.sourceOfTruthPages,
     tokensStudioExportAvailable: plan.tokensStudioExportAvailable,
-    validation
+    validation,
+    validatorPlanAligned: validation.passed || validation.blockedReasons.every((reason) => !reason.includes("planner page"))
   };
 }
 

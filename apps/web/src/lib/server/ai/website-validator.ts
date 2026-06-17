@@ -36,6 +36,12 @@ function duplicateValues(values: string[]) {
   return Array.from(duplicates);
 }
 
+function pageToPath(page: string) {
+  const normalized = page.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+  return normalized === "home" ? "index.html" : `${normalized}.html`;
+}
+
 export function validateWebsitePlanAndFiles(input: {
   files: Record<string, string>;
   plan: WebsitePlan;
@@ -50,11 +56,17 @@ export function validateWebsitePlanAndFiles(input: {
   const emptyFiles = Object.entries(input.files)
     .filter(([, content]) => content.trim().length === 0)
     .map(([path]) => path);
+  const expectedPageFiles = input.plan.pages.map(pageToPath);
+  const missingPageFiles = expectedPageFiles.filter((path) => !(path in input.files));
+  const unexpectedHtmlFiles = Object.keys(input.files)
+    .filter((path) => path.endsWith(".html") && !expectedPageFiles.includes(path));
   const blockedReasons = [
     duplicateSections.length ? `Duplicate sections detected: ${duplicateSections.join(", ")}.` : "",
     genericLayoutDetected ? "Generic template language or layout detected." : "",
     placeholderDetected ? "Placeholder or remote image reference detected." : "",
     emptyFiles.length ? `Empty generated files: ${emptyFiles.join(", ")}.` : "",
+    missingPageFiles.length ? `Missing planner page files: ${missingPageFiles.join(", ")}.` : "",
+    unexpectedHtmlFiles.length ? `Generated pages not present in planner page list: ${unexpectedHtmlFiles.join(", ")}.` : "",
     input.plan.requiredSections.length < 4 ? "Website plan has too few industry-specific sections." : "",
     !input.plan.designTokenValidationPassed
       ? `Design token validation failed: ${input.plan.designTokens.validation.issues.map((issue) => issue.message).join("; ")}.`

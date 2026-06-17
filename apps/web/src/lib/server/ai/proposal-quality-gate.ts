@@ -130,7 +130,13 @@ function isLandingPage(input: BuildProposalQualityGateInput) {
 }
 
 function hasStaticTrio(files: Record<string, string>) {
-  return ["index.html", "styles.css", "main.js"].every((path) => path in files);
+  const hasRunnableAppSource = Object.keys(files).some((path) =>
+    path === "vite.config.ts" ||
+    path === "vite.config.js" ||
+    path.startsWith("src/")
+  );
+
+  return ["index.html", "styles.css", "main.js"].every((path) => path in files) && !hasRunnableAppSource;
 }
 
 function visibleFileContent(files: Record<string, string>) {

@@ -227,6 +227,12 @@ export type DiffProposal = {
   designTokenTheme?: string;
   designTokenValidationPassed?: boolean;
   tokensStudioExportAvailable?: boolean;
+  memoryIgnoredForNewProject?: boolean;
+  plannerGeneratorAligned?: boolean;
+  sourceOfTruthDomain?: string | null;
+  sourceOfTruthPages?: string[];
+  sourceOfTruthPrompt?: string;
+  validatorPlanAligned?: boolean;
   websiteAudience?: string;
   websiteGoal?: string;
   websiteIndustry?: string;
@@ -815,6 +821,19 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       typeof proposal.designTokenValidationPassed === "boolean") &&
     (typeof proposal.tokensStudioExportAvailable === "undefined" ||
       typeof proposal.tokensStudioExportAvailable === "boolean") &&
+    (typeof proposal.memoryIgnoredForNewProject === "undefined" ||
+      typeof proposal.memoryIgnoredForNewProject === "boolean") &&
+    (typeof proposal.plannerGeneratorAligned === "undefined" ||
+      typeof proposal.plannerGeneratorAligned === "boolean") &&
+    (typeof proposal.sourceOfTruthDomain === "undefined" ||
+      proposal.sourceOfTruthDomain === null ||
+      typeof proposal.sourceOfTruthDomain === "string") &&
+    (typeof proposal.sourceOfTruthPages === "undefined" ||
+      isStringArray(proposal.sourceOfTruthPages)) &&
+    (typeof proposal.sourceOfTruthPrompt === "undefined" ||
+      typeof proposal.sourceOfTruthPrompt === "string") &&
+    (typeof proposal.validatorPlanAligned === "undefined" ||
+      typeof proposal.validatorPlanAligned === "boolean") &&
     (typeof proposal.websiteAudience === "undefined" ||
       typeof proposal.websiteAudience === "string") &&
     (typeof proposal.websiteGoal === "undefined" ||
