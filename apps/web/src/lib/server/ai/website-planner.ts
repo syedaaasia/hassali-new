@@ -1,5 +1,6 @@
 import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
+import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 import {
   getWebsiteIndustryProfile,
@@ -76,8 +77,13 @@ function normalizePage(page: string) {
 function pagePlan(input: {
   generatorContract?: GeneratorContract;
   industry: WebsiteIndustry;
+  proposalContext?: ProposalContext;
   requiredCount: number | null;
 }) {
+  if (input.proposalContext?.mode === "WEBSITE" && input.proposalContext.pages.length) {
+    return Array.from(new Set(input.proposalContext.pages.map(normalizePage).filter(Boolean)));
+  }
+
   const explicit = input.generatorContract?.generatorMode === "website_generation"
     ? input.generatorContract.requiredPages.map(normalizePage).filter(Boolean)
     : [];
@@ -120,6 +126,7 @@ export function planWebsite(input: {
   composition: CompositionStrategy;
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
+  proposalContext?: ProposalContext;
 }): WebsitePlan {
   const industry = detectWebsiteIndustry(input);
   const profile = getWebsiteIndustryProfile(industry);
@@ -127,6 +134,7 @@ export function planWebsite(input: {
   const pages = pagePlan({
     generatorContract: input.generatorContract,
     industry,
+    proposalContext: input.proposalContext,
     requiredCount
   });
   const designTokens = generateDesignTokens({
@@ -156,7 +164,7 @@ export function planWebsite(input: {
     pages,
     requiredSections: profile.requiredSections,
     sectionRegistryVersion: "11.2B",
-    sourceOfTruthDomain: input.generatorContract?.authoritativeDomain ?? input.intent.domain,
+    sourceOfTruthDomain: input.proposalContext?.domain ?? input.generatorContract?.authoritativeDomain ?? input.intent.domain,
     sourceOfTruthPages: pages,
     tokensStudioExportAvailable: true,
     visualStrategy: profile.visualStrategy

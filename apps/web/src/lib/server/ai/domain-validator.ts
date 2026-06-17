@@ -3,11 +3,15 @@ import type { CompositionPlan } from "@/lib/server/ai/composition-engine";
 import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-engine";
 import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
+import type {
+  ProposalContext,
+  ValidationSeverity
+} from "@/lib/server/ai/proposal-context";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
 
 export type DomainValidationMode = "pre_proposal_context" | "proposal_content";
-export type DomainValidationSeverity = "high" | "low" | "medium";
+export type DomainValidationSeverity = ValidationSeverity;
 export type DomainValidationStatus = "blocked" | "passed" | "review_required";
 
 export type DomainValidationResult = {
@@ -43,6 +47,7 @@ type ValidateDomainInput = {
   currentPrompt: string;
   executionPlan: ExecutionPlan;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  proposalContext?: ProposalContext;
   projectContract: ProjectContract | null;
   proposalSummary?: string;
   proposedFiles?: Record<string, string>;
@@ -101,8 +106,12 @@ const profiles: Record<string, ValidationProfile> = {
     required: ["sofa", "chair", "table", "cupboard", "wardrobe", "products", "collections", "showroom", "delivery"]
   },
   restaurant: {
-    forbidden: ["developer", "OLED", "QLED", "dental treatments"],
-    required: ["menu", "food", "order", "pickup", "delivery", "hours"]
+    forbidden: ["developer", "OLED", "QLED", "dental treatments", "television", "electronics", "CRM", "Local Service"],
+    required: ["menu", "food", "reservation", "hours", "contact"]
+  },
+  seafood_restaurant: {
+    forbidden: ["television", "TV", "electronics", "OLED", "QLED", "CRM", "products.html", "collections.html", "Local Service"],
+    required: ["seafood", "menu", "reservation", "fresh catch", "gallery", "contact"]
   },
   saas: {
     forbidden: ["Local Service", "clinic doctors", "coffee pickup"],
@@ -129,7 +138,15 @@ function contentFromFiles(files?: Record<string, string>) {
 }
 
 function profileFor(domain: string | null) {
+  const normalizedDomain = domain ? normalize(domain) : null;
   if (domain && profiles[domain]) return profiles[domain];
+  if (normalizedDomain?.includes("seafood") || normalizedDomain?.includes("restaurant")) return profiles.seafood_restaurant;
+  if (normalizedDomain?.includes("crm")) return profiles.crm;
+  if (normalizedDomain?.includes("dental")) return profiles.dental;
+  if (normalizedDomain?.includes("coffee") || normalizedDomain?.includes("cafe")) return profiles.coffee;
+  if (normalizedDomain?.includes("furniture")) return profiles.furniture;
+  if (normalizedDomain?.includes("floral") || normalizedDomain?.includes("flower")) return profiles.floral;
+  if (normalizedDomain?.includes("tv") || normalizedDomain?.includes("electronics")) return profiles.electronics_retail;
 
   return {
     forbidden: ["developer/coder fallback", "keyword-chain copy patterns"],
@@ -175,6 +192,21 @@ function fileStrategyIssues(input: ValidateDomainInput) {
 
   if (input.contextPriority.authoritativeMode === "ASK" && fileNames.length > 0) {
     issues.push("ASK request produced file mutation proposal.");
+  }
+
+  if (input.validationMode === "proposal_content" && input.proposalContext?.requiredFiles.length) {
+    const missingRequiredFiles = input.proposalContext.requiredFiles.filter((path) => !fileNames.includes(path));
+    for (const path of missingRequiredFiles) {
+      issues.push(`missing required file ${path}`);
+    }
+
+    if (input.proposalContext.mode === "WEBSITE") {
+      const allowed = new Set(input.proposalContext.requiredFiles);
+      const extraPages = fileNames.filter((path) => path.endsWith(".html") && !allowed.has(path));
+      for (const path of extraPages) {
+        issues.push(`unexpected page file ${path}`);
+      }
+    }
   }
 
   return issues;
@@ -229,7 +261,7 @@ function score(input: {
 }
 
 export function validateDomain(input: ValidateDomainInput): DomainValidationResult {
-  const domain = input.contextPriority.authoritativeDomain;
+  const domain = input.proposalContext?.domain ?? input.contextPriority.authoritativeDomain;
   const profile = profileFor(domain);
   const requiredSignals = unique([
     ...profile.required,
@@ -242,11 +274,12 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
     ...input.compositionPlan.forbiddenSections,
     ...input.businessBlueprint.mustAvoid
   ]);
-  const combinedContent = [
-    input.currentPrompt,
-    input.proposalSummary ?? "",
-    contentFromFiles(input.proposedFiles)
-  ].join("\n");
+  const combinedContent = input.validationMode === "proposal_content"
+    ? [
+        input.proposalSummary ?? "",
+        contentFromFiles(input.proposedFiles)
+      ].join("\n")
+    : input.currentPrompt;
   const detectedForbiddenSignals = detectForbidden(combinedContent, forbiddenSignals);
   const detectedGenericCopy = detectGenericCopy(combinedContent);
   const missingSignals = detectMissing(combinedContent, requiredSignals, input.validationMode);
@@ -266,11 +299,11 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
   const pageIssues =
     input.validationMode === "proposal_content" &&
     input.contextPriority.authoritativeMode === "WEBSITE" &&
-    input.compositionPlan.pagePlans.length > 0 &&
     input.proposedFiles
-      ? input.compositionPlan.pagePlans
-          .filter((page) => !input.proposedFiles?.[page.route])
-          .map((page) => `missing expected page ${page.route}`)
+      ? (input.proposalContext?.requiredFiles.filter((path) => path.endsWith(".html")) ??
+          input.compositionPlan.pagePlans.map((page) => page.route))
+          .filter((route) => !input.proposedFiles?.[route])
+          .map((route) => `missing expected page ${route}`)
       : [];
   const sectionIssues =
     input.validationMode === "proposal_content" && detectedGenericCopy.length
@@ -284,18 +317,15 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
     preview: detectedPreviewDrift.length,
     strategy: strategyIssues.length
   });
-  const severe =
-    input.validationMode === "proposal_content" &&
-    (detectedGenericCopy.length > 0 ||
-      strategyIssues.length > 0 ||
-      detectedModeDrift.length > 0 ||
-      detectedForbiddenSignals.length > 0);
-  const severity: DomainValidationSeverity = severe || validationScore < 60
-    ? "high"
-    : validationScore < 82 || detectedPreviewDrift.length > 0 || missingSignals.length > 4
-      ? "medium"
-      : "low";
-  const shouldBlockProposal = input.validationMode === "proposal_content" && severity === "high";
+  const criticalIssueCount = input.validationMode === "proposal_content"
+    ? pageIssues.length + strategyIssues.length + detectedModeDrift.length + detectedForbiddenSignals.length
+    : 0;
+  const severity: DomainValidationSeverity = criticalIssueCount
+    ? "critical"
+    : validationScore < 82 || detectedPreviewDrift.length > 0 || missingSignals.length > 4 || detectedGenericCopy.length > 0
+      ? "major"
+      : "minor";
+  const shouldBlockProposal = input.validationMode === "proposal_content" && severity === "critical";
 
   return {
     acceptanceChecks: unique([
@@ -330,7 +360,7 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
     validationId: `${input.validationMode}_${domain ?? "unknown"}_domain_validation`,
     validationMode: input.validationMode,
     validationScore,
-    validationStatus: shouldBlockProposal ? "blocked" : severity === "medium" ? "review_required" : "passed"
+    validationStatus: shouldBlockProposal ? "blocked" : severity === "major" ? "review_required" : "passed"
   };
 }
 

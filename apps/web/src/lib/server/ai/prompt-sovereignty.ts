@@ -4,6 +4,7 @@ import {
 } from "@/lib/server/ai/capability-domain-blueprint";
 import type { DecisionPlan } from "@/lib/server/ai/decision-engine";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
+import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 
 export type PromptSovereigntyContract = {
@@ -105,6 +106,8 @@ function expectedTermsForDomain(domain: string, baseTerms: string[]) {
     crm: ["crm", "customers", "leads", "pipeline", "auth", "database", "dashboard", "billing"],
     "coffee shop": ["coffee", "cafe", "espresso", "latte", "cold brew", "barista", "menu", "pastries"],
     coffee: ["coffee", "cafe", "espresso", "latte", "cold brew", "barista", "menu", "pastries"],
+    "ice cream": ["ice cream", "flavors", "scoops", "gelato", "cones", "sundaes", "store", "online order"],
+    ice_cream: ["ice cream", "flavors", "scoops", "gelato", "cones", "sundaes", "brand", "store"],
     "dentist clinic": ["dental", "dentist", "clinic", "appointment", "hygiene", "treatment", "smile"],
     dental: ["dental", "dentist", "clinic", "appointment", "hygiene", "treatment", "smile"],
     perfume: ["perfume", "fragrance", "scent", "bottles", "oud", "floral", "citrus", "musk", "testers", "gift"],
@@ -204,6 +207,7 @@ export function buildPromptSovereigntyContract(input: {
   decision: DecisionPlan;
   intent: IntentIntelligence;
   prompt: string;
+  proposalContext?: ProposalContext;
 }): PromptSovereigntyContract {
   const promptText = lower(input.prompt);
   const blueprint = buildDomainBlueprint({ prompt: input.prompt });
@@ -215,21 +219,24 @@ export function buildPromptSovereigntyContract(input: {
       : routedCapability;
   const explicitPages = input.intent.requestedPages.map(pageToPath);
   const requiredFiles =
-    expectedCapability === "web_app"
-      ? input.decision.requiredFiles
-      : explicitPages.length > 0
-        ? unique([...explicitPages, ...(expectedCapability === "business_website" ? ["styles.css", "main.js"] : [])])
-      : input.decision.requiredFiles;
+    input.proposalContext?.requiredFiles.length
+      ? input.proposalContext.requiredFiles
+      : expectedCapability === "web_app"
+        ? input.decision.requiredFiles
+        : explicitPages.length > 0
+          ? unique([...explicitPages, ...(expectedCapability === "business_website" ? ["styles.css", "main.js"] : [])])
+          : input.decision.requiredFiles;
+  const expectedDomain = input.proposalContext?.domain ?? blueprint.domainLabel;
   const expectedTerms = expectedTermsForDomain(
-    blueprint.domainLabel,
-    unique([blueprint.domainLabel, ...blueprint.validationTerms, ...input.composition.businessType.split(/[\s/]+/)])
+    expectedDomain,
+    unique([expectedDomain, blueprint.domainLabel, ...blueprint.validationTerms, ...input.composition.businessType.split(/[\s/]+/)])
       .filter((term) => term.length > 3)
   );
 
   return {
-    contradictoryTerms: contradictoryTermsFor(blueprint.domainLabel, expectedCapability),
+    contradictoryTerms: contradictoryTermsFor(expectedDomain, expectedCapability),
     expectedCapability,
-    expectedDomain: blueprint.domainLabel,
+    expectedDomain,
     expectedTerms,
     isExplicitNewBuild: explicitNewBuild(promptText, input.intent, input.decision),
     prompt: input.prompt,
@@ -307,7 +314,9 @@ export function validatePromptSovereignty(input: {
     input.contract.expectedCapability === "web_app" &&
     paths.has("index.html") &&
     paths.has("styles.css") &&
-    paths.has("main.js")
+    paths.has("main.js") &&
+    !paths.has("vite.config.ts") &&
+    !Array.from(paths).some((path) => path.startsWith("src/"))
   ) {
     issues.push("CODE/web app request was converted into a static website scaffold");
   }

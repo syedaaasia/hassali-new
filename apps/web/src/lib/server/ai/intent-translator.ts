@@ -58,6 +58,11 @@ const domainProfiles: DomainProfile[] = [
     terms: ["coffee shop", "cafe", "café", "espresso", "latte", "roastery"]
   },
   {
+    businessType: "Ice Cream Brand",
+    domain: "ice_cream",
+    terms: ["ice cream", "gelato", "scoops", "sundae", "sundaes", "cones", "frozen dessert", "ice cream brand", "ice cream store"]
+  },
+  {
     businessType: "Floral / Bridal Flower Store",
     domain: "floral",
     terms: ["bridal flower", "flower shop", "florist", "floral", "bouquet", "wedding flowers"]
@@ -241,7 +246,7 @@ function extractPages(text: string): IntentPages {
     : text.includes("single page")
       ? 1
       : null;
-  const listedPagesMatch = text.match(/\b(?:pages?|with)\s*,?\s+((?:home|about us|about|services?|blogs?|blog|contact|story|our story|products?|menu|pricing|gallery|shop)(?:\s*,?\s*(?:and\s+)?(?:home|about us|about|services?|blogs?|blog|contact|story|our story|products?|menu|pricing|gallery|shop))*)/);
+  const listedPagesMatch = text.match(/\b(?:pages?|with)\s*:?\s*,?\s+((?:home|about us|about|services?|blogs?|blog|contact|story|our story|products?|menu|pricing|gallery|shop)(?:\s*,?\s*(?:and\s+)?(?:home|about us|about|services?|blogs?|blog|contact|story|our story|products?|menu|pricing|gallery|shop))*)/);
   const names = listedPagesMatch?.[1]
     ?.split(/\s*,\s*|\s+and\s+/)
     .map(normalizePageName)

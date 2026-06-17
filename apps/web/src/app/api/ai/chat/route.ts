@@ -66,6 +66,12 @@ import {
   type GeneratorContract
 } from "@/lib/server/ai/generator-contract";
 import {
+  buildProposalContext,
+  decidePromptOwnership,
+  enforceGeneratorContractWithProposalContext,
+  type ProposalContext
+} from "@/lib/server/ai/proposal-context";
+import {
   repairProposal,
   type ProposalRepairResult
 } from "@/lib/server/ai/proposal-repair-engine";
@@ -211,7 +217,7 @@ type DiffProposal = {
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
   domainValidationScore?: number;
-  domainValidationSeverity?: "high" | "low" | "medium";
+  domainValidationSeverity?: "critical" | "major" | "minor";
   domainValidationStatus?: "blocked" | "passed" | "review_required";
   executionMode?: "ASK" | "CODE" | "WEBSITE";
   executionPlanId?: string;
@@ -1325,7 +1331,8 @@ function createLocalProposal(
   decision: DecisionPlan,
   intent: IntentIntelligence,
   composition: CompositionStrategy,
-  generatorContract?: GeneratorContract
+  generatorContract?: GeneratorContract,
+  proposalContext?: ProposalContext
 ): DiffProposal {
   const renameRequest = detectRenameRequest(prompt);
 
@@ -2004,7 +2011,12 @@ if ("IntersectionObserver" in window) {
       };
     }
 
-    const websiteGeneration = generatePlannedWebsiteFiles({ composition, generatorContract, intent });
+    const websiteGeneration = generatePlannedWebsiteFiles({
+      composition,
+      generatorContract,
+      intent,
+      proposalContext
+    });
     const websiteFiles = websiteGeneration.files;
 
     if (!websiteGeneration.validation.passed) {
@@ -2373,14 +2385,24 @@ function createHassaliReadyPromptAnswer(input: {
     prompt: input.prompt,
     translatedIntent: input.translatedIntent
   });
-  const pages = source.pages.length ? source.pages : ["home", "menu", "about", "gallery", "contact"];
-  const domain = source.businessType ?? "Seafood Restaurant";
+  const domain = source.businessType ?? input.translatedIntent.businessType ?? "brand";
+  const isIceCream = input.translatedIntent.domain === "ice_cream" || /ice cream|gelato|scoops/i.test(input.prompt);
+  const pages = source.pages.length
+    ? source.pages
+    : isIceCream
+      ? ["home", "flavors", "about", "visit", "contact"]
+      : ["home", "about", "contact"];
   const design = source.domain === "seafood_restaurant"
     ? "premium ocean-inspired dark design with deep navy, aqua/cyan highlights, pearl surfaces, elegant seafood photography intent, glass panels, and calm reservation-first hierarchy"
-    : source.visualStrategy;
+    : isIceCream
+      ? "premium playful brand design with creamy pastels, rich contrast, flavor-forward cards, polished product photography intent, and clear store/order CTAs"
+      : source.visualStrategy;
   const vocabulary = source.domain === "seafood_restaurant"
     ? "fresh catch, seasonal catch, oysters, lobster, grilled fish, chef sourcing, sustainability, ocean atmosphere, reservations, hours, location"
-    : "domain-specific services, trust, conversion, visual identity, responsive layout";
+    : isIceCream
+      ? "ice cream, gelato, scoops, flavors, cones, sundaes, family treats, seasonal specials, store visit, online order"
+      : "domain-specific products or services, trust, conversion, visual identity, responsive layout";
+  const primaryAction = isIceCream ? "order or visit the store" : "reservation";
 
   return `Here is a Hassali-ready WEBSITE mode prompt:
 
@@ -2390,21 +2412,21 @@ Build me a beautiful premium ${domain.toLowerCase()} website with exactly ${page
 Use this design direction:
 - ${design}
 - Use Hassali design tokens instead of random Tailwind values.
-- Make the first screen immediately communicate the restaurant/domain, the offer, and the main CTA.
+- Make the first screen immediately communicate the brand/domain, the offer, and the main CTA.
 
 Required page behavior:
-- Home: premium hero, signature specialties, trust/atmosphere, reservation CTA.
-- Menu: domain-specific categories, item cards, pricing, seasonal highlights.
-- About: story, team/chef or sourcing, values, atmosphere.
-- Gallery: visual grid for food/ambience using safe domain-specific visual intent; no broken remote images.
-- Contact: contact form, hours, location block, reservation CTA.
+- Home: premium hero, signature offer, trust/atmosphere, ${primaryAction} CTA.
+- Domain page(s): category cards, product/service highlights, pricing/details where useful, seasonal highlights.
+- About: brand story, sourcing/craft, values, atmosphere.
+- Visual page if requested: safe domain-specific visual grid; no broken remote images.
+- Contact/Visit: contact form, hours, location block, ${primaryAction} CTA.
 
 Use this vocabulary and content direction:
 - ${vocabulary}
 
 Conversion goals:
-- Encourage reservations.
-- Make menu exploration easy.
+- Encourage ${primaryAction}.
+- Make offer exploration easy.
 - Build trust through sourcing, reviews, hours, and location.
 
 Forbidden mistakes:
@@ -2801,7 +2823,8 @@ function attachProposalRoutingMetadata(
   executionPlan?: ExecutionPlan,
   compositionPlan?: CompositionPlan,
   domainValidation?: DomainValidationResult,
-  generatorContract?: GeneratorContract
+  generatorContract?: GeneratorContract,
+  proposalContext?: ProposalContext
 ): DiffProposal {
   const extraWarnings = intent && composition ? intentRoutingWarnings(intent, composition, prompt) : [];
   const detectedDomain = translatedIntent?.businessType ?? composition?.businessType ?? intent?.domain;
@@ -2828,10 +2851,31 @@ function attachProposalRoutingMetadata(
       blueprintPreviewType: blueprint?.previewType
     }
   });
+  const criticalRoutingReasons = routing.reasons.filter((reason) =>
+    reason.code === "welcome_ts_pollution" ||
+    reason.message.toLowerCase().includes("cross-project") ||
+    reason.message.toLowerCase().includes("another project") ||
+    reason.message.toLowerCase().includes("project isolation")
+  );
+  const routingMode: ProposalRoutingMode = criticalRoutingReasons.length > 0
+    ? "blocked"
+    : routing.mode === "blocked"
+      ? "review_required"
+      : routing.mode;
+  const routingShouldBlock = criticalRoutingReasons.length > 0;
 
   return {
     ...proposal,
-    ...compactProposalRouting(kernel, routing),
+    ...compactProposalRouting(kernel, {
+      ...routing,
+      mode: routingMode,
+      reasons: criticalRoutingReasons.length > 0 ? routing.reasons : routing.reasons.map((reason) => ({
+        ...reason,
+        severity: reason.severity === "high" ? "medium" : reason.severity
+      })),
+      shouldBlockExecution: routingShouldBlock,
+      shouldRequireExtraReview: routing.shouldRequireExtraReview || routing.mode === "blocked"
+    }),
     blueprintConfidence: blueprint?.confidence,
     blueprintId: blueprint?.blueprintId,
     blueprintKind: blueprint?.blueprintKind,
@@ -2898,6 +2942,10 @@ function attachProposalRoutingMetadata(
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
     previewDriftDetected: domainValidation ? domainValidation.detectedPreviewDrift.length > 0 : undefined,
     requiredPageCount: generatorContract?.requiredPageCount,
+    memoryIgnoredForNewProject: proposalContext?.isNewBuild,
+    sourceOfTruthDomain: proposalContext?.domain ?? proposal.sourceOfTruthDomain,
+    sourceOfTruthPages: proposalContext?.pages.length ? proposalContext.pages : proposal.sourceOfTruthPages,
+    sourceOfTruthPrompt: proposalContext?.sourcePrompt ?? proposal.sourceOfTruthPrompt,
     publicCopyCleanStatus: "clean",
     proposalRoutingMode:
       extraWarnings.length > 0 && routing.mode === "normal" ? "review_required" : routing.mode,
@@ -3174,6 +3222,7 @@ function validateProposalContent(input: {
   decomposition: TaskDecomposition;
   executionPlan: ExecutionPlan;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  proposalContext: ProposalContext;
   projectContract: ProjectContract | null;
   prompt: string;
   proposal: DiffProposal;
@@ -3186,6 +3235,7 @@ function validateProposalContent(input: {
     currentPrompt: input.prompt,
     executionPlan: input.executionPlan,
     productMode: input.productMode,
+    proposalContext: input.proposalContext,
     projectContract: input.projectContract,
     proposalSummary: input.proposal.summary,
     proposedFiles: proposedFilesFromChanges(input.proposal.changes),
@@ -3203,6 +3253,7 @@ function validateProposalQuality(input: {
   domainValidation: DomainValidationResult;
   executionPlan: ExecutionPlan;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  proposalContext: ProposalContext;
   projectContract: ProjectContract | null;
   prompt: string;
   proposal: DiffProposal;
@@ -3216,6 +3267,7 @@ function validateProposalQuality(input: {
     domainValidation: input.domainValidation,
     executionPlan: input.executionPlan,
     productMode: input.productMode,
+    proposalContext: input.proposalContext,
     projectContract: input.projectContract,
     proposedFiles: proposedFilesFromChanges(input.proposal.changes),
     proposalSummary: input.proposal.summary,
@@ -3232,6 +3284,7 @@ function validateProposalAssets(input: {
   domainValidation: DomainValidationResult;
   executionPlan: ExecutionPlan;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  proposalContext: ProposalContext;
   projectContract: ProjectContract | null;
   prompt: string;
   proposal: DiffProposal;
@@ -3246,6 +3299,7 @@ function validateProposalAssets(input: {
     domainValidation: input.domainValidation,
     executionPlan: input.executionPlan,
     productMode: input.productMode,
+    proposalContext: input.proposalContext,
     projectContract: input.projectContract,
     proposalQuality: input.proposalQuality,
     proposalSummary: input.proposal.summary,
@@ -3368,6 +3422,7 @@ function evaluateAndRepairProposal(input: {
   executionPlan: ExecutionPlan;
   generatorContract: GeneratorContract;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  proposalContext: ProposalContext;
   projectContract: ProjectContract | null;
   prompt: string;
   proposal: DiffProposal;
@@ -3380,6 +3435,7 @@ function evaluateAndRepairProposal(input: {
     decomposition: input.decomposition,
     executionPlan: input.executionPlan,
     productMode: input.productMode,
+    proposalContext: input.proposalContext,
     projectContract: input.projectContract,
     prompt: input.prompt,
     proposal: input.proposal,
@@ -3394,6 +3450,7 @@ function evaluateAndRepairProposal(input: {
     domainValidation,
     executionPlan: input.executionPlan,
     productMode: input.productMode,
+    proposalContext: input.proposalContext,
     projectContract: input.projectContract,
     prompt: input.prompt,
     proposal: proposalWithValidation,
@@ -3408,6 +3465,7 @@ function evaluateAndRepairProposal(input: {
     domainValidation,
     executionPlan: input.executionPlan,
     productMode: input.productMode,
+    proposalContext: input.proposalContext,
     projectContract: input.projectContract,
     prompt: input.prompt,
     proposal: proposalWithQuality,
@@ -3425,6 +3483,7 @@ function evaluateAndRepairProposal(input: {
     executionPlan: input.executionPlan,
     generatorContract: input.generatorContract,
     productMode: input.productMode,
+    proposalContext: input.proposalContext,
     projectContract: input.projectContract,
     proposalQuality,
     proposalSummary: proposalWithAssets.summary,
@@ -3492,13 +3551,15 @@ function enforcePromptSovereignty(input: {
   decision: DecisionPlan;
   intent: IntentIntelligence;
   prompt: string;
+  proposalContext?: ProposalContext;
   proposal: DiffProposal;
 }) {
   const contract = buildPromptSovereigntyContract({
     composition: input.composition,
     decision: input.decision,
     intent: input.intent,
-    prompt: input.prompt
+    prompt: input.prompt,
+    proposalContext: input.proposalContext
   });
   const acceptance = validatePromptSovereignty({
     changes: input.proposal.changes,
@@ -3625,6 +3686,7 @@ async function createFallbackProposalResponse(input: {
   domainValidation: DomainValidationResult;
   executionPlan: ExecutionPlan;
   generatorContract: GeneratorContract;
+  proposalContext: ProposalContext;
   workspace: WorkspaceContext;
 }) {
   const proposal = createLocalProposal(
@@ -3635,7 +3697,8 @@ async function createFallbackProposalResponse(input: {
     input.decision,
     input.intent,
     input.composition,
-    input.generatorContract
+    input.generatorContract,
+    input.proposalContext
   );
   const proposalWithIntent = addCompositionDebugSummary(
     withProjectContractUpdate({
@@ -3658,6 +3721,7 @@ async function createFallbackProposalResponse(input: {
     decision: input.decision,
     intent: input.intent,
     prompt: input.prompt,
+    proposalContext: input.proposalContext,
     proposal: attachProposalRoutingMetadata(
       proposalWithIntent,
       input.kernel,
@@ -3672,7 +3736,8 @@ async function createFallbackProposalResponse(input: {
       input.executionPlan,
       input.compositionPlan,
       input.domainValidation,
-      input.generatorContract
+      input.generatorContract,
+      input.proposalContext
     )
   });
   const evaluatedProposal = evaluateAndRepairProposal({
@@ -3683,6 +3748,7 @@ async function createFallbackProposalResponse(input: {
     executionPlan: input.executionPlan,
     productMode: input.contextPriority.authoritativeMode,
     generatorContract: input.generatorContract,
+    proposalContext: input.proposalContext,
     projectContract: input.projectContract,
     prompt: input.prompt,
     proposal: proposalWithRouting,
@@ -3884,19 +3950,21 @@ export async function POST(request: Request) {
   const projectContract = readProjectContractFromWorkspace(workspace);
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const effectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
-  const shouldIgnoreContractForPrompt =
-    (productMode === "WEBSITE" && /\b(?:build|create|generate|design|make)\b[\s\S]{0,80}\b(?:website|site|web page|landing page)\b/i.test(effectiveUserPrompt)) ||
-    (productMode === "CODE" && /\b(?:build|create|generate|make)\b[\s\S]{0,120}\b(?:app|crm|dashboard|system|tool)\b/i.test(effectiveUserPrompt));
-  const projectContractContext = shouldIgnoreContractForPrompt
+  const promptOwnership = decidePromptOwnership({
+    mode: productMode,
+    prompt: effectiveUserPrompt
+  });
+  const activeProjectContract = promptOwnership.useContractMemory ? projectContract : null;
+  const projectContractContext = promptOwnership.useCurrentPromptOnly
     ? "HASSALI.md exists, but this is a new generation request. Ignore stale contract facts unless the user explicitly says continue/refine/edit the existing project."
     : projectContractSystemContext(projectContract);
   const translatedIntent = translateIntent({
-    contract: shouldIgnoreContractForPrompt ? null : projectContract,
+    contract: activeProjectContract,
     mode: productMode,
     prompt: effectiveUserPrompt
   });
   const blueprint = matchBusinessBlueprint({
-    contract: projectContract,
+    contract: activeProjectContract,
     productMode,
     prompt: effectiveUserPrompt,
     translatedIntent
@@ -3907,7 +3975,7 @@ export async function POST(request: Request) {
     fallbackDefaults: ["approval-first", "selected-project-only", "no shell execution", "no package installs"],
     previousProposalContext: null,
     productMode,
-    projectContract,
+    projectContract: activeProjectContract,
     regenerationContext: latestUserPrompt.includes("Previous proposal was blocked") ? latestUserPrompt : null,
     translatedIntent,
     workspaceContextSummary: `${workspace.fileList.length} file(s); active=${workspace.activePath}; project=${workspace.projectName ?? "unknown"}`
@@ -3917,7 +3985,7 @@ export async function POST(request: Request) {
     contextPriority,
     currentPrompt: effectiveUserPrompt,
     productMode,
-    projectContract,
+    projectContract: activeProjectContract,
     translatedIntent
   });
   const executionPlan = buildExecutionPlan({
@@ -3925,7 +3993,7 @@ export async function POST(request: Request) {
     contextPriority,
     currentPrompt: effectiveUserPrompt,
     productMode,
-    projectContract,
+    projectContract: activeProjectContract,
     taskDecomposition: decomposition,
     translatedIntent
   });
@@ -3935,7 +4003,7 @@ export async function POST(request: Request) {
     currentPrompt: effectiveUserPrompt,
     executionPlan,
     productMode,
-    projectContract,
+    projectContract: activeProjectContract,
     taskDecomposition: decomposition,
     translatedIntent
   });
@@ -3946,12 +4014,12 @@ export async function POST(request: Request) {
     currentPrompt: effectiveUserPrompt,
     executionPlan,
     productMode,
-    projectContract,
+    projectContract: activeProjectContract,
     taskDecomposition: decomposition,
     translatedIntent,
     validationMode: "pre_proposal_context"
   });
-  const generatorContract = buildGeneratorContract({
+  const initialGeneratorContract = buildGeneratorContract({
     businessBlueprint: blueprint,
     compositionPlan,
     contextPriority,
@@ -3959,10 +4027,21 @@ export async function POST(request: Request) {
     domainValidation,
     executionPlan,
     productMode,
-    projectContract,
+    projectContract: activeProjectContract,
     taskDecomposition: decomposition,
     translatedIntent
   });
+  const proposalContext = buildProposalContext({
+    contract: activeProjectContract,
+    generatorContract: initialGeneratorContract,
+    mode: productMode,
+    prompt: effectiveUserPrompt,
+    translatedIntent
+  });
+  const generatorContract = enforceGeneratorContractWithProposalContext(
+    initialGeneratorContract,
+    proposalContext
+  );
 
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
@@ -4059,7 +4138,7 @@ export async function POST(request: Request) {
 
   if (mode === "ASK") {
     const hassaliPromptAnswer = createHassaliReadyPromptAnswer({
-      projectContract,
+      projectContract: activeProjectContract,
       prompt: effectiveUserPrompt,
       translatedIntent
     });
@@ -4141,11 +4220,12 @@ export async function POST(request: Request) {
       decision,
       intent,
       composition,
-      generatorContract
+      generatorContract,
+      proposalContext
     );
     const proposalWithContract = withProjectContractUpdate({
       composition,
-      contract: projectContract,
+      contract: activeProjectContract,
       decision,
       generatorContract,
       intent,
@@ -4159,6 +4239,7 @@ export async function POST(request: Request) {
       decision,
       intent,
       prompt: effectiveUserPrompt,
+      proposalContext,
       proposal: attachProposalRoutingMetadata(
         addCompositionDebugSummary(
           proposalWithContract,
@@ -4178,7 +4259,8 @@ export async function POST(request: Request) {
         executionPlan,
         compositionPlan,
         domainValidation,
-        generatorContract
+        generatorContract,
+        proposalContext
       )
     });
     const evaluatedProposal = evaluateAndRepairProposal({
@@ -4189,7 +4271,8 @@ export async function POST(request: Request) {
       executionPlan,
       productMode,
       generatorContract,
-      projectContract,
+      proposalContext,
+      projectContract: activeProjectContract,
       prompt: effectiveUserPrompt,
       proposal: routedProposal,
       translatedIntent
@@ -4305,7 +4388,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
-        projectContract,
+        projectContract: activeProjectContract,
         reason: "openrouter_network_error",
         routing,
         translatedIntent,
@@ -4316,6 +4399,7 @@ export async function POST(request: Request) {
         domainValidation,
         executionPlan,
         generatorContract,
+        proposalContext,
         workspace
       });
     }
@@ -4331,7 +4415,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
-        projectContract,
+        projectContract: activeProjectContract,
         reason: `openrouter_${response.status}`,
         routing,
         translatedIntent,
@@ -4342,6 +4426,7 @@ export async function POST(request: Request) {
         domainValidation,
         executionPlan,
         generatorContract,
+        proposalContext,
         workspace
       });
     }
@@ -4374,7 +4459,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
-        projectContract,
+        projectContract: activeProjectContract,
         reason: "invalid_or_empty_model_proposal",
         routing,
         translatedIntent,
@@ -4385,6 +4470,7 @@ export async function POST(request: Request) {
         domainValidation,
         executionPlan,
         generatorContract,
+        proposalContext,
         workspace
       });
     }
@@ -4394,10 +4480,11 @@ export async function POST(request: Request) {
       decision,
       intent,
       prompt: effectiveUserPrompt,
+      proposalContext,
       proposal: attachProposalRoutingMetadata(
         addCompositionDebugSummary(withProjectContractUpdate({
           composition,
-          contract: projectContract,
+          contract: activeProjectContract,
           decision,
           generatorContract,
           intent,
@@ -4446,7 +4533,8 @@ export async function POST(request: Request) {
         executionPlan,
         compositionPlan,
         domainValidation,
-        generatorContract
+        generatorContract,
+        proposalContext
       )
     });
     const evaluatedProposal = evaluateAndRepairProposal({
@@ -4457,7 +4545,8 @@ export async function POST(request: Request) {
       executionPlan,
       productMode,
       generatorContract,
-      projectContract,
+      proposalContext,
+      projectContract: activeProjectContract,
       prompt: effectiveUserPrompt,
       proposal: routedProposal,
       translatedIntent
@@ -4479,7 +4568,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
-        projectContract,
+        projectContract: activeProjectContract,
         reason: "prompt_sovereignty_repair",
         routing,
         translatedIntent,
@@ -4490,6 +4579,7 @@ export async function POST(request: Request) {
         domainValidation,
         executionPlan,
         generatorContract,
+        proposalContext,
         workspace
       });
     }
@@ -4513,7 +4603,7 @@ export async function POST(request: Request) {
         model,
         persistence,
         prompt: effectiveUserPrompt,
-        projectContract,
+        projectContract: activeProjectContract,
         reason: `quality_score_${quality.score}_${quality.issues.join(",")}`,
         routing,
         translatedIntent,
@@ -4524,6 +4614,7 @@ export async function POST(request: Request) {
         domainValidation,
         executionPlan,
         generatorContract,
+        proposalContext,
         workspace
       });
     }

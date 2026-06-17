@@ -5,6 +5,7 @@ import {
 } from "@/lib/server/ai/capability-domain-blueprint";
 import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
+import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 import { renderWebsitePlanFiles } from "@/lib/server/ai/website-layout-engine";
 import {
@@ -2109,6 +2110,7 @@ export function generateComposedSiteFiles(input: {
   composition: CompositionStrategy;
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
+  proposalContext?: ProposalContext;
 }): Record<string, string> {
   return generatePlannedWebsiteFiles(input).files;
 }
@@ -2117,6 +2119,7 @@ export function generatePlannedWebsiteFiles(input: {
   composition: CompositionStrategy;
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
+  proposalContext?: ProposalContext;
 }): PlannedWebsiteGeneration {
   const brandName = brandNameForIntent(input.intent, input.composition);
   const plan = planWebsite(input);

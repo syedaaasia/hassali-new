@@ -6,6 +6,7 @@ import type { DomainValidationResult } from "@/lib/server/ai/domain-validator";
 import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
+import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { ProposalQualityGateResult } from "@/lib/server/ai/proposal-quality-gate";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
@@ -53,6 +54,7 @@ type BuildProposalRepairInput = {
   executionPlan: ExecutionPlan;
   generatorContract: GeneratorContract;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  proposalContext?: ProposalContext;
   projectContract: ProjectContract | null;
   proposalQuality: ProposalQualityGateResult;
   proposedFiles: Record<string, string>;
@@ -261,9 +263,9 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
   const reasons = blockReasons(input);
   const needsRepair =
     input.domainValidation.shouldBlockProposal ||
-    input.proposalQuality.qualityStatus !== "passed" ||
-    input.assetVisualValidation.visualValidationStatus !== "passed" ||
-    input.generatorContract.contractStatus === "blocked";
+    input.proposalQuality.approvalDisabled ||
+    input.assetVisualValidation.shouldBlockVisualApproval ||
+    input.generatorContract.contractBlocks.length > 0;
 
   if (!needsRepair) {
     return {
@@ -370,8 +372,12 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
     repairedFiles[path] = nextContent;
   }
 
-  if (input.generatorContract.generatorMode === "website_generation" && input.generatorContract.requiredPages.length > 0) {
-    for (const page of input.generatorContract.requiredPages) {
+  const requiredPages = input.proposalContext?.pages.length
+    ? input.proposalContext.pages
+    : input.generatorContract.requiredPages;
+
+  if (input.generatorContract.generatorMode === "website_generation" && requiredPages.length > 0) {
+    for (const page of requiredPages) {
       const path = pageToPath(page);
       if (!repairedFiles[path]) {
         strategies.push("page_count_repair");

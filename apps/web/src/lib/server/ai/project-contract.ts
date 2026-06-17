@@ -225,7 +225,11 @@ export function buildUpdatedProjectContract(input: {
       `Preview: ${previewType}`,
       ...(input.generatorContract?.requiredPages.length ? [`Source-of-truth pages: ${input.generatorContract.requiredPages.join(", ")}`] : []),
       ...(input.generatorContract ? [`Generator contract: ${input.generatorContract.contractId}`] : []),
-      ...(input.decision.requiredFiles.length ? [`Required files: ${input.decision.requiredFiles.join(", ")}`] : [])
+      ...(input.generatorContract?.requiredFileStrategy.length
+        ? [`Required files: ${input.generatorContract.requiredFileStrategy.join(", ")}`]
+        : input.decision.requiredFiles.length
+          ? [`Required files: ${input.decision.requiredFiles.join(", ")}`]
+          : [])
     ]).slice(0, 10),
     previewType,
     projectType: mode

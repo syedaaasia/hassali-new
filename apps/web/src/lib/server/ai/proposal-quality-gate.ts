@@ -4,6 +4,7 @@ import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-eng
 import type { DomainValidationResult } from "@/lib/server/ai/domain-validator";
 import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
+import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
 
@@ -61,6 +62,7 @@ type BuildProposalQualityGateInput = {
   domainValidation: DomainValidationResult;
   executionPlan: ExecutionPlan;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  proposalContext?: ProposalContext;
   projectContract: ProjectContract | null;
   proposedFiles?: Record<string, string>;
   proposalSummary?: string;
@@ -121,6 +123,9 @@ function issue(input: {
 function expectedPageRoutes(input: BuildProposalQualityGateInput) {
   if (input.contextPriority.authoritativeMode !== "WEBSITE") return [];
   if (input.contextPriority.authoritativeIntentFamily === "targeted_text_replacement") return [];
+  if (input.proposalContext?.requiredFiles.length) {
+    return unique(input.proposalContext.requiredFiles.filter((path) => path.endsWith(".html")));
+  }
 
   return unique(input.compositionPlan.pagePlans.map((page) => page.route));
 }
@@ -223,7 +228,7 @@ function statusFor(input: {
   qualityScore: number;
   warnings: ProposalQualityIssue[];
 }): ProposalQualityStatus {
-  if (input.blocks.length > 0 || input.qualityScore < 45) return "blocked";
+  if (input.blocks.length > 0) return "blocked";
   if (input.failures.length > 0 || input.qualityScore < 70) return "review_required";
   if (input.warnings.length > 0 || input.qualityScore < 85) return "warning";
 
@@ -349,8 +354,13 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
       ? sectionTerms(input.compositionPlan).filter((section) => !includesAny(visibleContent, [section]))
       : [];
   const missingEntities = entityTerms(input).filter((entity) => !includesAny(content, [entity]));
+  const hasRunnableCodeSource = mode === "CODE" && fileNames.some((path) =>
+    path === "vite.config.ts" ||
+    path === "vite.config.js" ||
+    path.startsWith("src/")
+  );
   const missingModules =
-    mode === "CODE"
+    mode === "CODE" && !hasRunnableCodeSource
       ? moduleTerms(input).filter((module) => !includesAny(content, [module]))
       : [];
   const missingTrustSignals =
@@ -364,13 +374,13 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
   const missingFooter = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/<footer\b|\bfooter\b/i.test(visibleContent);
 
   if (missingPages.length > 0) {
-    failures.push(issue({
+    blocks.push(issue({
       category: "completeness",
       evidence: missingPages.join(", "),
       id: "missing_pages",
       message: "Proposal is missing required page files.",
-      repairHint: "Generate every route requested by the composition plan.",
-      severity: "failure"
+      repairHint: "Generate every route required by the canonical proposal context.",
+      severity: "block"
     }));
   }
 

@@ -4,6 +4,7 @@ import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-eng
 import type { DomainValidationResult } from "@/lib/server/ai/domain-validator";
 import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
+import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { ProposalQualityGateResult } from "@/lib/server/ai/proposal-quality-gate";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
@@ -56,6 +57,7 @@ type BuildAssetVisualValidationInput = {
   domainValidation: DomainValidationResult;
   executionPlan: ExecutionPlan;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  proposalContext?: ProposalContext;
   projectContract: ProjectContract | null;
   proposalQuality: ProposalQualityGateResult;
   proposalSummary?: string;
@@ -75,7 +77,7 @@ const profiles: Record<string, AssetProfile> = {
     blocked: ["dental", "furniture catalog", "TV", "shoe", "CRM dashboard", "clinic"]
   },
   crm: {
-    allowed: ["dashboard", "analytics", "charts", "pipeline", "contacts", "workflow", "automation", "table UI", "business UI"],
+    allowed: ["CRM dashboard preview", "customer table", "billing panel", "pipeline board", "metric cards", "activity feed", "dashboard", "analytics", "charts", "pipeline", "contacts", "workflow", "automation", "table UI", "business UI"],
     blocked: ["dentist", "furniture product", "sofa", "chair", "table", "cupboard", "coffee", "flowers", "TV products", "shoe", "food"]
   },
   dental: {
@@ -128,7 +130,10 @@ function contentFromFiles(files?: Record<string, string>) {
 }
 
 function profileFor(domain: string | null): AssetProfile {
+  const normalizedDomain = domain ? normalize(domain) : null;
   if (domain && profiles[domain]) return profiles[domain];
+  if (normalizedDomain?.includes("crm")) return profiles.crm;
+  if (normalizedDomain?.includes("restaurant") || normalizedDomain?.includes("seafood")) return profiles.restaurant;
 
   return {
     allowed: ["domain-specific visual", "brand-relevant icon", "service visual"],
@@ -221,7 +226,7 @@ function statusFor(input: {
   score: number;
   warnings: AssetVisualIssue[];
 }): AssetVisualValidationStatus {
-  if (input.blocks.length > 0 || input.score < 45) return "blocked";
+  if (input.blocks.length > 0) return "blocked";
   if (input.failures.length > 0 || input.score < 70) return "review_required";
   if (input.warnings.length > 0 || input.score < 85) return "warning";
 
@@ -232,9 +237,11 @@ export function validateAssetVisuals(input: BuildAssetVisualValidationInput): As
   const mode = input.contextPriority.authoritativeMode;
   const intentFamily = input.contextPriority.authoritativeIntentFamily;
   const files = input.proposedFiles ?? {};
-  const content = [input.currentPrompt, input.proposalSummary ?? "", contentFromFiles(files)].join("\n");
+  const content = Object.keys(files).length > 0
+    ? [input.proposalSummary ?? "", contentFromFiles(files)].join("\n")
+    : input.currentPrompt;
   const snippets = visualSnippets(content);
-  const profile = profileFor(input.contextPriority.authoritativeDomain);
+  const profile = profileFor(input.proposalContext?.domain ?? input.contextPriority.authoritativeDomain);
   const expectedVisualSignals = visualIntentSignals(input, profile);
   const blockedAssetCategories = unique(profile.blocked);
   const allowedAssetCategories = unique(profile.allowed);

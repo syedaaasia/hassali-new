@@ -114,7 +114,7 @@ export type DiffProposal = {
   domainConfidence?: number;
   domainSource?: "current_user_prompt" | "existing_project" | "inferred" | "unknown";
   domainValidationScore?: number;
-  domainValidationSeverity?: "high" | "low" | "medium";
+  domainValidationSeverity?: "critical" | "major" | "minor";
   domainValidationStatus?: "blocked" | "passed" | "review_required";
   executionMode?: "ASK" | "CODE" | "WEBSITE";
   executionPlanId?: string;
@@ -581,9 +581,9 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     (typeof proposal.domainValidationScore === "undefined" ||
       typeof proposal.domainValidationScore === "number") &&
     (typeof proposal.domainValidationSeverity === "undefined" ||
-      proposal.domainValidationSeverity === "high" ||
-      proposal.domainValidationSeverity === "low" ||
-      proposal.domainValidationSeverity === "medium") &&
+      proposal.domainValidationSeverity === "critical" ||
+      proposal.domainValidationSeverity === "major" ||
+      proposal.domainValidationSeverity === "minor") &&
     (typeof proposal.domainValidationStatus === "undefined" ||
       proposal.domainValidationStatus === "blocked" ||
       proposal.domainValidationStatus === "passed" ||
