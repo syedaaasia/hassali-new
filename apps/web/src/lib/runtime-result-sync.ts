@@ -9,6 +9,7 @@ export type RuntimeProposalChange = {
 };
 
 export type RuntimeApprovalResponse = {
+  applied?: boolean;
   appliedSteps?: string[];
   backendExecutionRuntime?: {
     apiStatus: "candidate" | "failed" | "running";
@@ -41,6 +42,11 @@ export type RuntimeApprovalResponse = {
   requestedWorkerType?: string;
   runnerId?: string | null;
   runnerStatus?: string;
+  runtimeOptional?: boolean;
+  runtimeStartAttempted?: boolean;
+  runtimeStartError?: string | null;
+  runtimeStartStatus?: "blocked" | "failed" | "not_started" | "planned" | "running" | "stopped";
+  runtimeWarning?: string | null;
   selectedWorkerType?: string | null;
   skippedSteps?: string[];
   snapshot?: {
@@ -96,6 +102,8 @@ export type RuntimeApprovalResponse = {
     startedAt: string | null;
     workspaceRoot: string;
   } | null;
+  ok?: boolean;
+  previewMetadata?: Record<string, unknown> | null;
   mobileRuntime?: {
     candidateCommands: string[];
     capabilities: string[];
@@ -115,6 +123,7 @@ export type RuntimeApprovalResponse = {
   workspaceCreated?: boolean;
   workspaceRoot?: string;
   workspaceWarnings?: string[];
+  verificationOk?: boolean | null;
   writtenFiles?: string[];
 };
 
@@ -126,6 +135,10 @@ export type RuntimeSyncedFile = {
 export type RuntimeSyncMetadata = {
   runtimeRunnerId?: string | null;
   runtimeRunnerStatus?: string | null;
+  runtimeStartAttempted?: boolean;
+  runtimeStartError?: string | null;
+  runtimeStartStatus?: string | null;
+  runtimeWarning?: string | null;
   runtimeNextPreviewUrl?: string | null;
   runtimeNextRouterKind?: string | null;
   runtimeNextStatus?: string | null;
@@ -188,6 +201,7 @@ function normalizePath(value: unknown) {
     .trim()
     .replace(/\\/g, "/")
     .replace(/\/+/g, "/")
+    .replace(/^(?:\.\/)+/, "")
     .replace(/^\/+/, "")
     .replace(/\/+$/, "");
 
@@ -227,6 +241,10 @@ export function syncRuntimeApprovalResult(
 
   if (input.runtimeResult?.runnerStatus === "failed" || input.runtimeResult?.verification?.ok === false) {
     errors.push("Runtime approval did not complete verification.");
+  }
+
+  if (input.runtimeResult?.runtimeWarning) {
+    warnings.push(input.runtimeResult.runtimeWarning);
   }
 
   const writtenFileSet = new Set(uniqueRuntimeWrittenFiles);
@@ -277,6 +295,10 @@ export function syncRuntimeApprovalResult(
     liveRuntimePreviewSyncedAt: input.runtimeResult?.liveRuntimePreview?.liveRuntimePreviewSyncedAt ?? null,
     runtimeRunnerId: input.runtimeResult?.runnerId ?? null,
     runtimeRunnerStatus: input.runtimeResult?.runnerStatus ?? null,
+    runtimeStartAttempted: input.runtimeResult?.runtimeStartAttempted ?? false,
+    runtimeStartError: input.runtimeResult?.runtimeStartError ?? null,
+    runtimeStartStatus: input.runtimeResult?.runtimeStartStatus ?? null,
+    runtimeWarning: input.runtimeResult?.runtimeWarning ?? null,
     runtimeNextPreviewUrl: input.runtimeResult?.nextRuntime?.previewUrl ?? null,
     runtimeNextRouterKind: input.runtimeResult?.nextRuntime?.routerKind ?? null,
     runtimeNextStatus: input.runtimeResult?.nextRuntime?.runtimeStatus ?? null,

@@ -40,7 +40,14 @@ export type RuntimeApprovalValidationResult =
     };
 
 const supportedWriteActions = new Set(["create", "modify", "update", "write_file"]);
-const metadataActions = new Set(["reload_preview", "restart_preview", "restart_runtime", "stop_runtime"]);
+const metadataActions = new Set([
+  "reload_preview",
+  "restart_preview",
+  "restart_runtime",
+  "run_dev_server",
+  "start_runtime",
+  "stop_runtime"
+]);
 const blockedDeleteActions = new Set(["delete", "remove", "unlink"]);
 
 function normalizeChangePath(value: unknown) {
@@ -52,6 +59,7 @@ function normalizeChangePath(value: unknown) {
     .trim()
     .replace(/\\/g, "/")
     .replace(/\/+/g, "/")
+    .replace(/^(?:\.\/)+/, "")
     .replace(/^\/+/, "");
 
   if (!normalized || isAbsolute(value)) {
@@ -77,7 +85,7 @@ function packageOrShellBlocked(summary: string) {
     return blocked("package_install_blocked", "Package installation is blocked for runtime approval.");
   }
 
-  if (/shell|terminal|bash|powershell|cmd\.exe/i.test(summary)) {
+  if (/\b(?:shell|terminal|bash|powershell|cmd\.exe)\b/i.test(summary)) {
     return blocked("shell_command_blocked", "Shell command execution is blocked for runtime approval.");
   }
 
@@ -88,24 +96,17 @@ function changeToStep(
   change: RuntimeApprovalChange,
   index: number
 ): {
+  runtimeWarning: string | null;
   blockedReasons: RuntimeBlockedReason[];
   skipped: string | null;
   step: ApprovedExecutionStep | null;
 } {
   const action = typeof change.action === "string" ? change.action.trim().toLowerCase() : "";
   const summary = typeof change.summary === "string" ? change.summary : `Approved proposal change ${index + 1}`;
-  const summaryBlock = packageOrShellBlocked(summary);
-
-  if (summaryBlock) {
-    return {
-      blockedReasons: [summaryBlock],
-      skipped: null,
-      step: null
-    };
-  }
 
   if (blockedDeleteActions.has(action)) {
     return {
+      runtimeWarning: null,
       blockedReasons: [blocked("write_not_allowed", "Delete actions are blocked in this runtime approval phase.")],
       skipped: null,
       step: null
@@ -115,18 +116,26 @@ function changeToStep(
   if (metadataActions.has(action)) {
     return {
       blockedReasons: [],
+      runtimeWarning: `Runtime action '${action}' was recorded as optional preview metadata and was not executed during file approval.`,
       skipped: summary,
-      step: {
-        approved: true,
-        id: `runtime-metadata-${index}`,
-        summary,
-        tool: "restart_preview"
-      }
+      step: null
+    };
+  }
+
+  const summaryBlock = packageOrShellBlocked(summary);
+
+  if (summaryBlock) {
+    return {
+      runtimeWarning: null,
+      blockedReasons: [summaryBlock],
+      skipped: null,
+      step: null
     };
   }
 
   if (!supportedWriteActions.has(action)) {
     return {
+      runtimeWarning: null,
       blockedReasons: [blocked("unknown_tool", `Unsupported proposal action '${action || "unknown"}'.`)],
       skipped: null,
       step: null
@@ -137,6 +146,7 @@ function changeToStep(
 
   if (!path) {
     return {
+      runtimeWarning: null,
       blockedReasons: [blocked("unsafe_path", "A safe relative file path is required.")],
       skipped: null,
       step: null
@@ -145,6 +155,7 @@ function changeToStep(
 
   if (typeof change.proposedContent !== "string") {
     return {
+      runtimeWarning: null,
       blockedReasons: [blocked("write_not_allowed", `Approved change for '${path}' is missing proposedContent.`)],
       skipped: null,
       step: null
@@ -155,6 +166,7 @@ function changeToStep(
 
   return {
     blockedReasons: [],
+    runtimeWarning: null,
     skipped: null,
     step: {
       approved: true,
@@ -175,12 +187,17 @@ export function buildApprovedPlanFromProposal(input: {
 }) {
   const steps: ApprovedExecutionStep[] = [];
   const blockedReasons: RuntimeBlockedReason[] = [];
+  const runtimeWarnings: string[] = [];
   const skippedSummaries: string[] = [];
 
   input.changes.forEach((change, index) => {
     const converted = changeToStep(change, index);
 
     blockedReasons.push(...converted.blockedReasons);
+
+    if (converted.runtimeWarning) {
+      runtimeWarnings.push(converted.runtimeWarning);
+    }
 
     if (converted.skipped) {
       skippedSummaries.push(converted.skipped);
@@ -205,6 +222,7 @@ export function buildApprovedPlanFromProposal(input: {
   return {
     blockedReasons,
     plan,
+    runtimeWarnings,
     skippedSummaries
   };
 }

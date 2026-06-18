@@ -1189,6 +1189,9 @@ function sectionCopy(section: string, composition: CompositionStrategy) {
   const category = blueprint.productCategory;
   const isCoffeeDomain = blueprint.domainLabel.includes("coffee");
   const isDentalDomain = blueprint.domainLabel.includes("dentist");
+  const isRestaurantDomain = blueprint.domainLabel.includes("restaurant") ||
+    composition.businessType.toLowerCase().includes("restaurant") ||
+    composition.businessType.toLowerCase().includes("seafood");
 
   if (sectionText === "hero") {
     if (isCoffeeDomain) {
@@ -1202,6 +1205,13 @@ function sectionCopy(section: string, composition: CompositionStrategy) {
       return {
         body: "Lead with calm dental care, appointment booking, experienced dentists, hygiene standards, and treatment clarity for families and new patients.",
         title: "Premium dental care for confident smiles"
+      };
+    }
+
+    if (isRestaurantDomain) {
+      return {
+        body: "Open with fresh coastal seafood, chef-led specials, waterfront atmosphere, and an easy path to reserve a table.",
+        title: "Fresh coastal dining with a polished first impression"
       };
     }
 
@@ -1382,6 +1392,43 @@ function sectionCopy(section: string, composition: CompositionStrategy) {
     };
   }
 
+  if (isRestaurantDomain) {
+    if (sectionText.includes("menu") || sectionText.includes("dish") || sectionText.includes("special") || sectionText.includes("catch")) {
+      return {
+        body: "Present oysters, grilled fish, lobster, shellfish, seasonal catch, and chef specials with clear pricing and appetite-led descriptions.",
+        title: "Seasonal seafood dishes prepared for the table"
+      };
+    }
+
+    if (sectionText.includes("reservation") || sectionText.includes("cta") || sectionText.includes("booking")) {
+      return {
+        body: "Give guests a confident next step with dinner seating, private dining, and tonight's fresh catch framed naturally.",
+        title: "Reserve a table for tonight's fresh catch"
+      };
+    }
+
+    if (sectionText.includes("gallery") || sectionText.includes("ambience") || sectionText.includes("atmosphere")) {
+      return {
+        body: "Show plated seafood, warm dining-room details, coastal lighting, and celebration moments without pretending uploads are available.",
+        title: "A glimpse of the food and waterfront mood"
+      };
+    }
+
+    if (sectionText.includes("location") || sectionText.includes("contact") || sectionText.includes("visit")) {
+      return {
+        body: "Make hours, location, contact details, and reservation paths easy to scan for guests planning a visit.",
+        title: "Visit us by the waterfront"
+      };
+    }
+
+    if (sectionText.includes("about") || sectionText.includes("story") || sectionText.includes("chef") || sectionText.includes("sourcing")) {
+      return {
+        body: "Share the chef's sourcing standards, local seafood relationships, sustainability notes, and the restaurant's coastal story.",
+        title: "A seafood kitchen shaped by sourcing and craft"
+      };
+    }
+  }
+
   if (sectionText.includes("store") || sectionText.includes("visit")) {
     return {
       body: `Guide ${escapeHtml(audience)} toward the shop, opening hours, contact, and the next friendly step.`,
@@ -1429,6 +1476,13 @@ function heroCopyForComposition(input: {
     return {
       body: "Bouquets, bridal florals, event styling, and thoughtful delivery arranged with warm editorial care.",
       title: `${input.brandName} creates floral moments that feel personal.`
+    };
+  }
+
+  if (label.includes("restaurant") || label.includes("seafood")) {
+    return {
+      body: "Fresh catch specials, coastal dining-room warmth, chef-led seafood, and a simple path to reserve a table.",
+      title: `${input.brandName} serves polished coastal seafood for memorable nights.`
     };
   }
 
@@ -1536,6 +1590,14 @@ function visualPlaceholder(input: {
     };
   }
 
+  if (label.includes("restaurant") || label.includes("seafood")) {
+    const labels = ["Chef's coastal platter", "Fresh catch table", "Waterfront dining"];
+    return {
+      className: "visual-warm-service",
+      label: labels[input.index % labels.length]
+    };
+  }
+
   if (label.includes("bicycle")) {
     const labels = ["Cycling wall", "Tune-up lane", "Ride fitting"];
     return {
@@ -1614,6 +1676,9 @@ function renderComposedPage(input: {
   });
   const primaryCta = input.composition.contentStrategy.ctaStrategy[0] ?? "Contact us";
   const layoutClass = layoutClassForComposition(input.composition);
+  const ctaPage = input.composition.siteArchitecture.pages.includes("contact")
+    ? "contact"
+    : (input.composition.siteArchitecture.pages[input.composition.siteArchitecture.pages.length - 1] ?? "contact");
   const heroVisual = visualPlaceholder({
     blueprintLabel: blueprint.domainLabel,
     index: 0,
@@ -1642,7 +1707,7 @@ function renderComposedPage(input: {
           <p class="eyebrow">${escapeHtml(blueprint.domainLabel)} / ${escapeHtml(blueprint.productCategory)}</p>
           <h1>${escapeHtml(heroCopy.title)}</h1>
           <p class="lede">${escapeHtml(heroCopy.body)}</p>
-          <a class="button" href="./${pageToPath(input.composition.siteArchitecture.pages.includes("contact") ? "contact" : input.composition.siteArchitecture.pages[input.composition.siteArchitecture.pages.length - 1] ?? "contact")}">${escapeHtml(primaryCta)}</a>
+          <a class="button" href="./${pageToPath(ctaPage)}">${escapeHtml(primaryCta)}</a>
         </div>
         <figure class="hero-visual glass-card">
           ${visualAssetMarkup({
@@ -2127,6 +2192,24 @@ export function generatePlannedWebsiteFiles(input: {
     brandName,
     plan
   });
+  plannedFiles["HASSALI.md"] = [
+    "# HASSALI.md",
+    "",
+    "Project contract owned by Hassali.ai.",
+    "",
+    `projectType: WEBSITE`,
+    `current domain/business: ${plan.sourceOfTruthDomain ?? plan.industry}`,
+    `brand/app/site name: ${brandName}`,
+    `previewType: website`,
+    `pages: ${plan.pages.join(", ")}`,
+    `designTokenTheme: ${plan.designTokenTheme}`,
+    "",
+    "Do-not rules:",
+    "- Do not override the current prompt with stale project memory.",
+    "- Do not add pages outside the source-of-truth page list.",
+    "- Do not mix unrelated domains into public copy.",
+    "- Keep static preview files local and approval-first."
+  ].join("\n");
   const validation = validateWebsitePlanAndFiles({
     files: plannedFiles,
     plan

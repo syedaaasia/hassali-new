@@ -11,6 +11,11 @@ import {
   formatAskRuntimeContext
 } from "@/lib/server/ai/ask-context";
 import {
+  applyApprovalDecision,
+  buildApprovalDecision,
+  type ApprovalDecision
+} from "@/lib/server/ai/approval-authority";
+import {
   validateAssetVisuals,
   type AssetVisualValidationResult
 } from "@/lib/server/ai/asset-visual-validator";
@@ -65,6 +70,8 @@ import {
   summarizeGeneratorContract,
   type GeneratorContract
 } from "@/lib/server/ai/generator-contract";
+import { createHassaliIdentityAnswer } from "@/lib/server/ai/hassali-identity";
+import { routeLiveKnowledgeQuestion } from "@/lib/server/ai/live-knowledge-router";
 import {
   buildProposalContext,
   decidePromptOwnership,
@@ -154,8 +161,8 @@ type ChatPersistenceContext = {
   userId: string;
 };
 
-type FileProposalAction = "create" | "update";
-type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "stop_runtime";
+type FileProposalAction = "create" | "modify" | "update" | "write_file";
+type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "run_dev_server" | "start_runtime" | "stop_runtime";
 type ProposalAction = FileProposalAction | RuntimeProposalAction;
 
 type ProposalChange = {
@@ -262,6 +269,8 @@ type DiffProposal = {
   previewDriftDetected?: boolean;
   requiredPageCount?: number | null;
   heroAssetMismatch?: boolean;
+  approvalDecision?: ApprovalDecision;
+  approvalDisabled?: boolean;
   approvalRecommendation?: "approve" | "reject" | "review";
   completenessScore?: number;
   contentScore?: number;
@@ -396,7 +405,7 @@ function productModeFromRequest(value: unknown, legacyMode: AiMode): ProductMode
   return legacyMode === "SUGGEST" ? "WEBSITE" : "CODE";
 }
 
-function createDiffPreview(action: "create" | "update", path: string, proposedContent: string) {
+function createDiffPreview(action: FileProposalAction, path: string, proposedContent: string) {
   return [
     action === "create" ? `create ${path}` : `update ${path}`,
     `--- ${path}`,
@@ -406,11 +415,15 @@ function createDiffPreview(action: "create" | "update", path: string, proposedCo
 }
 
 function isRuntimeProposalAction(action: unknown): action is RuntimeProposalAction {
-  return action === "restart_runtime" || action === "reload_preview" || action === "stop_runtime";
+  return action === "restart_runtime" ||
+    action === "reload_preview" ||
+    action === "run_dev_server" ||
+    action === "start_runtime" ||
+    action === "stop_runtime";
 }
 
 function isFileProposalAction(action: unknown): action is FileProposalAction {
-  return action === "create" || action === "update";
+  return action === "create" || action === "modify" || action === "update" || action === "write_file";
 }
 
 function shouldRestartPreview(prompt: string) {
@@ -3414,6 +3427,19 @@ function applyRepairedFilesToProposal(
   };
 }
 
+function applyFinalApprovalAuthority(
+  proposal: DiffProposal,
+  proposalContext: ProposalContext
+): DiffProposal {
+  return applyApprovalDecision(
+    proposal,
+    buildApprovalDecision({
+      proposal,
+      proposalContext
+    })
+  );
+}
+
 function evaluateAndRepairProposal(input: {
   blueprint: BusinessBlueprint;
   compositionPlan: CompositionPlan;
@@ -3493,10 +3519,12 @@ function evaluateAndRepairProposal(input: {
   });
 
   if (!repair.repairApplied) {
+    const proposalWithRepair = applyProposalRepairMetadata(proposalWithAssets, repair);
+
     return {
       assetVisualValidation,
       domainValidation,
-      proposal: applyProposalRepairMetadata(proposalWithAssets, repair),
+      proposal: applyFinalApprovalAuthority(proposalWithRepair, input.proposalContext),
       proposalQuality,
       proposalRepair: repair
     };
@@ -3540,7 +3568,10 @@ function evaluateAndRepairProposal(input: {
   return {
     assetVisualValidation: repairedAssetValidation,
     domainValidation: repairedDomainValidation,
-    proposal: applyProposalRepairMetadata(repairedWithAssets, finalizedRepair),
+    proposal: applyFinalApprovalAuthority(
+      applyProposalRepairMetadata(repairedWithAssets, finalizedRepair),
+      input.proposalContext
+    ),
     proposalQuality: repairedProposalQuality,
     proposalRepair: finalizedRepair
   };
@@ -4137,6 +4168,48 @@ export async function POST(request: Request) {
   });
 
   if (mode === "ASK") {
+    const identityAnswer = createHassaliIdentityAnswer({
+      model,
+      prompt: effectiveUserPrompt
+    });
+
+    if (identityAnswer) {
+      persistence = await persistChatMessage(persistence, {
+        content: identityAnswer,
+        metadata: {
+          deterministic: true,
+          identityResponse: true,
+          intentTranslation: compactTranslatedIntent(translatedIntent),
+          model,
+          projectContract: summarizeProjectContract(projectContract)
+        },
+        role: "assistant"
+      });
+
+      return createTextStream(identityAnswer, persistence?.sessionId);
+    }
+
+    const liveKnowledgeAnswer = routeLiveKnowledgeQuestion(effectiveUserPrompt);
+
+    if (liveKnowledgeAnswer.answer) {
+      persistence = await persistChatMessage(persistence, {
+        content: liveKnowledgeAnswer.answer,
+        metadata: {
+          deterministic: true,
+          liveKnowledge: {
+            confidence: liveKnowledgeAnswer.confidence,
+            requiresLiveSearch: liveKnowledgeAnswer.requiresLiveSearch,
+            status: liveKnowledgeAnswer.status
+          },
+          model,
+          projectContract: summarizeProjectContract(projectContract)
+        },
+        role: "assistant"
+      });
+
+      return createTextStream(liveKnowledgeAnswer.answer, persistence?.sessionId);
+    }
+
     const hassaliPromptAnswer = createHassaliReadyPromptAnswer({
       projectContract: activeProjectContract,
       prompt: effectiveUserPrompt,

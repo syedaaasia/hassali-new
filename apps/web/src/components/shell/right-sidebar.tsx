@@ -4,7 +4,14 @@ import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
-import { type ChatMessage, type DiffProposal, type ProductMode, useChatStore } from "@/lib/chat-store";
+import {
+  isProposalApprovalBlocked,
+  normalizeApprovalDecision,
+  type ChatMessage,
+  type DiffProposal,
+  type ProductMode,
+  useChatStore
+} from "@/lib/chat-store";
 import {
   type RuntimeApprovalResponse,
   syncRuntimeApprovalResult
@@ -77,11 +84,15 @@ const manualReviewGuidance = [
 ];
 
 function isFileProposalAction(action: string) {
-  return action === "create" || action === "update";
+  return action === "create" || action === "modify" || action === "update" || action === "write_file";
 }
 
 function isRuntimeProposalAction(action: string) {
-  return action === "restart_runtime" || action === "reload_preview" || action === "stop_runtime";
+  return action === "restart_runtime" ||
+    action === "reload_preview" ||
+    action === "stop_runtime" ||
+    action === "start_runtime" ||
+    action === "run_dev_server";
 }
 
 function normalizeProposalPath(value: unknown) {
@@ -98,6 +109,7 @@ function normalizeProposalPath(value: unknown) {
   const normalized = rawPath
     .replace(/\\/g, "/")
     .replace(/\/+/g, "/")
+    .replace(/^(?:\.\/)+/, "")
     .replace(/^\/+/, "")
     .replace(/\/+$/, "");
 
@@ -114,8 +126,10 @@ function normalizeProposalPath(value: unknown) {
 }
 
 function validateProposalForApproval(proposal: DiffProposal, selectedProjectId: string | null) {
-  if (isBlockedProposal(proposal)) {
-    return "This proposal was marked unsafe. Reject it and ask Hassali to recreate a safer proposal.";
+  const approvalDecision = normalizeApprovalDecision(proposal);
+
+  if (approvalDecision.hasCriticalIssues) {
+    return `This proposal has critical approval issues: ${approvalDecision.criticalIssues.join("; ")}`;
   }
 
   if (proposal.changes.length === 0) {
@@ -165,7 +179,7 @@ function runtimeApprovalMessage(status: number, payload: RuntimeApprovalResponse
       .map((reason) => reason.message)
       .find((message): message is string => Boolean(message?.trim()));
 
-  return `Runtime approval failed. Backend returned ${status}: ${backendError ?? "Approved file runner rejected the proposal."} Proposal was not applied.`;
+  return `File approval failed. Backend returned ${status}: ${backendError ?? "Approved file runner rejected the proposal."}`;
 }
 
 async function approveProposalThroughRuntime(
@@ -208,17 +222,27 @@ async function approveProposalThroughRuntime(
 }
 
 function isBlockedProposal(proposal: DiffProposal) {
-  return proposal.proposalRoutingMode === "blocked" || proposal.shouldBlockExecution === true;
+  return isProposalApprovalBlocked(proposal);
 }
 
 function blockedProposalReasons(proposal: DiffProposal) {
+  const decision = normalizeApprovalDecision(proposal);
+
+  if (decision.hasCriticalIssues) {
+    return decision.criticalIssues;
+  }
+
   return (proposal.proposalRoutingReasons ?? [])
     .filter((reason) => reason.severity !== "info")
     .map((reason) => reason.message);
 }
 
 function blockedProposalWarnings(proposal: DiffProposal) {
-  return (proposal.proposalRoutingWarnings ?? []).map((warning) => warning.message);
+  const decision = normalizeApprovalDecision(proposal);
+
+  return decision.warnings.length
+    ? decision.warnings
+    : (proposal.proposalRoutingWarnings ?? []).map((warning) => warning.message);
 }
 
 function formatPromptList(items: string[], fallback: string) {
@@ -549,8 +573,6 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const sendMessage = useChatStore((state) => state.sendMessage);
   const isPreviewOpen = useRuntimeStore((state) => state.isPreviewOpen);
   const applyRuntimePayload = useRuntimeStore((state) => state.applyRuntimePayload);
-  const startPreview = useRuntimeStore((state) => state.startPreview);
-  const stopPreview = useRuntimeStore((state) => state.stopPreview);
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
   const togglePreview = useRuntimeStore((state) => state.togglePreview);
   const files = useWorkspaceStore((state) => state.files);
@@ -564,6 +586,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     (path) => !path.endsWith(`/${folderPlaceholderFileName}`)
   );
   const isApprovalBlocked = proposal ? isBlockedProposal(proposal) : false;
+  const approvalDecision = proposal ? normalizeApprovalDecision(proposal) : null;
   const isProposalApplied = proposal?.status === "approved";
   const regenerationInFlightRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -765,21 +788,28 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           });
         }
 
+        if (!viteRuntimeStarted && !nextRuntimeStarted && !backendRuntimeStarted && runtimeResult.runtimeStartStatus) {
+          applyRuntimePayload({
+            error: runtimeResult.runtimeStartError ?? runtimeResult.runtimeWarning ?? null,
+            logs: runtimeResult.runtimeWarning ? [runtimeResult.runtimeWarning] : [],
+            port: null,
+            previewUrl: null,
+            projectId: selectedProjectId,
+            status:
+              runtimeResult.runtimeStartStatus === "blocked"
+                ? "blocked"
+                : runtimeResult.runtimeStartStatus === "failed"
+                  ? "error"
+                  : "stopped",
+            workspacePath: runtimeResult.workspaceRoot ?? null
+          });
+        }
+
         if (syncResult.refreshedPreview && !viteRuntimeStarted && !nextRuntimeStarted && !backendRuntimeStarted) {
           await syncPreview(selectedProjectId);
         }
 
         markProposalApproved(syncResult.runtimeMetadata);
-      }
-
-      for (const change of proposal.changes) {
-        if (change.action === "restart_runtime") {
-          await startPreview(proposal.projectId);
-        } else if (change.action === "reload_preview") {
-          await syncPreview(proposal.projectId);
-        } else if (change.action === "stop_runtime") {
-          await stopPreview();
-        }
       }
 
       if (!runtimeResult) {
@@ -934,6 +964,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   {proposal.runtimeSyncStatus
                     ? ` Sync ${proposal.runtimeSyncStatus}.`
                     : null}
+                  {runtimeApprovalResult.runtimeWarning
+                    ? ` ${runtimeApprovalResult.runtimeWarning}`
+                    : null}
                 </div>
               ) : null}
 
@@ -963,7 +996,13 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   }}
                   type="button"
                 >
-                  {isApprovalBlocked ? "Approval blocked" : isProposalApplied ? "Applied" : "Approve"}
+                  {isApprovalBlocked
+                    ? "Approval blocked"
+                    : isProposalApplied
+                      ? "Applied"
+                      : approvalDecision?.hasWarnings
+                        ? "Review and approve"
+                        : "Approve"}
                 </button>
               </div>
             </motion.div>

@@ -238,7 +238,7 @@ function statusFor(input: {
 export function buildProposalQualityGate(input: BuildProposalQualityGateInput): ProposalQualityGateResult {
   const files = input.proposedFiles ?? {};
   const fileNames = Object.keys(files);
-  const content = [input.currentPrompt, input.proposalSummary ?? "", contentFromFiles(files)].join("\n");
+  const content = [input.proposalSummary ?? "", contentFromFiles(files)].join("\n");
   const visibleContent = visibleFileContent(files);
   const mode = input.contextPriority.authoritativeMode;
   const intentFamily = input.contextPriority.authoritativeIntentFamily;
@@ -308,7 +308,9 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
     }));
   }
 
-  const placeholderDetected = includesAny(content, placeholderPatterns);
+  const placeholderDetected = mode === "CODE"
+    ? /\b(?:lorem ipsum|fix me|insert content here|placeholder image|image goes here)\b/i.test(content)
+    : includesAny(content, placeholderPatterns);
   const loremDetected = /\blorem ipsum\b/i.test(content);
   const todoDetected = /\b(?:TODO|coming soon|TBD)\b/i.test(content);
   const fakeContentDetected = includesAny(content, fakeContentPatterns);

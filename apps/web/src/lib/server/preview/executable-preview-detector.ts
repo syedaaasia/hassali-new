@@ -6,7 +6,7 @@ import type {
 } from "@/lib/server/preview/executable-preview-types";
 
 function normalizePath(path: string) {
-  return path.replace(/\\/g, "/").toLowerCase();
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "").toLowerCase();
 }
 
 function collectFiles(input: ExecutablePreviewDetectionInput) {
@@ -52,31 +52,6 @@ function detection(
 export function detectExecutablePreviewFramework(
   input: ExecutablePreviewDetectionInput
 ): ExecutablePreviewDetection {
-  const registryMatch = detectFramework({
-    files: collectFiles(input)
-  });
-
-  if (registryMatch.frameworkId !== "unknown") {
-    const collectedFiles = fileNames(input);
-    const collectedText = allText(input);
-
-    if (
-      registryMatch.frameworkId === "vite" &&
-      (hasFile(collectedFiles, /(^|\/)src\/main\.(?:tsx|jsx)$/) ||
-        hasFile(collectedFiles, /(^|\/)src\/app\.(?:tsx|jsx)$/) ||
-        hasText(collectedText, ['"react"', "'react'", "react-dom/client"]))
-    ) {
-      return detection("react_vite", Math.max(0.92, registryMatch.confidence), ["registry:vite", "react_source"], registryMatch);
-    }
-
-    return detection(
-      registryMatch.frameworkId,
-      registryMatch.confidence,
-      registryMatch.signals,
-      registryMatch
-    );
-  }
-
   const files = fileNames(input);
   const text = allText(input);
   const hasPackageJson = hasFile(files, /(^|\/)package\.json$/);
@@ -108,6 +83,23 @@ export function detectExecutablePreviewFramework(
       ...(packageMentionsVite ? ["package_vite"] : []),
       ...(hasIndexHtml ? ["index_html"] : [])
     ]);
+  }
+
+  if (hasIndexHtml && !hasPackageJson && !hasViteConfig && !hasNextConfig && !hasSrcApp) {
+    return detection("static_html", 0.9, ["index_html", "static_site"]);
+  }
+
+  const registryMatch = detectFramework({
+    files: collectFiles(input)
+  });
+
+  if (registryMatch.frameworkId !== "unknown") {
+    return detection(
+      registryMatch.frameworkId,
+      registryMatch.confidence,
+      registryMatch.signals,
+      registryMatch
+    );
   }
 
   if (hasApiFiles || hasText(text, ["express", "fastify", "router.", "app.get(", "app.post("])) {

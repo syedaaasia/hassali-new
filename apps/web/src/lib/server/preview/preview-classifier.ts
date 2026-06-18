@@ -37,6 +37,75 @@ function normalizedText(input: PreviewRuntimeInput) {
     .toLowerCase();
 }
 
+function collectedFiles(input: PreviewRuntimeInput) {
+  const normalizeKey = (path: string) => path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
+
+  return {
+    ...Object.fromEntries(Object.entries(input.generatedFiles ?? {}).map(([path, content]) => [normalizeKey(path), content])),
+    ...Object.fromEntries(
+      (input.proposal?.changes ?? [])
+        .filter((change) => typeof change.path === "string" && typeof change.proposedContent === "string")
+        .map((change) => [normalizeKey(change.path as string), change.proposedContent as string])
+    )
+  };
+}
+
+function normalizedPath(path: string) {
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "").toLowerCase();
+}
+
+function fileEvidence(input: PreviewRuntimeInput) {
+  const files = collectedFiles(input);
+  const paths = Object.keys(files).map(normalizedPath);
+  const text = Object.entries(files)
+    .map(([path, content]) => `${path}\n${content.slice(0, 6000)}`)
+    .join("\n")
+    .toLowerCase();
+  const packageJson = Object.entries(files).find(([path]) => normalizedPath(path).endsWith("package.json"))?.[1] ?? "";
+  const packageText = packageJson.toLowerCase();
+  const has = (pattern: RegExp) => paths.some((path) => pattern.test(path));
+  const htmlPages = paths.filter((path) => path.endsWith(".html"));
+  const hasPackageJson = has(/(^|\/)package\.json$/);
+  const hasIndexHtml = has(/(^|\/)index\.html$/);
+  const hasStylesCss = has(/(^|\/)styles\.css$/) || has(/(^|\/)src\/styles\.css$/);
+  const hasViteConfig = has(/(^|\/)vite\.config\.(?:js|ts|mjs)$/);
+  const hasNextConfig = has(/(^|\/)next\.config\.(?:js|ts|mjs)$/);
+  const hasSrcMain = has(/(^|\/)src\/main\.(?:tsx|jsx|ts|js)$/);
+  const hasSrcApp = has(/(^|\/)src\/app\.(?:tsx|jsx|ts|js)$/);
+  const hasNextPage = has(/(^|\/)(?:app\/page|pages\/index)\.(?:tsx|jsx|ts|js)$/);
+  const hasBackendFiles = has(/(^|\/)(?:api|routes|server)\/.*\.(?:ts|js|py|go)$/) || has(/(^|\/)server\.(?:ts|js|py)$/);
+  const hasOnlyDocs = paths.length > 0 && paths.every((path) => /\.(?:md|mdx|txt)$/i.test(path));
+  const hasNativeFolder = paths.some((path) => path.startsWith("android/") || path.startsWith("ios/"));
+  const hasExpoConfig = has(/(^|\/)(?:app\.json|app\.config\.(?:js|ts))$/);
+  const hasReactNativeDependency = /["']react-native["']/.test(packageText);
+  const hasExpoDependency = /["']expo["']/.test(packageText);
+  const importsReactNative = /from\s+["']react-native["']|require\(["']react-native["']\)/.test(text);
+  const hasFlutter = has(/(^|\/)pubspec\.yaml$/) && has(/(^|\/)lib\/main\.dart$/);
+
+  return {
+    hasBackendFiles,
+    hasFlutter,
+    hasIndexHtml,
+    hasNextConfig,
+    hasNextPage,
+    hasOnlyDocs,
+    hasPackageJson,
+    hasReactNativeEvidence: hasReactNativeDependency || importsReactNative || hasNativeFolder || hasExpoConfig || hasExpoDependency,
+    hasSrcApp,
+    hasSrcMain,
+    hasStaticWebsite: hasIndexHtml && hasStylesCss && !hasViteConfig && !hasNextConfig && !hasSrcMain && !hasSrcApp,
+    hasStylesCss,
+    hasTrueMobileEvidence: hasFlutter || hasReactNativeDependency || importsReactNative || hasNativeFolder || hasExpoConfig || hasExpoDependency,
+    hasViteConfig,
+    htmlPages,
+    packageMentionsNext: /["']next["']/.test(packageText),
+    packageMentionsReact: /["']react["']/.test(packageText),
+    packageMentionsVite: /["']vite["']/.test(packageText),
+    paths,
+    text
+  };
+}
+
 function includesAny(text: string, terms: string[]) {
   return terms.some((term) => text.includes(term));
 }
@@ -53,6 +122,46 @@ function classification(previewType: PreviewType, confidence: number, reason: st
 export function classifyPreview(input: PreviewRuntimeInput): PreviewClassification {
   if (input.productMode === "ASK") {
     return classification("none", 0.99, "ASK mode is answer-only and has no visual preview.", ["ask_mode"]);
+  }
+
+  const evidence = fileEvidence(input);
+
+  if (
+    evidence.hasNextConfig ||
+    evidence.hasNextPage ||
+    (evidence.hasPackageJson && evidence.packageMentionsNext && evidence.hasNextPage)
+  ) {
+    return classification("application", 0.96, "Next.js app files were detected from generated file evidence.", ["next_file_evidence"]);
+  }
+
+  if (
+    evidence.hasViteConfig &&
+    evidence.hasIndexHtml &&
+    evidence.hasSrcMain &&
+    (evidence.hasSrcApp || evidence.packageMentionsReact)
+  ) {
+    return classification(
+      includesAny(evidence.text, ["crm", "dashboard", "billing", "pipeline", "customer table"]) ? "dashboard" : "application",
+      0.97,
+      "React/Vite app files were detected from generated file evidence.",
+      ["vite_config", "src_main", "index_html"]
+    );
+  }
+
+  if (evidence.hasStaticWebsite || (input.productMode === "WEBSITE" && evidence.hasIndexHtml)) {
+    return classification("website", 0.97, "Static website files were detected from generated file evidence.", ["static_html", "styles_css"]);
+  }
+
+  if (input.productMode === "CODE" && evidence.hasTrueMobileEvidence) {
+    return classification("mobile", 0.94, "Mobile framework evidence was detected from package/native files.", ["mobile_file_evidence"]);
+  }
+
+  if (input.productMode === "CODE" && evidence.hasBackendFiles && !evidence.hasIndexHtml && !evidence.hasSrcMain) {
+    return classification("architecture", 0.9, "Backend/API files were detected without a frontend preview surface.", ["backend_file_evidence"]);
+  }
+
+  if (input.productMode === "CODE" && evidence.hasOnlyDocs) {
+    return classification("architecture", 0.88, "Only planning/architecture documents were detected.", ["docs_only"]);
   }
 
   const explicitLegacy = input.proposal?.previewType ? legacyPreviewMap[input.proposal.previewType] : undefined;

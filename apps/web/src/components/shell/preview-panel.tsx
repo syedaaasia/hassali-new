@@ -27,6 +27,7 @@ type RealPreviewResult = {
     | "static_website"
     | "unavailable";
   renderMode: string;
+  safeHtml?: string;
   state: "ready" | "unavailable";
   title: string;
   warnings?: Array<{
@@ -86,6 +87,8 @@ function normalizePreviewType(value: string | undefined, productMode: string): U
 }
 
 function previewLabel(type: UnifiedPreviewType) {
+  if (type === "website") return "Website preview";
+  if (type === "application" || type === "dashboard") return "Web app preview";
   return type === "none" ? "No preview" : `${type.charAt(0).toUpperCase()}${type.slice(1)} preview`;
 }
 
@@ -155,6 +158,10 @@ function previewTypeFromClassification(value: unknown): UnifiedPreviewType | nul
   const previewType = (value as { previewType?: unknown }).previewType;
 
   return typeof previewType === "string" ? normalizePreviewType(previewType, "CODE") : null;
+}
+
+function normalizePreviewPath(path: string) {
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
 }
 
 function RealPreviewMock({ preview }: { preview: RealPreviewResult }) {
@@ -278,7 +285,7 @@ export function PreviewPanel() {
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
   const livePreviewUrl = runtimePreviewUrl ?? previewUrl;
   const iframeSource = livePreviewUrl ? `${livePreviewUrl}?v=${iframeVersion}` : null;
-  const hasIndexHtml = Boolean(files["index.html"]);
+  const hasIndexHtml = Object.keys(files).some((path) => normalizePreviewPath(path) === "index.html");
   const activePreviewMetadata = proposal?.livePreviewMetadata ?? proposal?.previewMetadata;
   const unifiedPreviewType = previewTypeFromClassification(proposal?.livePreviewClassification) ??
     proposal?.previewClassification?.previewType ??
@@ -417,7 +424,7 @@ export function PreviewPanel() {
             }`}>
               {runtimeStatus}
             </span>
-            <span>Framework: {runtimeFramework ?? "runtime"}</span>
+            <span>Framework: {runtimeFramework ?? (unifiedPreviewType === "website" ? "Static HTML" : "runtime")}</span>
             {runtimePort ? <span>Port: {runtimePort}</span> : null}
             {livePreviewUrl ? <span className="truncate">URL: {livePreviewUrl}</span> : null}
           </div>
@@ -444,7 +451,7 @@ export function PreviewPanel() {
       ) : null}
 
       {executablePreview && executablePreview.framework !== "unknown" ? (
-        <div className="border-b border-[hsl(var(--premium-border))] px-4 py-2 text-[11px] leading-5 text-muted-foreground">
+          <div className="border-b border-[hsl(var(--premium-border))] px-4 py-2 text-[11px] leading-5 text-muted-foreground">
           {executablePreview.devServerRuntime ? (
             <>
               Framework: {executablePreview.devServerRuntime.frameworkDisplayName}. Runtime:{" "}
@@ -458,9 +465,9 @@ export function PreviewPanel() {
             </>
           ) : (
             <>
-              Executable preview detected: {(executablePreview.frameworkMatch?.displayName ?? executablePreview.framework).replace(/_/g, " ")}.
+              Framework: {(executablePreview.frameworkMatch?.displayName ?? executablePreview.framework).replace(/_/g, " ")}.
               {executablePreview.canExecuteNow
-                ? " Existing static iframe preview can render this output."
+                ? " Runtime: static, no dev server required."
                 : " Runtime start is blocked until safe enablement."}
               {executablePreview.commandPlan?.devCommand
                 ? ` Planned command metadata: ${executablePreview.commandPlan.devCommand} on port ${executablePreview.commandPlan.defaultPort}.`
@@ -477,6 +484,14 @@ export function PreviewPanel() {
             key={iframeSource}
             src={iframeSource}
             title="Hassali local preview"
+          />
+        ) : realPreview?.kind === "static_website" && realPreview.safeHtml ? (
+          <iframe
+            className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"
+            key={`static-safe-${proposal?.id ?? iframeVersion}`}
+            sandbox=""
+            srcDoc={realPreview.safeHtml}
+            title="Hassali static website preview"
           />
         ) : realPreview && realPreview.state === "ready" && realPreview.kind !== "static_website" ? (
           <RealPreviewMock preview={realPreview} />

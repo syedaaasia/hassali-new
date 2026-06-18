@@ -289,16 +289,19 @@ export function validateAssetVisuals(input: BuildAssetVisualValidationInput): As
   }
 
   if (mode === "CODE") {
-    const physicalSignals = mismatchedAssets.filter((signal) => !/dashboard|workflow|analytics|table/i.test(signal));
+    const physicalSignals = mismatchedAssets.filter((signal) => !/dashboard|workflow|analytics|table|customer|billing|pipeline|metric|activity|sidebar|shell|invoice|record/i.test(signal));
+    const physicalVisualSnippets = snippets.filter((snippet) =>
+      physicalSignals.some((signal) => includesSignal(snippet, signal))
+    );
 
-    if (physicalSignals.length > 0) {
-      visualBlocks.push(issue({
+    if (physicalVisualSnippets.length > 0) {
+      visualWarnings.push(issue({
         category: "mode",
-        evidence: physicalSignals.join(", "),
-        id: "code_physical_asset_mismatch",
-        message: "CODE app proposal contains physical product imagery signals.",
+        evidence: physicalVisualSnippets.slice(0, 5).join(", "),
+        id: "code_physical_asset_review",
+        message: "CODE app proposal includes physical-domain visual wording to review.",
         repairHint: "Use dashboard, workflow, table, chart, or interface visuals for CODE app previews.",
-        severity: "block"
+        severity: "warning"
       }));
     }
   }

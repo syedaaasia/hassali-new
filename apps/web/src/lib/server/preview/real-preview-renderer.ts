@@ -100,11 +100,35 @@ function architectureFrames(metadata: PreviewMetadata) {
 }
 
 function websiteHtml(input: PreviewRuntimeInput) {
-  const indexHtml =
-    input.generatedFiles?.["index.html"] ??
-    input.proposal?.changes?.find((change) => change.path === "index.html")?.proposedContent;
+  const normalizeKey = (path: string) => path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
+  const files = {
+    ...Object.fromEntries(Object.entries(input.generatedFiles ?? {}).map(([path, content]) => [normalizeKey(path), content])),
+    ...Object.fromEntries(
+      (input.proposal?.changes ?? [])
+        .filter((change) => typeof change.path === "string" && typeof change.proposedContent === "string")
+        .map((change) => [normalizeKey(change.path as string), change.proposedContent as string])
+    )
+  };
+  const indexHtml = files["index.html"];
 
-  return typeof indexHtml === "string" ? sanitizeStaticPreviewHtml(indexHtml) : undefined;
+  if (typeof indexHtml !== "string") {
+    return undefined;
+  }
+
+  const css = files["styles.css"];
+  const sanitizedHtml = sanitizeStaticPreviewHtml(indexHtml);
+
+  if (typeof css !== "string" || !css.trim()) {
+    return sanitizedHtml;
+  }
+
+  const styleTag = `<style>${css.replace(/<\/style/gi, "<\\/style")}</style>`;
+
+  if (/<\/head>/i.test(sanitizedHtml)) {
+    return sanitizedHtml.replace(/<\/head>/i, `${styleTag}</head>`);
+  }
+
+  return `${styleTag}${sanitizedHtml}`;
 }
 
 function safeHtmlFor(result: Omit<RealPreviewResult, "safeHtml">) {

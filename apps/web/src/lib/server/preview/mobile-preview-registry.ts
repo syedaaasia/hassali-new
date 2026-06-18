@@ -14,7 +14,7 @@ type MobileRegistryEntry = {
 };
 
 function normalizePath(path: string) {
-  return path.replace(/\\/g, "/").toLowerCase();
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "").toLowerCase();
 }
 
 function paths(input: MobilePreviewDetectionInput) {
@@ -26,6 +26,44 @@ function text(input: MobilePreviewDetectionInput) {
     .map(([path, content]) => `${path}\n${content.slice(0, 5000)}`)
     .join("\n")
     .toLowerCase();
+}
+
+function hasPath(inputPaths: string[], pattern: RegExp) {
+  return inputPaths.some((path) => pattern.test(path));
+}
+
+function hasMobileAuthority(input: MobilePreviewDetectionInput, framework: MobilePreviewFramework) {
+  const inputPaths = paths(input);
+  const inputText = text(input);
+  const packageJson = Object.entries(input.files)
+    .find(([path]) => normalizePath(path).endsWith("package.json"))?.[1]
+    ?.toLowerCase() ?? "";
+
+  if (framework === "react_native") {
+    return (
+      /["']react-native["']/.test(packageJson) ||
+      /from\s+["']react-native["']|require\(["']react-native["']\)/.test(inputText) ||
+      inputPaths.some((path) => path.startsWith("android/") || path.startsWith("ios/"))
+    );
+  }
+
+  if (framework === "expo") {
+    return (
+      /["']expo["']/.test(packageJson) ||
+      hasPath(inputPaths, /(^|\/)(?:app\.json|app\.config\.(?:js|ts))$/) ||
+      inputText.includes("expo-router")
+    );
+  }
+
+  if (framework === "flutter") {
+    return hasPath(inputPaths, /(^|\/)pubspec\.yaml$/) && hasPath(inputPaths, /(^|\/)lib\/main\.dart$/);
+  }
+
+  if (framework === "android_xml" || framework === "jetpack_compose") {
+    return inputPaths.some((path) => path.startsWith("android/") || path.includes("androidmanifest.xml") || path.includes("build.gradle"));
+  }
+
+  return true;
 }
 
 function scoreEntry(entry: MobileRegistryEntry, input: MobilePreviewDetectionInput): MobilePreviewMatch {
@@ -121,7 +159,7 @@ export function detectMobilePreviewFramework(input: MobilePreviewDetectionInput)
     .map((entry) => scoreEntry(entry, input))
     .sort((a, b) => b.confidence - a.confidence)[0];
 
-  if (!match || match.confidence < 0.24) {
+  if (!match || match.confidence < 0.24 || !hasMobileAuthority(input, match.framework)) {
     return {
       capabilities: [],
       confidence: 0.22,

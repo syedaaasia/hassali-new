@@ -84,7 +84,7 @@ function seafoodPageCopy(page: string) {
         {
           body: "Open Tuesday to Sunday for lunch and dinner, with extended evening seating on Fridays and Saturdays.",
           title: "Hours and location",
-          visual: "seafood restaurant location block"
+          visual: "Visit us by the waterfront"
         },
         {
           body: "Use the contact form for table requests, group bookings, allergy notes, and chef's tasting menu inquiries.",
@@ -120,12 +120,12 @@ function seafoodPageCopy(page: string) {
         {
           body: "Daily catch, oysters, lobster pasta, grilled prawns, citrus salads, and chef specials anchor the first screen.",
           title: "Featured seafood specialties",
-          visual: "premium seafood hero platter"
+          visual: "Chef's coastal signature platter"
         },
         {
-          body: "Guide guests from appetite to action with a clear reservation CTA, menu path, hours, and contact details.",
+          body: "Guide guests from appetite to action with a warm table request, menu path, hours, and contact details.",
           title: "Reservation-first dining path",
-          visual: "reservation CTA panel"
+          visual: "Reserve tonight's fresh catch"
         }
       ]
     },

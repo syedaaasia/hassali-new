@@ -293,6 +293,7 @@ function normalizeProjectFilePath(value: unknown) {
   const normalized = rawPath
     .replace(/\\/g, "/")
     .replace(/\/+/g, "/")
+    .replace(/^(?:\.\/)+/, "")
     .replace(/^\/+/, "")
     .replace(/\/+$/, "");
 

@@ -41,8 +41,8 @@ export type WorkspaceContext = {
   projectName: string | null;
 };
 
-type FileProposalAction = "create" | "update";
-type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "stop_runtime";
+type FileProposalAction = "create" | "modify" | "update" | "write_file";
+type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "run_dev_server" | "start_runtime" | "stop_runtime";
 type ProposalAction = FileProposalAction | RuntimeProposalAction;
 type ProposalRoutingMode = "blocked" | "normal" | "review_required";
 type UnifiedPreviewType = "application" | "architecture" | "component" | "dashboard" | "mobile" | "none" | "website";
@@ -59,6 +59,16 @@ export type ProposalRoutingWarning = {
   code: string;
   message: string;
   risk: "high" | "medium";
+};
+
+export type ApprovalDecision = {
+  approvalAllowed: boolean;
+  criticalIssues: string[];
+  decisionSource: "client-normalized" | "server";
+  hasCriticalIssues: boolean;
+  hasWarnings: boolean;
+  reviewItems: string[];
+  warnings: string[];
 };
 
 export type KernelRoutingDecision = {
@@ -166,6 +176,8 @@ export type DiffProposal = {
   previewDriftDetected?: boolean;
   requiredPageCount?: number | null;
   heroAssetMismatch?: boolean;
+  approvalDecision?: ApprovalDecision;
+  approvalDisabled?: boolean;
   approvalRecommendation?: "approve" | "reject" | "review";
   completenessScore?: number;
   contentScore?: number;
@@ -192,6 +204,10 @@ export type DiffProposal = {
   runtimeRunnerStatus?: string | null;
   runtimeSnapshotId?: string | null;
   runtimeSnapshotStatus?: string | null;
+  runtimeStartAttempted?: boolean;
+  runtimeStartError?: string | null;
+  runtimeStartStatus?: string | null;
+  runtimeWarning?: string | null;
   runtimeSyncStatus?: "failed" | "partial" | "skipped" | "synced";
   runtimeSyncedAt?: string;
   runtimeVerificationOk?: boolean | null;
@@ -251,6 +267,82 @@ export type DiffProposal = {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isApprovalDecision(value: unknown): value is ApprovalDecision {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const decision = value as ApprovalDecision;
+
+  return (
+    typeof decision.approvalAllowed === "boolean" &&
+    Array.isArray(decision.criticalIssues) &&
+    decision.criticalIssues.every((item) => typeof item === "string") &&
+    (decision.decisionSource === "client-normalized" || decision.decisionSource === "server") &&
+    typeof decision.hasCriticalIssues === "boolean" &&
+    typeof decision.hasWarnings === "boolean" &&
+    Array.isArray(decision.reviewItems) &&
+    decision.reviewItems.every((item) => typeof item === "string") &&
+    Array.isArray(decision.warnings) &&
+    decision.warnings.every((item) => typeof item === "string")
+  );
+}
+
+function legacyCriticalIssues(proposal: DiffProposal) {
+  const issues: string[] = [];
+  const criticalPattern = /\b(?:cross-project|another project|project isolation|unsafe path|invalid file path|missing required file|unexpected website page|wrong-domain|dangerous action|unsupported action|package install|shell execution|missing proposed content)\b/i;
+
+  for (const change of proposal.changes) {
+    if (isFileProposalAction(change.action) && (!change.path || typeof change.proposedContent !== "string")) {
+      issues.push(`invalid file mutation for ${change.path ?? "unknown path"}`);
+    }
+
+    if (change.path && (/^[a-z]:/i.test(change.path) || change.path.startsWith("/") || change.path.startsWith("\\") || change.path.includes(".."))) {
+      issues.push(`unsafe file path ${change.path}`);
+    }
+  }
+
+  if (proposal.blockedReason && criticalPattern.test(proposal.blockedReason)) {
+    issues.push(proposal.blockedReason);
+  }
+
+  for (const reason of proposal.proposalRoutingReasons ?? []) {
+    if (criticalPattern.test(reason.message) || criticalPattern.test(reason.code)) {
+      issues.push(reason.message);
+    }
+  }
+
+  return Array.from(new Set(issues));
+}
+
+export function normalizeApprovalDecision(proposal: DiffProposal): ApprovalDecision {
+  if (proposal.approvalDecision) {
+    return proposal.approvalDecision;
+  }
+
+  const criticalIssues = legacyCriticalIssues(proposal);
+  const warnings = Array.from(new Set([
+    ...(proposal.proposalRoutingReasons ?? [])
+      .filter((reason) => reason.severity !== "info")
+      .map((reason) => reason.message),
+    ...(proposal.proposalRoutingWarnings ?? []).map((warning) => warning.message)
+  ]));
+
+  return {
+    approvalAllowed: criticalIssues.length === 0,
+    criticalIssues,
+    decisionSource: "client-normalized",
+    hasCriticalIssues: criticalIssues.length > 0,
+    hasWarnings: warnings.length > 0,
+    reviewItems: warnings,
+    warnings
+  };
+}
+
+export function isProposalApprovalBlocked(proposal: DiffProposal) {
+  return normalizeApprovalDecision(proposal).hasCriticalIssues;
 }
 
 function isAppPreview(value: unknown): value is NonNullable<DiffProposal["appPreview"]> {
@@ -361,11 +453,15 @@ function createMessage(role: ChatRole, content: string): ChatMessage {
 }
 
 function isRuntimeProposalAction(action: unknown): action is RuntimeProposalAction {
-  return action === "restart_runtime" || action === "reload_preview" || action === "stop_runtime";
+  return action === "restart_runtime" ||
+    action === "reload_preview" ||
+    action === "run_dev_server" ||
+    action === "start_runtime" ||
+    action === "stop_runtime";
 }
 
 function isFileProposalAction(action: unknown): action is FileProposalAction {
-  return action === "create" || action === "update";
+  return action === "create" || action === "modify" || action === "update" || action === "write_file";
 }
 
 function isProposalRoutingMode(value: unknown): value is ProposalRoutingMode {
@@ -684,6 +780,10 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       typeof proposal.requiredPageCount === "number") &&
     (typeof proposal.heroAssetMismatch === "undefined" ||
       typeof proposal.heroAssetMismatch === "boolean") &&
+    (typeof proposal.approvalDecision === "undefined" ||
+      isApprovalDecision(proposal.approvalDecision)) &&
+    (typeof proposal.approvalDisabled === "undefined" ||
+      typeof proposal.approvalDisabled === "boolean") &&
     (typeof proposal.approvalRecommendation === "undefined" ||
       proposal.approvalRecommendation === "approve" ||
       proposal.approvalRecommendation === "reject" ||
@@ -735,6 +835,17 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       typeof proposal.requiresExtraReview === "boolean") &&
     (typeof proposal.repeatedContentDetected === "undefined" ||
       typeof proposal.repeatedContentDetected === "boolean") &&
+    (typeof proposal.runtimeStartAttempted === "undefined" ||
+      typeof proposal.runtimeStartAttempted === "boolean") &&
+    (typeof proposal.runtimeStartError === "undefined" ||
+      proposal.runtimeStartError === null ||
+      typeof proposal.runtimeStartError === "string") &&
+    (typeof proposal.runtimeStartStatus === "undefined" ||
+      proposal.runtimeStartStatus === null ||
+      typeof proposal.runtimeStartStatus === "string") &&
+    (typeof proposal.runtimeWarning === "undefined" ||
+      proposal.runtimeWarning === null ||
+      typeof proposal.runtimeWarning === "string") &&
     (typeof proposal.publicCopyCleanStatus === "undefined" ||
       proposal.publicCopyCleanStatus === "blocked" ||
       proposal.publicCopyCleanStatus === "clean" ||

@@ -5,6 +5,7 @@ import {
 } from "@/lib/server/runtime/project-workspace-registry";
 import { createGitSnapshotSafety } from "@/lib/server/runtime/git-snapshot-safety";
 import { buildLiveRuntimePreviewMetadata } from "@/lib/server/runtime/live-runtime-sync";
+import { buildRuntimeAuthorityDecision } from "@/lib/server/runtime/runtime-authority";
 import { selectRuntimeAdapter } from "@/lib/server/runtime/runtime-adapter-selector";
 import { buildDevServerRuntime } from "@/lib/server/runtime/dev-server-runtime";
 import { buildBackendRuntimeEngine } from "@/lib/server/runtime/backend-runtime-engine";
@@ -178,7 +179,7 @@ export async function POST(request: Request) {
       ? ["Client-supplied workspaceRoot was ignored; Hassali resolved the project workspace server-side."]
       : [])
   ];
-  const { blockedReasons, plan, skippedSummaries } = buildApprovedPlanFromProposal({
+  const { blockedReasons, plan, runtimeWarnings, skippedSummaries } = buildApprovedPlanFromProposal({
     changes: parsed.changes,
     projectId: parsed.projectId,
     proposalId: parsed.proposalId,
@@ -217,6 +218,11 @@ export async function POST(request: Request) {
       events: [],
       runnerId: null,
       runnerStatus: "blocked",
+      runtimeOptional: true,
+      runtimeStartAttempted: false,
+      runtimeStartError: blockedReasons[0]?.message ?? null,
+      runtimeStartStatus: "not_started",
+      runtimeWarning: null,
       ...blockedWorkerExecutionMetadata,
       rejectedWorkers: workerRouter.rejectedWorkers,
       requestedWorkerType: workerRouter.requestedWorkerType ?? parsed.workerType,
@@ -335,8 +341,17 @@ export async function POST(request: Request) {
           workspaceRoot: workspaceBinding.workspaceRoot
         })
       : null;
+  const runtimeAuthority = buildRuntimeAuthorityDecision({
+    backendRuntime: backendExecutionRuntime,
+    mobileRuntime,
+    nextRuntime,
+    runtimeWarnings,
+    viteRuntime
+  });
+  const fileApprovalSucceeded = result.ok;
 
   return Response.json({
+    applied: fileApprovalSucceeded,
     appliedSteps: result.events
       .filter((event) => event.type === "file_written" && event.stepId)
       .map((event) => event.stepId),
@@ -348,7 +363,8 @@ export async function POST(request: Request) {
     events: result.events,
     rejectedWorkers: workerRouter.rejectedWorkers,
     runnerId: session.id,
-    runnerStatus: result.ok ? "completed" : "failed",
+    runnerStatus: fileApprovalSucceeded ? "completed" : "failed",
+    ...runtimeAuthority,
     ...workerExecutionMetadata,
     requestedWorkerType: workerRouter.requestedWorkerType ?? adapterSelection.requestedWorkerType,
     selectedWorkerType: workerRouter.selectedWorkerType,
@@ -365,12 +381,15 @@ export async function POST(request: Request) {
     workspaceBindingStatus: workspaceBinding.registryStatus,
     workspaceCreated: workspaceBinding.created,
     workspaceRoot: workspaceBinding.workspaceRoot,
-    workspaceWarnings,
+    workspaceWarnings: [...workspaceWarnings, ...runtimeWarnings],
     backendExecutionRuntime,
     liveRuntimePreview,
     mobileRuntime,
     nextRuntime,
+    ok: fileApprovalSucceeded,
+    previewMetadata: liveRuntimePreview?.previewRuntime ?? null,
     viteRuntime,
+    verificationOk: result.verification?.ok ?? null,
     writtenFiles
-  }, { status: result.ok ? 200 : 400 });
+  }, { status: fileApprovalSucceeded ? 200 : 400 });
 }

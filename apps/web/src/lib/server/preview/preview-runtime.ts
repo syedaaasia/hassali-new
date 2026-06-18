@@ -20,14 +20,17 @@ function fileNames(input: PreviewRuntimeInput) {
   return unique([
     ...Object.keys(input.generatedFiles ?? {}),
     ...(input.proposal?.changes ?? []).map((change) => change.path ?? "")
-  ]);
+  ].map((path) => path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "")));
 }
 
 function proposalFiles(input: PreviewRuntimeInput) {
   return Object.fromEntries(
     (input.proposal?.changes ?? [])
       .filter((change) => typeof change.path === "string" && typeof change.proposedContent === "string")
-      .map((change) => [change.path as string, change.proposedContent as string])
+      .map((change) => [
+        (change.path as string).replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, ""),
+        change.proposedContent as string
+      ])
   );
 }
 
