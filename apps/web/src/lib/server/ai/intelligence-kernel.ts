@@ -778,7 +778,7 @@ export function critiquePlan(
     issues.push("rename intent was not routed to text replacement");
   }
 
-  if (taskUnderstanding.userIntent === "new_site" && !websiteRequest) {
+  if (input.mode === "WEBSITE" && taskUnderstanding.userIntent === "new_site" && !websiteRequest) {
     issues.push("new website intent was not routed to website generation");
   }
 

@@ -45,6 +45,23 @@ function isSeafoodPlan(plan: WebsitePlan) {
     plan.sourceOfTruthPages.includes("menu") && plan.sourceOfTruthPages.includes("gallery") && plan.industry === "restaurant";
 }
 
+function isBeveragePlan(plan: WebsitePlan) {
+  const text = `${plan.sourceOfTruthDomain ?? ""} ${plan.industry} ${plan.layoutType}`.toLowerCase();
+
+  return text.includes("cola") ||
+    text.includes("soft drink") ||
+    text.includes("beverage") ||
+    text.includes("soda") ||
+    plan.layoutType === "beverage_brand";
+}
+
+function publicLayoutLabel(plan: WebsitePlan) {
+  if (plan.layoutType === "catalog_commerce") return "featured range";
+  if (plan.layoutType === "beverage_brand") return "beverage brand";
+
+  return plan.layoutType.replace(/_/g, " ");
+}
+
 function seafoodPageCopy(page: string) {
   const copy: Record<string, {
     cta: string;
@@ -152,6 +169,77 @@ function seafoodPageCopy(page: string) {
   return copy[page] ?? copy.home;
 }
 
+function beveragePageCopy(page: string) {
+  const copy: Record<string, {
+    cta: string;
+    eyebrow: string;
+    hero: string;
+    lede: string;
+    sections: Array<{
+      body: string;
+      title: string;
+      visual: string;
+    }>;
+  }> = {
+    about: {
+      cta: "Explore the flavor story",
+      eyebrow: "Brand story / flavor profile",
+      hero: "A cola brand built around bold flavor, campaigns, and retail momentum.",
+      lede: "The brand story starts with a crisp cola profile, chilled shelf presence, and campaign launches built for stores, events, and regional distribution.",
+      sections: [
+        {
+          body: "Flagship cans and sparkling bottles carry a bold cola flavor made for everyday shelves, campaign coolers, and shared moments.",
+          title: "Flavor profile with shelf energy",
+          visual: "flagship cans and sparkling bottles"
+        },
+        {
+          body: "Campaign launches and regional distribution help retailers bring the cola lineup to new neighborhoods with consistent supply and clear merchandising.",
+          title: "Campaigns and distribution story",
+          visual: "regional campaign launch"
+        }
+      ]
+    },
+    contact: {
+      cta: "Become a distribution partner",
+      eyebrow: "Retailer / distributor contact",
+      hero: "Retailer inquiries, distributor partnerships, and campaign partnerships start here.",
+      lede: "Use the contact form for retailer inquiries, distributor partnerships, campaign partnerships, regional availability, and shelf-launch planning.",
+      sections: [
+        {
+          body: "Retail teams can ask about flagship cans, sparkling bottles, chilled displays, wholesale availability, and launch timing.",
+          title: "Retailer inquiries",
+          visual: "retailer inquiry form"
+        },
+        {
+          body: "Distribution partners can discuss region coverage, campaign launches, delivery rhythm, and shelf-ready cola supply.",
+          title: "Distributor partnerships",
+          visual: "distribution partner path"
+        }
+      ]
+    },
+    home: {
+      cta: "Become a distribution partner",
+      eyebrow: "Premium cola / soft drinks",
+      hero: "Bold cola flavor, chilled and ready.",
+      lede: "Flagship cans and sparkling bottles bring crisp cola refreshment, campaign energy, and flavors for every shelf.",
+      sections: [
+        {
+          body: "Featured cola lineup with classic cola, zero sugar, citrus sparkle, and seasonal campaign flavors for retail coolers.",
+          title: "Flavors for every shelf",
+          visual: "featured cola lineup"
+        },
+        {
+          body: "Trusted by retailers across 12 regions, with campaign launches and regional distribution support for growing stores.",
+          title: "Retailer and distributor inquiries",
+          visual: "regional cola distribution"
+        }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
 function renderVisual(label: string, index: number) {
   return `<div class="visual visual-${(index % 4) + 1}" aria-label="${escapeHtml(label)}">
             <span>${escapeHtml(label)}</span>
@@ -168,11 +256,13 @@ function renderPage(input: {
   const pageSections = sectionsForPage(input.plan, input.page);
   const leadSection = pageSections[0] ?? input.plan.requiredSections[0];
   const seafoodCopy = isSeafoodPlan(input.plan) ? seafoodPageCopy(input.page) : null;
-  const heroTitle = seafoodCopy?.hero ?? (isHome ? leadSection.title : `${pageTitle} built around ${leadSection.title.toLowerCase()}`);
-  const lede = seafoodCopy?.lede ?? (isHome ? leadSection.intent : leadSection.contentAngle);
-  const cta = seafoodCopy?.cta ?? input.plan.goal;
-  const eyebrow = seafoodCopy?.eyebrow ?? `${industryLabel(input.plan)} / ${input.plan.layoutType.replace(/_/g, " ")}`;
-  const sectionCards = seafoodCopy?.sections.map((section, index) => ({
+  const beverageCopy = isBeveragePlan(input.plan) ? beveragePageCopy(input.page) : null;
+  const domainCopy = beverageCopy ?? seafoodCopy;
+  const heroTitle = domainCopy?.hero ?? (isHome ? leadSection.title : `${pageTitle} built around ${leadSection.title.toLowerCase()}`);
+  const lede = domainCopy?.lede ?? (isHome ? leadSection.intent : leadSection.contentAngle);
+  const cta = domainCopy?.cta ?? input.plan.goal;
+  const eyebrow = domainCopy?.eyebrow ?? `${industryLabel(input.plan)} / ${publicLayoutLabel(input.plan)}`;
+  const sectionCards = domainCopy?.sections.map((section, index) => ({
     contentAngle: section.body,
     id: `${input.page}-${index + 1}`,
     title: section.title,
@@ -203,7 +293,7 @@ function renderPage(input: {
           <p class="lede">${escapeHtml(lede)}</p>
           <a class="button" href="./${input.plan.pages.includes("contact") ? "contact.html" : pageToPath(input.plan.pages[input.plan.pages.length - 1] ?? "contact")}">${escapeHtml(cta)}</a>
         </div>
-        ${renderVisual(seafoodCopy?.sections[0]?.visual ?? leadSection.visualIntent, 0)}
+        ${renderVisual(domainCopy?.sections[0]?.visual ?? leadSection.visualIntent, 0)}
       </section>
       <section class="section-grid" aria-label="${escapeHtml(pageTitle)} sections">
 ${sectionCards
@@ -216,23 +306,23 @@ ${sectionCards
         </article>`)
   .join("\n")}
       </section>
-      ${seafoodCopy && input.page === "contact" ? `<section class="contact-form" aria-label="Reservation request">
+      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${beverageCopy ? "Partner inquiry" : "Reservation request"}">
         <div>
-          <p class="eyebrow">Reservation request</p>
-          <h2>Tell us your preferred date, party size, and seafood notes.</h2>
-          <p>Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit.</p>
+          <p class="eyebrow">${beverageCopy ? "Partner inquiry" : "Reservation request"}</p>
+          <h2>${beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : "Tell us your preferred date, party size, and seafood notes."}</h2>
+          <p>${beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
         </div>
         <form>
           <label>Name <input type="text" name="name" autocomplete="name" /></label>
           <label>Email <input type="email" name="email" autocomplete="email" /></label>
-          <label>Reservation notes <textarea name="notes" rows="4"></textarea></label>
-          <button class="button" type="button">Send reservation request</button>
+          <label>${beverageCopy ? "Partnership notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
+          <button class="button" type="button">${beverageCopy ? "Send partnership inquiry" : "Send reservation request"}</button>
         </form>
       </section>` : ""}
     </main>
     <footer>
       <span>${escapeHtml(input.brandName)}</span>
-      <span>${escapeHtml(seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : input.plan.visualStrategy)}</span>
+      <span>${escapeHtml(beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : input.plan.visualStrategy)}</span>
       <a href="mailto:hello@example.com">hello@example.com</a>
     </footer>
     <script src="./main.js"></script>

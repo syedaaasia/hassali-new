@@ -1,8 +1,10 @@
 "use client";
 
 import { create } from "zustand";
+import { canonicalProjectState } from "@/lib/canonical-project-state";
 import type { RuntimeSyncedFile } from "@/lib/runtime-result-sync";
 import { useRuntimeStore } from "@/lib/runtime-store";
+import { normalizeSafeProjectPath } from "@/lib/utils/path";
 
 export type WorkspaceFile = {
   id?: string;
@@ -87,6 +89,7 @@ type WorkspaceSet = (state: Partial<WorkspaceState>) => void;
 
 export const folderPlaceholderFileName = ".hassali-folder";
 const selectedProjectStorageKey = "hassali:selected-project-id";
+const starterWelcomeSignature = 'type WorkspaceMood = "calm" | "focused" | "ready";';
 type LocalStorageLike = {
   getItem: (key: string) => string | null;
   removeItem: (key: string) => void;
@@ -110,18 +113,33 @@ function languageFromPath(path: string) {
 }
 
 function filesFromPayload(files: WorkspacePayloadFile[]) {
-  return Object.fromEntries(
-    files.map((file) => [
-      file.path,
-      {
-        content: file.content,
-        id: file.id,
-        language: languageFromPath(file.path),
-        path: file.path,
-        savedContent: file.content
-      } satisfies WorkspaceFile
-    ])
-  );
+  const normalizedFiles = new Map<string, WorkspaceFile>();
+
+  for (const file of files.filter((payloadFile) => !isTemplateWelcomeFile(payloadFile))) {
+    const path = normalizeSafeProjectPath(file.path);
+
+    if (!path) continue;
+
+    normalizedFiles.set(path, {
+      content: file.content,
+      id: file.id,
+      language: languageFromPath(path),
+      path,
+      savedContent: file.content
+    });
+  }
+
+  return Object.fromEntries(normalizedFiles);
+}
+
+function isTemplateWelcomeFile(file: WorkspacePayloadFile) {
+  return normalizeSafeProjectPath(file.path) === "welcome.ts" &&
+    file.content.includes(starterWelcomeSignature) &&
+    file.content.includes("small steps, visible changes");
+}
+
+function committedPayloadFiles(files: WorkspacePayloadFile[]) {
+  return files.filter((file) => !isTemplateWelcomeFile(file));
 }
 
 function isFolderPlaceholderPath(path: string) {
@@ -198,6 +216,11 @@ function applyWorkspacePayload(
   payload: WorkspaceLoadResult,
   set: WorkspaceSet
 ) {
+  canonicalProjectState.hydrateCommitted({
+    files: committedPayloadFiles(payload.files),
+    projectId: payload.project?.id ?? null
+  });
+
   const files = filesFromPayload(payload.files);
   const firstPath = visibleFilePaths(files)[0] ?? "";
 
@@ -223,6 +246,11 @@ function applyFilesPayload(
   get: () => WorkspaceState,
   preferredPath?: string | null
 ) {
+  canonicalProjectState.hydrateCommitted({
+    files: committedPayloadFiles(filesPayload),
+    projectId: get().projectId
+  });
+
   const files = filesFromPayload(filesPayload);
   const visiblePaths = visibleFilePaths(files);
   const currentPath = get().activePath;
@@ -280,33 +308,13 @@ async function readFileApiError(response: Response) {
 }
 
 function normalizeProjectFilePath(value: unknown) {
-  if (typeof value !== "string") {
+  const normalized = normalizeSafeProjectPath(value);
+
+  if (!normalized || normalized === folderPlaceholderFileName || normalized.endsWith(`/${folderPlaceholderFileName}`)) {
     return null;
   }
 
-  const rawPath = value.trim();
-
-  if (!rawPath || rawPath.startsWith("/") || rawPath.startsWith("\\") || /^[a-z]:/i.test(rawPath)) {
-    return null;
-  }
-
-  const normalized = rawPath
-    .replace(/\\/g, "/")
-    .replace(/\/+/g, "/")
-    .replace(/^(?:\.\/)+/, "")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-
-  if (normalized === folderPlaceholderFileName || normalized.endsWith(`/${folderPlaceholderFileName}`)) {
-    return null;
-  }
-
-  const segments = normalized.split("/");
-  const hasUnsafeSegment = segments.some(
-    (segment) => !segment || segment === "." || segment === ".."
-  );
-
-  return hasUnsafeSegment ? null : normalized;
+  return normalized;
 }
 
 function setAndThrowFileApplyError(set: WorkspaceSet, message: string): never {
@@ -429,9 +437,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   createFile: async (path) => {
     const { projectId } = get();
+    const normalizedPath = normalizeProjectFilePath(path);
 
     if (!projectId) {
       set({ error: "Create a project before adding files." });
+      return;
+    }
+
+    if (!normalizedPath) {
+      set({ error: "A valid file path is required." });
       return;
     }
 
@@ -439,7 +453,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     try {
       const response = await fetch("/api/workspace/files", {
-        body: JSON.stringify({ action: "createFile", content: "", path, projectId }),
+        body: JSON.stringify({ action: "createFile", content: "", path: normalizedPath, projectId }),
         headers: {
           "Content-Type": "application/json"
         },
@@ -451,7 +465,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       }
 
       const payload = await readFilesMutationResponse(response);
-      applyFilesPayload(payload.files, set, get, path);
+      applyFilesPayload(payload.files, set, get, normalizedPath);
       syncPreviewIfRunning(projectId);
     } catch (error) {
       set({
@@ -462,9 +476,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   createFolder: async (path) => {
     const { projectId } = get();
+    const normalizedPath = normalizeProjectFilePath(path);
 
     if (!projectId) {
       set({ error: "Create a project before adding folders." });
+      return;
+    }
+
+    if (!normalizedPath) {
+      set({ error: "A valid folder path is required." });
       return;
     }
 
@@ -472,7 +492,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     try {
       const response = await fetch("/api/workspace/files", {
-        body: JSON.stringify({ action: "createFolder", path, projectId }),
+        body: JSON.stringify({ action: "createFolder", path: normalizedPath, projectId }),
         headers: {
           "Content-Type": "application/json"
         },
@@ -532,9 +552,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   deletePath: async (path, kind) => {
     const { projectId } = get();
+    const normalizedPath = normalizeProjectFilePath(path);
 
     if (!projectId) {
       set({ error: "Create a project before deleting files." });
+      return;
+    }
+
+    if (!normalizedPath) {
+      set({ error: "A valid path is required." });
       return;
     }
 
@@ -542,7 +568,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     try {
       const response = await fetch("/api/workspace/files", {
-        body: JSON.stringify({ kind, path, projectId }),
+        body: JSON.stringify({ kind, path: normalizedPath, projectId }),
         headers: {
           "Content-Type": "application/json"
         },
@@ -564,6 +590,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
   loadWorkspace: async (projectId) => {
+    canonicalProjectState.resetForProjectSwitch(projectId ?? readSelectedProjectId());
     set({ error: null, isLoading: true });
 
     try {
@@ -592,9 +619,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
   renamePath: async (path, newPath, kind) => {
     const { projectId } = get();
+    const normalizedPath = normalizeProjectFilePath(path);
+    const normalizedNewPath = normalizeProjectFilePath(newPath);
 
     if (!projectId) {
       set({ error: "Create a project before renaming files." });
+      return;
+    }
+
+    if (!normalizedPath || !normalizedNewPath) {
+      set({ error: "Valid source and target paths are required." });
       return;
     }
 
@@ -602,7 +636,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     try {
       const response = await fetch("/api/workspace/files", {
-        body: JSON.stringify({ action: "rename", kind, newPath, path, projectId }),
+        body: JSON.stringify({ action: "rename", kind, newPath: normalizedNewPath, path: normalizedPath, projectId }),
         headers: {
           "Content-Type": "application/json"
         },
@@ -614,7 +648,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       }
 
       const payload = await readFilesMutationResponse(response);
-      applyFilesPayload(payload.files, set, get, kind === "file" ? newPath : null);
+      applyFilesPayload(payload.files, set, get, kind === "file" ? normalizedNewPath : null);
       syncPreviewIfRunning(projectId);
     } catch (error) {
       set({
@@ -665,8 +699,29 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         openTabs: Array.from(openedPaths).filter((path) => files[path])
       };
     });
+    canonicalProjectState.hydrateCommitted({
+      files: Object.values(useWorkspaceStore.getState().files).map((file) => ({
+        content: file.savedContent,
+        id: file.id ?? file.path,
+        path: file.path
+      })),
+      projectId: get().projectId
+    });
   },
-  switchProject: async (projectId) => get().loadWorkspace(projectId),
+  switchProject: async (projectId) => {
+    canonicalProjectState.resetForProjectSwitch(projectId);
+    useRuntimeStore.getState().applyRuntimePayload({
+      error: null,
+      logs: [],
+      port: null,
+      previewUrl: null,
+      projectId,
+      status: "stopped",
+      workspacePath: null
+    });
+
+    return get().loadWorkspace(projectId);
+  },
   updateActiveFile: (content) =>
     set((state) => ({
       files: state.files[state.activePath]
@@ -712,6 +767,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       const savedFile = payload.files.find((workspaceFile) => workspaceFile.path === activePath);
       savedContent = savedFile?.content ?? file.content;
       fileId = savedFile?.id ?? file.id;
+      canonicalProjectState.hydrateCommitted({
+        files: committedPayloadFiles(payload.files),
+        projectId
+      });
       syncPreviewIfRunning(projectId);
     }
 

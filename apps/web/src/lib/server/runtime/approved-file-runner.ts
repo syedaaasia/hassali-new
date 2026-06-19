@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, normalize, resolve } from "node:path";
 import {
   createGitSnapshotSafety,
@@ -145,17 +145,26 @@ async function writeApprovedFile(workspaceRoot: string, path: string, content: s
   return target;
 }
 
-async function verifyWrittenFiles(writtenFiles: string[]) {
+async function verifyWrittenFiles(writtenFiles: Array<{ content: string; path: string; target: string }>) {
   const details: string[] = [];
   let ok = true;
 
   for (const file of writtenFiles) {
     try {
-      const stats = await stat(file);
-      details.push(`${file}: exists (${stats.size} bytes)`);
+      const [stats, content] = await Promise.all([
+        stat(file.target),
+        readFile(file.target, "utf8")
+      ]);
+
+      if (!stats.isFile() || content !== file.content || content.length === 0) {
+        ok = false;
+        details.push(`${file.path}: verification content mismatch`);
+      } else {
+        details.push(`${file.path}: exists (${stats.size} bytes)`);
+      }
     } catch {
       ok = false;
-      details.push(`${file}: missing after write`);
+      details.push(`${file.path}: missing after write`);
     }
   }
 
@@ -164,6 +173,33 @@ async function verifyWrittenFiles(writtenFiles: string[]) {
     details: details.length ? details : ["No files were written; no file existence checks were required."],
     ok
   };
+}
+
+async function captureFileBeforeWrite(target: string) {
+  try {
+    return {
+      content: await readFile(target, "utf8"),
+      existed: true
+    };
+  } catch {
+    return {
+      content: "",
+      existed: false
+    };
+  }
+}
+
+async function rollbackWrites(
+  backups: Array<{ content: string; existed: boolean; target: string }>
+) {
+  for (const backup of [...backups].reverse()) {
+    if (backup.existed) {
+      await mkdir(dirname(backup.target), { recursive: true });
+      await writeFile(backup.target, backup.content, "utf8");
+    } else {
+      await rm(backup.target, { force: true });
+    }
+  }
 }
 
 export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promise<ApprovedFileRunnerOutput> {
@@ -179,6 +215,8 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
   const skippedSteps: string[] = [];
   const blockedSteps: ApprovedFileRunnerOutput["blockedSteps"] = [];
   const writtenFiles: string[] = [];
+  const writtenTargets: Array<{ content: string; path: string; target: string }> = [];
+  const backups: Array<{ content: string; existed: boolean; target: string }> = [];
   const errors: string[] = [];
   const snapshotBefore = await createGitSnapshotSafety({
     planId: input.approvedPlan.id,
@@ -203,6 +241,8 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
     });
   }
 
+  const runnableSteps: ApprovedExecutionStep[] = [];
+
   for (const step of input.approvedPlan.steps) {
     events.push(event({ message: `Checking approved step '${step.id}'.`, runnerId, stepId: step.id, type: "step_started" }));
     const reasons = validateRunnerStep(step, input.approvedPlan, input.workspaceRoot);
@@ -213,58 +253,98 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
       continue;
     }
 
-    try {
-      if (step.tool === "restart_preview") {
-        skippedSteps.push(step.id);
-        events.push(event({
-          message: "restart_preview recorded as metadata only; no runtime process was touched.",
-          runnerId,
-          stepId: step.id,
-          type: "step_skipped"
-        }));
-        continue;
-      }
-
-      if (step.tool === "verify_files") {
-        skippedSteps.push(step.id);
-        events.push(event({
-          message: "verify_files deferred to final runner verification.",
-          runnerId,
-          stepId: step.id,
-          type: "verification"
-        }));
-        continue;
-      }
-
-      const targetContent = contentForStep(step, input.files);
-
-      if (targetContent === null) {
-        blockedSteps.push({
-          reasons: [blocked("write_not_allowed", `Step '${step.id}' has no approved content to write.`)],
-          stepId: step.id
-        });
-        events.push(event({ message: `Blocked step '${step.id}' because no approved content was provided.`, runnerId, stepId: step.id, type: "blocked" }));
-        continue;
-      }
-
-      const target = await writeApprovedFile(input.workspaceRoot, stepFilePath(step), targetContent);
-      writtenFiles.push(target);
-      appliedSteps.push(step.id);
+    if (step.tool === "restart_preview") {
+      skippedSteps.push(step.id);
       events.push(event({
-        message: `Wrote approved file '${step.path}'.`,
-        metadata: { path: step.path ?? null, tool: step.tool },
+        message: "restart_preview recorded as metadata only; no runtime process was touched.",
         runnerId,
         stepId: step.id,
-        type: "file_written"
+        type: "step_skipped"
       }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown approved file runner error.";
-      errors.push(message);
-      events.push(event({ message, runnerId, stepId: step.id, type: "error" }));
+      continue;
+    }
+
+    if (step.tool === "verify_files") {
+      skippedSteps.push(step.id);
+      events.push(event({
+        message: "verify_files deferred to final runner verification.",
+        runnerId,
+        stepId: step.id,
+        type: "verification"
+      }));
+      continue;
+    }
+
+    const targetContent = contentForStep(step, input.files);
+
+    if (targetContent === null || targetContent.length === 0) {
+      blockedSteps.push({
+        reasons: [blocked("write_not_allowed", `Step '${step.id}' has no approved content to write.`)],
+        stepId: step.id
+      });
+      events.push(event({ message: `Blocked step '${step.id}' because no approved content was provided.`, runnerId, stepId: step.id, type: "blocked" }));
+      continue;
+    }
+
+    runnableSteps.push(step);
+  }
+
+  if (blockedSteps.length === 0) {
+    for (const step of runnableSteps) {
+      try {
+        const targetContent = contentForStep(step, input.files);
+
+        if (targetContent === null || targetContent.length === 0) {
+          throw new Error(`Step '${step.id}' has no approved content to write.`);
+        }
+
+        const target = resolveInsideWorkspace(input.workspaceRoot, stepFilePath(step));
+
+        if (!target) {
+          throw new Error(`Refusing to write outside workspace root: ${stepFilePath(step)}`);
+        }
+
+        backups.push({ ...(await captureFileBeforeWrite(target)), target });
+        await writeApprovedFile(input.workspaceRoot, stepFilePath(step), targetContent);
+        writtenFiles.push(stepFilePath(step));
+        writtenTargets.push({ content: targetContent, path: stepFilePath(step), target });
+        appliedSteps.push(step.id);
+        events.push(event({
+          message: `Wrote approved file '${step.path}'.`,
+          metadata: { path: step.path ?? null, tool: step.tool },
+          runnerId,
+          stepId: step.id,
+          type: "file_written"
+        }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown approved file runner error.";
+        errors.push(message);
+        events.push(event({ message, runnerId, stepId: step.id, type: "error" }));
+        break;
+      }
     }
   }
 
-  const verification = await verifyWrittenFiles(writtenFiles);
+  let verification = await verifyWrittenFiles(writtenTargets);
+
+  if (!verification.ok && errors.length === 0) {
+    errors.push("Approved file runner verification failed.");
+  }
+
+  if ((errors.length > 0 || !verification.ok) && writtenTargets.length > 0) {
+    await rollbackWrites(backups).catch((error) => {
+      errors.push(error instanceof Error ? error.message : "Rollback failed.");
+    });
+    events.push(event({
+      message: "Approved file transaction rolled back to the pre-approval snapshot.",
+      metadata: { filesWrittenBeforeFailure: writtenTargets.length },
+      runnerId,
+      type: "rollback_applied"
+    }));
+    writtenFiles.length = 0;
+    appliedSteps.length = 0;
+    verification = await verifyWrittenFiles([]);
+  }
   const snapshot = await finalizeGitSnapshotSafety(
     {
       planId: input.approvedPlan.id,

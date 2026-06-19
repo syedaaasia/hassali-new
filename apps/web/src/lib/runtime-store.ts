@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { canonicalProjectState } from "@/lib/canonical-project-state";
 
 type RuntimeStatus = "blocked" | "error" | "running" | "starting" | "stopped";
 
@@ -89,6 +90,28 @@ function isRuntimePayload(value: unknown): value is RuntimePayload {
   );
 }
 
+function canonicalRuntimeStatus(status: RuntimeStatus) {
+  if (status === "error") return "failed";
+
+  return status;
+}
+
+function syncCanonicalRuntime(payload: {
+  framework?: string | null;
+  lastHealthCheckAt?: string | null;
+  port?: number | null;
+  previewUrl?: string | null;
+  status?: RuntimeStatus;
+}) {
+  canonicalProjectState.setRuntime({
+    framework: payload.framework ?? null,
+    lastHealthCheck: payload.lastHealthCheckAt ? Date.parse(payload.lastHealthCheckAt) : Date.now(),
+    port: payload.port ?? null,
+    previewUrl: payload.previewUrl ?? null,
+    status: canonicalRuntimeStatus(payload.status ?? "stopped")
+  });
+}
+
 async function readRuntimeResponse(response: Response) {
   const payload = (await response.json().catch(() => null)) as unknown;
 
@@ -112,16 +135,19 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   ...initialPayload,
   ...initialStreamState,
   applyRuntimePayload: (payload) =>
-    set((state) => ({
-      ...payload,
-      iframeVersion: payload.previewUrl ? state.iframeVersion + 1 : state.iframeVersion,
-      isLoading: false,
-      runtimeErrors: payload.error ? [payload.error] : state.runtimeErrors,
-      runtimeLogs: payload.logs,
-      runtimePort: payload.port,
-      runtimePreviewUrl: payload.previewUrl,
-      runtimeStatus: payload.status
-    })),
+    {
+      syncCanonicalRuntime(payload);
+      set((state) => ({
+        ...payload,
+        iframeVersion: payload.previewUrl ? state.iframeVersion + 1 : state.iframeVersion,
+        isLoading: false,
+        runtimeErrors: payload.error ? [payload.error] : state.runtimeErrors,
+        runtimeLogs: payload.logs,
+        runtimePort: payload.port,
+        runtimePreviewUrl: payload.previewUrl,
+        runtimeStatus: payload.status
+      }));
+    },
   iframeVersion: 0,
   isLoading: false,
   isPreviewOpen: false,
@@ -156,6 +182,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         return;
       }
 
+      syncCanonicalRuntime(payload);
       set((state) => {
         const nextPreviewUrl = payload.previewUrl ?? state.previewUrl;
 
@@ -199,6 +226,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         method: "POST"
       });
       const payload = await readRuntimeResponse(response);
+      syncCanonicalRuntime(payload);
       set((state) => ({
         ...payload,
         iframeVersion: payload.previewUrl ? state.iframeVersion + 1 : state.iframeVersion,
@@ -222,6 +250,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         method: "POST"
       });
       const payload = await readRuntimeResponse(response);
+      syncCanonicalRuntime(payload);
       set({ ...payload, isLoading: false });
     } catch (error) {
       set({
@@ -243,6 +272,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         method: "POST"
       });
       const payload = await readRuntimeResponse(response);
+      syncCanonicalRuntime(payload);
       set((state) => ({
         ...payload,
         iframeVersion: payload.previewUrl ? state.iframeVersion + 1 : state.iframeVersion

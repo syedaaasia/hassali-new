@@ -2431,7 +2431,7 @@ Required page behavior:
 - Home: premium hero, signature offer, trust/atmosphere, ${primaryAction} CTA.
 - Domain page(s): category cards, product/service highlights, pricing/details where useful, seasonal highlights.
 - About: brand story, sourcing/craft, values, atmosphere.
-- Visual page if requested: safe domain-specific visual grid; no broken remote images.
+- Visual page if requested: safe domain-specific visual grid with local-safe image markup.
 - Contact/Visit: contact form, hours, location block, ${primaryAction} CTA.
 
 Use this vocabulary and content direction:

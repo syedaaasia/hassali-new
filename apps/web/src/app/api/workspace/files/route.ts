@@ -7,35 +7,18 @@ import {
   renameUserProjectPath,
   saveUserProjectFileContent
 } from "@hassali/database";
+import { normalizeSafeProjectPath } from "@/lib/utils/path";
 
 const folderPlaceholderFileName = ".hassali-folder";
 
 type FileKind = "file" | "folder";
 
 function normalizeWorkspacePath(value: unknown, kind: FileKind) {
-  if (typeof value !== "string") {
-    return null;
-  }
+  const normalized = normalizeSafeProjectPath(value);
 
-  const normalized = value
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/+/g, "/")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-
-  if (!normalized) {
-    return null;
-  }
+  if (!normalized) return null;
 
   const segments = normalized.split("/");
-  const hasUnsafeSegment = segments.some(
-    (segment) => !segment || segment === "." || segment === ".."
-  );
-
-  if (hasUnsafeSegment) {
-    return null;
-  }
 
   if (kind === "file" && segments.at(-1) === folderPlaceholderFileName) {
     return null;

@@ -19,7 +19,7 @@ export function buildDevServerRuntime(input: DevServerDetectionInput): DevServer
   const blockedReasons = blockedReasonsForDevServer(detection.framework);
   const port = entry?.port ?? null;
   const startCommand = entry?.startCommand ?? null;
-  const previewUrl = port ? `http://localhost:${port}` : null;
+  const previewUrl = policy.allowExecution && port ? `http://localhost:${port}` : null;
   const plannedCommand = startCommand
     ? `${startCommand}${port ? ` -- planned port ${port}` : ""}`
     : null;
@@ -32,7 +32,7 @@ export function buildDevServerRuntime(input: DevServerDetectionInput): DevServer
       "framework_detection",
       "planned_command_metadata",
       "port_metadata",
-      "preview_url_metadata",
+      ...(previewUrl ? ["preview_url_metadata" as const] : []),
       ...(detection.framework === "static_html" ? ["static_iframe_preview" as const] : [])
     ],
     confidence: detection.confidence,

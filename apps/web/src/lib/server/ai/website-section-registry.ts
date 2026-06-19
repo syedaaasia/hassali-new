@@ -1,5 +1,6 @@
 export type WebsiteIndustry =
   | "ai_product"
+  | "beverage"
   | "ecommerce"
   | "healthcare"
   | "marketplace"
@@ -10,6 +11,7 @@ export type WebsiteIndustry =
 
 export type WebsiteLayoutType =
   | "app_product_story"
+  | "beverage_brand"
   | "catalog_commerce"
   | "clinical_trust"
   | "creator_case_study"
@@ -61,7 +63,7 @@ const profiles: Record<WebsiteIndustry, WebsiteIndustryProfile> = {
   ecommerce: {
     audience: "online shoppers comparing products, categories, delivery, and support",
     contentStrategy: ["lead with product categories", "surface trust and delivery", "make discovery easy"],
-    goal: "drive product browsing and purchase intent",
+    goal: "help shoppers explore the range and purchase confidently",
     industry: "ecommerce",
     layoutType: "catalog_commerce",
     optionalSections: [
@@ -69,13 +71,32 @@ const profiles: Record<WebsiteIndustry, WebsiteIndustryProfile> = {
       section("support", "Delivery and Support", "Explain delivery, returns, and support.", "service badges", true)
     ],
     requiredSections: [
-      section("shop-hero", "Product-Led Storefront", "Show what is sold and why it matters.", "product showcase"),
-      section("categories", "Shop by Category", "Organize products into clear buying paths.", "category tiles"),
-      section("featured-products", "Featured Products", "Highlight specific products or collections.", "product cards"),
-      section("trust", "Delivery, Warranty, and Payment Trust", "Reduce buying anxiety.", "trust badge row"),
-      section("contact", "Support and Store Contact", "Make support and contact obvious.", "support panel")
+      section("shop-hero", "Featured Range", "Present the range and why it matters.", "range showcase"),
+      section("categories", "Collection Paths", "Organize items into clear buying paths.", "collection grid"),
+      section("featured-products", "Featured Lineup", "Highlight specific items or collections.", "lineup highlights"),
+      section("trust", "Delivery, Warranty, and Payment Clarity", "Reduce buying anxiety.", "confidence row"),
+      section("contact", "Store Support", "Make support and contact obvious.", "contact panel")
     ],
-    visualStrategy: "deterministic product cards, category shelves, delivery badges, no broken remote images"
+    visualStrategy: "curated range visuals, collection shelves, delivery confidence, stable local assets"
+  },
+  beverage: {
+    audience: "retailers, distributors, campaign partners, and cola fans",
+    contentStrategy: ["lead with flavor and chill", "show lineup and campaigns", "make retail/distribution contact easy"],
+    goal: "grow cola brand demand and distribution partner inquiries",
+    industry: "beverage",
+    layoutType: "beverage_brand",
+    optionalSections: [
+      section("campaigns", "Campaign Launches", "Show regional launches and seasonal moments.", "campaign bottles", true),
+      section("distribution", "Distribution Network", "Explain retailer and distributor paths.", "route map", true)
+    ],
+    requiredSections: [
+      section("beverage-hero", "Bold Cola Flavor, Chilled and Ready", "Lead with cold cola flavor, sparkling bottles, and shelf-ready cans.", "chilled cola cans"),
+      section("lineup", "Featured Cola Lineup", "Show flagship cans, sparkling bottles, and flavors for every shelf.", "cola flavor lineup"),
+      section("retail", "Retailer and Distributor Inquiries", "Invite partners to discuss campaign launches and regional distribution.", "retailer inquiry path"),
+      section("proof", "Trusted by Retailers Across 12 Regions", "Build confidence with distribution proof and campaign reliability.", "regional retail proof"),
+      section("contact", "Become a Distribution Partner", "Close with a clear contact path for retail, distributor, and campaign partnerships.", "partner contact form")
+    ],
+    visualStrategy: "chilled cola cans, sparkling bottle shapes, campaign shelves, retailer distribution cues"
   },
   healthcare: {
     audience: "patients and families looking for calm, trustworthy care",

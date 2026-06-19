@@ -231,6 +231,10 @@ const profiles: DomainCompositionProfile[] = [
 function inferDomain(input: BuildCompositionInput) {
   const text = input.currentPrompt.toLowerCase();
 
+  if (text.includes("cola") || text.includes("soft drink") || text.includes("soda") || text.includes("beverage")) {
+    return "cola company / soft drinks";
+  }
+
   if (text.includes("furniture") || text.includes("sofa") || text.includes("cupboard") || text.includes("chair") || text.includes("table")) {
     return "furniture";
   }
@@ -244,25 +248,30 @@ function inferDomain(input: BuildCompositionInput) {
   if (input.contextPriority.authoritativeDomain === "saas") return "saas";
   if (input.contextPriority.authoritativeDomain === "restaurant" || input.contextPriority.authoritativeDomain === "bakery") return "restaurant";
 
-  return input.contextPriority.authoritativeDomain ?? "generic_local_service";
+  return input.contextPriority.authoritativeDomain ??
+    input.translatedIntent.domain ??
+    input.translatedIntent.businessType ??
+    "unknown";
 }
 
 function profileFor(input: BuildCompositionInput) {
   const domain = inferDomain(input);
 
+  const domainLabel = domain === "unknown" ? input.contextPriority.authoritativeBusinessType ?? "current request" : domain;
+
   return profiles.find((profile) => profile.domain === domain) ?? {
-    assetIntent: ["business visuals", "service proof", "contact"],
-    contentAngles: ["clear offer", "service confidence", "trust", "contact"],
+    assetIntent: [`${domainLabel} imagery`, "product proof", "contact path"],
+    contentAngles: [`${domainLabel} offer`, "audience confidence", "trust", "contact"],
     domain,
-    entities: unique([input.contextPriority.authoritativeBusinessType ?? "service", ...input.contextPriority.authoritativeFeatures]),
-    forbiddenSections: domain === "generic_local_service" ? ["developer/coder fallback"] : ["Local Service", "clear services", "developer/coder fallback"],
-    layoutIntent: ["hero", "services", "trust", "CTA", "contact"],
+    entities: unique([domainLabel, ...input.contextPriority.authoritativeFeatures]),
+    forbiddenSections: ["Local Service", "clear services", "developer/coder fallback"],
+    layoutIntent: ["hero", "offer detail", "trust", "action", "contact"],
     optionalSections: ["testimonials", "FAQ"],
     primaryCTA: "Contact us",
-    requiredSections: ["hero", "services", "trust", "CTA", "contact"],
-    secondaryCTA: "View services",
-    trustSignals: ["clear communication", "reliable service", "customer trust"],
-    visualIntent: ["clean business", "accessible", "domain-relevant"]
+    requiredSections: ["hero", "offer detail", "trust", "action", "contact"],
+    secondaryCTA: "Explore options",
+    trustSignals: ["clear communication", `${domainLabel} relevance`, "customer trust"],
+    visualIntent: [`${domainLabel} relevant`, "accessible", "brand-specific"]
   };
 }
 

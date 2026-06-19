@@ -1,4 +1,3 @@
-import { isAbsolute } from "node:path";
 import { normalizeRuntimeWorkerType, type RuntimeWorkerType } from "@/lib/server/runtime/runtime-adapter-selector";
 import type {
   ApprovedExecutionPlan,
@@ -6,9 +5,11 @@ import type {
   RuntimeBlockedReason,
   RuntimeToolName
 } from "@/lib/server/runtime/runtime-types";
+import { normalizePath, validateSafePath } from "@/lib/utils/path";
 
 export type RuntimeApprovalChange = {
   action?: unknown;
+  type?: unknown;
   path?: unknown;
   proposedContent?: unknown;
   summary?: unknown;
@@ -39,7 +40,7 @@ export type RuntimeApprovalValidationResult =
       workerType: RuntimeWorkerType;
     };
 
-const supportedWriteActions = new Set(["create", "modify", "update", "write_file"]);
+const supportedWriteActions = new Set(["create", "create_file", "modify", "update", "update_file", "write_file"]);
 const metadataActions = new Set([
   "reload_preview",
   "restart_preview",
@@ -50,28 +51,6 @@ const metadataActions = new Set([
 ]);
 const blockedDeleteActions = new Set(["delete", "remove", "unlink"]);
 
-function normalizeChangePath(value: unknown) {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/+/g, "/")
-    .replace(/^(?:\.\/)+/, "")
-    .replace(/^\/+/, "");
-
-  if (!normalized || isAbsolute(value)) {
-    return null;
-  }
-
-  const segments = normalized.split("/");
-  const unsafe = segments.some((segment) => !segment || segment === "." || segment === "..");
-
-  return unsafe ? null : normalized;
-}
-
 function blocked(code: RuntimeBlockedReason["code"], message: string): RuntimeBlockedReason {
   return {
     code,
@@ -80,29 +59,50 @@ function blocked(code: RuntimeBlockedReason["code"], message: string): RuntimeBl
   };
 }
 
-function packageOrShellBlocked(summary: string) {
-  if (/npm\s+install|pnpm\s+add|yarn\s+add|pip\s+install|bun\s+add/i.test(summary)) {
-    return blocked("package_install_blocked", "Package installation is blocked for runtime approval.");
-  }
+function actionName(change: RuntimeApprovalChange) {
+  const value = typeof change.type === "string" ? change.type : change.action;
 
-  if (/\b(?:shell|terminal|bash|powershell|cmd\.exe)\b/i.test(summary)) {
-    return blocked("shell_command_blocked", "Shell command execution is blocked for runtime approval.");
-  }
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
 
-  return null;
+function isShellAction(change: RuntimeApprovalChange) {
+  const action = actionName(change);
+
+  return action === "execute_shell" || action === "runtime_command";
+}
+
+function normalizeChangePath(value: unknown, workspaceRoot: string) {
+  const path = normalizePath(value);
+
+  try {
+    validateSafePath(path, workspaceRoot);
+    return path;
+  } catch {
+    return null;
+  }
 }
 
 function changeToStep(
   change: RuntimeApprovalChange,
-  index: number
+  index: number,
+  workspaceRoot: string
 ): {
   runtimeWarning: string | null;
   blockedReasons: RuntimeBlockedReason[];
   skipped: string | null;
   step: ApprovedExecutionStep | null;
 } {
-  const action = typeof change.action === "string" ? change.action.trim().toLowerCase() : "";
+  const action = actionName(change);
   const summary = typeof change.summary === "string" ? change.summary : `Approved proposal change ${index + 1}`;
+
+  if (isShellAction(change)) {
+    return {
+      runtimeWarning: null,
+      blockedReasons: [blocked("shell_command_blocked", "Shell command execution is blocked for runtime approval.")],
+      skipped: null,
+      step: null
+    };
+  }
 
   if (blockedDeleteActions.has(action)) {
     return {
@@ -122,17 +122,6 @@ function changeToStep(
     };
   }
 
-  const summaryBlock = packageOrShellBlocked(summary);
-
-  if (summaryBlock) {
-    return {
-      runtimeWarning: null,
-      blockedReasons: [summaryBlock],
-      skipped: null,
-      step: null
-    };
-  }
-
   if (!supportedWriteActions.has(action)) {
     return {
       runtimeWarning: null,
@@ -142,7 +131,7 @@ function changeToStep(
     };
   }
 
-  const path = normalizeChangePath(change.path);
+  const path = normalizeChangePath(change.path, workspaceRoot);
 
   if (!path) {
     return {
@@ -191,7 +180,7 @@ export function buildApprovedPlanFromProposal(input: {
   const skippedSummaries: string[] = [];
 
   input.changes.forEach((change, index) => {
-    const converted = changeToStep(change, index);
+    const converted = changeToStep(change, index, input.workspaceRoot);
 
     blockedReasons.push(...converted.blockedReasons);
 
@@ -214,7 +203,7 @@ export function buildApprovedPlanFromProposal(input: {
     id: input.proposalId,
     mode: "CODE",
     projectId: input.projectId,
-    steps,
+    steps: [...new Map(steps.map((step) => [step.path ?? step.id, step])).values()],
     summary: `Approved proposal ${input.proposalId}`,
     workspaceRoot: input.workspaceRoot
   };

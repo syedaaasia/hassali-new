@@ -174,10 +174,19 @@ function contradictoryTermsFor(domain: string, capability: PromptSovereigntyCont
   return unique(contradictions);
 }
 
+function isScannableProposalFile(path: string | undefined) {
+  if (!path) {
+    return false;
+  }
+
+  return path !== "HASSALI.md" && /\.(?:html|css|js|ts|tsx|md)$/i.test(path);
+}
+
 function contentFor(changes: PromptAcceptanceChange[]) {
   return lower(
     changes
-      .map((change) => `${change.path ?? ""}\n${change.summary ?? ""}\n${change.proposedContent ?? ""}`)
+      .filter((change) => isScannableProposalFile(change.path))
+      .map((change) => change.proposedContent ?? "")
       .join("\n")
   );
 }

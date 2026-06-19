@@ -131,6 +131,25 @@ function includesSignal(text: string, signal: string) {
   return normalize(text).includes(normalize(signal));
 }
 
+function domainVocabulary(domain: string | null) {
+  if (!domain || normalize(domain) === "unknown") {
+    return [];
+  }
+
+  const domainText = normalize(domain);
+  const words = domainText
+    .split(/[^a-z0-9+]+/i)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 2 && !["and", "the", "for", "with"].includes(word));
+  const expanded = [...words];
+
+  if (domainText.includes("cola") || domainText.includes("soft drink") || domainText.includes("soda") || domainText.includes("beverage")) {
+    expanded.push("cola", "soft drink", "soda", "beverage", "flavor", "refresh");
+  }
+
+  return unique(expanded);
+}
+
 function contentFromFiles(files?: Record<string, string>) {
   return Object.entries(files ?? {})
     .map(([path, content]) => `\nFILE:${path}\n${content}`)
@@ -150,7 +169,7 @@ function profileFor(domain: string | null) {
 
   return {
     forbidden: ["developer/coder fallback", "keyword-chain copy patterns"],
-    required: []
+    required: domainVocabulary(domain)
   };
 }
 
@@ -261,7 +280,13 @@ function score(input: {
 }
 
 export function validateDomain(input: ValidateDomainInput): DomainValidationResult {
-  const domain = input.proposalContext?.domain ?? input.contextPriority.authoritativeDomain;
+  const domain =
+    input.proposalContext?.domain ??
+    input.compositionPlan.authoritativeDomain ??
+    input.contextPriority.authoritativeDomain ??
+    input.translatedIntent.domain ??
+    input.translatedIntent.businessType ??
+    null;
   const profile = profileFor(domain);
   const requiredSignals = unique([
     ...profile.required,
@@ -275,10 +300,7 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
     ...input.businessBlueprint.mustAvoid
   ]);
   const combinedContent = input.validationMode === "proposal_content"
-    ? [
-        input.proposalSummary ?? "",
-        contentFromFiles(input.proposedFiles)
-      ].join("\n")
+    ? contentFromFiles(input.proposedFiles)
     : input.currentPrompt;
   const detectedForbiddenSignals = detectForbidden(combinedContent, forbiddenSignals);
   const detectedGenericCopy = detectGenericCopy(combinedContent);

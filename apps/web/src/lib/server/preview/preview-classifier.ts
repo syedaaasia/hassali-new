@@ -3,6 +3,7 @@ import type {
   PreviewRuntimeInput,
   PreviewType
 } from "@/lib/server/preview/preview-types";
+import { normalizePath } from "@/lib/utils/path";
 
 const legacyPreviewMap: Record<string, PreviewType> = {
   code_app_preview: "dashboard",
@@ -38,20 +39,18 @@ function normalizedText(input: PreviewRuntimeInput) {
 }
 
 function collectedFiles(input: PreviewRuntimeInput) {
-  const normalizeKey = (path: string) => path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
-
   return {
-    ...Object.fromEntries(Object.entries(input.generatedFiles ?? {}).map(([path, content]) => [normalizeKey(path), content])),
+    ...Object.fromEntries(Object.entries(input.generatedFiles ?? {}).map(([path, content]) => [normalizePath(path), content])),
     ...Object.fromEntries(
       (input.proposal?.changes ?? [])
         .filter((change) => typeof change.path === "string" && typeof change.proposedContent === "string")
-        .map((change) => [normalizeKey(change.path as string), change.proposedContent as string])
+        .map((change) => [normalizePath(change.path as string), change.proposedContent as string])
     )
   };
 }
 
 function normalizedPath(path: string) {
-  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "").toLowerCase();
+  return normalizePath(path).toLowerCase();
 }
 
 function fileEvidence(input: PreviewRuntimeInput) {

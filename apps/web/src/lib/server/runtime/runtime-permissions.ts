@@ -66,14 +66,6 @@ export function validateRuntimeStep(
     reasons.push(blocked("external_path_blocked", `Path '${step.path}' is outside the workspace root.`));
   }
 
-  if (/npm\s+install|pnpm\s+add|yarn\s+add|pip\s+install|bun\s+add/i.test(step.summary)) {
-    reasons.push(blocked("package_install_blocked", "Package installation is blocked in this runtime contract."));
-  }
-
-  if (/shell|terminal|bash|powershell|cmd\.exe/i.test(step.summary)) {
-    reasons.push(blocked("shell_command_blocked", "Shell command execution is blocked in this runtime contract."));
-  }
-
   return reasons;
 }
 

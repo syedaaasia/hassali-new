@@ -5,7 +5,16 @@ import type { RuntimeFileAnalysis } from "@/lib/server/runtime/live-runtime-type
 
 const maxFiles = 300;
 const maxFileBytes = 140_000;
-const ignoredDirs = new Set([".git", ".next", "dist", "node_modules"]);
+const ignoredDirs = new Set([
+  ".git",
+  ".hassali-git",
+  ".next",
+  ".turbo",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules"
+]);
 const readablePattern = /\.(?:astro|cs|csproj|css|dart|gradle|go|html|java|js|json|jsx|kt|md|php|prisma|py|sql|svelte|swift|toml|ts|tsx|vue|xml|yaml|yml)$/i;
 const keyFileNames = new Set([
   "androidmanifest.xml",

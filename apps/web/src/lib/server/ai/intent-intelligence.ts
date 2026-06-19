@@ -169,6 +169,10 @@ function inferDomain(promptText: string, projectText: string) {
     return "seafood";
   }
 
+  if (includesAny(promptText, ["cola", "soft drink", "soft drinks", "soda", "beverage", "fizzy drink"])) {
+    return "cola company / soft drinks";
+  }
+
   if (includesAny(promptText, ["candle", "candles", "scent", "fragrance"])) {
     return "candle";
   }

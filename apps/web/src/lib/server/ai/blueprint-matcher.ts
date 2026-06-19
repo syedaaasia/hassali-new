@@ -356,6 +356,12 @@ function cloneTemplate(template: BlueprintTemplate, status: BlueprintStatus, con
 }
 
 function fallbackBlueprint(input: MatchBlueprintInput): BusinessBlueprint {
+  const promptDomain =
+    input.translatedIntent.businessType ??
+    input.translatedIntent.domain ??
+    input.prompt.match(/\b(?:cola|soft drinks?|soda|beverage|seafood|restaurant|crm|dashboard|billing)\b/gi)?.join(" / ") ??
+    "unknown";
+
   if (input.productMode === "ASK") {
     return {
       acceptanceChecks: ["answer the question directly", "do not propose file mutations"],
@@ -402,9 +408,9 @@ function fallbackBlueprint(input: MatchBlueprintInput): BusinessBlueprint {
 
   return {
     acceptanceChecks: ["domain-specific copy is present", "requested pages and constraints are respected", "no stale domain leakage"],
-    blueprintId: "generic_local_service_website",
+    blueprintId: "current_prompt_website",
     blueprintKind: "website",
-    blueprintName: "Generic Local Service Website",
+    blueprintName: promptDomain === "unknown" ? "Current Prompt Website" : `${promptDomain} Website`,
     blueprintStatus: "fallback",
     confidence: 0.42,
     dataEntities: [],
@@ -412,12 +418,12 @@ function fallbackBlueprint(input: MatchBlueprintInput): BusinessBlueprint {
     integrations: ["contact form placeholder"],
     matchedDomain: input.translatedIntent.domain,
     mustAvoid: ["developer/coder fallback", "unrelated stale project domain", "generic internal instruction copy"],
-    mustInclude: ["clear hero", "services/offers", "trust reasons", "CTA", "contact"],
+    mustInclude: [promptDomain, "domain-specific hero", "audience trust", "clear action", "contact"],
     previewType: "website_static_preview",
-    requiredComponents: ["Hero", "OfferSections", "TrustReasons", "CTA", "Contact"],
-    requiredCopyBlocks: ["public hero copy", "offer descriptions", "trust copy", "contact CTA"],
+    requiredComponents: ["Hero", "OfferSections", "TrustReasons", "Action", "Contact"],
+    requiredCopyBlocks: ["public hero copy", "offer descriptions", "trust copy", "contact action"],
     screens: [],
-    sections: ["hero", "services or offers", "trust reasons", "testimonials", "CTA", "contact"]
+    sections: ["hero", "offer detail", "trust reasons", "testimonials", "action", "contact"]
   };
 }
 

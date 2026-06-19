@@ -63,6 +63,13 @@ type BuildProposalRepairInput = {
   translatedIntent: TranslatedIntentSpec;
 };
 
+const unknownRepairDomains = new Set([
+  "generic local service website",
+  "generic_local_service",
+  "local service",
+  "unknown"
+]);
+
 const genericReplacementMap: Array<[RegExp, string]> = [
   [/\bClear Services Studio\b/gi, ""],
   [/\bLocal Service\b/gi, ""],
@@ -111,6 +118,22 @@ function dominantPhrase(contract: GeneratorContract) {
     contract.requiredCopySignals.find((signal) => signal.length > 4) ??
     contract.authoritativeDomain ??
     "domain-specific offer";
+}
+
+function repairDomain(input: BuildProposalRepairInput) {
+  return input.generatorContract.authoritativeBusinessType ??
+    input.generatorContract.authoritativeDomain ??
+    input.proposalContext?.domain ??
+    input.compositionPlan.authoritativeDomain ??
+    input.translatedIntent.businessType ??
+    input.translatedIntent.domain ??
+    "unknown";
+}
+
+function cannotRepairDomain(domain: string) {
+  const normalized = normalize(domain);
+
+  return !normalized || unknownRepairDomains.has(normalized);
 }
 
 function domainSentence(contract: GeneratorContract) {
@@ -232,6 +255,186 @@ function simpleHtmlPage(input: {
 `;
 }
 
+function simpleStyles(contract: GeneratorContract) {
+  const label = dominantPhrase(contract);
+
+  return `:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f7f8fb;
+  color: #172033;
+}
+
+body {
+  margin: 0;
+}
+
+nav, main, footer {
+  margin: 0 auto;
+  max-width: 980px;
+  padding: 24px;
+}
+
+nav {
+  display: flex;
+  gap: 16px;
+}
+
+a {
+  color: #0f5fbe;
+}
+
+.hero, .domain-section {
+  border: 1px solid #d8deea;
+  border-radius: 18px;
+  margin: 20px 0;
+  padding: 28px;
+}
+
+.visual-panel {
+  background: #eef4ff;
+  border-radius: 14px;
+  margin-top: 18px;
+  padding: 20px;
+}
+
+footer::before {
+  content: "${label}";
+  display: block;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+`;
+}
+
+function simpleMainJs(contract: GeneratorContract) {
+  return `document.documentElement.dataset.hassaliDomain = ${JSON.stringify(dominantPhrase(contract))};
+`;
+}
+
+function simpleContractMd(contract: GeneratorContract) {
+  const label = dominantPhrase(contract);
+
+  return `# HASSALI Contract
+
+- Domain: ${label}
+- Mode: website generation
+- Preview: static website
+- Required pages: ${contract.requiredPages.join(", ") || "index.html"}
+- Contract role: human-readable project notes only; not machine state.
+`;
+}
+
+function requiredRepairFiles(input: BuildProposalRepairInput) {
+  if (input.generatorContract.generatorMode === "website_generation") {
+    const pagePaths = (input.proposalContext?.pages.length ? input.proposalContext.pages : input.generatorContract.requiredPages)
+      .map(pageToPath);
+
+    return unique(["index.html", ...pagePaths, "styles.css", "main.js", "HASSALI.md"]);
+  }
+
+  if (input.generatorContract.generatorMode === "code_generation") {
+    return ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx", "styles.css", "HASSALI.md"];
+  }
+
+  return [];
+}
+
+function generatedRepairFile(path: string, input: BuildProposalRepairInput) {
+  const appName = dominantPhrase(input.generatorContract);
+
+  if (path === "package.json") {
+    return JSON.stringify(
+      {
+        scripts: {
+          dev: "vite",
+          build: "tsc && vite build",
+          preview: "vite preview"
+        },
+        dependencies: {
+          "@vitejs/plugin-react": "latest",
+          vite: "latest",
+          react: "latest",
+          "react-dom": "latest",
+          typescript: "latest"
+        },
+        devDependencies: {}
+      },
+      null,
+      2
+    );
+  }
+
+  if (path === "vite.config.ts") {
+    return `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()]
+});
+`;
+  }
+
+  if (path === "src/main.tsx") {
+    return `import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+`;
+  }
+
+  if (path === "src/App.tsx") {
+    return `export default function App() {
+  return (
+    <main>
+      <h1>${appName}</h1>
+      <p>Approval-first React/Vite project shell for the requested CODE task.</p>
+    </main>
+  );
+}
+`;
+  }
+
+  if (path.endsWith(".html")) {
+    if (input.generatorContract.generatorMode === "code_generation") {
+      return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${appName}</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
+`;
+    }
+
+    return simpleHtmlPage({ contract: input.generatorContract, page: path === "index.html" ? "home" : path.replace(/\.html$/i, "") });
+  }
+
+  if (path === "styles.css") {
+    return simpleStyles(input.generatorContract);
+  }
+
+  if (path === "main.js") {
+    return simpleMainJs(input.generatorContract);
+  }
+
+  if (path === "HASSALI.md") {
+    return simpleContractMd(input.generatorContract);
+  }
+
+  return null;
+}
+
 function codeDocsRepair(input: BuildProposalRepairInput) {
   const name = input.generatorContract.authoritativeBusinessType ?? "CODE app/system";
 
@@ -315,6 +518,31 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
     };
   }
 
+  const domain = repairDomain(input);
+  if (input.generatorContract.generatorMode === "website_generation" && cannotRepairDomain(domain)) {
+    return {
+      originalBlockReasons: reasons,
+      repairActions: [],
+      repairApplied: false,
+      repairAttempted: true,
+      repairConfidence: 0.82,
+      repairId: `${input.generatorContract.contractId}_repair_domain_blocked`,
+      repairedFiles: input.proposedFiles,
+      repairedSummary: input.proposalSummary,
+      repairSeverity: "high",
+      repairStatus: "keep_blocked",
+      repairStrategy: "none",
+      repairWarnings: [
+        "Cannot generate missing files: domain not detected from prompt. Please rephrase your request with more specific domain details."
+      ],
+      revalidationPassed: false,
+      revalidationRequired: false,
+      shouldKeepBlocked: true,
+      shouldPresentRepairedProposal: false,
+      unresolvedIssues: reasons
+    };
+  }
+
   const hasRunnableAppSource = Object.keys(repairedFiles).some((path) =>
     path === "vite.config.ts" ||
     path === "vite.config.js" ||
@@ -386,6 +614,21 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
         repairedFiles[path] = simpleHtmlPage({ contract: input.generatorContract, page });
       }
     }
+  }
+
+  for (const path of requiredRepairFiles(input)) {
+    if (repairedFiles[path]) {
+      continue;
+    }
+
+    const generated = generatedRepairFile(path, input);
+    if (!generated) {
+      continue;
+    }
+
+    strategies.push(path.endsWith(".html") ? "page_count_repair" : "section_structure_repair");
+    actions.push(`Added missing required file ${path}.`);
+    repairedFiles[path] = generated;
   }
 
   const applied = actions.length > 0;

@@ -1,5 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import {
+  listUserProjectFiles,
+  saveUserProjectFileContent
+} from "@hassali/database";
+import {
+  persistCanonicalApprovalState,
+  recordCanonicalEvent
+} from "@/lib/server/canonical-persistence";
+import {
   isWorkspaceBindingError,
   resolveProjectWorkspace
 } from "@/lib/server/runtime/project-workspace-registry";
@@ -8,17 +16,13 @@ import { buildLiveRuntimePreviewMetadata } from "@/lib/server/runtime/live-runti
 import { buildRuntimeAuthorityDecision } from "@/lib/server/runtime/runtime-authority";
 import { selectRuntimeAdapter } from "@/lib/server/runtime/runtime-adapter-selector";
 import { buildDevServerRuntime } from "@/lib/server/runtime/dev-server-runtime";
-import { buildBackendRuntimeEngine } from "@/lib/server/runtime/backend-runtime-engine";
 import { buildMobilePreviewRuntime } from "@/lib/server/preview/mobile-preview-runtime";
-import { startBackendRuntime } from "@/lib/server/runtime/backend-runtime-manager";
 import { buildMobileRuntimeCandidate } from "@/lib/server/runtime/mobile-runtime-manager";
-import { startNextRuntime } from "@/lib/server/runtime/next-runtime-manager";
 import {
   buildApprovedPlanFromProposal,
   validateRuntimeApprovalRequest,
   type RuntimeApprovalBody
 } from "@/lib/server/runtime/runtime-approval-plan";
-import { startViteRuntime } from "@/lib/server/runtime/vite-runtime-manager";
 import { routeRuntimeWorker } from "@/lib/server/runtime/worker-router";
 import type {
   RuntimeAdapterResult,
@@ -58,6 +62,18 @@ function metadataFromBody(value: unknown): Record<string, unknown> | undefined {
 
 function workerTypeFromBody(value: unknown) {
   return typeof value === "string" ? value : null;
+}
+
+async function recordBestEffortEvent(
+  workspaceRoot: string,
+  type: string,
+  data: Record<string, unknown>
+) {
+  try {
+    await recordCanonicalEvent(workspaceRoot, type, data);
+  } catch {
+    // Event persistence is best-effort; approval success is still governed by file and DB persistence.
+  }
 }
 
 function isExternalWorkerRequest(value: string | null) {
@@ -261,6 +277,102 @@ export async function POST(request: Request) {
     .filter((event) => event.type === "file_written")
     .map((event) => String(event.metadata?.path ?? ""))
     .filter(Boolean);
+
+  if (result.ok) {
+    try {
+      for (const step of plan.steps) {
+        if (step.tool !== "write_file" || !step.path || typeof step.content !== "string") {
+          continue;
+        }
+
+        await recordBestEffortEvent(workspaceBinding.workspaceRoot, "FILE_WRITE_STARTED", {
+          path: step.path,
+          projectId: parsed.projectId,
+          proposalId: parsed.proposalId
+        });
+        const saved = await saveUserProjectFileContent({
+          content: step.content,
+          externalUserId: userId,
+          path: step.path,
+          projectId: parsed.projectId
+        });
+
+        if (!saved || saved.content !== step.content) {
+          throw new Error(`Persistence verification failed for: ${step.path}`);
+        }
+
+        await recordBestEffortEvent(workspaceBinding.workspaceRoot, "FILE_WRITTEN", {
+          path: step.path,
+          projectId: parsed.projectId,
+          proposalId: parsed.proposalId
+        });
+      }
+
+      const persistedFiles = await listUserProjectFiles({
+        externalUserId: userId,
+        projectId: parsed.projectId
+      });
+
+      if (!persistedFiles) {
+        throw new Error("Project not found during approval persistence.");
+      }
+
+      await persistCanonicalApprovalState({
+        files: persistedFiles.map((file) => ({
+          content: String(file.content),
+          path: String(file.path)
+        })),
+        projectId: parsed.projectId,
+        proposalId: parsed.proposalId,
+        workspaceRoot: workspaceBinding.workspaceRoot
+      });
+      await recordBestEffortEvent(workspaceBinding.workspaceRoot, "PROPOSAL_APPROVED", {
+        filesWritten: writtenFiles,
+        projectId: parsed.projectId,
+        proposalId: parsed.proposalId
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Approval persistence failed.";
+
+      await recordBestEffortEvent(workspaceBinding.workspaceRoot, "PERSIST_FAILURE", {
+        error: message,
+        filesWrittenBeforeFailure: writtenFiles,
+        projectId: parsed.projectId,
+        proposalId: parsed.proposalId
+      });
+      await recordBestEffortEvent(workspaceBinding.workspaceRoot, "PROJECT_CRASH_BACKUP", {
+        reason: "File runner completed, but canonical persistence failed.",
+        projectId: parsed.projectId,
+        proposalId: parsed.proposalId
+      });
+
+      return Response.json({
+        applied: false,
+        appliedSteps: result.events
+          .filter((event) => event.type === "file_written" && event.stepId)
+          .map((event) => event.stepId),
+        blockedSteps: [],
+        errors: [`${message} Event PERSIST_FAILURE recorded; proposal remains pending.`],
+        events: result.events,
+        ok: false,
+        persistenceWarning: "File write completed but canonical persistence failed. Hassali did not mark the proposal successful.",
+        runnerId: session.id,
+        runnerStatus: "failed",
+        runtimeOptional: true,
+        runtimeStartAttempted: false,
+        runtimeStartError: message,
+        runtimeStartStatus: "failed",
+        runtimeWarning: "Persistence failed after file write; refresh may not show the new files until this proposal is approved again.",
+        verification: result.verification ?? null,
+        workspaceBindingStatus: workspaceBinding.registryStatus,
+        workspaceCreated: workspaceBinding.created,
+        workspaceRoot: workspaceBinding.workspaceRoot,
+        workspaceWarnings: [...workspaceWarnings, "Canonical persistence failed after file write."],
+        writtenFiles
+      }, { status: 500 });
+    }
+  }
+
   const liveRuntimePreview = result.ok
     ? await buildLiveRuntimePreviewMetadata({
         productMode,
@@ -274,64 +386,18 @@ export async function POST(request: Request) {
         generatedFiles: liveRuntimePreview.analysis.generatedFiles
       })
     : null;
-  const backendRuntime = liveRuntimePreview
-    ? buildBackendRuntimeEngine(liveRuntimePreview.analysis.generatedFiles)
-    : null;
   const mobilePreview = liveRuntimePreview
     ? buildMobilePreviewRuntime({
         files: liveRuntimePreview.analysis.generatedFiles
       })
     : null;
-  const viteRuntime =
-    result.ok &&
-    productMode === "CODE" &&
-    workerRouter.selectedWorkerType === "local" &&
-    devServerRuntime?.framework === "react_vite"
-      ? await startViteRuntime({
-          devServerRuntime,
-          productMode,
-          projectId: parsed.projectId,
-          workerType: workerRouter.selectedWorkerType,
-          workspaceRoot: workspaceBinding.workspaceRoot
-        })
-      : null;
-  const nextRuntime =
-    result.ok &&
-    productMode === "CODE" &&
-    workerRouter.selectedWorkerType === "local" &&
-    devServerRuntime?.framework === "next_app"
-      ? await startNextRuntime({
-          devServerRuntime,
-          productMode,
-          projectId: parsed.projectId,
-          workerType: workerRouter.selectedWorkerType,
-          workspaceRoot: workspaceBinding.workspaceRoot
-        })
-      : null;
-  const backendExecutionRuntime =
-    result.ok &&
-    productMode === "CODE" &&
-    workerRouter.selectedWorkerType === "local" &&
-    !viteRuntime &&
-    !nextRuntime &&
-    backendRuntime?.detected &&
-    ["express", "fastify", "nestjs", "node"].includes(backendRuntime.match.framework)
-      ? await startBackendRuntime({
-          analysis: backendRuntime.analysis,
-          match: backendRuntime.match,
-          productMode,
-          projectId: parsed.projectId,
-          workerType: workerRouter.selectedWorkerType,
-          workspaceRoot: workspaceBinding.workspaceRoot
-        })
-      : null;
+  const viteRuntime = null;
+  const nextRuntime = null;
+  const backendExecutionRuntime = null;
   const mobileRuntime =
     result.ok &&
     productMode === "CODE" &&
     workerRouter.selectedWorkerType === "local" &&
-    !viteRuntime &&
-    !nextRuntime &&
-    !backendExecutionRuntime &&
     mobilePreview?.detected
       ? await buildMobileRuntimeCandidate({
           mobilePreview,
@@ -345,7 +411,11 @@ export async function POST(request: Request) {
     backendRuntime: backendExecutionRuntime,
     mobileRuntime,
     nextRuntime,
-    runtimeWarnings,
+    runtimeWarnings: [
+      ...runtimeWarnings,
+      ...(devServerRuntime?.warnings ?? []),
+      "Approval recorded runtime metadata only; no runtime process was started."
+    ],
     viteRuntime
   });
   const fileApprovalSucceeded = result.ok;

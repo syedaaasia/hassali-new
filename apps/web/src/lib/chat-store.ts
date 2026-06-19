@@ -1,7 +1,9 @@
 "use client";
 
 import { create } from "zustand";
+import { canonicalProjectState } from "@/lib/canonical-project-state";
 import type { RuntimeSyncMetadata } from "@/lib/runtime-result-sync";
+import { normalizeSafeProjectPath } from "@/lib/utils/path";
 
 export type ChatRole = "user" | "assistant";
 export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
@@ -299,7 +301,7 @@ function legacyCriticalIssues(proposal: DiffProposal) {
       issues.push(`invalid file mutation for ${change.path ?? "unknown path"}`);
     }
 
-    if (change.path && (/^[a-z]:/i.test(change.path) || change.path.startsWith("/") || change.path.startsWith("\\") || change.path.includes(".."))) {
+    if (change.path && !normalizeSafeProjectPath(change.path)) {
       issues.push(`unsafe file path ${change.path}`);
     }
   }
@@ -981,6 +983,113 @@ function isDiffProposal(value: unknown): value is DiffProposal {
   );
 }
 
+function normalizeProposalFiles(proposal: DiffProposal): DiffProposal {
+  const dedupedChanges = new Map<string, DiffProposal["changes"][number]>();
+  const nextChanges: DiffProposal["changes"] = [];
+
+  for (const change of proposal.changes) {
+    if (!isFileProposalAction(change.action)) {
+      nextChanges.push(change);
+      continue;
+    }
+
+    const path = normalizeSafeProjectPath(change.path);
+
+    if (!path || typeof change.proposedContent !== "string" || change.proposedContent.length === 0) {
+      continue;
+    }
+
+    dedupedChanges.set(path, {
+      ...change,
+      path
+    });
+  }
+
+  return {
+    ...proposal,
+    changes: [...nextChanges, ...dedupedChanges.values()]
+  };
+}
+
+function proposalFromFileBlocks(files: Array<{ content: string; path: string }>): DiffProposal | null {
+  const deduped = new Map<string, string>();
+
+  for (const file of files) {
+    const path = normalizeSafeProjectPath(file.path);
+
+    if (!path || typeof file.content !== "string" || file.content.length === 0) {
+      continue;
+    }
+
+    deduped.set(path, file.content);
+  }
+
+  if (deduped.size === 0) {
+    return null;
+  }
+
+  return {
+    changes: [...deduped.entries()].map(([path, proposedContent]) => ({
+      action: "update",
+      path,
+      proposedContent,
+      summary: `Update ${path}`
+    })),
+    id: `proposal-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    mode: "EXECUTE",
+    projectId: null,
+    status: "pending",
+    summary: `Prepared ${deduped.size} file change(s).`
+  };
+}
+
+function parseJsonProposal(value: unknown) {
+  if (isDiffProposal(value)) {
+    return normalizeProposalFiles(value);
+  }
+
+  if (Array.isArray(value)) {
+    const files = value.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+
+      const record = item as { content?: unknown; path?: unknown };
+
+      return typeof record.path === "string" && typeof record.content === "string"
+        ? [{ content: record.content, path: record.path }]
+        : [];
+    });
+
+    return proposalFromFileBlocks(files);
+  }
+
+  return null;
+}
+
+function extractXmlFileBlocks(content: string) {
+  return Array.from(content.matchAll(/<file\b[^>]*path=["']([^"']+)["'][^>]*>([\s\S]*?)(?:<\/file>|$)/gi))
+    .map((match) => ({
+      content: match[2] ?? "",
+      path: match[1] ?? ""
+    }));
+}
+
+function extractMarkdownFileBlocks(content: string) {
+  return Array.from(content.matchAll(/```[^\n]*\n([\s\S]*?)```/g)).flatMap((match) => {
+    const block = match[1] ?? "";
+    const lines = block.split(/\r?\n/);
+    const pathMatch = lines[0]?.match(/^\s*(?:\/\/|#|<!--)\s*path:\s*([^->\s]+)\s*(?:-->)?\s*$/i);
+
+    if (!pathMatch?.[1]) {
+      return [];
+    }
+
+    return [{
+      content: lines.slice(1).join("\n"),
+      path: pathMatch[1]
+    }];
+  });
+}
+
 function parseDiffProposal(content: string) {
   if (!content.trim()) {
     return null;
@@ -988,11 +1097,33 @@ function parseDiffProposal(content: string) {
 
   try {
     const parsed = JSON.parse(content) as unknown;
+    const proposal = parseJsonProposal(parsed);
 
-    return isDiffProposal(parsed) ? parsed : null;
+    if (proposal) {
+      return proposal;
+    }
   } catch {
-    return null;
+    // Continue with tolerant extraction below.
   }
+
+  const jsonArrayMatch = content.match(/\[[\s\S]*\]/);
+
+  if (jsonArrayMatch) {
+    try {
+      const proposal = parseJsonProposal(JSON.parse(jsonArrayMatch[0]) as unknown);
+
+      if (proposal) {
+        return proposal;
+      }
+    } catch {
+      // Continue with file block extraction.
+    }
+  }
+
+  return proposalFromFileBlocks([
+    ...extractXmlFileBlocks(content),
+    ...extractMarkdownFileBlocks(content)
+  ]);
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -1021,13 +1152,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setInput: (input) => set({ input }),
   setModel: (model) => set({ model }),
   setMode: (mode) => {
-    set({ mode, productMode: aiModeToProductMode(mode) });
+    canonicalProjectState.setMode(aiModeToProductMode(mode));
+    set({ mode, productMode: aiModeToProductMode(mode), proposal: null });
   },
   setProductMode: (productMode) => {
-    set({ mode: productModeToAiMode(productMode), productMode });
+    canonicalProjectState.setMode(productMode);
+    set({ mode: productModeToAiMode(productMode), productMode, proposal: null });
   },
-  clearProposal: () => set({ proposal: null }),
-  markProposalApproved: (metadata) =>
+  clearProposal: () => {
+    canonicalProjectState.clearProposalState();
+    set({ proposal: null });
+  },
+  markProposalApproved: (metadata) => {
+    canonicalProjectState.clearProposalState();
     set((state) => ({
       proposal: state.proposal
         ? {
@@ -1036,7 +1173,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             status: "approved"
           }
         : null
-    })),
+    }));
+  },
   sendMessage: async (workspaceContext) => {
     const prompt = get().input.trim();
     const mode = get().mode;
@@ -1149,6 +1287,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               status: "pending"
             }
           }));
+          canonicalProjectState.stageProposal({
+            ...parsedProposal,
+            status: "pending"
+          });
         }
       }
     } catch {

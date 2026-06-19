@@ -4,6 +4,7 @@ import { renderFrameworkPreview } from "@/lib/server/preview/framework-preview-r
 import { buildMobilePreviewRuntime } from "@/lib/server/preview/mobile-preview-runtime";
 import { getPreviewRegistryEntry } from "@/lib/server/preview/preview-registry";
 import { renderRealPreview } from "@/lib/server/preview/real-preview-renderer";
+import { normalizePath } from "@/lib/utils/path";
 import type {
   PreviewClassification,
   PreviewMetadata,
@@ -20,7 +21,7 @@ function fileNames(input: PreviewRuntimeInput) {
   return unique([
     ...Object.keys(input.generatedFiles ?? {}),
     ...(input.proposal?.changes ?? []).map((change) => change.path ?? "")
-  ].map((path) => path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "")));
+  ].map(normalizePath));
 }
 
 function proposalFiles(input: PreviewRuntimeInput) {
@@ -28,7 +29,7 @@ function proposalFiles(input: PreviewRuntimeInput) {
     (input.proposal?.changes ?? [])
       .filter((change) => typeof change.path === "string" && typeof change.proposedContent === "string")
       .map((change) => [
-        (change.path as string).replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, ""),
+        normalizePath(change.path),
         change.proposedContent as string
       ])
   );

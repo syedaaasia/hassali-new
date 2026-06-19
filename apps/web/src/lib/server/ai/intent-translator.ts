@@ -38,6 +38,11 @@ type DomainProfile = {
 
 const domainProfiles: DomainProfile[] = [
   {
+    businessType: "Cola Company / Soft Drinks",
+    domain: "cola company / soft drinks",
+    terms: ["cola", "soft drink", "soft drinks", "soda", "beverage", "beverages", "fizzy drink"]
+  },
+  {
     businessType: "Seafood Restaurant",
     domain: "seafood_restaurant",
     terms: ["seafood restaurant", "seafood", "fresh catch", "oyster", "lobster", "fish grill", "daily catch"]

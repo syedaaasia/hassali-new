@@ -114,7 +114,7 @@ const domainSignals: Record<string, {
     visual: ["sofa", "chair", "living room", "showroom", "wood texture"]
   },
   gaming_controller: {
-    copy: ["gaming controller", "controller", "console", "wireless", "pro gaming", "accessories", "compatibility", "grip", "low latency", "product showcase", "gaming setup", "controller gallery", "warranty", "shipping", "support"],
+    copy: ["gaming controller", "controller", "console", "wireless", "pro gaming", "accessories", "compatibility", "grip", "low latency", "controller comparison", "gaming setup", "controller gallery", "warranty", "shipping", "support"],
     label: "Gaming controller product website",
     pages: ["home", "products", "controller-gallery", "about", "contact"],
     visual: ["controller hero visual", "gaming setup", "product gallery", "console accessory", "Apple Glass cards", "glass panels", "accent lighting"]
@@ -143,7 +143,11 @@ function unique(values: string[]) {
 
 function inferDomain(input: BuildGeneratorContractInput) {
   const prompt = normalize(input.currentPrompt);
-  const domain = input.contextPriority.authoritativeDomain ?? input.compositionPlan.authoritativeDomain ?? input.translatedIntent.domain;
+  const domain =
+    input.compositionPlan.authoritativeDomain ??
+    input.contextPriority.authoritativeDomain ??
+    input.translatedIntent.domain ??
+    input.translatedIntent.businessType;
 
   if (prompt.includes("gaming control") || prompt.includes("gaming controller") || prompt.includes("controler")) {
     return "gaming_controller";
@@ -153,7 +157,11 @@ function inferDomain(input: BuildGeneratorContractInput) {
     return "seafood_restaurant";
   }
 
-  return domain;
+  if (prompt.includes("cola") || prompt.includes("soft drink") || prompt.includes("soda") || prompt.includes("beverage")) {
+    return "cola company / soft drinks";
+  }
+
+  return domain && !["generic_local_service", "Generic Local Service Website"].includes(domain) ? domain : null;
 }
 
 function generatorMode(input: BuildGeneratorContractInput): GeneratorMode {

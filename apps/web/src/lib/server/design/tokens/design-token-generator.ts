@@ -12,6 +12,7 @@ import {
 
 const industryThemeMap: Record<WebsiteIndustry, DesignTokenThemeId> = {
   ai_product: "ai_product",
+  beverage: "default_dark",
   ecommerce: "luxury_ecommerce",
   healthcare: "healthcare",
   marketplace: "marketplace",

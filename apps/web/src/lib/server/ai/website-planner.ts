@@ -39,6 +39,41 @@ function includesAny(text: string, terms: string[]) {
   return terms.some((term) => text.includes(term));
 }
 
+export function selectLayoutTemplate(domain: string): WebsiteLayoutType | "brand_marketing" {
+  const d = domain.toLowerCase();
+
+  if (
+    d.includes("cola") ||
+    d.includes("soft drink") ||
+    d.includes("beverage") ||
+    d.includes("drink") ||
+    d.includes("soda")
+  ) {
+    return "beverage_brand";
+  }
+
+  if (
+    d.includes("restaurant") ||
+    d.includes("cafe") ||
+    d.includes("dining") ||
+    d.includes("food") ||
+    d.includes("seafood")
+  ) {
+    return "table_to_order";
+  }
+
+  if (
+    d.includes("shop") ||
+    d.includes("store") ||
+    d.includes("ecommerce") ||
+    d.includes("retail")
+  ) {
+    return "catalog_commerce";
+  }
+
+  return "brand_marketing";
+}
+
 export function detectWebsiteIndustry(input: {
   composition: CompositionStrategy;
   generatorContract?: GeneratorContract;
@@ -52,7 +87,9 @@ export function detectWebsiteIndustry(input: {
     ...(input.generatorContract?.requiredCopySignals ?? []),
     ...(input.generatorContract?.requiredEntities ?? [])
   ].join(" ").toLowerCase();
+  const layoutTemplate = selectLayoutTemplate(text);
 
+  if (layoutTemplate === "beverage_brand") return "beverage";
   if (includesAny(text, ["ai product", "ai tool", "ai workspace", "automation ai", "assistant", "llm"])) return "ai_product";
   if (includesAny(text, ["real estate", "property", "properties", "realtor", "homes", "apartments"])) return "real_estate";
   if (includesAny(text, ["seafood", "fresh catch", "oyster", "lobster", "restaurant", "cafe", "coffee", "menu", "food", "pizza", "burger", "dining"])) return "restaurant";
@@ -94,6 +131,7 @@ function pagePlan(input: {
 
   const industryPage: Record<WebsiteIndustry, string> = {
     ai_product: "workflow",
+    beverage: "lineup",
     ecommerce: "products",
     healthcare: "services",
     marketplace: "listings",
@@ -110,6 +148,7 @@ function pagePlan(input: {
   const target = Math.max(input.requiredCount ?? base.length, base.length);
   const extras: Record<WebsiteIndustry, string[]> = {
     ai_product: ["security", "use-cases", "pricing"],
+    beverage: ["campaigns", "distribution", "retail"],
     ecommerce: ["collections", "support", "delivery"],
     healthcare: ["team", "appointments", "reviews"],
     marketplace: ["sell", "categories", "trust"],

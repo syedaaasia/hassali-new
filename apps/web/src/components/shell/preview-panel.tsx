@@ -1,10 +1,26 @@
 "use client";
 
-import { useEffect } from "react";
+/*
+Phase 31 audit before edits:
+1. Static WEBSITE iframe srcDoc was built in this file by staticWebsiteSrcDoc(), then rendered directly in PreviewPanel.
+2. Preview iframe sandbox attributes were set in this file: static used sandbox="allow-scripts"; runtime iframes used src without a sandbox.
+3. Relative static links like about.html/contact.html were not handled; injected srcDoc had no click interception or page state.
+4. Clicking About/Contact navigated the iframe to ./about.html on the Hassali/Next origin, so Next.js handled it and returned 404.
+5. The Clerk/localStorage sandbox error came from the iframe navigating away from committed srcDoc into the Hassali/Next app surface.
+6. Fake preview URLs were traced to runtime metadata: preview-panel displayed runtimePreviewUrl/previewUrl, and dev-server-runtime.ts created planning previewUrl metadata.
+7. CODE React/Vite preview selected "Runtime not started" in this file when manifest.type was react_vite_app/next_app and runtimeStatus was not running.
+8. The Start button click handler is in this file and calls runtime-store startPreview(projectId), which POSTs /api/runtime restart.
+9. WEBSITE cola/soft-drink public copy is generated through domain-site-generator.ts -> website-planner.ts -> website-layout-engine.ts.
+10. Abstract labels entered generated HTML from website-section-registry.ts ecommerce profile and website-layout-engine.ts using section titles, visualIntent, and layoutType text.
+*/
+
+import { useEffect, useMemo, useState } from "react";
 import { Panel } from "@/components/ui/panel";
+import { useCanonicalFiles, useCanonicalManifest } from "@/lib/canonical-project-state";
 import { useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
+import type { PreviewManifest, VfsFile } from "@/lib/preview-manifest";
 
 type UnifiedPreviewType = "application" | "architecture" | "component" | "dashboard" | "mobile" | "none" | "website";
 type RealPreviewFrame = {
@@ -63,28 +79,6 @@ type ExecutablePreviewResult = {
   };
   warnings?: string[];
 };
-
-function normalizePreviewType(value: string | undefined, productMode: string): UnifiedPreviewType {
-  if (
-    value === "application" ||
-    value === "architecture" ||
-    value === "component" ||
-    value === "dashboard" ||
-    value === "mobile" ||
-    value === "none" ||
-    value === "website"
-  ) {
-    return value;
-  }
-
-  if (value === "website_static_preview") return "website";
-  if (value === "code_app_preview") return "dashboard";
-  if (value === "code_plan_preview" || value === "docs_preview") return "architecture";
-  if (productMode === "ASK") return "none";
-  if (productMode === "WEBSITE") return "website";
-
-  return "architecture";
-}
 
 function previewLabel(type: UnifiedPreviewType) {
   if (type === "website") return "Website preview";
@@ -150,18 +144,277 @@ function executablePreviewFrom(value: unknown): ExecutablePreviewResult | null {
   return preview;
 }
 
-function previewTypeFromClassification(value: unknown): UnifiedPreviewType | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const previewType = (value as { previewType?: unknown }).previewType;
-
-  return typeof previewType === "string" ? normalizePreviewType(previewType, "CODE") : null;
-}
-
 function normalizePreviewPath(path: string) {
   return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
+}
+
+function normalizePreviewHref(href: string) {
+  return href
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.?\//, "")
+    .replace(/\/+$/, "")
+    .replace(/\/{2,}/g, "/");
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function previewTypeFromManifest(manifest: PreviewManifest): UnifiedPreviewType | null {
+  if (manifest.type === "static_website") return "website";
+  if (manifest.type === "react_vite_app" || manifest.type === "next_app") return "application";
+  if (manifest.type === "mobile") return "mobile";
+  if (manifest.type === "architecture") return "architecture";
+
+  return null;
+}
+
+function frameworkLabelFromManifest(manifest: PreviewManifest) {
+  if (manifest.framework === "static_html") return "Static HTML";
+  if (manifest.framework === "react_vite") return "React + Vite";
+  if (manifest.framework === "next_app") return "Next.js";
+  if (manifest.type !== null) return manifest.framework ?? "Detecting...";
+
+  return "No project";
+}
+
+function manifestWithCommittedFallback(manifest: PreviewManifest, committedPaths: string[]): PreviewManifest {
+  if (manifest.type !== null) {
+    return manifest;
+  }
+
+  const paths = new Set(committedPaths);
+  const hasViteConfig = paths.has("vite.config.ts") || paths.has("vite.config.js");
+  const hasReactEntry = paths.has("src/main.tsx") || paths.has("src/main.jsx");
+  const hasNextConfig = paths.has("next.config.ts") || paths.has("next.config.js");
+
+  if (hasViteConfig && hasReactEntry && paths.has("index.html")) {
+    return {
+      type: "react_vite_app",
+      framework: "react_vite",
+      entryPoint: "index.html",
+      requiredFiles: ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx"]
+    };
+  }
+
+  if (hasNextConfig) {
+    return {
+      type: "next_app",
+      framework: "next_app",
+      entryPoint: "app/page.tsx",
+      requiredFiles: ["package.json", "next.config.ts"]
+    };
+  }
+
+  if (paths.has("index.html")) {
+    return {
+      type: "static_website",
+      framework: "static_html",
+      entryPoint: "index.html",
+      requiredFiles: ["index.html"]
+    };
+  }
+
+  return manifest;
+}
+
+function missingPreviewDocument(path: string) {
+  return `<!doctype html>
+<html>
+<body style="font-family:sans-serif;padding:2rem;background:#090909;color:#fff">
+  <h2>Missing preview file: ${escapeHtml(path)}</h2>
+  <p>This file was not found in committed VFS.</p>
+</body>
+</html>`;
+}
+
+function buildStaticSrcDoc(committedFiles: Map<string, VfsFile>, pagePath: string) {
+  const normalizedPage = normalizePreviewHref(pagePath || "index.html") || "index.html";
+  const file = committedFiles.get(normalizedPage);
+
+  if (!file) {
+    return missingPreviewDocument(normalizedPage);
+  }
+
+  const css = committedFiles.get("styles.css")?.content ?? "";
+  const js = committedFiles.get("main.js")?.content ?? "";
+  const interceptScript = `<script>
+document.addEventListener("click", function(event) {
+  var target = event.target;
+  var anchor = target && target.closest ? target.closest("a[href]") : null;
+  if (!anchor) return;
+  var href = anchor.getAttribute("href");
+  if (!href) return;
+  if (
+    href.startsWith("http://") ||
+    href.startsWith("https://") ||
+    href.startsWith("mailto:") ||
+    href.startsWith("tel:") ||
+    href.startsWith("#")
+  ) {
+    return;
+  }
+  event.preventDefault();
+  var normalized = href.trim()
+    .replace(/\\\\/g, "/")
+    .replace(/^\\.?\\//, "")
+    .replace(/\\/+$/, "")
+    .replace(/\\/{2,}/g, "/");
+  window.parent.postMessage({
+    type: "HASSALI_STATIC_PREVIEW_NAVIGATE",
+    href: normalized
+  }, "*");
+});
+</script>`;
+  let srcDoc = file.content;
+
+  if (css) {
+    srcDoc = srcDoc.replace(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi, `<style>${css}</style>`);
+  }
+
+  if (js) {
+    srcDoc = srcDoc.replace(/<script[^>]+src=["'][./]*main\.js["'][^>]*><\/script>/gi, `<script>${js}</script>`);
+  }
+
+  return /<\/body>/i.test(srcDoc)
+    ? srcDoc.replace(/<\/body>/i, `${interceptScript}</body>`)
+    : `${srcDoc}${interceptScript}`;
+}
+
+function StaticWebsitePreview({ committedFiles }: { committedFiles: Map<string, VfsFile> }) {
+  const [currentPage, setCurrentPage] = useState("index.html");
+
+  useEffect(() => {
+    setCurrentPage("index.html");
+  }, [committedFiles]);
+
+  useEffect(() => {
+    const messageTarget = globalThis as unknown as {
+      addEventListener: (type: "message", handler: (event: MessageEvent) => void) => void;
+      removeEventListener: (type: "message", handler: (event: MessageEvent) => void) => void;
+    };
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type !== "HASSALI_STATIC_PREVIEW_NAVIGATE") return;
+
+      const target = normalizePreviewHref(String(event.data.href ?? ""));
+
+      if (!target || target === "/") {
+        setCurrentPage("index.html");
+        return;
+      }
+
+      setCurrentPage(target.endsWith(".html") ? target : `${target}.html`);
+    };
+
+    messageTarget.addEventListener("message", handler);
+    return () => messageTarget.removeEventListener("message", handler);
+  }, []);
+
+  return (
+    <iframe
+      className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"
+      sandbox="allow-scripts allow-forms"
+      srcDoc={buildStaticSrcDoc(committedFiles, currentPage)}
+      title="Static srcDoc preview"
+    />
+  );
+}
+
+function codeAppName(committedFiles: Map<string, VfsFile>) {
+  try {
+    const pkg = committedFiles.get("package.json");
+    if (pkg) {
+      const parsed = JSON.parse(pkg.content) as { name?: unknown };
+      if (typeof parsed.name === "string" && parsed.name.trim()) return parsed.name;
+    }
+  } catch {
+    // package.json is user-provided; fall back to a neutral name if it is invalid.
+  }
+
+  return "App";
+}
+
+function CodeAppSourceSummary({
+  committedFiles,
+  manifest
+}: {
+  committedFiles: Map<string, VfsFile>;
+  manifest: PreviewManifest;
+}) {
+  const appName = codeAppName(committedFiles);
+  const sourceFiles = [...committedFiles.keys()].filter((path) => /\.(?:tsx|ts|jsx|js)$/.test(path));
+  const componentFiles = sourceFiles.filter((path) => path.includes("/components/"));
+  const css = committedFiles.get("src/styles.css")?.content ?? committedFiles.get("src/index.css")?.content ?? "";
+
+  if (css) {
+    const previewDoc = `<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>${css}</style>
+</head>
+<body>
+  <div style="position:fixed;top:0;left:0;right:0;background:rgba(0,0,0,0.85);color:#60efff;font-size:0.72rem;padding:6px 14px;z-index:9999;font-family:monospace;letter-spacing:0.05em">
+    CSS preview - ${escapeHtml(appName)} - ${escapeHtml(manifest.framework ?? "React + Vite")} - Runtime not started
+  </div>
+  <div style="padding-top:34px">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">${escapeHtml(appName)}</div>
+        <nav class="nav">
+          <a class="active" href="#">Dashboard</a>
+          <a href="#">Customers</a>
+          <a href="#">Pipeline</a>
+          <a href="#">Billing</a>
+        </nav>
+      </aside>
+      <main class="content">
+        <section class="hero-panel">
+          <div>
+            <p class="eyebrow">CSS preview only</p>
+            <h1>Layout ready. Start runtime for React interactivity.</h1>
+            <p class="muted">Source files committed. Vite requires explicit runtime enablement.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    return (
+      <iframe
+        className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"
+        sandbox="allow-scripts"
+        srcDoc={previewDoc}
+        title="CODE app CSS preview"
+      />
+    );
+  }
+
+  return (
+    <div className="h-full overflow-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.5)] p-8 font-mono text-xs leading-6 text-muted-foreground">
+      <p className="text-[#60efff]">
+        {appName} - {manifest.framework ?? "React + Vite"}
+      </p>
+      <p className="mt-2">
+        Runtime not started. Source files committed and ready.
+      </p>
+      <ul className="mt-4 list-inside list-disc">
+        {sourceFiles.map((file) => (
+          <li key={file}>{file}</li>
+        ))}
+      </ul>
+      <p className="mt-4">
+        {componentFiles.length} component(s) detected.
+      </p>
+    </div>
+  );
 }
 
 function RealPreviewMock({ preview }: { preview: RealPreviewResult }) {
@@ -261,7 +514,8 @@ function RealPreviewMock({ preview }: { preview: RealPreviewResult }) {
 }
 
 export function PreviewPanel() {
-  const files = useWorkspaceStore((state) => state.files);
+  const canonicalFiles = useCanonicalFiles();
+  const canonicalManifest = useCanonicalManifest();
   const productMode = useChatStore((state) => state.productMode);
   const proposal = useChatStore((state) => state.proposal);
   const projectId = useWorkspaceStore((state) => state.projectId);
@@ -271,7 +525,6 @@ export function PreviewPanel() {
   const previewUrl = useRuntimeStore((state) => state.previewUrl);
   const refreshRuntimeStatus = useRuntimeStore((state) => state.refreshRuntimeStatus);
   const runtimeErrors = useRuntimeStore((state) => state.runtimeErrors);
-  const runtimeFramework = useRuntimeStore((state) => state.runtimeFramework);
   const runtimeHealth = useRuntimeStore((state) => state.runtimeHealth);
   const runtimeLastUpdatedAt = useRuntimeStore((state) => state.runtimeLastUpdatedAt);
   const runtimeLogs = useRuntimeStore((state) => state.runtimeLogs);
@@ -283,33 +536,46 @@ export function PreviewPanel() {
   const startPreview = useRuntimeStore((state) => state.startPreview);
   const stopPreview = useRuntimeStore((state) => state.stopPreview);
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
-  const livePreviewUrl = runtimePreviewUrl ?? previewUrl;
-  const iframeSource = livePreviewUrl ? `${livePreviewUrl}?v=${iframeVersion}` : null;
-  const hasIndexHtml = Object.keys(files).some((path) => normalizePreviewPath(path) === "index.html");
-  const activePreviewMetadata = proposal?.livePreviewMetadata ?? proposal?.previewMetadata;
-  const unifiedPreviewType = previewTypeFromClassification(proposal?.livePreviewClassification) ??
-    proposal?.previewClassification?.previewType ??
-    normalizePreviewType(proposal?.previewType, productMode);
+  const committedFileMap = useMemo(
+    () => new Map(canonicalFiles.map((file) => [normalizePreviewPath(file.path), { ...file, path: normalizePreviewPath(file.path) }])),
+    [canonicalFiles]
+  );
+  const committedPaths = canonicalFiles.map((file) => normalizePreviewPath(file.path));
+  const hasIndexHtml = committedPaths.some((path) => path === "index.html");
+  const effectiveManifest = manifestWithCommittedFallback(canonicalManifest, committedPaths);
+  const unifiedPreviewType = previewTypeFromManifest(effectiveManifest) ?? "none";
+  const activePreviewMetadata = effectiveManifest.type === "architecture"
+    ? proposal?.livePreviewMetadata ?? proposal?.previewMetadata
+    : undefined;
   const realPreview = realPreviewFrom(proposal?.liveRealPreview) ?? realPreviewFrom(proposal?.realPreview);
   const executablePreview = executablePreviewFrom(activePreviewMetadata?.executablePreview);
-  const isWebsitePreview = unifiedPreviewType === "website";
-  const canStartStaticPreview = isWebsitePreview && hasIndexHtml;
+  const canStartStaticPreview = effectiveManifest.type === "static_website" && hasIndexHtml;
+  const isRuntimePreviewType = effectiveManifest.type === "react_vite_app" || effectiveManifest.type === "next_app";
+  const livePreviewUrl = effectiveManifest.type === "static_website" ? null : runtimePreviewUrl ?? previewUrl;
+  const iframeSource = livePreviewUrl ? `${livePreviewUrl}?v=${iframeVersion}` : null;
+  const startDisabledReason = !projectId
+    ? "Create or select a project before starting preview."
+    : isLoading
+      ? "Preview is already updating."
+      : isRuntimePreviewType
+        ? "Runtime execution requires explicit enablement. Vite cannot start until npm install is approved and runtime is enabled in project settings."
+        : canStartStaticPreview
+          ? "Static srcDoc preview is already available; no local server is started."
+          : !canStartStaticPreview
+          ? "Preview needs index.html in the committed project files."
+          : null;
+  const startButtonLabel = isRuntimePreviewType ? "Enable Runtime" : "Start";
+  const panelPreviewLabel = effectiveManifest.type === "static_website" ? "Static srcDoc preview" : previewLabel(unifiedPreviewType);
+  const missingManifestFile = effectiveManifest.requiredFiles.find(
+    (requiredFile) => !committedPaths.includes(normalizePreviewPath(requiredFile))
+  );
   const proposalDocFiles =
     proposal?.changes
       .map((change) => change.path)
       .filter((path): path is string => typeof path === "string" && /\.(?:md|mdx|txt)$/i.test(path))
       .slice(0, 4) ?? [];
   const appPreview = proposal?.appPreview;
-  const isCodePreviewContext =
-    productMode === "CODE" ||
-    unifiedPreviewType === "application" ||
-    unifiedPreviewType === "architecture" ||
-    unifiedPreviewType === "component" ||
-    unifiedPreviewType === "dashboard" ||
-    unifiedPreviewType === "mobile" ||
-    proposal?.previewMode === "code_plan" ||
-    proposal?.previewType === "code_app_preview" ||
-    proposal?.previewType === "code_plan_preview";
+  const isCodePreviewContext = productMode === "CODE" || unifiedPreviewType === "application" || unifiedPreviewType === "architecture";
   const structuredPreviewFields =
     unifiedPreviewType === "dashboard"
       ? ["screens", "widgets", "charts", "panels"]
@@ -354,7 +620,7 @@ export function PreviewPanel() {
             Preview
           </div>
           <div className="mt-1 text-xs text-foreground">
-            {status === "running" ? "Local static runtime" : previewLabel(unifiedPreviewType)}
+            {status === "running" && isRuntimePreviewType ? "Local runtime" : panelPreviewLabel}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -382,13 +648,14 @@ export function PreviewPanel() {
       <div className="flex items-center gap-2 border-b border-[hsl(var(--premium-border))] p-3">
         <button
           className="rounded-full border border-[#7c6cff]/35 bg-[#7c6cff] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isLoading || !projectId || !canStartStaticPreview}
+          disabled={Boolean(startDisabledReason)}
           onClick={() => {
             void startPreview(projectId);
           }}
+          title={startDisabledReason ?? "Start static preview"}
           type="button"
         >
-          Start
+          {startButtonLabel}
         </button>
         <button
           className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -412,7 +679,7 @@ export function PreviewPanel() {
         </button>
       </div>
 
-      {runtimeFramework || runtimeLogs.length || runtimeErrors.length ? (
+      {runtimeLogs.length || runtimeErrors.length || runtimePort || livePreviewUrl ? (
         <div className="border-b border-[hsl(var(--premium-border))] px-4 py-3 text-[11px] leading-5 text-muted-foreground">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full border px-2 py-0.5 uppercase ${
@@ -424,7 +691,7 @@ export function PreviewPanel() {
             }`}>
               {runtimeStatus}
             </span>
-            <span>Framework: {runtimeFramework ?? (unifiedPreviewType === "website" ? "Static HTML" : "runtime")}</span>
+            <span>Framework: {frameworkLabelFromManifest(effectiveManifest)}</span>
             {runtimePort ? <span>Port: {runtimePort}</span> : null}
             {livePreviewUrl ? <span className="truncate">URL: {livePreviewUrl}</span> : null}
           </div>
@@ -450,7 +717,7 @@ export function PreviewPanel() {
         </div>
       ) : null}
 
-      {executablePreview && executablePreview.framework !== "unknown" ? (
+      {effectiveManifest.type === "architecture" && executablePreview && executablePreview.framework !== "unknown" ? (
           <div className="border-b border-[hsl(var(--premium-border))] px-4 py-2 text-[11px] leading-5 text-muted-foreground">
           {executablePreview.devServerRuntime ? (
             <>
@@ -478,24 +745,20 @@ export function PreviewPanel() {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-hidden bg-black/35 p-2">
-        {iframeSource ? (
+        {effectiveManifest.type === "static_website" && hasIndexHtml ? (
+          <StaticWebsitePreview committedFiles={committedFileMap} />
+        ) : isRuntimePreviewType && runtimeStatus === "running" && iframeSource ? (
           <iframe
             className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"
             key={iframeSource}
             src={iframeSource}
             title="Hassali local preview"
           />
-        ) : realPreview?.kind === "static_website" && realPreview.safeHtml ? (
-          <iframe
-            className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"
-            key={`static-safe-${proposal?.id ?? iframeVersion}`}
-            sandbox=""
-            srcDoc={realPreview.safeHtml}
-            title="Hassali static website preview"
-          />
-        ) : realPreview && realPreview.state === "ready" && realPreview.kind !== "static_website" ? (
+        ) : isRuntimePreviewType ? (
+          <CodeAppSourceSummary committedFiles={committedFileMap} manifest={effectiveManifest} />
+        ) : effectiveManifest.type === "architecture" && realPreview?.state === "ready" && realPreview.kind === "api_architecture" ? (
           <RealPreviewMock preview={realPreview} />
-        ) : appPreview && isCodePreviewContext ? (
+        ) : effectiveManifest.type === "mobile" && appPreview && isCodePreviewContext ? (
           <div className="flex h-full min-h-0 flex-col overflow-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.55)] p-4 text-xs text-foreground">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
@@ -562,7 +825,7 @@ export function PreviewPanel() {
               </section>
             </div>
           </div>
-        ) : proposal && isCodePreviewContext && unifiedPreviewType !== "none" ? (
+        ) : effectiveManifest.type === "architecture" && proposal && isCodePreviewContext && unifiedPreviewType !== "none" ? (
           <div className="flex h-full min-h-0 flex-col overflow-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.55)] p-4 text-xs text-foreground">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
@@ -610,7 +873,9 @@ export function PreviewPanel() {
           <div className="flex h-full items-center justify-center rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.5)] p-6 text-center text-xs leading-5 text-muted-foreground">
             {!projectId
               ? "Create or select a project before starting preview."
-              : hasIndexHtml
+              : missingManifestFile
+                ? `Missing required file: ${missingManifestFile}`
+                : hasIndexHtml || effectiveManifest.type === "react_vite_app" || effectiveManifest.type === "next_app"
                 ? "Start preview when you are ready."
                 : missingPreviewMessage}
           </div>

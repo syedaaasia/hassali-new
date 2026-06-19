@@ -1,5 +1,7 @@
 "use client";
 
+import { normalizeSafeProjectPath } from "@/lib/utils/path";
+
 export type RuntimeProposalChange = {
   action: string;
   diffPreview?: string;
@@ -193,23 +195,7 @@ const fileActions = new Set(["create", "modify", "update", "write_file"]);
 const previewFilePattern = /\.(css|html|js|jsx|mjs|tsx?)$/i;
 
 function normalizePath(value: unknown) {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/+/g, "/")
-    .replace(/^(?:\.\/)+/, "")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-
-  if (!normalized || normalized.includes("../") || normalized === "..") {
-    return null;
-  }
-
-  return normalized;
+  return normalizeSafeProjectPath(value);
 }
 
 function writtenFilesFromEvents(runtimeResult: RuntimeApprovalResponse | null) {

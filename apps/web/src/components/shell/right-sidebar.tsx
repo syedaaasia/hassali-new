@@ -18,6 +18,7 @@ import {
 } from "@/lib/runtime-result-sync";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
+import { normalizeSafeProjectPath } from "@/lib/utils/path";
 
 const modelOptions = [
   { label: "GPT-4o mini", value: "openai/gpt-4o-mini" },
@@ -96,33 +97,13 @@ function isRuntimeProposalAction(action: string) {
 }
 
 function normalizeProposalPath(value: unknown) {
-  if (typeof value !== "string") {
+  const normalized = normalizeSafeProjectPath(value);
+
+  if (!normalized || normalized === folderPlaceholderFileName || normalized.endsWith(`/${folderPlaceholderFileName}`)) {
     return null;
   }
 
-  const rawPath = value.trim();
-
-  if (!rawPath || rawPath.startsWith("/") || rawPath.startsWith("\\") || /^[a-z]:/i.test(rawPath)) {
-    return null;
-  }
-
-  const normalized = rawPath
-    .replace(/\\/g, "/")
-    .replace(/\/+/g, "/")
-    .replace(/^(?:\.\/)+/, "")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
-
-  if (normalized === folderPlaceholderFileName || normalized.endsWith(`/${folderPlaceholderFileName}`)) {
-    return null;
-  }
-
-  const segments = normalized.split("/");
-  const hasUnsafeSegment = segments.some(
-    (segment) => !segment || segment === "." || segment === ".."
-  );
-
-  return hasUnsafeSegment ? null : normalized;
+  return normalized;
 }
 
 function validateProposalForApproval(proposal: DiffProposal, selectedProjectId: string | null) {
@@ -225,15 +206,37 @@ function isBlockedProposal(proposal: DiffProposal) {
   return isProposalApprovalBlocked(proposal);
 }
 
+function proposalReviewMode(proposal: DiffProposal) {
+  return proposal.executionMode ??
+    proposal.kernelRoutingDecision?.mode ??
+    (proposal.generatorMode === "code_generation" ? "CODE" : proposal.generatorMode === "website_generation" ? "WEBSITE" : null);
+}
+
+function isReviewMessageVisibleForMode(message: string, mode: "ASK" | "CODE" | "WEBSITE" | null | undefined) {
+  const normalized = message.toLowerCase();
+
+  if (mode === "CODE" && normalized.includes("website intent")) {
+    return false;
+  }
+
+  if (mode === "WEBSITE" && normalized.includes("code_system_generation")) {
+    return false;
+  }
+
+  return true;
+}
+
 function blockedProposalReasons(proposal: DiffProposal) {
   const decision = normalizeApprovalDecision(proposal);
+  const mode = proposalReviewMode(proposal);
 
   if (decision.hasCriticalIssues) {
-    return decision.criticalIssues;
+    return decision.criticalIssues.filter((issue) => isReviewMessageVisibleForMode(issue, mode));
   }
 
   return (proposal.proposalRoutingReasons ?? [])
     .filter((reason) => reason.severity !== "info")
+    .filter((reason) => isReviewMessageVisibleForMode(reason.message, mode))
     .map((reason) => reason.message);
 }
 
@@ -409,9 +412,12 @@ function getProposalReviewState(proposal: DiffProposal) {
 
 function ProposalReviewState({ proposal }: { proposal: DiffProposal }) {
   const reviewState = getProposalReviewState(proposal);
-  const warnings = proposal.proposalRoutingWarnings ?? [];
+  const mode = proposalReviewMode(proposal);
+  const warnings = (proposal.proposalRoutingWarnings ?? [])
+    .filter((warning) => isReviewMessageVisibleForMode(warning.message, mode));
   const visibleReasons = (proposal.proposalRoutingReasons ?? [])
     .filter((reason) => reason.severity !== "info")
+    .filter((reason) => isReviewMessageVisibleForMode(reason.message, mode))
     .slice(0, 3);
   const kernelDecision = proposal.kernelRoutingDecision;
 
@@ -847,7 +853,19 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                     : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
                 }`}
                 key={item.label}
-                onClick={() => setProductMode(item.label)}
+                onClick={() => {
+                  setProductMode(item.label);
+                  setRuntimeApprovalResult(null);
+                  applyRuntimePayload({
+                    error: null,
+                    logs: [],
+                    port: null,
+                    previewUrl: null,
+                    projectId,
+                    status: "stopped",
+                    workspacePath: null
+                  });
+                }}
                 type="button"
               >
                 <span className="block text-[10px] font-semibold uppercase tracking-[0.08em]">
