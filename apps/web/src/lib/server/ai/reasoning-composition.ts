@@ -69,6 +69,10 @@ function inferBusinessType(intent: IntentIntelligence) {
     return "television shop / electronics and home cinema retail";
   }
 
+  if (includesAny(text, ["mobile phone shop", "phone shop", "smartphone store", "mobile store", "cellphone shop", "phone retail", "phone accessories", "iphone shop", "samsung phone shop", "android phone shop", "unlocked phones", "phone repair shop", "mobile_phone_shop"])) {
+    return "mobile phone shop / smartphone retail and repair";
+  }
+
   if (includesAny(text, ["motorbike", "motorcycle", "engine service", "oil change", "helmet", "spare parts"])) {
     return "motorbike shop / motorcycle retail and service";
   }
@@ -109,11 +113,11 @@ function inferBusinessType(intent: IntentIntelligence) {
     return "hospitality and reservations";
   }
 
-  if (intent.domain === "car showroom") {
+  if (intent.domain === "car_showroom" || intent.domain === "car showroom") {
     return "premium automotive showroom";
   }
 
-  if (intent.domain === "car rental") {
+  if (intent.domain === "car_rental" || intent.domain === "car rental") {
     return "automotive rental and booking";
   }
 

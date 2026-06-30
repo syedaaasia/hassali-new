@@ -1,0 +1,127 @@
+export type HassaliModelTier = "high" | "low" | "medium" | "unknown";
+
+export type HassaliModelMetadata = {
+  providerId: string;
+  providerName: string;
+  modelId: string;
+  displayName: string;
+  family: string;
+  strengths: string[];
+  weaknesses: string[];
+  costTier: HassaliModelTier;
+  speedTier: HassaliModelTier;
+  reasoningTier: HassaliModelTier;
+  codingTier: HassaliModelTier;
+  designTier: HassaliModelTier;
+  contextWindow: number | null;
+  supportsTools: boolean;
+  supportsVision: boolean;
+  supportsJson: boolean;
+  supportsStreaming: boolean;
+  isLocal: boolean;
+  isOpenSource: boolean;
+  isOpenAICompatible: boolean;
+  requiresApiKey: boolean;
+  baseUrlEnv: string | null;
+  apiKeyEnv: string | null;
+};
+
+export type HassaliProviderMetadata = {
+  providerId: string;
+  providerName: string;
+  apiKeyEnv: string | null;
+  baseUrlEnv: string | null;
+  isLocal: boolean;
+  isOpenAICompatible: boolean;
+};
+
+export const hassaliModelProviders: HassaliProviderMetadata[] = [
+  { providerId: "openai", providerName: "OpenAI", apiKeyEnv: "OPENAI_API_KEY", baseUrlEnv: null, isLocal: false, isOpenAICompatible: true },
+  { providerId: "anthropic", providerName: "Anthropic", apiKeyEnv: "ANTHROPIC_API_KEY", baseUrlEnv: null, isLocal: false, isOpenAICompatible: false },
+  { providerId: "google", providerName: "Google Gemini", apiKeyEnv: "GEMINI_API_KEY", baseUrlEnv: null, isLocal: false, isOpenAICompatible: false },
+  { providerId: "openrouter", providerName: "OpenRouter", apiKeyEnv: "OPENROUTER_API_KEY", baseUrlEnv: null, isLocal: false, isOpenAICompatible: true },
+  { providerId: "zai", providerName: "Z.ai / GLM", apiKeyEnv: "ZAI_API_KEY", baseUrlEnv: "ZAI_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "deepseek", providerName: "DeepSeek", apiKeyEnv: "DEEPSEEK_API_KEY", baseUrlEnv: "DEEPSEEK_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "qwen", providerName: "Qwen", apiKeyEnv: "QWEN_API_KEY", baseUrlEnv: "QWEN_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "mistral", providerName: "Mistral", apiKeyEnv: "MISTRAL_API_KEY", baseUrlEnv: "MISTRAL_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "meta", providerName: "Meta / Llama", apiKeyEnv: "META_API_KEY", baseUrlEnv: "META_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "groq", providerName: "Groq", apiKeyEnv: "GROQ_API_KEY", baseUrlEnv: "GROQ_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "together", providerName: "Together AI", apiKeyEnv: "TOGETHER_API_KEY", baseUrlEnv: "TOGETHER_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "fireworks", providerName: "Fireworks AI", apiKeyEnv: "FIREWORKS_API_KEY", baseUrlEnv: "FIREWORKS_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "ollama", providerName: "Ollama", apiKeyEnv: null, baseUrlEnv: "OLLAMA_BASE_URL", isLocal: true, isOpenAICompatible: true },
+  { providerId: "lmstudio", providerName: "LM Studio", apiKeyEnv: null, baseUrlEnv: "LM_STUDIO_BASE_URL", isLocal: true, isOpenAICompatible: true },
+  { providerId: "custom-openai-compatible", providerName: "Custom OpenAI-compatible", apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY", baseUrlEnv: "OPENAI_COMPATIBLE_BASE_URL", isLocal: false, isOpenAICompatible: true },
+  { providerId: "sakana-compatible", providerName: "Sakana/Fugu-style compatible", apiKeyEnv: "SAKANA_COMPATIBLE_API_KEY", baseUrlEnv: "SAKANA_COMPATIBLE_BASE_URL", isLocal: false, isOpenAICompatible: true }
+];
+
+function model(input: HassaliModelMetadata): HassaliModelMetadata {
+  return input;
+}
+
+export const hassaliModelRegistry: HassaliModelMetadata[] = [
+  model({ providerId: "openai", providerName: "OpenAI", modelId: "openai/gpt-4.1", displayName: "GPT-4.1", family: "gpt-4.1", strengths: ["reasoning", "coding", "general generation"], weaknesses: ["requires OpenAI or OpenRouter configuration"], costTier: "high", speedTier: "medium", reasoningTier: "high", codingTier: "high", designTier: "high", contextWindow: 1000000, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "OPENAI_API_KEY" }),
+  model({ providerId: "openai", providerName: "OpenAI", modelId: "openai/gpt-4.1-mini", displayName: "GPT-4.1 mini", family: "gpt-4.1", strengths: ["fast coding", "cost control", "structured output"], weaknesses: ["lower ceiling than flagship models"], costTier: "medium", speedTier: "high", reasoningTier: "medium", codingTier: "high", designTier: "medium", contextWindow: 1000000, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "OPENAI_API_KEY" }),
+  model({ providerId: "openai", providerName: "OpenAI", modelId: "openai/gpt-4o", displayName: "GPT-4o", family: "gpt-4o", strengths: ["multimodal", "balanced generation", "design copy"], weaknesses: ["requires configured provider"], costTier: "medium", speedTier: "medium", reasoningTier: "medium", codingTier: "medium", designTier: "high", contextWindow: 128000, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "OPENAI_API_KEY" }),
+  model({ providerId: "openai", providerName: "OpenAI", modelId: "openai/gpt-4o-mini", displayName: "GPT-4o mini", family: "gpt-4o", strengths: ["low cost", "fast iteration", "small edits"], weaknesses: ["less reliable on large architecture decisions"], costTier: "low", speedTier: "high", reasoningTier: "medium", codingTier: "medium", designTier: "medium", contextWindow: 128000, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "OPENAI_API_KEY" }),
+  model({ providerId: "openai", providerName: "OpenAI", modelId: "openai/gpt-5", displayName: "GPT-5 placeholder", family: "gpt-5", strengths: ["future configured frontier model"], weaknesses: ["only available if configured by provider/env"], costTier: "unknown", speedTier: "unknown", reasoningTier: "high", codingTier: "high", designTier: "high", contextWindow: null, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "OPENAI_API_KEY" }),
+  model({ providerId: "openai", providerName: "OpenAI", modelId: "openai/gpt-5.5", displayName: "GPT-5.5 placeholder", family: "gpt-5", strengths: ["future configured frontier model"], weaknesses: ["registered as config placeholder only"], costTier: "unknown", speedTier: "unknown", reasoningTier: "high", codingTier: "high", designTier: "high", contextWindow: null, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "OPENAI_API_KEY" }),
+
+  model({ providerId: "anthropic", providerName: "Anthropic", modelId: "anthropic/claude-sonnet", displayName: "Claude Sonnet", family: "claude", strengths: ["coding", "long-form reasoning", "review"], weaknesses: ["requires Anthropic or router configuration"], costTier: "medium", speedTier: "medium", reasoningTier: "high", codingTier: "high", designTier: "medium", contextWindow: 200000, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: false, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "ANTHROPIC_API_KEY" }),
+  model({ providerId: "anthropic", providerName: "Anthropic", modelId: "anthropic/claude-opus", displayName: "Claude Opus", family: "claude", strengths: ["deep reasoning", "architecture review", "high quality writing"], weaknesses: ["higher cost", "requires configuration"], costTier: "high", speedTier: "medium", reasoningTier: "high", codingTier: "high", designTier: "high", contextWindow: 200000, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: false, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "ANTHROPIC_API_KEY" }),
+  model({ providerId: "anthropic", providerName: "Anthropic", modelId: "anthropic/claude-next", displayName: "Claude newer placeholder", family: "claude", strengths: ["future configured Claude model"], weaknesses: ["registered as config placeholder only"], costTier: "unknown", speedTier: "unknown", reasoningTier: "high", codingTier: "high", designTier: "high", contextWindow: null, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: false, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "ANTHROPIC_API_KEY" }),
+
+  model({ providerId: "google", providerName: "Google Gemini", modelId: "google/gemini-pro", displayName: "Gemini Pro", family: "gemini", strengths: ["reasoning", "long context", "multimodal planning"], weaknesses: ["requires Gemini configuration"], costTier: "medium", speedTier: "medium", reasoningTier: "high", codingTier: "medium", designTier: "high", contextWindow: 1000000, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: false, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "GEMINI_API_KEY" }),
+  model({ providerId: "google", providerName: "Google Gemini", modelId: "google/gemini-flash", displayName: "Gemini Flash", family: "gemini", strengths: ["speed", "cheap iteration", "summaries"], weaknesses: ["less consistent for complex code"], costTier: "low", speedTier: "high", reasoningTier: "medium", codingTier: "medium", designTier: "medium", contextWindow: 1000000, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: false, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "GEMINI_API_KEY" }),
+  model({ providerId: "google", providerName: "Google Gemini", modelId: "google/gemini-next", displayName: "Gemini newer placeholder", family: "gemini", strengths: ["future configured Gemini model"], weaknesses: ["registered as config placeholder only"], costTier: "unknown", speedTier: "unknown", reasoningTier: "high", codingTier: "medium", designTier: "high", contextWindow: null, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: false, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "GEMINI_API_KEY" }),
+
+  model({ providerId: "zai", providerName: "Z.ai / GLM", modelId: "zai/glm-5.1", displayName: "GLM-5.1", family: "glm", strengths: ["open-compatible routing", "reasoning", "coding"], weaknesses: ["requires ZAI_BASE_URL and ZAI_API_KEY or OpenRouter"], costTier: "medium", speedTier: "medium", reasoningTier: "high", codingTier: "high", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "ZAI_BASE_URL", apiKeyEnv: "ZAI_API_KEY" }),
+  model({ providerId: "zai", providerName: "Z.ai / GLM", modelId: "zai/glm-5.2", displayName: "GLM-5.2", family: "glm", strengths: ["frontier GLM placeholder", "coding", "reasoning"], weaknesses: ["registered only if configured"], costTier: "unknown", speedTier: "unknown", reasoningTier: "high", codingTier: "high", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "ZAI_BASE_URL", apiKeyEnv: "ZAI_API_KEY" }),
+  model({ providerId: "zai", providerName: "Z.ai / GLM", modelId: "zai/glm-5.2-long", displayName: "GLM-5.2 long-context", family: "glm", strengths: ["long context", "architecture review", "large prompt digestion"], weaknesses: ["registered only if configured"], costTier: "unknown", speedTier: "unknown", reasoningTier: "high", codingTier: "high", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "ZAI_BASE_URL", apiKeyEnv: "ZAI_API_KEY" }),
+
+  model({ providerId: "deepseek", providerName: "DeepSeek", modelId: "deepseek/deepseek-chat", displayName: "DeepSeek Chat", family: "deepseek", strengths: ["general coding", "low cost"], weaknesses: ["provider-specific availability"], costTier: "low", speedTier: "medium", reasoningTier: "medium", codingTier: "high", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "DEEPSEEK_BASE_URL", apiKeyEnv: "DEEPSEEK_API_KEY" }),
+  model({ providerId: "deepseek", providerName: "DeepSeek", modelId: "deepseek/deepseek-coder", displayName: "DeepSeek Coder", family: "deepseek", strengths: ["code generation", "patching", "debugging"], weaknesses: ["less design-focused"], costTier: "low", speedTier: "medium", reasoningTier: "medium", codingTier: "high", designTier: "low", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "DEEPSEEK_BASE_URL", apiKeyEnv: "DEEPSEEK_API_KEY" }),
+  model({ providerId: "deepseek", providerName: "DeepSeek", modelId: "deepseek/deepseek-reasoner", displayName: "DeepSeek Reasoner", family: "deepseek", strengths: ["reasoning", "architecture", "debug analysis"], weaknesses: ["may be slower"], costTier: "medium", speedTier: "medium", reasoningTier: "high", codingTier: "high", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "DEEPSEEK_BASE_URL", apiKeyEnv: "DEEPSEEK_API_KEY" }),
+
+  model({ providerId: "qwen", providerName: "Qwen", modelId: "qwen/qwen-coder", displayName: "Qwen Coder", family: "qwen", strengths: ["coding", "structured output", "open model ecosystem"], weaknesses: ["availability depends on host"], costTier: "low", speedTier: "medium", reasoningTier: "medium", codingTier: "high", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "QWEN_BASE_URL", apiKeyEnv: "QWEN_API_KEY" }),
+  model({ providerId: "qwen", providerName: "Qwen", modelId: "qwen/qwen-long-context", displayName: "Qwen long-context", family: "qwen", strengths: ["long context", "repo digestion", "planning"], weaknesses: ["host-dependent"], costTier: "medium", speedTier: "medium", reasoningTier: "medium", codingTier: "high", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "QWEN_BASE_URL", apiKeyEnv: "QWEN_API_KEY" }),
+
+  model({ providerId: "mistral", providerName: "Mistral", modelId: "mistral/codestral", displayName: "Codestral", family: "mistral", strengths: ["code completion", "patching", "developer tasks"], weaknesses: ["less broad reasoning than frontier models"], costTier: "medium", speedTier: "medium", reasoningTier: "medium", codingTier: "high", designTier: "low", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "MISTRAL_BASE_URL", apiKeyEnv: "MISTRAL_API_KEY" }),
+  model({ providerId: "mistral", providerName: "Mistral", modelId: "mistral/mistral-large", displayName: "Mistral Large", family: "mistral", strengths: ["general reasoning", "multilingual", "business copy"], weaknesses: ["requires configured provider"], costTier: "medium", speedTier: "medium", reasoningTier: "high", codingTier: "medium", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "MISTRAL_BASE_URL", apiKeyEnv: "MISTRAL_API_KEY" }),
+  model({ providerId: "mistral", providerName: "Mistral", modelId: "mistral/devstral", displayName: "Devstral", family: "mistral", strengths: ["agentic coding placeholder", "developer workflow"], weaknesses: ["registered only if configured"], costTier: "unknown", speedTier: "unknown", reasoningTier: "medium", codingTier: "high", designTier: "low", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "MISTRAL_BASE_URL", apiKeyEnv: "MISTRAL_API_KEY" }),
+
+  model({ providerId: "meta", providerName: "Meta / Llama", modelId: "meta/llama-3.1", displayName: "Llama 3.x", family: "llama", strengths: ["open model ecosystem", "local/hosted flexibility"], weaknesses: ["host/model size determines quality"], costTier: "low", speedTier: "medium", reasoningTier: "medium", codingTier: "medium", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "META_BASE_URL", apiKeyEnv: "META_API_KEY" }),
+  model({ providerId: "meta", providerName: "Meta / Llama", modelId: "meta/llama-4", displayName: "Llama 4 placeholder", family: "llama", strengths: ["future configured open model"], weaknesses: ["registered as config placeholder only"], costTier: "unknown", speedTier: "unknown", reasoningTier: "high", codingTier: "medium", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "META_BASE_URL", apiKeyEnv: "META_API_KEY" }),
+
+  model({ providerId: "openrouter", providerName: "OpenRouter", modelId: "openrouter/custom", displayName: "OpenRouter custom model", family: "router", strengths: ["custom model IDs", "provider fallback testing"], weaknesses: ["requires OPENROUTER_API_KEY and a valid model ID"], costTier: "unknown", speedTier: "unknown", reasoningTier: "unknown", codingTier: "unknown", designTier: "unknown", contextWindow: null, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: null, apiKeyEnv: "OPENROUTER_API_KEY" }),
+  model({ providerId: "groq", providerName: "Groq", modelId: "groq/fast-open-model", displayName: "Groq fast open model", family: "hosted-open", strengths: ["very fast hosted open models"], weaknesses: ["model choice depends on Groq account availability"], costTier: "low", speedTier: "high", reasoningTier: "medium", codingTier: "medium", designTier: "low", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "GROQ_BASE_URL", apiKeyEnv: "GROQ_API_KEY" }),
+  model({ providerId: "together", providerName: "Together AI", modelId: "together/hosted-open-model", displayName: "Together hosted open model", family: "hosted-open", strengths: ["open model variety", "long-context options"], weaknesses: ["requires explicit hosted model ID"], costTier: "low", speedTier: "medium", reasoningTier: "medium", codingTier: "medium", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "TOGETHER_BASE_URL", apiKeyEnv: "TOGETHER_API_KEY" }),
+  model({ providerId: "fireworks", providerName: "Fireworks AI", modelId: "fireworks/hosted-open-model", displayName: "Fireworks hosted open model", family: "hosted-open", strengths: ["fast hosted open models", "custom deployment options"], weaknesses: ["requires configured model ID"], costTier: "low", speedTier: "high", reasoningTier: "medium", codingTier: "medium", designTier: "medium", contextWindow: null, supportsTools: true, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "FIREWORKS_BASE_URL", apiKeyEnv: "FIREWORKS_API_KEY" }),
+
+  model({ providerId: "ollama", providerName: "Ollama", modelId: "ollama/custom-local", displayName: "Ollama local model", family: "local", strengths: ["local privacy", "offline-friendly when installed", "low recurring cost"], weaknesses: ["depends on local hardware and installed model"], costTier: "low", speedTier: "unknown", reasoningTier: "unknown", codingTier: "unknown", designTier: "low", contextWindow: null, supportsTools: false, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: true, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: false, baseUrlEnv: "OLLAMA_BASE_URL", apiKeyEnv: null }),
+  model({ providerId: "lmstudio", providerName: "LM Studio", modelId: "lmstudio/custom-local", displayName: "LM Studio local model", family: "local", strengths: ["local OpenAI-compatible endpoint", "custom local model names"], weaknesses: ["depends on local hardware and server state"], costTier: "low", speedTier: "unknown", reasoningTier: "unknown", codingTier: "unknown", designTier: "low", contextWindow: null, supportsTools: false, supportsVision: false, supportsJson: true, supportsStreaming: true, isLocal: true, isOpenSource: true, isOpenAICompatible: true, requiresApiKey: false, baseUrlEnv: "LM_STUDIO_BASE_URL", apiKeyEnv: null }),
+  model({ providerId: "custom-openai-compatible", providerName: "Custom OpenAI-compatible", modelId: "custom-openai-compatible/custom-model", displayName: "Custom OpenAI-compatible model", family: "custom", strengths: ["bring your own endpoint", "custom model IDs", "hosted or private routing"], weaknesses: ["requires correct base URL, key, and model ID"], costTier: "unknown", speedTier: "unknown", reasoningTier: "unknown", codingTier: "unknown", designTier: "unknown", contextWindow: null, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "OPENAI_COMPATIBLE_BASE_URL", apiKeyEnv: "OPENAI_COMPATIBLE_API_KEY" }),
+  model({ providerId: "sakana-compatible", providerName: "Sakana/Fugu-style compatible", modelId: "sakana-compatible/custom-model", displayName: "Sakana/Fugu-style compatible model", family: "custom-orchestration", strengths: ["one-API provider placeholder", "future orchestration metadata"], weaknesses: ["no multi-agent orchestration implemented yet"], costTier: "unknown", speedTier: "unknown", reasoningTier: "unknown", codingTier: "unknown", designTier: "unknown", contextWindow: null, supportsTools: true, supportsVision: true, supportsJson: true, supportsStreaming: true, isLocal: false, isOpenSource: false, isOpenAICompatible: true, requiresApiKey: true, baseUrlEnv: "SAKANA_COMPATIBLE_BASE_URL", apiKeyEnv: "SAKANA_COMPATIBLE_API_KEY" })
+];
+
+export const hassaliDefaultModelId = "openai/gpt-4o-mini";
+
+export function getHassaliModelOptions() {
+  return hassaliModelRegistry.map((model) => ({
+    label: `${model.displayName} · ${model.providerName}`,
+    value: model.modelId
+  }));
+}
+
+export function findHassaliModel(modelId: string | null | undefined) {
+  if (!modelId) return null;
+  const normalized = modelId.trim().toLowerCase();
+
+  return hassaliModelRegistry.find((model) => model.modelId.toLowerCase() === normalized) ?? null;
+}
+
+export function findHassaliProvider(providerId: string | null | undefined) {
+  if (!providerId) return null;
+  const normalized = providerId.trim().toLowerCase();
+
+  return hassaliModelProviders.find((provider) => provider.providerId === normalized) ?? null;
+}

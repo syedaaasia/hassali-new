@@ -45,6 +45,14 @@ export function blockedReasonsForDevServer(framework: DevServerFramework): DevSe
     ];
   }
 
+  if (framework === "python_streamlit") {
+    return [
+      blockedReason("dev_server_execution_disabled", "Python app preview is summary-only. Hassali did not install packages or start Streamlit."),
+      blockedReason("process_spawn_blocked", "Process spawning is blocked for Python previews."),
+      blockedReason("package_install_blocked", "Package installation is blocked for Python previews.")
+    ];
+  }
+
   if (framework === "unknown") {
     return [
       blockedReason(

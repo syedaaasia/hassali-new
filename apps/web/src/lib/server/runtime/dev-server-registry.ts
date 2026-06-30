@@ -52,6 +52,18 @@ const registry: DevServerRegistryEntry[] = [
     terms: ['"vite"', '"@vitejs/plugin-react"', "import.meta.env", '"react"']
   },
   {
+    displayName: "Python / Streamlit",
+    framework: "python_streamlit",
+    patterns: [
+      /(^|\/)app\.py$/,
+      /(^|\/)requirements\.txt$/,
+      /(^|\/).*\.py$/
+    ],
+    port: null,
+    startCommand: null,
+    terms: ["streamlit", "st.", "pandas"]
+  },
+  {
     displayName: "Static HTML",
     framework: "static_html",
     patterns: [/(^|\/)index\.html$/],

@@ -97,6 +97,10 @@ const profiles: Record<string, ValidationProfile> = {
     forbidden: ["dental", "dentist", "doctor", "bouquet", "floral", "coffee", "cafe", "sofa"],
     required: ["TV", "smart TV", "OLED", "QLED", "LED", "installation", "warranty", "delivery"]
   },
+  mobile_phone_shop: {
+    forbidden: ["dental", "dentist", "coffee", "cafe", "seafood", "car rental", "cycling", "bicycle", "SaaS", "dashboard conversion"],
+    required: ["smartphones", "iPhone", "Samsung", "Android phones", "phone accessories", "warranty", "repairs", "customer support"]
+  },
   floral: {
     forbidden: ["Local Service", "Clear Services Studio", "developer", "OLED", "QLED", "dental"],
     required: ["bouquet", "flowers", "wedding", "event", "delivery", "gifting", "freshness", "arrangements"]
@@ -147,6 +151,10 @@ function domainVocabulary(domain: string | null) {
     expanded.push("cola", "soft drink", "soda", "beverage", "flavor", "refresh");
   }
 
+  if (domainText.includes("mobile phone") || domainText.includes("phone shop") || domainText.includes("smartphone") || domainText.includes("cellphone")) {
+    expanded.push("smartphones", "iPhone", "Samsung", "Android phones", "phone accessories", "cases", "chargers", "screen protectors", "unlocked phones", "warranty", "repairs", "device setup");
+  }
+
   return unique(expanded);
 }
 
@@ -165,6 +173,7 @@ function profileFor(domain: string | null) {
   if (normalizedDomain?.includes("coffee") || normalizedDomain?.includes("cafe")) return profiles.coffee;
   if (normalizedDomain?.includes("furniture")) return profiles.furniture;
   if (normalizedDomain?.includes("floral") || normalizedDomain?.includes("flower")) return profiles.floral;
+  if (normalizedDomain?.includes("mobile_phone") || normalizedDomain?.includes("mobile phone") || normalizedDomain?.includes("phone shop") || normalizedDomain?.includes("smartphone")) return profiles.mobile_phone_shop;
   if (normalizedDomain?.includes("tv") || normalizedDomain?.includes("electronics")) return profiles.electronics_retail;
 
   return {

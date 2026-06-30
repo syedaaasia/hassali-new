@@ -77,7 +77,14 @@ const placeholderPatterns = [
   "example content",
   "insert copy",
   "your content",
-  "image goes here"
+  "image goes here",
+  "Current Prompt Website",
+  "contact / unknown",
+  "domain-specific hero",
+  "product proof / contact path",
+  "unknown with clear guidance",
+  "Support, warranty, shipping, and contact details for Current Prompt Website",
+  "document dataset domain = Current Prompt Website"
 ];
 
 const fakeContentPatterns = [
@@ -359,6 +366,9 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
   const hasRunnableCodeSource = mode === "CODE" && fileNames.some((path) =>
     path === "vite.config.ts" ||
     path === "vite.config.js" ||
+    path === "app.py" ||
+    path === "requirements.txt" ||
+    path.endsWith(".py") ||
     path.startsWith("src/")
   );
   const missingModules =

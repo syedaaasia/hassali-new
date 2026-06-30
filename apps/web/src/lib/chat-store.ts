@@ -2,7 +2,12 @@
 
 import { create } from "zustand";
 import { canonicalProjectState } from "@/lib/canonical-project-state";
+import { hassaliDefaultModelId } from "@/lib/model-registry";
 import type { RuntimeSyncMetadata } from "@/lib/runtime-result-sync";
+import type {
+  SelfReviewReport,
+  SelfReviewStatus
+} from "@/lib/self-review-types";
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
 
 export type ChatRole = "user" | "assistant";
@@ -174,6 +179,11 @@ export type DiffProposal = {
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
   proposalRoutingWarnings?: ProposalRoutingWarning[];
+  selfReview?: SelfReviewReport;
+  selfReviewConfidence?: number;
+  selfReviewFailureCount?: number;
+  selfReviewStatus?: SelfReviewStatus;
+  selfReviewWarningCount?: number;
   realPreview?: Record<string, unknown>;
   previewDriftDetected?: boolean;
   requiredPageCount?: number | null;
@@ -292,6 +302,44 @@ function isApprovalDecision(value: unknown): value is ApprovalDecision {
   );
 }
 
+const applyUnsafePlaceholderPatterns = [
+  /\bCurrent Prompt Website\b/i,
+  /\bcontact\s*\/\s*unknown\b/i,
+  /\bdomain-specific hero\b/i,
+  /\bproduct proof\s*\/\s*contact path\b/i,
+  /\bunknown with clear guidance\b/i,
+  /\bSupport, warranty, shipping, and contact details for Current Prompt Website\b/i,
+  /\bdocument dataset domain\s*=\s*Current Prompt Website\b/i
+];
+
+function proposalFileContents(proposal: DiffProposal) {
+  return proposal.changes
+    .filter((change) => isFileProposalAction(change.action) && typeof change.proposedContent === "string")
+    .map((change) => ({
+      content: change.proposedContent as string,
+      path: change.path ?? "unknown"
+    }));
+}
+
+function proposalHtmlPages(proposal: DiffProposal) {
+  return proposalFileContents(proposal)
+    .map((file) => normalizeSafeProjectPath(file.path))
+    .filter((path): path is string => Boolean(path?.endsWith(".html")));
+}
+
+function expectedHtmlPages(proposal: DiffProposal) {
+  const sourcePages = proposal.sourceOfTruthPages?.length
+    ? proposal.sourceOfTruthPages
+    : [];
+
+  return new Set(
+    sourcePages
+      .map((page) => page.toLowerCase().trim())
+      .filter(Boolean)
+      .map((page) => page === "home" || page === "index" ? "index.html" : `${page.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.html`)
+  );
+}
+
 function legacyCriticalIssues(proposal: DiffProposal) {
   const issues: string[] = [];
   const criticalPattern = /\b(?:cross-project|another project|project isolation|unsafe path|invalid file path|missing required file|unexpected website page|wrong-domain|dangerous action|unsupported action|package install|shell execution|missing proposed content)\b/i;
@@ -316,16 +364,82 @@ function legacyCriticalIssues(proposal: DiffProposal) {
     }
   }
 
+  if (proposal.approvalDisabled) {
+    issues.push(proposal.blockedReason ?? "This proposal failed validation and cannot be applied. Regenerate or fix the request.");
+  }
+
+  if (proposal.shouldBlockExecution) {
+    issues.push(proposal.blockedReason ?? "This proposal is marked as blocked and cannot be applied.");
+  }
+
+  if (proposal.proposalRoutingMode === "blocked") {
+    issues.push(proposal.blockedReason ?? "This proposal routing is blocked.");
+  }
+
+  if (proposal.selfReviewStatus === "FAIL") {
+    issues.push("Self Review failed this proposal.");
+  }
+
+  if (proposal.proposalQualityStatus === "blocked") {
+    issues.push(proposal.blockedReason ?? "Proposal quality gate blocked this proposal.");
+  }
+
+  if (proposal.domainValidationStatus === "blocked") {
+    issues.push(proposal.blockedReason ?? "Domain validation blocked this proposal.");
+  }
+
+  if (
+    proposal.contradictionStatus === "blocked" ||
+    proposal.publicCopyCleanStatus === "blocked" ||
+    proposal.sectionCopyQualityStatus === "blocked" ||
+    proposal.staleTermScanStatus === "blocked" ||
+    proposal.visualValidationStatus === "blocked" ||
+    proposal.generatorContractStatus === "blocked"
+  ) {
+    issues.push(proposal.blockedReason ?? "One or more validation layers blocked this proposal.");
+  }
+
+  if (
+    proposal.proposalRepairStatus === "failed" ||
+    proposal.proposalRepairStatus === "keep_blocked" ||
+    proposal.proposalRepairStatus === "partial_repair"
+  ) {
+    issues.push("Repair did not produce an apply-safe proposal.");
+  }
+
+  if ((proposal.qualityBlockCount ?? 0) > 0) {
+    issues.push("Proposal quality gate reported blocking issues.");
+  }
+
+  for (const file of proposalFileContents(proposal)) {
+    if (applyUnsafePlaceholderPatterns.some((pattern) => pattern.test(file.content))) {
+      issues.push(`Apply-unsafe placeholder repair content detected in ${file.path}.`);
+    }
+  }
+
+  const expectedPages = expectedHtmlPages(proposal);
+  if (proposal.generatorMode === "website_generation" && expectedPages.size > 0) {
+    const extraPages = proposalHtmlPages(proposal).filter((path) => !expectedPages.has(path));
+
+    if (extraPages.length > 0) {
+      issues.push(`Generated extra page(s) not requested: ${extraPages.join(", ")}.`);
+    }
+  }
+
   return Array.from(new Set(issues));
 }
 
 export function normalizeApprovalDecision(proposal: DiffProposal): ApprovalDecision {
-  if (proposal.approvalDecision) {
-    return proposal.approvalDecision;
-  }
-
   const criticalIssues = legacyCriticalIssues(proposal);
+  const explicitCriticalIssues = [
+    ...(proposal.approvalDecision?.criticalIssues ?? []),
+    ...(proposal.approvalDecision?.approvalAllowed === false && !(proposal.approvalDecision?.criticalIssues ?? []).length
+      ? ["This proposal failed validation and cannot be applied. Regenerate or fix the request."]
+      : [])
+  ];
+  const combinedCriticalIssues = Array.from(new Set([...explicitCriticalIssues, ...criticalIssues]));
   const warnings = Array.from(new Set([
+    ...(proposal.approvalDecision?.warnings ?? []),
     ...(proposal.proposalRoutingReasons ?? [])
       .filter((reason) => reason.severity !== "info")
       .map((reason) => reason.message),
@@ -333,10 +447,10 @@ export function normalizeApprovalDecision(proposal: DiffProposal): ApprovalDecis
   ]));
 
   return {
-    approvalAllowed: criticalIssues.length === 0,
-    criticalIssues,
-    decisionSource: "client-normalized",
-    hasCriticalIssues: criticalIssues.length > 0,
+    approvalAllowed: proposal.approvalDecision?.approvalAllowed === false ? false : combinedCriticalIssues.length === 0,
+    criticalIssues: combinedCriticalIssues,
+    decisionSource: proposal.approvalDecision?.decisionSource ?? "client-normalized",
+    hasCriticalIssues: combinedCriticalIssues.length > 0 || proposal.approvalDecision?.hasCriticalIssues === true,
     hasWarnings: warnings.length > 0,
     reviewItems: warnings,
     warnings
@@ -431,7 +545,7 @@ type ChatState = {
   sendMessage: (workspaceContext: WorkspaceContext) => Promise<void>;
 };
 
-const defaultModel = "openai/gpt-4o-mini";
+const defaultModel = hassaliDefaultModelId;
 const proposalMarker = "HASSALI_DIFF_PROPOSAL:";
 
 function productModeToAiMode(mode: ProductMode): AiMode {
@@ -495,6 +609,59 @@ function isProposalRoutingReason(value: unknown): value is ProposalRoutingReason
     typeof reason.code === "string" &&
     typeof reason.message === "string" &&
     (reason.severity === "high" || reason.severity === "info" || reason.severity === "medium")
+  );
+}
+
+function isSelfReviewStatus(value: unknown): value is SelfReviewStatus {
+  return value === "FAIL" || value === "PASS" || value === "PASS_WITH_WARNINGS";
+}
+
+function isSelfReviewIssue(value: unknown) {
+  if (!isPlainRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.ruleId === "string" &&
+    typeof value.reviewer === "string" &&
+    (value.mode === "ASK" || value.mode === "CODE" || value.mode === "WEBSITE") &&
+    typeof value.category === "string" &&
+    typeof value.severity === "string" &&
+    typeof value.title === "string" &&
+    typeof value.description === "string" &&
+    Array.isArray(value.evidence) &&
+    isPlainRecord(value.location) &&
+    typeof value.confidence === "number" &&
+    typeof value.repairable === "boolean" &&
+    typeof value.repairStrategy === "string" &&
+    typeof value.recommendedFix === "string" &&
+    typeof value.timestamp === "number" &&
+    Array.isArray(value.trace)
+  );
+}
+
+function isSelfReviewReport(value: unknown): value is SelfReviewReport {
+  if (!isPlainRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.reviewId === "string" &&
+    typeof value.reviewer === "string" &&
+    (value.mode === "ASK" || value.mode === "CODE" || value.mode === "WEBSITE") &&
+    isSelfReviewStatus(value.overallStatus) &&
+    typeof value.confidence === "number" &&
+    typeof value.passed === "boolean" &&
+    Array.isArray(value.warnings) &&
+    value.warnings.every(isSelfReviewIssue) &&
+    Array.isArray(value.failures) &&
+    value.failures.every(isSelfReviewIssue) &&
+    Array.isArray(value.recommendations) &&
+    isPlainRecord(value.scores) &&
+    isPlainRecord(value.metrics) &&
+    typeof value.timestamp === "number" &&
+    Array.isArray(value.trace)
   );
 }
 
@@ -773,6 +940,16 @@ function isDiffProposal(value: unknown): value is DiffProposal {
     (typeof proposal.proposalRoutingReasons === "undefined" ||
       (Array.isArray(proposal.proposalRoutingReasons) &&
         proposal.proposalRoutingReasons.every(isProposalRoutingReason))) &&
+    (typeof proposal.selfReview === "undefined" ||
+      isSelfReviewReport(proposal.selfReview)) &&
+    (typeof proposal.selfReviewConfidence === "undefined" ||
+      typeof proposal.selfReviewConfidence === "number") &&
+    (typeof proposal.selfReviewFailureCount === "undefined" ||
+      typeof proposal.selfReviewFailureCount === "number") &&
+    (typeof proposal.selfReviewStatus === "undefined" ||
+      isSelfReviewStatus(proposal.selfReviewStatus)) &&
+    (typeof proposal.selfReviewWarningCount === "undefined" ||
+      typeof proposal.selfReviewWarningCount === "number") &&
     (typeof proposal.realPreview === "undefined" ||
       isPlainRecord(proposal.realPreview)) &&
     (typeof proposal.previewDriftDetected === "undefined" ||

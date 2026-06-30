@@ -303,6 +303,10 @@ function inferSiteType(domain: string) {
     return "motorcycle showroom and service website";
   }
 
+  if (domain.includes("mobile phone") || domain.includes("phone shop") || domain.includes("smartphone")) {
+    return "mobile phone retail and repair website";
+  }
+
   if (domain === "bike shop") {
     return "ambiguous bike retail and service website";
   }
@@ -327,6 +331,7 @@ function inferSiteType(domain: string) {
     florist: "local service and product website",
     "generic website": "responsive marketing website",
     jewellery: "luxury ecommerce/editorial website",
+    "mobile phone shop": "mobile phone retail and repair website",
     podcast: "creator media brand",
     portfolio: "portfolio showcase",
     restaurant: "reservation-focused hospitality website",

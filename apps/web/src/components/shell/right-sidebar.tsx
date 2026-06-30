@@ -12,6 +12,7 @@ import {
   type ProductMode,
   useChatStore
 } from "@/lib/chat-store";
+import { getHassaliModelOptions } from "@/lib/model-registry";
 import {
   type RuntimeApprovalResponse,
   syncRuntimeApprovalResult
@@ -20,11 +21,7 @@ import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
 
-const modelOptions = [
-  { label: "GPT-4o mini", value: "openai/gpt-4o-mini" },
-  { label: "Claude Haiku", value: "anthropic/claude-3.5-haiku" },
-  { label: "Gemini Flash", value: "google/gemini-flash-1.5" }
-];
+const modelOptions = getHassaliModelOptions();
 
 const productModes: Array<{
   label: ProductMode;
@@ -183,6 +180,26 @@ async function approveProposalThroughRuntime(
         summary: change.summary
       })),
       productMode,
+      proposalMetadata: {
+        approvalDecision: normalizeApprovalDecision(proposal),
+        approvalDisabled: proposal.approvalDisabled,
+        blockedReason: proposal.blockedReason,
+        contradictionStatus: proposal.contradictionStatus,
+        domainValidationStatus: proposal.domainValidationStatus,
+        generatorContractStatus: proposal.generatorContractStatus,
+        generatorMode: proposal.generatorMode,
+        proposalQualityStatus: proposal.proposalQualityStatus,
+        proposalRepairStatus: proposal.proposalRepairStatus,
+        proposalRoutingMode: proposal.proposalRoutingMode,
+        publicCopyCleanStatus: proposal.publicCopyCleanStatus,
+        requiredPageCount: proposal.requiredPageCount,
+        sectionCopyQualityStatus: proposal.sectionCopyQualityStatus,
+        selfReviewStatus: proposal.selfReviewStatus,
+        shouldBlockExecution: proposal.shouldBlockExecution,
+        sourceOfTruthPages: proposal.sourceOfTruthPages,
+        staleTermScanStatus: proposal.staleTermScanStatus,
+        visualValidationStatus: proposal.visualValidationStatus
+      },
       projectId: selectedProjectId,
       proposalId: proposal.id
     }),
@@ -420,6 +437,14 @@ function ProposalReviewState({ proposal }: { proposal: DiffProposal }) {
     .filter((reason) => isReviewMessageVisibleForMode(reason.message, mode))
     .slice(0, 3);
   const kernelDecision = proposal.kernelRoutingDecision;
+  const selfReview = proposal.selfReview;
+  const selfReviewTopIssues = selfReview
+    ? [...selfReview.failures, ...selfReview.warnings].slice(0, 3)
+    : [];
+  const selfReviewConfidence = proposal.selfReviewConfidence ?? selfReview?.confidence;
+  const selfReviewStatus = proposal.selfReviewStatus ?? selfReview?.overallStatus;
+  const selfReviewWarningCount = proposal.selfReviewWarningCount ?? selfReview?.warnings.length ?? 0;
+  const selfReviewFailureCount = proposal.selfReviewFailureCount ?? selfReview?.failures.length ?? 0;
 
   return (
     <div className="mt-3 rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.28)] p-3">
@@ -429,6 +454,45 @@ function ProposalReviewState({ proposal }: { proposal: DiffProposal }) {
         </span>
         <span className="text-[11px] leading-5 text-muted-foreground">{reviewState.message}</span>
       </div>
+
+      {selfReviewStatus ? (
+        <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-2">
+          <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground sm:grid-cols-4">
+            <div>
+              <span className="text-foreground/75">Score</span>
+              <br />
+              {selfReviewConfidence ?? 0}%
+            </div>
+            <div>
+              <span className="text-foreground/75">Status</span>
+              <br />
+              {selfReviewStatus}
+            </div>
+            <div>
+              <span className="text-foreground/75">Warnings</span>
+              <br />
+              {selfReviewWarningCount}
+            </div>
+            <div>
+              <span className="text-foreground/75">Failures</span>
+              <br />
+              {selfReviewFailureCount}
+            </div>
+          </div>
+          {selfReviewTopIssues.length > 0 ? (
+            <div className="mt-2 space-y-1.5">
+              {selfReviewTopIssues.map((issue) => (
+                <div className="text-[11px] leading-5 text-muted-foreground" key={issue.id}>
+                  <span className={issue.severity === "critical" || issue.severity === "high" ? "text-red-200" : "text-amber-100"}>
+                    {issue.ruleId}
+                  </span>{" "}
+                  {issue.title}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {warnings.length > 0 ? (
         <div className="mt-3 space-y-1.5">

@@ -3,8 +3,8 @@ import { normalizePath } from "@/lib/utils/path";
 export type HassaliMode = "ASK" | "WEBSITE" | "CODE";
 
 export type PreviewManifest = {
-  type: "static_website" | "react_vite_app" | "next_app" | "mobile" | "architecture" | null;
-  framework: "static_html" | "react_vite" | "next_app" | "unknown" | null;
+  type: "static_website" | "react_vite_app" | "next_app" | "python_app" | "mobile" | "architecture" | null;
+  framework: "static_html" | "react_vite" | "next_app" | "python_streamlit" | "unknown" | null;
   entryPoint: string | null;
   requiredFiles: string[];
 };
@@ -25,6 +25,10 @@ export const emptyPreviewManifest: PreviewManifest = {
 export function deriveManifest(committedFiles: Map<string, VfsFile>): PreviewManifest {
   const paths = [...committedFiles.keys()].map(normalizePath).filter(Boolean);
   const pathSet = new Set(paths);
+  const appPy = committedFiles.get("app.py")?.content.toLowerCase() ?? "";
+  const requirements = committedFiles.get("requirements.txt")?.content.toLowerCase() ?? "";
+  const hasPythonEntry = pathSet.has("app.py");
+  const hasStreamlitSignal = appPy.includes("streamlit") || requirements.includes("streamlit");
 
   if (pathSet.has("src/main.tsx") && pathSet.has("vite.config.ts")) {
     return {
@@ -44,6 +48,15 @@ export function deriveManifest(committedFiles: Map<string, VfsFile>): PreviewMan
     };
   }
 
+  if (hasPythonEntry && (hasStreamlitSignal || pathSet.has("requirements.txt"))) {
+    return {
+      type: "python_app",
+      framework: hasStreamlitSignal ? "python_streamlit" : "unknown",
+      entryPoint: "app.py",
+      requiredFiles: ["app.py", "requirements.txt"]
+    };
+  }
+
   if (pathSet.has("index.html") && paths.some((path) => path.endsWith(".css"))) {
     return {
       type: "static_website",
@@ -60,6 +73,7 @@ export function manifestPreviewLabel(manifest: PreviewManifest) {
   if (manifest.type === "static_website") return "Website preview";
   if (manifest.type === "react_vite_app") return "Web app preview";
   if (manifest.type === "next_app") return "Web app preview";
+  if (manifest.type === "python_app") return "Python app preview";
 
   return "No preview";
 }

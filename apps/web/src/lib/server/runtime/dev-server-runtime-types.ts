@@ -1,5 +1,6 @@
 export type DevServerFramework =
   | "next_app"
+  | "python_streamlit"
   | "react_vite"
   | "static_html"
   | "unknown";

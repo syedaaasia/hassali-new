@@ -59,7 +59,10 @@ import {
   generatePlannedWebsiteFiles,
   type SiteDomain
 } from "@/lib/server/ai/domain-site-generator";
-import { generateCrmViteSource } from "@/lib/server/ai/code-app-source-generator";
+import {
+  generateCrmPythonStreamlitSource,
+  generateCrmViteSource
+} from "@/lib/server/ai/code-app-source-generator";
 import {
   buildExecutionPlan,
   summarizeExecutionPlan,
@@ -121,6 +124,11 @@ import {
   type PromptAcceptanceResult
 } from "@/lib/server/ai/prompt-sovereignty";
 import {
+  runSelfReview,
+  type SelfReviewFile,
+  type SelfReviewSystemRisk
+} from "@/lib/server/ai/self-review";
+import {
   buildCompositionStrategy,
   type CompositionStrategy
 } from "@/lib/server/ai/reasoning-composition";
@@ -131,6 +139,10 @@ import type {
   PreviewRuntimeResult,
   PreviewType
 } from "@/lib/server/preview/preview-types";
+import type {
+  SelfReviewReport,
+  SelfReviewStatus
+} from "@/lib/self-review-types";
 import { getRuntimeStatus } from "@/lib/server/runtime-manager";
 
 export const runtime = "nodejs";
@@ -295,6 +307,11 @@ type DiffProposal = {
   repeatedContentDetected?: boolean;
   sectionCopyQualityStatus?: "blocked" | "clean" | "review_required";
   shouldBlockExecution?: boolean;
+  selfReview?: SelfReviewReport;
+  selfReviewConfidence?: number;
+  selfReviewFailureCount?: number;
+  selfReviewStatus?: SelfReviewStatus;
+  selfReviewWarningCount?: number;
   staleTermScanStatus?: "blocked" | "clean" | "review_required";
   structureScore?: number;
   status: "pending";
@@ -1336,6 +1353,14 @@ tfoot td {
   };
 }
 
+function promptRequestsPythonStack(prompt: string) {
+  return /\b(?:python|py|streamlit|flask|fastapi|django|tkinter|pyside|pyqt)\b/i.test(prompt);
+}
+
+function promptRequestsReactFrontendStack(prompt: string) {
+  return /\b(?:react|vite|tsx|frontend react|react frontend|typescript frontend)\b/i.test(prompt);
+}
+
 function createLocalProposal(
   prompt: string,
   workspace: WorkspaceContext,
@@ -1373,10 +1398,16 @@ function createLocalProposal(
         "security and test plan"
       ].filter(Boolean) as string[])
     );
-    const sourceFiles = generateCrmViteSource({
-      appName: appPreview.appName,
-      prompt
-    });
+    const usePythonStack = promptRequestsPythonStack(prompt) && !promptRequestsReactFrontendStack(prompt);
+    const sourceFiles = usePythonStack
+      ? generateCrmPythonStreamlitSource({
+          appName: appPreview.appName,
+          prompt
+        })
+      : generateCrmViteSource({
+          appName: appPreview.appName,
+          prompt
+        });
 
     return {
       changes: sourceFiles.map((file) => ({
@@ -1398,7 +1429,9 @@ function createLocalProposal(
       projectId: diagnostic.projectId,
       status: "pending",
       summary:
-        `Detected a CODE-mode ${appPreview.appName} ${systemName} request with ${requestedCapabilities.join(", ")}. I will create runnable Vite React CRM source files plus architecture, data model, and security docs. No package install or runtime command runs before approval.`
+        usePythonStack
+          ? `Detected a CODE-mode ${appPreview.appName} ${systemName} request with explicit Python stack intent and ${requestedCapabilities.join(", ")}. I will create a Python / Streamlit CRM scaffold with mock data, dashboard metrics, billing charts, and documentation. No package install or runtime command runs before approval.`
+          : `Detected a CODE-mode ${appPreview.appName} ${systemName} request with ${requestedCapabilities.join(", ")}. I will create runnable Vite React CRM source files plus architecture, data model, and security docs. No package install or runtime command runs before approval.`
     };
     const architecture = `# ${systemName.toUpperCase()} Architecture Plan
 
@@ -2739,6 +2772,41 @@ function compactProposalRepair(repair: ProposalRepairResult) {
   };
 }
 
+function compactSelfReview(review: SelfReviewReport) {
+  return {
+    reviewId: review.reviewId,
+    reviewer: review.reviewer,
+    mode: review.mode,
+    overallStatus: review.overallStatus,
+    confidence: review.confidence,
+    passed: review.passed,
+    warningCount: review.warnings.length,
+    failureCount: review.failures.length,
+    recommendations: review.recommendations,
+    scores: review.scores,
+    topIssues: [...review.failures, ...review.warnings].slice(0, 3).map((issue) => ({
+      category: issue.category,
+      description: issue.description,
+      id: issue.id,
+      recommendedFix: issue.recommendedFix,
+      ruleId: issue.ruleId,
+      severity: issue.severity,
+      title: issue.title
+    })),
+    metrics: review.metrics,
+    timestamp: review.timestamp,
+    reviewerReports: review.reviewerReports?.map((report) => ({
+      reviewId: report.reviewId,
+      reviewer: report.reviewer,
+      overallStatus: report.overallStatus,
+      confidence: report.confidence,
+      warningCount: report.warnings.length,
+      failureCount: report.failures.length,
+      metrics: report.metrics
+    }))
+  };
+}
+
 function compactGeneratorContract(generatorContract: GeneratorContract) {
   return {
     acceptanceChecks: generatorContract.acceptanceChecks,
@@ -3228,6 +3296,171 @@ function proposedFilesFromChanges(changes: DiffProposal["changes"]) {
   );
 }
 
+function selfReviewFilesFromChanges(changes: DiffProposal["changes"]): SelfReviewFile[] {
+  return changes
+    .filter((change) => isFileProposalAction(change.action) && change.path && typeof change.proposedContent === "string")
+    .map((change) => ({
+      content: change.proposedContent as string,
+      path: change.path as string
+    }));
+}
+
+function applySelfReviewMetadata(
+  proposal: DiffProposal,
+  selfReview: SelfReviewReport
+): DiffProposal {
+  const failed = selfReview.overallStatus === "FAIL";
+  const topFailure = selfReview.failures[0];
+  const failureReason = topFailure
+    ? `${topFailure.ruleId}: ${topFailure.title} - ${topFailure.description}`
+    : "Self Review failed this proposal.";
+
+  return {
+    ...proposal,
+    approvalDisabled: proposal.approvalDisabled || failed,
+    approvalRecommendation: failed ? "reject" : proposal.approvalRecommendation,
+    blockedReason: failed
+      ? failureReason
+      : proposal.blockedReason,
+    proposalRoutingMode: failed ? "blocked" : proposal.proposalRoutingMode,
+    proposalRoutingReasons: failed
+      ? [
+          ...(proposal.proposalRoutingReasons ?? []),
+          {
+            code: "self_review_failed",
+            message: failureReason,
+            severity: "high"
+          }
+        ]
+      : proposal.proposalRoutingReasons,
+    requiresExtraReview: proposal.requiresExtraReview || selfReview.overallStatus !== "PASS",
+    selfReview,
+    selfReviewConfidence: selfReview.confidence,
+    selfReviewFailureCount: selfReview.failures.length,
+    selfReviewStatus: selfReview.overallStatus,
+    selfReviewWarningCount: selfReview.warnings.length,
+    shouldBlockExecution: proposal.shouldBlockExecution || failed
+  };
+}
+
+function staleTermEvidence(message: string) {
+  const match = message.match(/stale-domain terms:\s*(.+)$/i) ?? message.match(/contradictory or stale-domain terms:\s*(.+)$/i);
+
+  return match?.[1]?.trim() ?? message;
+}
+
+function selfReviewSystemRisksFromProposal(proposal: DiffProposal): SelfReviewSystemRisk[] {
+  const risks: SelfReviewSystemRisk[] = [];
+
+  for (const reason of proposal.proposalRoutingReasons ?? []) {
+    if (reason.code === "prompt_sovereignty_block") {
+      const isStaleDomain = /stale-domain|contradictory/i.test(reason.message);
+      risks.push({
+        category: isStaleDomain ? "domain_consistency" : "prompt_sovereignty",
+        code: reason.code,
+        description: isStaleDomain
+          ? `Prompt sovereignty detected unrelated stale-domain term: ${staleTermEvidence(reason.message)}.`
+          : reason.message,
+        evidence: staleTermEvidence(reason.message),
+        recommendedFix: isStaleDomain
+          ? "Remove unrelated stale-domain vocabulary from the generated output."
+          : "Regenerate the proposal so it follows the current prompt and project mode.",
+        repairStrategy: isStaleDomain
+          ? "remove_stale_domain_terms_and_regenerate_domain_copy"
+          : "regenerate_output_to_match_current_prompt_sovereignty_contract",
+        ruleId: isStaleDomain ? "SOV001" : "SOV002",
+        severity: "high",
+        title: isStaleDomain ? "Stale Domain Contradiction" : "Prompt Sovereignty Risk"
+      });
+      continue;
+    }
+
+    if (reason.code === "domain_validation_block") {
+      risks.push({
+        category: "validator_risk",
+        code: reason.code,
+        description: reason.message || "Domain validator blocked this proposal.",
+        evidence: reason.message,
+        recommendedFix: "Use validator repair hints to regenerate domain-correct files.",
+        repairStrategy: "regenerate_output_to_satisfy_domain_validator",
+        ruleId: "VAL001",
+        severity: reason.severity === "high" ? "high" : "medium",
+        title: "Validator Risk"
+      });
+      continue;
+    }
+
+    if (reason.severity === "high") {
+      risks.push({
+        category: "proposal_risk",
+        code: reason.code,
+        description: reason.message,
+        evidence: reason.message,
+        recommendedFix: "Review the high-severity proposal risk before approval.",
+        repairStrategy: "resolve_high_severity_proposal_risk",
+        ruleId: "RISK001",
+        severity: "high",
+        title: "High Severity Proposal Risk"
+      });
+    }
+  }
+
+  for (const warning of proposal.proposalRoutingWarnings ?? []) {
+    const isRepair = warning.code.includes("repair");
+    risks.push({
+      category: isRepair ? "repair_warning" : "validator_warning",
+      code: warning.code,
+      description: warning.message,
+      evidence: warning.message,
+      recommendedFix: isRepair
+        ? "Review repair warnings and regenerate if the repair was partial."
+        : "Review validator warning before approval.",
+      repairStrategy: isRepair
+        ? "resolve_repair_warning_before_approval"
+        : "resolve_validator_warning_before_approval",
+      ruleId: isRepair ? "REPAIR001" : "VAL001",
+      severity: warning.risk === "high" ? "high" : "medium",
+      title: isRepair ? "Repair Warning" : "Validator Warning"
+    });
+  }
+
+  if (
+    proposal.requiresExtraReview &&
+    risks.length === 0
+  ) {
+    risks.push({
+      category: "proposal_risk",
+      code: "requires_extra_review",
+      description: "Proposal metadata marks this proposal as needing review.",
+      evidence: proposal.blockedReason ?? proposal.summary,
+      recommendedFix: "Inspect proposal review notes before approval.",
+      repairStrategy: "inspect_review_metadata_before_approval",
+      ruleId: "RISK001",
+      severity: "medium",
+      title: "Proposal Needs Review"
+    });
+  }
+
+  if (
+    proposal.shouldBlockExecution &&
+    risks.every((risk) => risk.severity !== "high" && risk.severity !== "critical")
+  ) {
+    risks.push({
+      category: "metadata_consistency",
+      code: "should_block_execution",
+      description: "Proposal metadata marks execution as blocked, but no high-severity risk was bridged.",
+      evidence: proposal.blockedReason ?? "shouldBlockExecution=true",
+      recommendedFix: "Preserve the blocking reason in review metadata before presenting a perfect self-review score.",
+      repairStrategy: "align_self_review_with_existing_blocking_metadata",
+      ruleId: "META001",
+      severity: "high",
+      title: "Blocking Metadata Mismatch"
+    });
+  }
+
+  return risks;
+}
+
 function validateProposalContent(input: {
   blueprint: BusinessBlueprint;
   compositionPlan: CompositionPlan;
@@ -3440,6 +3673,51 @@ function applyFinalApprovalAuthority(
   );
 }
 
+function runSelfReviewForProposal(input: {
+  generatorContract: GeneratorContract;
+  productMode: "ASK" | "CODE" | "WEBSITE";
+  prompt: string;
+  proposal: DiffProposal;
+  proposalContext: ProposalContext;
+}) {
+  return runSelfReview({
+    domain: input.proposalContext.domain,
+    files: selfReviewFilesFromChanges(input.proposal.changes),
+    generator: input.generatorContract.contractId,
+    manifest: {
+      framework: input.proposalContext.framework ?? null,
+      requiredFiles: input.proposalContext.requiredFiles,
+      type: input.productMode === "WEBSITE"
+        ? "static_website"
+        : input.proposalContext.framework === "react_vite"
+          ? "react_vite_app"
+          : null
+    },
+    mode: input.productMode,
+    projectId: input.proposal.projectId,
+    prompt: input.prompt,
+    requestedPages: input.proposalContext.pages,
+    requiredFiles: input.proposalContext.requiredFiles,
+    systemRisks: selfReviewSystemRisksFromProposal(input.proposal)
+  });
+}
+
+function runSelfReviewForAskAnswer(input: {
+  answer: string;
+  generator: string;
+  projectId?: string | null;
+  prompt: string;
+}) {
+  return runSelfReview({
+    answer: input.answer,
+    files: [],
+    generator: input.generator,
+    mode: "ASK",
+    projectId: input.projectId ?? null,
+    prompt: input.prompt
+  });
+}
+
 function evaluateAndRepairProposal(input: {
   blueprint: BusinessBlueprint;
   compositionPlan: CompositionPlan;
@@ -3520,13 +3798,22 @@ function evaluateAndRepairProposal(input: {
 
   if (!repair.repairApplied) {
     const proposalWithRepair = applyProposalRepairMetadata(proposalWithAssets, repair);
+    const proposalWithApproval = applyFinalApprovalAuthority(proposalWithRepair, input.proposalContext);
+    const selfReview = runSelfReviewForProposal({
+      generatorContract: input.generatorContract,
+      productMode: input.productMode,
+      prompt: input.prompt,
+      proposal: proposalWithApproval,
+      proposalContext: input.proposalContext
+    });
 
     return {
       assetVisualValidation,
       domainValidation,
-      proposal: applyFinalApprovalAuthority(proposalWithRepair, input.proposalContext),
+      proposal: applySelfReviewMetadata(proposalWithApproval, selfReview),
       proposalQuality,
-      proposalRepair: repair
+      proposalRepair: repair,
+      selfReview
     };
   }
 
@@ -3565,15 +3852,25 @@ function evaluateAndRepairProposal(input: {
         ]
   };
 
+  const proposalWithApproval = applyFinalApprovalAuthority(
+    applyProposalRepairMetadata(repairedWithAssets, finalizedRepair),
+    input.proposalContext
+  );
+  const selfReview = runSelfReviewForProposal({
+    generatorContract: input.generatorContract,
+    productMode: input.productMode,
+    prompt: input.prompt,
+    proposal: proposalWithApproval,
+    proposalContext: input.proposalContext
+  });
+
   return {
     assetVisualValidation: repairedAssetValidation,
     domainValidation: repairedDomainValidation,
-    proposal: applyFinalApprovalAuthority(
-      applyProposalRepairMetadata(repairedWithAssets, finalizedRepair),
-      input.proposalContext
-    ),
+    proposal: applySelfReviewMetadata(proposalWithApproval, selfReview),
     proposalQuality: repairedProposalQuality,
-    proposalRepair: finalizedRepair
+    proposalRepair: finalizedRepair,
+    selfReview
   };
 }
 
@@ -3809,6 +4106,7 @@ async function createFallbackProposalResponse(input: {
       proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
       assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
       proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
+      selfReview: compactSelfReview(evaluatedProposal.selfReview),
       previewRuntime: compactPreviewRuntime(buildProposalPreviewRuntime(
         evaluatedProposal.proposal,
         input.contextPriority.authoritativeMode,
@@ -4174,6 +4472,13 @@ export async function POST(request: Request) {
     });
 
     if (identityAnswer) {
+      const selfReview = runSelfReviewForAskAnswer({
+        answer: identityAnswer,
+        generator: "hassali_identity",
+        projectId: requestedProjectId,
+        prompt: effectiveUserPrompt
+      });
+
       persistence = await persistChatMessage(persistence, {
         content: identityAnswer,
         metadata: {
@@ -4181,7 +4486,8 @@ export async function POST(request: Request) {
           identityResponse: true,
           intentTranslation: compactTranslatedIntent(translatedIntent),
           model,
-          projectContract: summarizeProjectContract(projectContract)
+          projectContract: summarizeProjectContract(projectContract),
+          selfReview: compactSelfReview(selfReview)
         },
         role: "assistant"
       });
@@ -4192,6 +4498,13 @@ export async function POST(request: Request) {
     const liveKnowledgeAnswer = routeLiveKnowledgeQuestion(effectiveUserPrompt);
 
     if (liveKnowledgeAnswer.answer) {
+      const selfReview = runSelfReviewForAskAnswer({
+        answer: liveKnowledgeAnswer.answer,
+        generator: "live_knowledge_router",
+        projectId: requestedProjectId,
+        prompt: effectiveUserPrompt
+      });
+
       persistence = await persistChatMessage(persistence, {
         content: liveKnowledgeAnswer.answer,
         metadata: {
@@ -4202,7 +4515,8 @@ export async function POST(request: Request) {
             status: liveKnowledgeAnswer.status
           },
           model,
-          projectContract: summarizeProjectContract(projectContract)
+          projectContract: summarizeProjectContract(projectContract),
+          selfReview: compactSelfReview(selfReview)
         },
         role: "assistant"
       });
@@ -4217,13 +4531,21 @@ export async function POST(request: Request) {
     });
 
     if (hassaliPromptAnswer) {
+      const selfReview = runSelfReviewForAskAnswer({
+        answer: hassaliPromptAnswer,
+        generator: "hassali_ready_prompt",
+        projectId: requestedProjectId,
+        prompt: effectiveUserPrompt
+      });
+
       persistence = await persistChatMessage(persistence, {
         content: hassaliPromptAnswer,
         metadata: {
           deterministic: true,
           intentTranslation: compactTranslatedIntent(translatedIntent),
           model,
-          projectContract: summarizeProjectContract(projectContract)
+          projectContract: summarizeProjectContract(projectContract),
+          selfReview: compactSelfReview(selfReview)
         },
         role: "assistant"
       });
@@ -4237,6 +4559,13 @@ export async function POST(request: Request) {
     );
 
     if (directAskAnswer) {
+      const selfReview = runSelfReviewForAskAnswer({
+        answer: directAskAnswer,
+        generator: "ask_direct_answer",
+        projectId: requestedProjectId,
+        prompt: effectiveUserPrompt
+      });
+
       persistence = await persistChatMessage(persistence, {
         content: directAskAnswer,
         metadata: {
@@ -4244,7 +4573,8 @@ export async function POST(request: Request) {
           askRuntimeContext,
           deterministic: askLiveIntent !== "weather",
           model,
-          projectContract: summarizeProjectContract(projectContract)
+          projectContract: summarizeProjectContract(projectContract),
+          selfReview: compactSelfReview(selfReview)
         },
         role: "assistant"
       });
@@ -4373,6 +4703,7 @@ export async function POST(request: Request) {
         proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
         assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
         proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
+        selfReview: compactSelfReview(evaluatedProposal.selfReview),
         previewRuntime: compactPreviewRuntime(buildProposalPreviewRuntime(
           proposal,
           contextPriority.authoritativeMode,
@@ -4392,12 +4723,20 @@ export async function POST(request: Request) {
   if (!process.env.OPENROUTER_API_KEY) {
     return createPlaceholderStream(model, {
       onComplete: async (content) => {
+        const selfReview = runSelfReviewForAskAnswer({
+          answer: content,
+          generator: "ask_placeholder_stream",
+          projectId: requestedProjectId,
+          prompt: effectiveUserPrompt
+        });
+
         persistence = await persistChatMessage(persistence, {
           content,
           metadata: {
             askLiveIntent,
             askRuntimeContext,
-            model
+            model,
+            selfReview: compactSelfReview(selfReview)
           },
           role: "assistant"
         });
@@ -4422,6 +4761,7 @@ export async function POST(request: Request) {
                 `Only include safe runtime actions when the user asks to start, restart, reload, or stop preview. Do not include shell commands, package installs, Docker, or destructive deletes. ` +
                 `Do not use markdown. Do not mutate files. Use the diagnostic context. For vague prompts, preserve existing structure and prefer targeted edits. ` +
                 `If Product mode is CODE or kernel task is code_system_generation, do not create a fake static website or index.html/styles.css/main.js unless the user explicitly asks for a static landing page. Prefer architecture, implementation, data model, and security plan files. ` +
+                `Proposal context: ${JSON.stringify(proposalContext)}. If proposalContext.framework is python_streamlit or runtimeType is python, generate Python files such as app.py, requirements.txt, data/mock_crm_data.py, README.md, ARCHITECTURE.md, SECURITY_AND_TESTING.md, and HASSALI.md; do not generate package.json, vite.config.ts, or React/Vite files unless the prompt explicitly asks for a React frontend. ` +
                 `For vague create/build website requests without clear web files, propose standard static files: index.html, styles.css, and main.js. ` +
                 `For multi-page requests, satisfy the required page files exactly. Decision plan: ${JSON.stringify(decision)}. ` +
                 `Intent translator spec from current prompt, higher priority than project contract: ${JSON.stringify(translatedIntent)}. ` +
@@ -4708,6 +5048,7 @@ export async function POST(request: Request) {
         proposalQuality: compactProposalQualityGate(evaluatedProposal.proposalQuality),
         assetVisualValidation: compactAssetVisualValidation(evaluatedProposal.assetVisualValidation),
         proposalRepair: compactProposalRepair(evaluatedProposal.proposalRepair),
+        selfReview: compactSelfReview(evaluatedProposal.selfReview),
         previewRuntime: compactPreviewRuntime(buildProposalPreviewRuntime(
           proposal,
           contextPriority.authoritativeMode,
@@ -4756,13 +5097,21 @@ export async function POST(request: Request) {
 
   return createOpenRouterTextStream(response, {
     onComplete: async (content) => {
+      const selfReview = runSelfReviewForAskAnswer({
+        answer: content,
+        generator: "openrouter_ask_stream",
+        projectId: requestedProjectId,
+        prompt: effectiveUserPrompt
+      });
+
       persistence = await persistChatMessage(persistence, {
         content,
         metadata: {
           askLiveIntent,
           askRuntimeContext,
           model,
-          projectContract: summarizeProjectContract(projectContract)
+          projectContract: summarizeProjectContract(projectContract),
+          selfReview: compactSelfReview(selfReview)
         },
         role: "assistant"
       });

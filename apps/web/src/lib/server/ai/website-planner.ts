@@ -43,6 +43,32 @@ export function selectLayoutTemplate(domain: string): WebsiteLayoutType | "brand
   const d = domain.toLowerCase();
 
   if (
+    d.includes("car rental") ||
+    d.includes("rent a car") ||
+    d.includes("vehicle rental") ||
+    d.includes("car hire") ||
+    d.includes("rental cars") ||
+    d.includes("fleet rental") ||
+    d.includes("airport rentals")
+  ) {
+    return "property_showcase";
+  }
+
+  if (
+    d.includes("mobile phone shop") ||
+    d.includes("phone shop") ||
+    d.includes("smartphone store") ||
+    d.includes("mobile store") ||
+    d.includes("cellphone shop") ||
+    d.includes("phone retail") ||
+    d.includes("phone accessories") ||
+    d.includes("unlocked phones") ||
+    d.includes("phone repair")
+  ) {
+    return "catalog_commerce";
+  }
+
+  if (
     d.includes("cola") ||
     d.includes("soft drink") ||
     d.includes("beverage") ||
@@ -78,17 +104,36 @@ export function detectWebsiteIndustry(input: {
   composition: CompositionStrategy;
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
+  proposalContext?: ProposalContext;
 }): WebsiteIndustry {
   const text = [
     input.intent.domain,
     input.intent.siteType ?? "",
     input.composition.businessType,
     input.composition.reasoningSummary,
+    input.proposalContext?.domain ?? "",
+    input.proposalContext?.sourcePrompt ?? "",
     ...(input.generatorContract?.requiredCopySignals ?? []),
     ...(input.generatorContract?.requiredEntities ?? [])
   ].join(" ").toLowerCase();
   const layoutTemplate = selectLayoutTemplate(text);
 
+  if (includesAny(text, ["car rental", "rent a car", "vehicle rental", "car hire", "rental cars", "fleet rental", "airport rentals", "car_rental"])) return "car_rental";
+  if (includesAny(text, [
+    "mobile phone shop",
+    "phone shop",
+    "smartphone store",
+    "mobile store",
+    "cellphone shop",
+    "phone retail",
+    "phone accessories",
+    "iphone shop",
+    "samsung phone shop",
+    "android phone shop",
+    "unlocked phones",
+    "phone repair shop",
+    "mobile_phone_shop"
+  ])) return "mobile_phone_shop";
   if (layoutTemplate === "beverage_brand") return "beverage";
   if (includesAny(text, ["ai product", "ai tool", "ai workspace", "automation ai", "assistant", "llm"])) return "ai_product";
   if (includesAny(text, ["real estate", "property", "properties", "realtor", "homes", "apartments"])) return "real_estate";
@@ -132,9 +177,11 @@ function pagePlan(input: {
   const industryPage: Record<WebsiteIndustry, string> = {
     ai_product: "workflow",
     beverage: "lineup",
+    car_rental: "services",
     ecommerce: "products",
     healthcare: "services",
     marketplace: "listings",
+    mobile_phone_shop: "services",
     portfolio: "work",
     real_estate: "listings",
     restaurant: "menu",
@@ -149,9 +196,11 @@ function pagePlan(input: {
   const extras: Record<WebsiteIndustry, string[]> = {
     ai_product: ["security", "use-cases", "pricing"],
     beverage: ["campaigns", "distribution", "retail"],
+    car_rental: ["fleet", "booking", "blog"],
     ecommerce: ["collections", "support", "delivery"],
     healthcare: ["team", "appointments", "reviews"],
     marketplace: ["sell", "categories", "trust"],
+    mobile_phone_shop: ["accessories", "repairs", "support"],
     portfolio: ["case-studies", "services", "process"],
     real_estate: ["neighborhoods", "agents", "valuation"],
     restaurant: ["reservations", "catering", "popular"],

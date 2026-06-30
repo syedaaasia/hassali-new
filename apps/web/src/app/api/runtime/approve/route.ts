@@ -60,6 +60,92 @@ function metadataFromBody(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+const applyUnsafePlaceholderPatterns = [
+  /\bCurrent Prompt Website\b/i,
+  /\bcontact\s*\/\s*unknown\b/i,
+  /\bdomain-specific hero\b/i,
+  /\bproduct proof\s*\/\s*contact path\b/i,
+  /\bunknown with clear guidance\b/i,
+  /\bSupport, warranty, shipping, and contact details for Current Prompt Website\b/i,
+  /\bdocument dataset domain\s*=\s*Current Prompt Website\b/i
+];
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function booleanValue(value: unknown) {
+  return value === true;
+}
+
+function stringArrayValue(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function pageToHtmlPath(page: string) {
+  const normalized = page.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+  return normalized === "home" || normalized === "index" ? "index.html" : `${normalized}.html`;
+}
+
+function proposalApplyBlockReasons(input: {
+  changes: RuntimeApprovalBody["changes"];
+  metadata: Record<string, unknown> | undefined;
+}) {
+  const reasons: string[] = [];
+  const metadata = input.metadata ?? {};
+  const approvalDecision = metadata.approvalDecision && typeof metadata.approvalDecision === "object" && !Array.isArray(metadata.approvalDecision)
+    ? metadata.approvalDecision as Record<string, unknown>
+    : null;
+  const criticalIssues = stringArrayValue(approvalDecision?.criticalIssues);
+
+  if (booleanValue(approvalDecision?.hasCriticalIssues) || approvalDecision?.approvalAllowed === false) {
+    reasons.push(...criticalIssues, "This proposal failed validation and cannot be applied. Regenerate or fix the request.");
+  }
+
+  if (booleanValue(metadata.approvalDisabled)) reasons.push("Proposal metadata disabled approval.");
+  if (booleanValue(metadata.shouldBlockExecution)) reasons.push("Proposal metadata marked execution as blocked.");
+  if (stringValue(metadata.proposalRoutingMode) === "blocked") reasons.push("Proposal routing is blocked.");
+  if (stringValue(metadata.selfReviewStatus) === "FAIL") reasons.push("Self Review failed this proposal.");
+  if (stringValue(metadata.proposalQualityStatus) === "blocked") reasons.push("Proposal quality gate blocked this proposal.");
+  if (stringValue(metadata.domainValidationStatus) === "blocked") reasons.push("Domain validation blocked this proposal.");
+  if (stringValue(metadata.generatorContractStatus) === "blocked") reasons.push("Generator contract blocked this proposal.");
+  if (stringValue(metadata.contradictionStatus) === "blocked") reasons.push("Prompt sovereignty blocked this proposal.");
+  if (stringValue(metadata.publicCopyCleanStatus) === "blocked") reasons.push("Public copy validation blocked this proposal.");
+  if (stringValue(metadata.sectionCopyQualityStatus) === "blocked") reasons.push("Section copy validation blocked this proposal.");
+  if (stringValue(metadata.staleTermScanStatus) === "blocked") reasons.push("Stale-domain validation blocked this proposal.");
+  if (stringValue(metadata.visualValidationStatus) === "blocked") reasons.push("Visual validation blocked this proposal.");
+
+  const repairStatus = stringValue(metadata.proposalRepairStatus);
+  if (repairStatus === "failed" || repairStatus === "keep_blocked" || repairStatus === "partial_repair") {
+    reasons.push("Repair did not produce an apply-safe proposal.");
+  }
+
+  const changes = Array.isArray(input.changes) ? input.changes as Array<Record<string, unknown>> : [];
+
+  for (const change of changes) {
+    const content = stringValue(change.proposedContent);
+    const path = stringValue(change.path);
+
+    if (content && applyUnsafePlaceholderPatterns.some((pattern) => pattern.test(content))) {
+      reasons.push(`Apply-unsafe placeholder repair content detected in ${path || "a proposed file"}.`);
+    }
+  }
+
+  const expectedPages = new Set(stringArrayValue(metadata.sourceOfTruthPages).map(pageToHtmlPath));
+  if (stringValue(metadata.generatorMode) === "website_generation" && expectedPages.size > 0) {
+    const extraPages = changes
+      .map((change) => stringValue(change.path).replace(/\\/g, "/").replace(/^\.?\//, ""))
+      .filter((path) => path.endsWith(".html") && !expectedPages.has(path));
+
+    if (extraPages.length > 0) {
+      reasons.push(`Generated extra page(s) not requested: ${Array.from(new Set(extraPages)).join(", ")}.`);
+    }
+  }
+
+  return Array.from(new Set(reasons.filter(Boolean)));
+}
+
 function workerTypeFromBody(value: unknown) {
   return typeof value === "string" ? value : null;
 }
@@ -183,6 +269,22 @@ export async function POST(request: Request) {
     return errorResponse(parsed.error, parsed.status ?? 400);
   }
 
+  const proposalMetadata = metadataFromBody(body.proposalMetadata);
+  const proposalBlockReasons = proposalApplyBlockReasons({
+    changes: body.changes,
+    metadata: proposalMetadata
+  });
+
+  if (proposalBlockReasons.length > 0) {
+    return errorResponse("This proposal failed validation and cannot be applied. Regenerate or fix the request.", 400, {
+      errors: proposalBlockReasons,
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
   const workspaceBinding = await resolveProjectWorkspace(parsed.projectId);
 
   if (isWorkspaceBindingError(workspaceBinding)) {
@@ -215,7 +317,7 @@ export async function POST(request: Request) {
     plan,
     productMode,
     projectId: parsed.projectId,
-    proposalMetadata: metadataFromBody(body.proposalMetadata),
+    proposalMetadata,
     requestedWorkerType,
     riskLevel: riskLevelFromBody(body.riskLevel),
     snapshotStatus: preflightSnapshot.snapshotStatus,

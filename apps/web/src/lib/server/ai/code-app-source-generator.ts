@@ -505,6 +505,210 @@ The app uses mock data in src/lib/mock-data.ts for preview. Database persistence
   ];
 }
 
+export function generateCrmPythonStreamlitSource(input: {
+  appName: string;
+  prompt: string;
+}): CodeAppSourceFile[] {
+  const appName = input.appName || "Hassali CRM";
+
+  return [
+    {
+      path: "app.py",
+      summary: "Adds a Streamlit CRM dashboard scaffold with metrics, tables, and billing charts. No runtime command is executed.",
+      content: `import pandas as pd
+import streamlit as st
+
+from data.mock_crm_data import activities, customers, invoices, metrics, pipeline
+
+
+st.set_page_config(page_title="${escapePython(appName)}", page_icon="CRM", layout="wide")
+
+st.sidebar.title("${escapePython(appName)}")
+section = st.sidebar.radio(
+    "Navigate",
+    ["Dashboard", "Customers", "Pipeline", "Billing", "Activity"],
+    index=0,
+)
+st.sidebar.caption("Python / Streamlit scaffold. Runtime requires approved Python flow.")
+
+st.title("${escapePython(appName)}")
+st.caption("Mock CRM data only. Auth, database, and payment providers are planned boundaries.")
+
+if section == "Dashboard":
+    cols = st.columns(4)
+    for col, metric in zip(cols, metrics):
+        col.metric(metric["label"], metric["value"], metric["delta"])
+
+    st.subheader("Billing graphical representation")
+    invoice_frame = pd.DataFrame(invoices)
+    st.bar_chart(invoice_frame.set_index("month")["revenue"])
+
+    st.subheader("Pipeline summary")
+    st.dataframe(pd.DataFrame(pipeline), use_container_width=True, hide_index=True)
+
+elif section == "Customers":
+    st.subheader("Customer table")
+    st.dataframe(pd.DataFrame(customers), use_container_width=True, hide_index=True)
+
+elif section == "Pipeline":
+    st.subheader("Pipeline by stage")
+    pipeline_frame = pd.DataFrame(pipeline)
+    st.bar_chart(pipeline_frame.set_index("stage")["value"])
+    st.dataframe(pipeline_frame, use_container_width=True, hide_index=True)
+
+elif section == "Billing":
+    st.subheader("Billing and cost table")
+    invoice_frame = pd.DataFrame(invoices)
+    st.line_chart(invoice_frame.set_index("month")["revenue"])
+    st.dataframe(invoice_frame, use_container_width=True, hide_index=True)
+    st.info("Payment provider integration is planned. Do not add secrets client-side.")
+
+else:
+    st.subheader("Recent activity")
+    for item in activities:
+        st.write(f"- {item}")
+`
+    },
+    {
+      path: "requirements.txt",
+      summary: "Declares lightweight Python dashboard dependencies for future approved runtime use.",
+      content: `streamlit
+pandas
+`
+    },
+    {
+      path: "data/mock_crm_data.py",
+      summary: "Adds mock CRM data for Streamlit dashboard metrics, customers, pipeline, billing, and activity.",
+      content: `metrics = [
+    {"label": "Active customers", "value": "1,248", "delta": "+8.4%"},
+    {"label": "Pipeline value", "value": "$284K", "delta": "+12.1%"},
+    {"label": "Monthly recurring billing", "value": "$42.8K", "delta": "+5.6%"},
+    {"label": "Open invoices", "value": "37", "delta": "-3"},
+]
+
+customers = [
+    {"name": "Apex Foods", "owner": "Sara", "plan": "Growth", "status": "Active", "value": 18400},
+    {"name": "Northline Motors", "owner": "Bilal", "plan": "Enterprise", "status": "Negotiation", "value": 42600},
+    {"name": "Pearl Clinics", "owner": "Mina", "plan": "Starter", "status": "Onboarding", "value": 7200},
+    {"name": "Metro Retail", "owner": "Hamza", "plan": "Growth", "status": "Active", "value": 23100},
+]
+
+pipeline = [
+    {"stage": "Leads", "deals": 42, "value": 76000},
+    {"stage": "Qualified", "deals": 21, "value": 94000},
+    {"stage": "Proposal", "deals": 13, "value": 68000},
+    {"stage": "Won", "deals": 8, "value": 46000},
+]
+
+invoices = [
+    {"month": "Jan", "revenue": 28600, "cost": 7400, "open_invoices": 19},
+    {"month": "Feb", "revenue": 31800, "cost": 8100, "open_invoices": 22},
+    {"month": "Mar", "revenue": 35400, "cost": 8600, "open_invoices": 17},
+    {"month": "Apr", "revenue": 42800, "cost": 9300, "open_invoices": 13},
+]
+
+activities = [
+    "Sara logged a renewal call with Apex Foods.",
+    "Billing follow-up scheduled for Northline Motors.",
+    "Pearl Clinics completed onboarding checklist.",
+    "Metro Retail requested pipeline export review.",
+]
+`
+    },
+    {
+      path: "README.md",
+      summary: "Explains the Python CRM scaffold and approved-runtime boundary.",
+      content: `# ${appName}
+
+Python / Streamlit CRM dashboard scaffold generated from:
+
+${input.prompt}
+
+## What is included
+
+- Dashboard metrics
+- Customer table
+- Pipeline summary
+- Billing and cost table
+- Graphical revenue and pipeline charts
+- Mock data in data/mock_crm_data.py
+
+## Runtime boundary
+
+Hassali does not install packages or start Python automatically. Running Streamlit requires a future approved Python runtime flow.
+`
+    },
+    {
+      path: "ARCHITECTURE.md",
+      summary: "Creates architecture guidance for the Python CRM app.",
+      content: `# ${appName} Architecture
+
+Project Type: CODE
+Stack: Python / Streamlit
+Domain: CRM System
+Preview Type: python_app_preview
+
+The current prompt outranks stale project contracts or previous frontend scaffolds.
+
+## Modules
+
+- Streamlit dashboard shell
+- Metrics overview
+- Customer table
+- Pipeline summary
+- Billing and revenue charts
+- Mock CRM data module
+
+## Planned boundaries
+
+- Auth is not implemented in this phase.
+- Database persistence is not implemented in this phase.
+- Payment provider integration is not implemented in this phase.
+- Runtime execution requires explicit approval and Python runtime support.
+`
+    },
+    {
+      path: "SECURITY_AND_TESTING.md",
+      summary: "Adds safety and verification notes for the Python CRM scaffold.",
+      content: `# ${appName} Security And Testing
+
+- Keep credentials and payment provider secrets out of client-visible files.
+- Treat mock CRM data as preview-only.
+- Add ownership checks before future database writes.
+- Do not auto-install packages.
+- Do not auto-start Streamlit.
+- Verify future Python runtime support through an approved runtime flow.
+`
+    },
+    {
+      path: "HASSALI.md",
+      summary: "Adds the human-readable project contract for the Python CRM scaffold.",
+      content: `# HASSALI.md
+
+Project Type: CODE
+Stack: Python / Streamlit
+Domain: CRM System
+Preview Type: python_app_preview
+
+Current prompt outranks stale contract memory.
+
+Files:
+- app.py
+- requirements.txt
+- data/mock_crm_data.py
+- README.md
+- ARCHITECTURE.md
+- SECURITY_AND_TESTING.md
+
+Runtime:
+- Python runtime is not auto-started.
+- Package installation requires future explicit approval.
+- Preview should be honest if Python runtime support is unavailable.
+`
+    }
+  ];
+}
+
 function component(path: string, content: string, summary: string): CodeAppSourceFile {
   return { content, path, summary };
 }
@@ -518,5 +722,9 @@ function escapeHtml(value: string) {
 }
 
 function escapeTsx(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+
+function escapePython(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
 }

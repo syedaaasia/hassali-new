@@ -139,13 +139,14 @@ export function PremiumSelect({
                   />
                   <motion.div
                     animate={{ opacity: 1, y: menuPosition.placement === "top" ? -4 : 4, scale: 1 }}
-                    className="fixed z-[9999] overflow-hidden rounded-xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--royal-panel))] p-1.5 shadow-[0_24px_80px_hsl(0_80%_3%/0.58),0_0_34px_hsl(var(--accent)/0.14)] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-950"
+                    className="fixed z-[9999] overflow-y-auto rounded-xl border border-[hsl(var(--royal-border))] bg-[hsl(var(--royal-panel))] p-1.5 shadow-[0_24px_80px_hsl(0_80%_3%/0.58),0_0_34px_hsl(var(--accent)/0.14)] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-950"
                     exit={{ opacity: 0, y: 0, scale: 0.98 }}
                     id={listboxId}
                     initial={{ opacity: 0, y: 0, scale: 0.98 }}
                     role="listbox"
                     style={{
                       left: menuPosition.left,
+                      maxHeight: 220,
                       top: menuPosition.top,
                       width: menuPosition.width
                     }}

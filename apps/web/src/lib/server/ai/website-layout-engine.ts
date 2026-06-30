@@ -55,7 +55,30 @@ function isBeveragePlan(plan: WebsitePlan) {
     plan.layoutType === "beverage_brand";
 }
 
+function isCarRentalPlan(plan: WebsitePlan) {
+  const text = `${plan.sourceOfTruthDomain ?? ""} ${plan.industry} ${plan.layoutType}`.toLowerCase();
+
+  return plan.industry === "car_rental" ||
+    text.includes("car rental") ||
+    text.includes("vehicle rental") ||
+    text.includes("car_rental") ||
+    text.includes("rental cars");
+}
+
+function isMobilePhonePlan(plan: WebsitePlan) {
+  const text = `${plan.sourceOfTruthDomain ?? ""} ${plan.industry} ${plan.layoutType}`.toLowerCase();
+
+  return plan.industry === "mobile_phone_shop" ||
+    text.includes("mobile phone shop") ||
+    text.includes("phone shop") ||
+    text.includes("smartphone") ||
+    text.includes("phone retail") ||
+    text.includes("mobile_phone_shop");
+}
+
 function publicLayoutLabel(plan: WebsitePlan) {
+  if (plan.industry === "car_rental") return "vehicle rental";
+  if (plan.industry === "mobile_phone_shop") return "smartphone retail";
   if (plan.layoutType === "catalog_commerce") return "featured range";
   if (plan.layoutType === "beverage_brand") return "beverage brand";
 
@@ -240,6 +263,202 @@ function beveragePageCopy(page: string) {
   return copy[page] ?? copy.home;
 }
 
+function carRentalPageCopy(page: string) {
+  const copy: Record<string, {
+    cta: string;
+    eyebrow: string;
+    hero: string;
+    lede: string;
+    sections: Array<{
+      body: string;
+      title: string;
+      visual: string;
+    }>;
+  }> = {
+    about: {
+      cta: "Explore the fleet",
+      eyebrow: "Car rental story / fleet care",
+      hero: "A rental team built around clean vehicles, clear pricing, and confident handovers.",
+      lede: "Our car rental service keeps economy cars, SUVs, and luxury vehicles ready for airport pickups, business travel, family trips, and weekly rental plans.",
+      sections: [
+        {
+          body: "Every vehicle is inspected, cleaned, and prepared with mileage, insurance, and pickup details explained before handover.",
+          title: "Clean vehicles, ready on time",
+          visual: "vehicle inspection and clean fleet"
+        },
+        {
+          body: "Drivers can compare rental categories, daily and weekly plans, airport timing, and roadside support without hidden pressure.",
+          title: "Transparent rental guidance",
+          visual: "transparent rental plan cards"
+        }
+      ]
+    },
+    blog: {
+      cta: "Reserve a vehicle",
+      eyebrow: "Rental guides / travel tips",
+      hero: "Helpful rental guides for airport trips, city drives, and weekly plans.",
+      lede: "Read practical notes on choosing economy cars, SUVs, luxury vehicles, insurance options, mileage expectations, pickup timing, and travel-ready reservations.",
+      sections: [
+        {
+          body: "Compare vehicle categories by luggage, passenger count, route length, comfort, and daily or weekly rental budget.",
+          title: "How to choose the right rental car",
+          visual: "rental car comparison guide"
+        },
+        {
+          body: "Plan pickup and dropoff windows, driver requirements, insurance notes, and roadside support before your reservation.",
+          title: "Before pickup checklist",
+          visual: "pickup checklist for drivers"
+        }
+      ]
+    },
+    contact: {
+      cta: "Send rental inquiry",
+      eyebrow: "Reservations / pickup details",
+      hero: "Reserve a rental car with clear dates, pickup location, and vehicle category.",
+      lede: "Use the form for reservations, airport rentals, pickup and dropoff timing, driver questions, insurance options, and fleet availability.",
+      sections: [
+        {
+          body: "Share your pickup date, dropoff date, airport or city location, driver count, and preferred vehicle class.",
+          title: "Rental inquiry form",
+          visual: "reservation form for rental cars"
+        },
+        {
+          body: "Ask about mileage, deposits, insurance, roadside support, luxury vehicles, SUVs, and weekly rental plans.",
+          title: "Support before handover",
+          visual: "roadside support and insurance details"
+        }
+      ]
+    },
+    home: {
+      cta: "Reserve a vehicle",
+      eyebrow: "Premium car rental / vehicle fleet",
+      hero: "Rental cars ready for airport pickups, business days, and weekend drives.",
+      lede: "Choose from clean economy cars, SUVs, and luxury vehicles with transparent pricing, insurance guidance, mileage clarity, and easy pickup and dropoff.",
+      sections: [
+        {
+          body: "Browse economy cars, SUVs, and luxury vehicles prepared for daily rentals, weekly plans, airport arrivals, and driver comfort.",
+          title: "Vehicle fleet for every trip",
+          visual: "economy cars SUVs and luxury vehicles"
+        },
+        {
+          body: "Reserve with clear availability, pickup location, insurance options, mileage details, and roadside support before handover.",
+          title: "Booking, insurance, and pickup clarity",
+          visual: "booking and pickup details"
+        }
+      ]
+    },
+    services: {
+      cta: "Check availability",
+      eyebrow: "Rental services / plans",
+      hero: "Daily rentals, weekly plans, airport pickup, and flexible vehicle categories.",
+      lede: "Services include economy rentals, SUV rentals, luxury vehicles, airport rentals, corporate bookings, driver support, insurance guidance, and transparent mileage terms.",
+      sections: [
+        {
+          body: "Daily and weekly rental plans make it simple to book a clean vehicle for errands, travel, business, or family needs.",
+          title: "Daily and weekly rental plans",
+          visual: "rental plan cards"
+        },
+        {
+          body: "Airport pickup, dropoff scheduling, driver requirements, and roadside support are explained before confirmation.",
+          title: "Pickup, dropoff, and support",
+          visual: "airport pickup and dropoff"
+        }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
+function mobilePhonePageCopy(page: string) {
+  const copy: Record<string, {
+    cta: string;
+    eyebrow: string;
+    hero: string;
+    lede: string;
+    sections: Array<{
+      body: string;
+      title: string;
+      visual: string;
+    }>;
+  }> = {
+    about: {
+      cta: "Visit the service counter",
+      eyebrow: "Phone shop story / trusted support",
+      hero: "A mobile phone shop built around honest comparison, setup help, and after-sale care.",
+      lede: "Our team helps customers compare iPhone, Samsung, and Android phones, choose accessories, understand warranty options, and set up devices with confidence.",
+      sections: [
+        {
+          body: "We explain storage, camera, battery, display, warranty, and installment plan differences in plain language before customers buy.",
+          title: "Clear smartphone guidance",
+          visual: "smartphone comparison counter"
+        },
+        {
+          body: "The service counter supports screen protectors, device setup, data transfer, trade-ins, repairs, and customer support after purchase.",
+          title: "Setup, warranty, and repairs",
+          visual: "phone repair and setup desk"
+        }
+      ]
+    },
+    contact: {
+      cta: "Ask about availability",
+      eyebrow: "Store support / phone inquiries",
+      hero: "Contact us for smartphones, accessories, repairs, trade-ins, and device setup.",
+      lede: "Use the form to ask about iPhone availability, Samsung models, Android phones, cases, chargers, screen protectors, unlocked phones, installment plans, warranty, repairs, and service counter timing.",
+      sections: [
+        {
+          body: "Share the phone model, storage size, preferred color, accessory needs, warranty question, or repair issue so the team can prepare options.",
+          title: "Phone and repair inquiry form",
+          visual: "customer support contact form"
+        },
+        {
+          body: "Ask about store hours, pickup, trade-ins, installment plans, screen protector fitting, and device setup before visiting.",
+          title: "Support before your visit",
+          visual: "mobile store customer support"
+        }
+      ]
+    },
+    home: {
+      cta: "Compare phones",
+      eyebrow: "Premium mobile phone shop / smartphone retail",
+      hero: "Smartphones, accessories, repairs, and setup help in one trusted phone shop.",
+      lede: "Browse iPhone, Samsung, Android phones, unlocked phones, cases, chargers, screen protectors, trade-ins, installment plans, warranty help, repairs, and device setup support.",
+      sections: [
+        {
+          body: "Compare new arrivals, flagship phones, budget Android phones, and unlocked devices with clear guidance on camera, battery, storage, and warranty.",
+          title: "Featured smartphones and new arrivals",
+          visual: "iPhone Samsung and Android phone display"
+        },
+        {
+          body: "Find cases, chargers, screen protectors, device setup, data transfer, repair support, and customer service from the same counter.",
+          title: "Accessories, setup, and service counter",
+          visual: "phone accessories and repair counter"
+        }
+      ]
+    },
+    services: {
+      cta: "Request service help",
+      eyebrow: "Services / support counter",
+      hero: "Phone repairs, device setup, accessories, warranty support, and upgrade guidance.",
+      lede: "Services include screen protector fitting, phone accessories, device setup, data transfer, trade-ins, installment plan guidance, warranty questions, repairs, and product comparison.",
+      sections: [
+        {
+          body: "Customers can compare iPhone, Samsung, Android phones, unlocked phones, storage choices, camera needs, and upgrade options.",
+          title: "Product comparison and upgrades",
+          visual: "smartphone product comparison"
+        },
+        {
+          body: "The service counter helps with screen protectors, cases, chargers, repairs, warranty questions, device setup, and customer support.",
+          title: "Repair, warranty, and setup support",
+          visual: "phone service counter"
+        }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
 function renderVisual(label: string, index: number) {
   return `<div class="visual visual-${(index % 4) + 1}" aria-label="${escapeHtml(label)}">
             <span>${escapeHtml(label)}</span>
@@ -257,7 +476,9 @@ function renderPage(input: {
   const leadSection = pageSections[0] ?? input.plan.requiredSections[0];
   const seafoodCopy = isSeafoodPlan(input.plan) ? seafoodPageCopy(input.page) : null;
   const beverageCopy = isBeveragePlan(input.plan) ? beveragePageCopy(input.page) : null;
-  const domainCopy = beverageCopy ?? seafoodCopy;
+  const carRentalCopy = isCarRentalPlan(input.plan) ? carRentalPageCopy(input.page) : null;
+  const mobilePhoneCopy = isMobilePhonePlan(input.plan) ? mobilePhonePageCopy(input.page) : null;
+  const domainCopy = mobilePhoneCopy ?? carRentalCopy ?? beverageCopy ?? seafoodCopy;
   const heroTitle = domainCopy?.hero ?? (isHome ? leadSection.title : `${pageTitle} built around ${leadSection.title.toLowerCase()}`);
   const lede = domainCopy?.lede ?? (isHome ? leadSection.intent : leadSection.contentAngle);
   const cta = domainCopy?.cta ?? input.plan.goal;
@@ -306,23 +527,23 @@ ${sectionCards
         </article>`)
   .join("\n")}
       </section>
-      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${beverageCopy ? "Partner inquiry" : "Reservation request"}">
+      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : "Reservation request"}">
         <div>
-          <p class="eyebrow">${beverageCopy ? "Partner inquiry" : "Reservation request"}</p>
-          <h2>${beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : "Tell us your preferred date, party size, and seafood notes."}</h2>
-          <p>${beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
+          <p class="eyebrow">${beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : "Reservation request"}</p>
+          <h2>${beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : carRentalCopy ? "Tell us your pickup date, dropoff location, and preferred vehicle category." : mobilePhoneCopy ? "Tell us which phone, accessory, repair, warranty, or setup support you need." : "Tell us your preferred date, party size, and seafood notes."}</h2>
+          <p>${beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : carRentalCopy ? "Share driver details, airport timing, mileage questions, insurance needs, and rental plan preferences." : mobilePhoneCopy ? "Share model, storage, color, accessory needs, repair issue, trade-in question, installment plan, or warranty detail before visiting." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
         </div>
         <form>
           <label>Name <input type="text" name="name" autocomplete="name" /></label>
           <label>Email <input type="email" name="email" autocomplete="email" /></label>
-          <label>${beverageCopy ? "Partnership notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
-          <button class="button" type="button">${beverageCopy ? "Send partnership inquiry" : "Send reservation request"}</button>
+          <label>${beverageCopy ? "Partnership notes" : carRentalCopy ? "Rental notes" : mobilePhoneCopy ? "Phone shop notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
+          <button class="button" type="button">${beverageCopy ? "Send partnership inquiry" : carRentalCopy ? "Send rental inquiry" : mobilePhoneCopy ? "Send phone inquiry" : "Send reservation request"}</button>
         </form>
       </section>` : ""}
     </main>
     <footer>
       <span>${escapeHtml(input.brandName)}</span>
-      <span>${escapeHtml(beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : input.plan.visualStrategy)}</span>
+      <span>${escapeHtml(beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : carRentalCopy ? "Rental cars, vehicle fleet, booking, pickup and dropoff, insurance, mileage, and roadside support." : mobilePhoneCopy ? "Smartphones, iPhone, Samsung, Android phones, accessories, warranty, repairs, trade-ins, and device setup support." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : input.plan.visualStrategy)}</span>
       <a href="mailto:hello@example.com">hello@example.com</a>
     </footer>
     <script src="./main.js"></script>

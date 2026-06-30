@@ -101,6 +101,12 @@ const domainSignals: Record<string, {
     pages: ["home", "products", "installation", "about", "contact"],
     visual: ["TV showroom", "OLED display", "home theater", "screen gallery"]
   },
+  mobile_phone_shop: {
+    copy: ["smartphones", "iPhone", "Samsung", "Android phones", "phone accessories", "cases", "chargers", "screen protectors", "unlocked phones", "trade-ins", "installment plans", "warranty", "repairs", "service counter", "device setup", "customer support"],
+    label: "Mobile phone shop website",
+    pages: ["home", "about", "services", "contact"],
+    visual: ["smartphone display", "phone accessories shelf", "repair counter", "device comparison cards"]
+  },
   floral: {
     copy: ["flowers", "bouquet", "wedding", "event", "delivery", "gifting", "freshness"],
     label: "Floral/flower website",
@@ -159,6 +165,23 @@ function inferDomain(input: BuildGeneratorContractInput) {
 
   if (prompt.includes("cola") || prompt.includes("soft drink") || prompt.includes("soda") || prompt.includes("beverage")) {
     return "cola company / soft drinks";
+  }
+
+  if (
+    prompt.includes("mobile phone shop") ||
+    prompt.includes("phone shop") ||
+    prompt.includes("smartphone store") ||
+    prompt.includes("mobile store") ||
+    prompt.includes("cellphone shop") ||
+    prompt.includes("phone retail") ||
+    prompt.includes("phone accessories") ||
+    prompt.includes("iphone shop") ||
+    prompt.includes("samsung phone shop") ||
+    prompt.includes("android phone shop") ||
+    prompt.includes("unlocked phones") ||
+    prompt.includes("phone repair shop")
+  ) {
+    return "mobile_phone_shop";
   }
 
   return domain && !["generic_local_service", "Generic Local Service Website"].includes(domain) ? domain : null;

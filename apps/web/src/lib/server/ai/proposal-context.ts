@@ -35,6 +35,14 @@ export type ValidationSeverity = "critical" | "major" | "minor";
 const newBuildPattern = /\b(?:create|build|generate|make|design|start|new)\b[\s\S]{0,120}\b(?:website|site|app|crm|saas|dashboard|system|tool|landing page)\b/i;
 const refinementPattern = /\b(?:update|improve|continue|modify|edit|change|redesign|refine|fix)\b/i;
 
+function promptRequestsPython(prompt: string) {
+  return /\b(?:python|py|streamlit|flask|fastapi|django|tkinter|pyside|pyqt)\b/i.test(prompt);
+}
+
+function promptRequestsReactFrontend(prompt: string) {
+  return /\b(?:react|vite|tsx|frontend react|react frontend|typescript frontend)\b/i.test(prompt);
+}
+
 export function decidePromptOwnership(input: {
   mode: ProposalContextMode;
   prompt: string;
@@ -72,11 +80,15 @@ export function buildProposalContext(input: {
   const pages = input.mode === "WEBSITE"
     ? websitePagesFor(input)
     : [];
+  const usePythonStack = input.mode === "CODE" &&
+    promptRequestsPython(input.prompt) &&
+    !promptRequestsReactFrontend(input.prompt);
   const requiredFiles = requiredFilesFor({
     domain,
     generatorContract: input.generatorContract,
     mode: input.mode,
     pages,
+    prompt: input.prompt,
     translatedIntent: input.translatedIntent
   });
 
@@ -87,7 +99,11 @@ export function buildProposalContext(input: {
     entities: input.generatorContract?.requiredEntities.length
       ? input.generatorContract.requiredEntities
       : input.translatedIntent.extractedEntities,
-    framework: input.mode === "CODE" && domain.toLowerCase().includes("crm") ? "react_vite" : undefined,
+    framework: usePythonStack
+      ? "python_streamlit"
+      : input.mode === "CODE" && domain.toLowerCase().includes("crm")
+        ? "react_vite"
+        : undefined,
     isNewBuild: ownership.useCurrentPromptOnly && !ownership.useContractMemory,
     isRefinement: ownership.useContractMemory,
     mode: input.mode,
@@ -99,7 +115,11 @@ export function buildProposalContext(input: {
         : "none",
     projectType: input.mode,
     requiredFiles,
-    runtimeType: input.mode === "CODE" && domain.toLowerCase().includes("crm") ? "vite" : undefined,
+    runtimeType: usePythonStack
+      ? "python"
+      : input.mode === "CODE" && domain.toLowerCase().includes("crm")
+        ? "vite"
+        : undefined,
     sourcePrompt: input.prompt,
     tokenTheme: input.mode === "WEBSITE" ? tokenThemeFor(domain) : undefined,
     validationRules: validationRulesFor(input.mode, pages, requiredFiles)
@@ -170,6 +190,7 @@ function requiredFilesFor(input: {
   generatorContract?: GeneratorContract | null;
   mode: ProposalContextMode;
   pages: string[];
+  prompt: string;
   translatedIntent: TranslatedIntentSpec;
 }) {
   if (input.mode === "ASK") return [];
@@ -179,6 +200,18 @@ function requiredFilesFor(input: {
       ...input.pages.map(pageToHtmlPath),
       "styles.css",
       "main.js",
+      "HASSALI.md"
+    ];
+  }
+
+  if (input.mode === "CODE" && promptRequestsPython(input.prompt) && !promptRequestsReactFrontend(input.prompt)) {
+    return [
+      "app.py",
+      "requirements.txt",
+      "data/mock_crm_data.py",
+      "README.md",
+      "ARCHITECTURE.md",
+      "SECURITY_AND_TESTING.md",
       "HASSALI.md"
     ];
   }

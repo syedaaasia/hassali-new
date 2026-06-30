@@ -18,15 +18,41 @@ export function createHassaliIdentityAnswer(input: {
 
   if (isProviderQuestion(input.prompt)) {
     const providerLine = provider.providerName && provider.modelName
-      ? `Current provider: ${provider.providerName}\nCurrent model: ${provider.modelName}`
+      ? [
+          `Selected provider: ${provider.providerName}`,
+          `Selected model: ${provider.modelName}`,
+          `Execution status: ${provider.isConfigured ? "configured" : "registered, config required"}`
+        ].join("\n")
       : "The provider/model is not exposed in this environment yet, but Hassali is designed to support multiple providers through configuration.";
+    const requiredEnvLine = provider.requiredEnv.length
+      ? `Required env: ${provider.requiredEnv.join(", ")}`
+      : "Required env: none detected from registry.";
+    const activationLine = provider.providerName && provider.modelName && !provider.isConfigured
+      ? "Selected model is registered but not confirmed active because required environment variables are missing."
+      : provider.providerName && provider.modelName
+        ? "Selected model has required configuration metadata present. Actual active execution still depends on the current chat route/provider path."
+        : "Selected model is not available from the registry.";
+    const localLine = provider.localModelsConfigured
+      ? "Local models: configured through Ollama or LM Studio metadata."
+      : "Local models: registered, but no local endpoint env is configured.";
+    const liveSearchLine = provider.liveSearchConnected
+      ? "Live search: provider key detected."
+      : "Live search: not connected in this environment.";
 
     return [
       "I am Hassali.ai, an AI engineering workspace built to help plan, generate, preview, review, and safely apply software and website changes.",
       "",
       providerLine,
+      requiredEnvLine,
+      activationLine,
+      localLine,
+      liveSearchLine,
       "",
-      "Hassali can route work through configured providers, validators, repair checks, preview/runtime metadata, and approval-first execution. Provider routing metadata is visible as configuration, not as a raw model refusal."
+      "Available model families in registry:",
+      "OpenAI, Claude, Gemini, GLM, DeepSeek, Qwen, Mistral, Llama, Groq, OpenRouter, Ollama, LM Studio, and custom OpenAI-compatible endpoints.",
+      "",
+      "Important:",
+      "Only configured models can actually execute. A model shown in the selector may still need its API key or base URL before it can run."
     ].join("\n");
   }
 

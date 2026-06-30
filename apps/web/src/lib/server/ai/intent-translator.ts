@@ -58,6 +58,24 @@ const domainProfiles: DomainProfile[] = [
     terms: ["television", "tv shop", "tv store", "electronics shop", "home cinema", "oled", "qled"]
   },
   {
+    businessType: "Mobile Phone Shop",
+    domain: "mobile_phone_shop",
+    terms: [
+      "mobile phone shop",
+      "phone shop",
+      "smartphone store",
+      "mobile store",
+      "cellphone shop",
+      "phone retail",
+      "phone accessories",
+      "iphone shop",
+      "samsung phone shop",
+      "android phone shop",
+      "unlocked phones",
+      "phone repair shop"
+    ]
+  },
+  {
     businessType: "Coffee Shop",
     domain: "coffee",
     terms: ["coffee shop", "cafe", "café", "espresso", "latte", "roastery"]
@@ -98,9 +116,14 @@ const domainProfiles: DomainProfile[] = [
     terms: ["bakery", "cake", "pastry", "bread", "dessert"]
   },
   {
+    businessType: "Car Rental / Vehicle Rental",
+    domain: "car_rental",
+    terms: ["car rental", "rent a car", "rent-a-car", "vehicle rental", "car hire", "rental cars", "airport rentals", "fleet rental"]
+  },
+  {
     businessType: "Car Showroom",
     domain: "car_showroom",
-    terms: ["car showroom", "car rental", "vehicle", "test drive", "fleet"]
+    terms: ["car showroom", "vehicle showroom", "dealership", "test drive", "fleet"]
   },
   {
     businessType: "Software Product",
@@ -256,8 +279,8 @@ function extractPages(text: string): IntentPages {
     ?.split(/\s*,\s*|\s+and\s+/)
     .map(normalizePageName)
     .filter(Boolean) ?? [];
-  const directNames = unique(
-    ["home", "menu", "about", "gallery", "contact", "services", "pricing", "products", "blog", "shop"]
+  const directNames = listedPagesMatch ? [] : unique(
+    ["home", "menu", "about", "gallery", "contact", "services", "pricing", "products", "blog"]
       .filter((page) => new RegExp(`\\b${page}\\b`).test(text))
       .map(normalizePageName)
   );

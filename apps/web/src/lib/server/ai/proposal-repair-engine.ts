@@ -519,31 +519,38 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
   }
 
   const domain = repairDomain(input);
-  if (input.generatorContract.generatorMode === "website_generation" && cannotRepairDomain(domain)) {
+  if (input.generatorContract.generatorMode === "website_generation") {
+    const domainBlocked = cannotRepairDomain(domain);
+
     return {
       originalBlockReasons: reasons,
       repairActions: [],
       repairApplied: false,
       repairAttempted: true,
-      repairConfidence: 0.82,
-      repairId: `${input.generatorContract.contractId}_repair_domain_blocked`,
+      repairConfidence: domainBlocked ? 0.82 : 0.78,
+      repairId: `${input.generatorContract.contractId}_${domainBlocked ? "repair_domain_blocked" : "website_repair_blocked"}`,
       repairedFiles: input.proposedFiles,
       repairedSummary: input.proposalSummary,
       repairSeverity: "high",
       repairStatus: "keep_blocked",
       repairStrategy: "none",
-      repairWarnings: [
-        "Cannot generate missing files: domain not detected from prompt. Please rephrase your request with more specific domain details."
-      ],
+      repairWarnings: domainBlocked
+        ? ["Cannot generate missing files: domain not detected from prompt. Please rephrase your request with more specific domain details."]
+        : ["Website repair did not create fallback placeholder files. Regenerate with the deterministic website generator or fix the request."],
       revalidationPassed: false,
       revalidationRequired: false,
       shouldKeepBlocked: true,
       shouldPresentRepairedProposal: false,
-      unresolvedIssues: reasons
+      unresolvedIssues: reasons.length
+        ? reasons
+        : ["Website proposal failed validation and cannot be safely repaired with placeholder files."]
     };
   }
 
   const hasRunnableAppSource = Object.keys(repairedFiles).some((path) =>
+    path === "app.py" ||
+    path === "requirements.txt" ||
+    path.endsWith(".py") ||
     path === "vite.config.ts" ||
     path === "vite.config.js" ||
     path.startsWith("src/")
@@ -598,22 +605,6 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
     }
 
     repairedFiles[path] = nextContent;
-  }
-
-  const requiredPages = input.proposalContext?.pages.length
-    ? input.proposalContext.pages
-    : input.generatorContract.requiredPages;
-
-  if (input.generatorContract.generatorMode === "website_generation" && requiredPages.length > 0) {
-    for (const page of requiredPages) {
-      const path = pageToPath(page);
-      if (!repairedFiles[path]) {
-        strategies.push("page_count_repair");
-        strategies.push("section_structure_repair");
-        actions.push(`Added missing required page ${path}.`);
-        repairedFiles[path] = simpleHtmlPage({ contract: input.generatorContract, page });
-      }
-    }
   }
 
   for (const path of requiredRepairFiles(input)) {

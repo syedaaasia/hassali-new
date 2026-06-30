@@ -184,6 +184,25 @@ function classifyIndustry(promptText: string, businessPhrase: string | null) {
       terms: ["television", "tv", "smart tv", "oled", "qled", "led", "home cinema", "soundbar", "wall mounting", "warranty"]
     },
     {
+      industry: "mobile phone retail and repair",
+      label: "mobile phone shop",
+      productCategory: "smartphones, iPhone, Samsung, Android phones, phone accessories, cases, chargers, screen protectors, unlocked phones, trade-ins, installment plans, warranty, repairs, device setup",
+      terms: [
+        "mobile phone shop",
+        "phone shop",
+        "smartphone store",
+        "mobile store",
+        "cellphone shop",
+        "phone retail",
+        "phone accessories",
+        "iphone shop",
+        "samsung phone shop",
+        "android phone shop",
+        "unlocked phones",
+        "phone repair shop"
+      ]
+    },
+    {
       industry: "motorcycle retail and service",
       label: "motorbike shop",
       productCategory: "motorcycles, helmets, rider gear, spare parts, engine service, oil change, test rides",
@@ -196,10 +215,16 @@ function classifyIndustry(promptText: string, businessPhrase: string | null) {
       terms: ["bike shop", "bike business", "bike website", "bike site"]
     },
     {
+      industry: "automotive rental and booking",
+      label: "car rental",
+      productCategory: "rental cars, vehicle fleet, economy cars, SUVs, luxury vehicles, pickup and dropoff, airport rentals, insurance, drivers, booking, reservations, mileage, transparent pricing",
+      terms: ["car rental", "rent a car", "rent-a-car", "vehicle rental", "car hire", "rental cars", "auto rental", "fleet rental", "airport rentals"]
+    },
+    {
       industry: "cycling retail and service",
       label: "bicycle",
       productCategory: "bikes, cycling accessories, tune-ups, repairs, rentals, rider fitting",
-      terms: ["bicycle", "bicycles", "cycling", "cycle", "cyclist", "commuter bike", "pedal", "tune-up", "rider fitting", "rental"]
+      terms: ["bicycle", "bicycles", "cycling", "cycle", "cyclist", "commuter bike", "pedal", "tune-up", "rider fitting", "bike rental", "bicycle rental"]
     },
     {
       industry: "frozen dessert and local food retail",
@@ -319,7 +344,7 @@ function classifyIndustry(promptText: string, businessPhrase: string | null) {
       industry: "automotive retail",
       label: "car showroom",
       productCategory: "vehicles, test drives, financing, showroom visits",
-      terms: ["car showroom", "dealership", "test drive"]
+      terms: ["car showroom", "dealership", "test drive", "vehicle showroom"]
     },
     {
       industry: "technical software",

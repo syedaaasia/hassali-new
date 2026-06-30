@@ -166,7 +166,7 @@ function escapeHtml(value: string) {
 
 function previewTypeFromManifest(manifest: PreviewManifest): UnifiedPreviewType | null {
   if (manifest.type === "static_website") return "website";
-  if (manifest.type === "react_vite_app" || manifest.type === "next_app") return "application";
+  if (manifest.type === "react_vite_app" || manifest.type === "next_app" || manifest.type === "python_app") return "application";
   if (manifest.type === "mobile") return "mobile";
   if (manifest.type === "architecture") return "architecture";
 
@@ -177,17 +177,31 @@ function frameworkLabelFromManifest(manifest: PreviewManifest) {
   if (manifest.framework === "static_html") return "Static HTML";
   if (manifest.framework === "react_vite") return "React + Vite";
   if (manifest.framework === "next_app") return "Next.js";
+  if (manifest.framework === "python_streamlit") return "Python / Streamlit";
   if (manifest.type !== null) return manifest.framework ?? "Detecting...";
 
   return "No project";
 }
 
 function manifestWithCommittedFallback(manifest: PreviewManifest, committedPaths: string[]): PreviewManifest {
+  const paths = new Set(committedPaths);
+  const pythonManifest = paths.has("app.py") && paths.has("requirements.txt")
+    ? {
+        type: "python_app" as const,
+        framework: "python_streamlit" as const,
+        entryPoint: "app.py",
+        requiredFiles: ["app.py", "requirements.txt"]
+      }
+    : null;
+
+  if (pythonManifest && (manifest.type === null || manifest.type === "static_website")) {
+    return pythonManifest;
+  }
+
   if (manifest.type !== null) {
     return manifest;
   }
 
-  const paths = new Set(committedPaths);
   const hasViteConfig = paths.has("vite.config.ts") || paths.has("vite.config.js");
   const hasReactEntry = paths.has("src/main.tsx") || paths.has("src/main.jsx");
   const hasNextConfig = paths.has("next.config.ts") || paths.has("next.config.js");
@@ -417,6 +431,71 @@ function CodeAppSourceSummary({
   );
 }
 
+function PythonAppSourceSummary({ committedFiles }: { committedFiles: Map<string, VfsFile> }) {
+  const generatedFiles = [
+    "app.py",
+    "requirements.txt",
+    "data/mock_crm_data.py",
+    "README.md",
+    "ARCHITECTURE.md",
+    "SECURITY_AND_TESTING.md",
+    "HASSALI.md"
+  ].filter((path) => committedFiles.has(path));
+
+  const hasMockData = committedFiles.has("data/mock_crm_data.py") || committedFiles.has("src/mock_data.py");
+
+  return (
+    <div className="h-full overflow-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.55)] p-5 text-xs leading-6 text-foreground">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        Python app preview
+      </p>
+      <h3 className="mt-2 text-lg font-semibold">
+        Runtime not started
+      </h3>
+      <p className="mt-2 text-muted-foreground">
+        Python / Streamlit scaffold generated. Package installation and Python runtime execution require an explicit approved runtime flow.
+      </p>
+
+      <div className="mt-5 grid gap-3">
+        <section className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+            Stack
+          </p>
+          <p className="mt-2">Python / Streamlit</p>
+        </section>
+
+        <section className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+            Generated files
+          </p>
+          <ul className="mt-2 list-inside list-disc font-mono text-[11px] text-muted-foreground">
+            {generatedFiles.map((file) => (
+              <li key={file}>{file}</li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+            What was created
+          </p>
+          <ul className="mt-2 list-inside list-disc text-muted-foreground">
+            <li>CRM dashboard metrics</li>
+            <li>Customer table{hasMockData ? " backed by mock data" : ""}</li>
+            <li>Pipeline summary</li>
+            <li>Billing/cost table</li>
+            <li>Revenue and billing charts</li>
+          </ul>
+        </section>
+
+        <section className="rounded-xl border border-amber-300/20 bg-amber-300/10 p-3 text-amber-100">
+          Streamlit runtime is not started. Hassali did not run <span className="font-mono">streamlit run</span>, install packages, or execute shell commands.
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function RealPreviewMock({ preview }: { preview: RealPreviewResult }) {
   const isMobile = preview.kind === "mobile_mock";
   const isArchitecture = preview.kind === "api_architecture";
@@ -550,6 +629,7 @@ export function PreviewPanel() {
   const realPreview = realPreviewFrom(proposal?.liveRealPreview) ?? realPreviewFrom(proposal?.realPreview);
   const executablePreview = executablePreviewFrom(activePreviewMetadata?.executablePreview);
   const canStartStaticPreview = effectiveManifest.type === "static_website" && hasIndexHtml;
+  const isPythonPreviewType = effectiveManifest.type === "python_app";
   const isRuntimePreviewType = effectiveManifest.type === "react_vite_app" || effectiveManifest.type === "next_app";
   const livePreviewUrl = effectiveManifest.type === "static_website" ? null : runtimePreviewUrl ?? previewUrl;
   const iframeSource = livePreviewUrl ? `${livePreviewUrl}?v=${iframeVersion}` : null;
@@ -559,13 +639,19 @@ export function PreviewPanel() {
       ? "Preview is already updating."
       : isRuntimePreviewType
         ? "Runtime execution requires explicit enablement. Vite cannot start until npm install is approved and runtime is enabled in project settings."
+        : isPythonPreviewType
+          ? "Python / Streamlit runtime requires explicit approved support. Hassali will not install packages or start Streamlit automatically."
         : canStartStaticPreview
           ? "Static srcDoc preview is already available; no local server is started."
           : !canStartStaticPreview
           ? "Preview needs index.html in the committed project files."
           : null;
-  const startButtonLabel = isRuntimePreviewType ? "Enable Runtime" : "Start";
-  const panelPreviewLabel = effectiveManifest.type === "static_website" ? "Static srcDoc preview" : previewLabel(unifiedPreviewType);
+  const startButtonLabel = isRuntimePreviewType || isPythonPreviewType ? "Enable Runtime" : "Start";
+  const panelPreviewLabel = effectiveManifest.type === "static_website"
+    ? "Static srcDoc preview"
+    : isPythonPreviewType
+      ? "Python app preview"
+      : previewLabel(unifiedPreviewType);
   const missingManifestFile = effectiveManifest.requiredFiles.find(
     (requiredFile) => !committedPaths.includes(normalizePreviewPath(requiredFile))
   );
@@ -679,7 +765,7 @@ export function PreviewPanel() {
         </button>
       </div>
 
-      {runtimeLogs.length || runtimeErrors.length || runtimePort || livePreviewUrl ? (
+      {!isPythonPreviewType && (runtimeLogs.length || runtimeErrors.length || runtimePort || livePreviewUrl) ? (
         <div className="border-b border-[hsl(var(--premium-border))] px-4 py-3 text-[11px] leading-5 text-muted-foreground">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full border px-2 py-0.5 uppercase ${
@@ -745,7 +831,9 @@ export function PreviewPanel() {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-hidden bg-black/35 p-2">
-        {effectiveManifest.type === "static_website" && hasIndexHtml ? (
+        {isPythonPreviewType ? (
+          <PythonAppSourceSummary committedFiles={committedFileMap} />
+        ) : effectiveManifest.type === "static_website" && hasIndexHtml ? (
           <StaticWebsitePreview committedFiles={committedFileMap} />
         ) : isRuntimePreviewType && runtimeStatus === "running" && iframeSource ? (
           <iframe

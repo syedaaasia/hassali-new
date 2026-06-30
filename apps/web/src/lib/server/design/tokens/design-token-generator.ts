@@ -13,9 +13,11 @@ import {
 const industryThemeMap: Record<WebsiteIndustry, DesignTokenThemeId> = {
   ai_product: "ai_product",
   beverage: "default_dark",
+  car_rental: "real_estate",
   ecommerce: "luxury_ecommerce",
   healthcare: "healthcare",
   marketplace: "marketplace",
+  mobile_phone_shop: "luxury_ecommerce",
   portfolio: "portfolio",
   real_estate: "real_estate",
   restaurant: "restaurant",

@@ -45,7 +45,9 @@ export function buildDevServerRuntime(input: DevServerDetectionInput): DevServer
     signals: detection.signals,
     startCommand,
     warnings: [
-      policy.allowStaticIframePreview
+      detection.framework === "python_streamlit"
+        ? "Python app preview is summary-only. Hassali did not install packages or start Streamlit."
+        : policy.allowStaticIframePreview
         ? "Static HTML preview uses the existing iframe path; Hassali did not start a server."
         : "Dev server runtime is planning-only; Hassali did not start a server or install packages."
     ],

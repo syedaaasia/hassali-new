@@ -1,9 +1,11 @@
 export type WebsiteIndustry =
   | "ai_product"
   | "beverage"
+  | "car_rental"
   | "ecommerce"
   | "healthcare"
   | "marketplace"
+  | "mobile_phone_shop"
   | "portfolio"
   | "real_estate"
   | "restaurant"
@@ -79,6 +81,25 @@ const profiles: Record<WebsiteIndustry, WebsiteIndustryProfile> = {
     ],
     visualStrategy: "curated range visuals, collection shelves, delivery confidence, stable local assets"
   },
+  mobile_phone_shop: {
+    audience: "smartphone buyers, upgrade customers, accessory shoppers, repair customers, and families comparing mobile devices",
+    contentStrategy: ["lead with phones and accessories", "make service and warranty clear", "support product comparison and repair inquiries"],
+    goal: "help customers choose phones, accessories, repairs, and service support with confidence",
+    industry: "mobile_phone_shop",
+    layoutType: "catalog_commerce",
+    optionalSections: [
+      section("trade-ins", "Trade-ins and Installments", "Explain upgrade paths, trade-ins, and installment plans.", "phone upgrade cards", true),
+      section("repairs", "Repair Counter", "Show screen, battery, setup, and warranty help.", "service counter panel", true)
+    ],
+    requiredSections: [
+      section("phone-hero", "Smartphone Storefront", "Introduce new arrivals, unlocked phones, and trusted setup help.", "premium smartphone shelf"),
+      section("devices", "iPhone, Samsung, and Android Phones", "Show the main device categories and comparison paths.", "device comparison grid"),
+      section("accessories", "Cases, Chargers, and Screen Protectors", "Surface essential accessories and add-ons.", "accessory shelf"),
+      section("service", "Repairs, Warranty, and Device Setup", "Make support, warranty, repairs, and transfer help clear.", "service counter"),
+      section("contact", "Customer Support and Store Visit", "Give shoppers a clear contact path.", "support and visit panel")
+    ],
+    visualStrategy: "premium smartphone displays, accessory shelves, repair/service counter, comparison cards, no SaaS dashboards or generic service filler"
+  },
   beverage: {
     audience: "retailers, distributors, campaign partners, and cola fans",
     contentStrategy: ["lead with flavor and chill", "show lineup and campaigns", "make retail/distribution contact easy"],
@@ -97,6 +118,25 @@ const profiles: Record<WebsiteIndustry, WebsiteIndustryProfile> = {
       section("contact", "Become a Distribution Partner", "Close with a clear contact path for retail, distributor, and campaign partnerships.", "partner contact form")
     ],
     visualStrategy: "chilled cola cans, sparkling bottle shapes, campaign shelves, retailer distribution cues"
+  },
+  car_rental: {
+    audience: "drivers, travelers, families, business customers, and airport rental customers comparing vehicle availability",
+    contentStrategy: ["lead with fleet and booking clarity", "show rental categories and transparent pricing", "make pickup, insurance, and contact paths obvious"],
+    goal: "turn visitors into car rental reservations and fleet inquiries",
+    industry: "car_rental",
+    layoutType: "property_showcase",
+    optionalSections: [
+      section("airport-rentals", "Airport Rentals", "Explain pickup, dropoff, and travel timing.", "airport pickup card", true),
+      section("rental-plans", "Daily and Weekly Rental Plans", "Clarify flexible rental periods and mileage.", "rental plan cards", true)
+    ],
+    requiredSections: [
+      section("rental-hero", "Rental Cars Ready for Every Trip", "Lead with vehicle fleet, booking, pickup/dropoff, and transparent pricing.", "premium vehicle fleet"),
+      section("fleet-categories", "Economy, SUV, and Luxury Vehicle Fleet", "Show rental categories, availability, clean vehicles, and driver needs.", "fleet category cards"),
+      section("booking-flow", "Booking, Insurance, and Mileage Clarity", "Explain reservations, insurance, mileage, deposits, and roadside support.", "booking details panel"),
+      section("trust-support", "Clean Vehicles and Roadside Support", "Build confidence with maintained cars, driver support, and simple handover.", "support and inspection checklist"),
+      section("contact", "Reserve a Vehicle", "Close with contact, pickup location, date, and vehicle category inquiry.", "rental reservation form")
+    ],
+    visualStrategy: "premium vehicle fleet, reservation cards, pickup/dropoff cues, transparent pricing, roadside support, no SaaS dashboard imagery"
   },
   healthcare: {
     audience: "patients and families looking for calm, trustworthy care",

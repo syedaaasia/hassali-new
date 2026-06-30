@@ -17,18 +17,41 @@ type ProposalLike = {
     proposedContent?: string;
     summary?: string;
   }>;
+  approvalDisabled?: boolean;
+  blockedReason?: string;
+  contradictionStatus?: string;
+  domainValidationStatus?: string;
+  generatorContractStatus?: string;
   proposalRoutingReasons?: Array<{
     code: string;
     message: string;
     severity: "high" | "info" | "medium";
   }>;
+  proposalQualityStatus?: string;
+  proposalRepairStatus?: string;
+  proposalRoutingMode?: string;
   proposalRoutingWarnings?: Array<{
     message: string;
   }>;
+  publicCopyCleanStatus?: string;
+  sectionCopyQualityStatus?: string;
+  selfReviewStatus?: string;
+  shouldBlockExecution?: boolean;
+  staleTermScanStatus?: string;
   summary?: string;
+  visualValidationStatus?: string;
 };
 
 const allowedRuntimeActions = new Set(["reload_preview", "restart_runtime", "stop_runtime"]);
+const applyUnsafePlaceholderPatterns = [
+  /\bCurrent Prompt Website\b/i,
+  /\bcontact\s*\/\s*unknown\b/i,
+  /\bdomain-specific hero\b/i,
+  /\bproduct proof\s*\/\s*contact path\b/i,
+  /\bunknown with clear guidance\b/i,
+  /\bSupport, warranty, shipping, and contact details for Current Prompt Website\b/i,
+  /\bdocument dataset domain\s*=\s*Current Prompt Website\b/i
+];
 
 function normalize(value: string) {
   return value.toLowerCase();
@@ -92,6 +115,52 @@ export function buildApprovalDecision(input: {
   const files = generatedFileMap(input.proposal);
   const fileNames = Object.keys(files);
 
+  if (input.proposal.approvalDisabled) {
+    criticalIssues.push(input.proposal.blockedReason ?? "proposal approval is disabled");
+  }
+
+  if (input.proposal.shouldBlockExecution) {
+    criticalIssues.push(input.proposal.blockedReason ?? "proposal execution is blocked");
+  }
+
+  if (input.proposal.proposalRoutingMode === "blocked") {
+    criticalIssues.push(input.proposal.blockedReason ?? "proposal routing is blocked");
+  }
+
+  if (input.proposal.selfReviewStatus === "FAIL") {
+    criticalIssues.push("Self Review failed this proposal");
+  }
+
+  if (input.proposal.proposalQualityStatus === "blocked") {
+    criticalIssues.push(input.proposal.blockedReason ?? "proposal quality gate blocked this proposal");
+  }
+
+  if (input.proposal.domainValidationStatus === "blocked") {
+    criticalIssues.push(input.proposal.blockedReason ?? "domain validation blocked this proposal");
+  }
+
+  if (input.proposal.generatorContractStatus === "blocked") {
+    criticalIssues.push(input.proposal.blockedReason ?? "generator contract blocked this proposal");
+  }
+
+  if (
+    input.proposal.contradictionStatus === "blocked" ||
+    input.proposal.publicCopyCleanStatus === "blocked" ||
+    input.proposal.sectionCopyQualityStatus === "blocked" ||
+    input.proposal.staleTermScanStatus === "blocked" ||
+    input.proposal.visualValidationStatus === "blocked"
+  ) {
+    criticalIssues.push(input.proposal.blockedReason ?? "one or more validation layers blocked this proposal");
+  }
+
+  if (
+    input.proposal.proposalRepairStatus === "failed" ||
+    input.proposal.proposalRepairStatus === "keep_blocked" ||
+    input.proposal.proposalRepairStatus === "partial_repair"
+  ) {
+    criticalIssues.push("repair did not produce an apply-safe proposal");
+  }
+
   for (const change of input.proposal.changes) {
     if (isFileAction(change.action)) {
       if (!change.path) {
@@ -102,6 +171,8 @@ export function buildApprovalDecision(input: {
 
       if (typeof change.proposedContent !== "string") {
         criticalIssues.push(`file mutation for ${change.path ?? "unknown"} is missing proposed content`);
+      } else if (applyUnsafePlaceholderPatterns.some((pattern) => pattern.test(change.proposedContent ?? ""))) {
+        criticalIssues.push(`apply-unsafe placeholder repair content detected in ${change.path ?? "unknown file"}`);
       }
     } else if (!allowedRuntimeActions.has(change.action)) {
       criticalIssues.push(`unsupported or dangerous action ${change.action}`);
@@ -136,9 +207,10 @@ export function buildApprovalDecision(input: {
 
   const warnings = reviewWarnings(input.proposal);
   const uniqueCritical = unique(criticalIssues);
+  const approvalAllowed = uniqueCritical.length === 0;
 
   return {
-    approvalAllowed: uniqueCritical.length === 0,
+    approvalAllowed,
     criticalIssues: uniqueCritical,
     decisionSource: "server",
     hasCriticalIssues: uniqueCritical.length > 0,
@@ -170,7 +242,7 @@ export function applyApprovalDecision<T extends ProposalLike>(
     approvalDecision: decision,
     approvalDisabled: decision.hasCriticalIssues,
     approvalRecommendation: decision.hasCriticalIssues ? "reject" : decision.hasWarnings ? "review" : "approve",
-    blockedReason: decision.hasCriticalIssues ? decision.criticalIssues.join("; ") : undefined,
+    blockedReason: decision.hasCriticalIssues ? decision.criticalIssues.join("; ") : proposal.blockedReason,
     proposalRoutingMode,
     shouldBlockExecution: decision.hasCriticalIssues,
   };
