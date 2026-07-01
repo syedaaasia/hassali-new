@@ -60,6 +60,56 @@ function metadataFromBody(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function previewMetadataFromApproval(input: {
+  metadata: Record<string, unknown> | undefined;
+  productMode: WorkerRouterProductMode;
+}) {
+  const raw = input.metadata?.previewMetadata && typeof input.metadata.previewMetadata === "object" && !Array.isArray(input.metadata.previewMetadata)
+    ? input.metadata.previewMetadata as Record<string, unknown>
+    : {};
+  const rawPreviewType = typeof raw.previewType === "string"
+    ? raw.previewType
+    : typeof input.metadata?.previewType === "string"
+      ? input.metadata.previewType
+      : "";
+  const now = new Date().toISOString();
+
+  if (input.productMode === "WEBSITE" || rawPreviewType === "static_website" || rawPreviewType === "website_static_preview") {
+    return {
+      ...raw,
+      entryPoint: typeof raw.entryPoint === "string" ? raw.entryPoint : "index.html",
+      framework: "static_html",
+      lastApprovedAt: now,
+      mode: "WEBSITE",
+      previewType: "static_website",
+      source: "website_approval",
+      status: "ready"
+    };
+  }
+
+  if (rawPreviewType === "python_app_preview" || raw.framework === "python_streamlit") {
+    return {
+      ...raw,
+      entryPoint: typeof raw.entryPoint === "string" ? raw.entryPoint : "app.py",
+      framework: "python_streamlit",
+      lastApprovedAt: now,
+      mode: "CODE",
+      previewType: "python_app_preview",
+      source: "code_approval",
+      status: "stopped"
+    };
+  }
+
+  return Object.keys(raw).length
+    ? {
+        ...raw,
+        lastApprovedAt: now,
+        mode: input.productMode,
+        status: input.productMode === "CODE" ? "stopped" : "ready"
+      }
+    : null;
+}
+
 const applyUnsafePlaceholderPatterns = [
   /\bCurrent Prompt Website\b/i,
   /\bcontact\s*\/\s*unknown\b/i,
@@ -304,6 +354,10 @@ export async function POST(request: Request) {
     workspaceRoot: workspaceBinding.workspaceRoot
   });
   const productMode = productModeFromBody(body.productMode);
+  const latestApprovalPreviewMetadata = previewMetadataFromApproval({
+    metadata: proposalMetadata,
+    productMode
+  });
   const requestedWorkerType = workerTypeFromBody(body.workerType);
   const preflightSnapshot = await resolveServerSnapshotStatus({
     clientSnapshotStatus: snapshotStatusFromBody(body.snapshotStatus),
@@ -559,7 +613,7 @@ export async function POST(request: Request) {
     mobileRuntime,
     nextRuntime,
     ok: fileApprovalSucceeded,
-    previewMetadata: liveRuntimePreview?.previewRuntime ?? null,
+    previewMetadata: liveRuntimePreview?.previewRuntime ?? latestApprovalPreviewMetadata,
     viteRuntime,
     verificationOk: result.verification?.ok ?? null,
     writtenFiles

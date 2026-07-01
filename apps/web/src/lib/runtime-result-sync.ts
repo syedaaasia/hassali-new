@@ -274,7 +274,8 @@ export function syncRuntimeApprovalResult(
   const runtimeMetadata: RuntimeSyncMetadata = {
     livePreviewCapabilities: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.capabilities ?? [],
     livePreviewClassification: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.classification,
-    livePreviewMetadata: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.metadata,
+    livePreviewMetadata: input.runtimeResult?.previewMetadata ??
+      input.runtimeResult?.liveRuntimePreview?.previewRuntime?.metadata,
     livePreviewRuntimeState: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.state ?? null,
     livePreviewWarnings: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.warnings ?? [],
     liveRealPreview: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.realPreview,

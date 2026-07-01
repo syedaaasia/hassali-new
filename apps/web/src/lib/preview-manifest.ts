@@ -27,8 +27,22 @@ export function deriveManifest(committedFiles: Map<string, VfsFile>): PreviewMan
   const pathSet = new Set(paths);
   const appPy = committedFiles.get("app.py")?.content.toLowerCase() ?? "";
   const requirements = committedFiles.get("requirements.txt")?.content.toLowerCase() ?? "";
+  const hassali = committedFiles.get("HASSALI.md")?.content.toLowerCase() ?? "";
+  const websiteContract = committedFiles.get("HASSALI.website.md")?.content.toLowerCase() ?? "";
   const hasPythonEntry = pathSet.has("app.py");
   const hasStreamlitSignal = appPy.includes("streamlit") || requirements.includes("streamlit");
+  const hasStaticWebsite = pathSet.has("index.html") && paths.some((path) => path.endsWith(".css"));
+  const hasWebsiteContract = Boolean(websiteContract) ||
+    (hassali.includes("mode: website") || hassali.includes("project type: website") || hassali.includes("preview type: static_website"));
+
+  if (hasWebsiteContract && hasStaticWebsite) {
+    return {
+      type: "static_website",
+      framework: "static_html",
+      entryPoint: "index.html",
+      requiredFiles: ["index.html"]
+    };
+  }
 
   if (pathSet.has("src/main.tsx") && pathSet.has("vite.config.ts")) {
     return {
@@ -57,7 +71,7 @@ export function deriveManifest(committedFiles: Map<string, VfsFile>): PreviewMan
     };
   }
 
-  if (pathSet.has("index.html") && paths.some((path) => path.endsWith(".css"))) {
+  if (hasStaticWebsite) {
     return {
       type: "static_website",
       framework: "static_html",

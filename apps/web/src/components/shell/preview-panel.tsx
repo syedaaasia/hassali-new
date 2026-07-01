@@ -183,8 +183,43 @@ function frameworkLabelFromManifest(manifest: PreviewManifest) {
   return "No project";
 }
 
-function manifestWithCommittedFallback(manifest: PreviewManifest, committedPaths: string[]): PreviewManifest {
-  const paths = new Set(committedPaths);
+function manifestFromApprovedMetadata(metadata: Record<string, unknown> | undefined): PreviewManifest | null {
+  const previewType = typeof metadata?.previewType === "string" ? metadata.previewType : "";
+  const framework = typeof metadata?.framework === "string" ? metadata.framework : "";
+  const entryPoint = typeof metadata?.entryPoint === "string" ? metadata.entryPoint : null;
+
+  if (previewType === "static_website") {
+    return {
+      type: "static_website",
+      framework: "static_html",
+      entryPoint: entryPoint ?? "index.html",
+      requiredFiles: ["index.html"]
+    };
+  }
+
+  if (previewType === "python_app_preview" || framework === "python_streamlit") {
+    return {
+      type: "python_app",
+      framework: "python_streamlit",
+      entryPoint: entryPoint ?? "app.py",
+      requiredFiles: ["app.py", "requirements.txt"]
+    };
+  }
+
+  return null;
+}
+
+function manifestWithCommittedFallback(
+  manifest: PreviewManifest,
+  committedFiles: Map<string, VfsFile>,
+  productMode: "ASK" | "CODE" | "WEBSITE",
+  approvedPreviewMetadata: Record<string, unknown> | undefined
+): PreviewManifest {
+  const approvedManifest = manifestFromApprovedMetadata(approvedPreviewMetadata);
+
+  if (approvedManifest) return approvedManifest;
+
+  const paths = new Set([...committedFiles.keys()]);
   const pythonManifest = paths.has("app.py") && paths.has("requirements.txt")
     ? {
         type: "python_app" as const,
@@ -193,8 +228,20 @@ function manifestWithCommittedFallback(manifest: PreviewManifest, committedPaths
         requiredFiles: ["app.py", "requirements.txt"]
       }
     : null;
+  const hasViteConfig = paths.has("vite.config.ts") || paths.has("vite.config.js");
+  const hasReactEntry = paths.has("src/main.tsx") || paths.has("src/main.jsx");
+  const hasNextConfig = paths.has("next.config.ts") || paths.has("next.config.js");
 
-  if (pythonManifest && (manifest.type === null || manifest.type === "static_website")) {
+  if (productMode === "WEBSITE" && paths.has("index.html")) {
+    return {
+      type: "static_website",
+      framework: "static_html",
+      entryPoint: "index.html",
+      requiredFiles: ["index.html"]
+    };
+  }
+
+  if (productMode === "CODE" && pythonManifest) {
     return pythonManifest;
   }
 
@@ -202,11 +249,7 @@ function manifestWithCommittedFallback(manifest: PreviewManifest, committedPaths
     return manifest;
   }
 
-  const hasViteConfig = paths.has("vite.config.ts") || paths.has("vite.config.js");
-  const hasReactEntry = paths.has("src/main.tsx") || paths.has("src/main.jsx");
-  const hasNextConfig = paths.has("next.config.ts") || paths.has("next.config.js");
-
-  if (hasViteConfig && hasReactEntry && paths.has("index.html")) {
+  if (productMode === "CODE" && hasViteConfig && hasReactEntry && paths.has("index.html")) {
     return {
       type: "react_vite_app",
       framework: "react_vite",
@@ -215,13 +258,17 @@ function manifestWithCommittedFallback(manifest: PreviewManifest, committedPaths
     };
   }
 
-  if (hasNextConfig) {
+  if (productMode === "CODE" && hasNextConfig) {
     return {
       type: "next_app",
       framework: "next_app",
       entryPoint: "app/page.tsx",
       requiredFiles: ["package.json", "next.config.ts"]
     };
+  }
+
+  if (pythonManifest) {
+    return pythonManifest;
   }
 
   if (paths.has("index.html")) {
@@ -612,16 +659,22 @@ export function PreviewPanel() {
   const runtimeStatus = useRuntimeStore((state) => state.runtimeStatus);
   const setPreviewOpen = useRuntimeStore((state) => state.setPreviewOpen);
   const status = useRuntimeStore((state) => state.status);
+  const applyRuntimePayload = useRuntimeStore((state) => state.applyRuntimePayload);
   const startPreview = useRuntimeStore((state) => state.startPreview);
   const stopPreview = useRuntimeStore((state) => state.stopPreview);
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
+  const [localPreviewVersion, setLocalPreviewVersion] = useState(0);
+  const [staticPreviewStopped, setStaticPreviewStopped] = useState(false);
   const committedFileMap = useMemo(
     () => new Map(canonicalFiles.map((file) => [normalizePreviewPath(file.path), { ...file, path: normalizePreviewPath(file.path) }])),
     [canonicalFiles]
   );
   const committedPaths = canonicalFiles.map((file) => normalizePreviewPath(file.path));
   const hasIndexHtml = committedPaths.some((path) => path === "index.html");
-  const effectiveManifest = manifestWithCommittedFallback(canonicalManifest, committedPaths);
+  const approvedPreviewMetadata = proposal?.status === "approved"
+    ? proposal.livePreviewMetadata ?? proposal.previewMetadata
+    : undefined;
+  const effectiveManifest = manifestWithCommittedFallback(canonicalManifest, committedFileMap, productMode, approvedPreviewMetadata);
   const unifiedPreviewType = previewTypeFromManifest(effectiveManifest) ?? "none";
   const activePreviewMetadata = effectiveManifest.type === "architecture"
     ? proposal?.livePreviewMetadata ?? proposal?.previewMetadata
@@ -685,6 +738,60 @@ export function PreviewPanel() {
     : "Preview needs index.html. Use WEBSITE mode to create a static website.";
 
   useEffect(() => {
+    setStaticPreviewStopped(false);
+    setLocalPreviewVersion((version) => version + 1);
+  }, [effectiveManifest.type, effectiveManifest.framework, productMode, canonicalFiles.length]);
+
+  const markPreviewStopped = () => {
+    applyRuntimePayload({
+      error: null,
+      logs: [],
+      port: null,
+      previewUrl: null,
+      projectId,
+      status: "stopped",
+      workspacePath: null
+    });
+  };
+
+  const reloadPreview = () => {
+    if (effectiveManifest.type === "static_website") {
+      setStaticPreviewStopped(false);
+      setLocalPreviewVersion((version) => version + 1);
+      markPreviewStopped();
+      return;
+    }
+
+    if (effectiveManifest.type === "python_app") {
+      setLocalPreviewVersion((version) => version + 1);
+      void refreshRuntimeStatus(projectId);
+      return;
+    }
+
+    if (runtimeStatus === "running" || status === "running") {
+      void syncPreview(projectId);
+      return;
+    }
+
+    void refreshRuntimeStatus(projectId);
+  };
+
+  const stopActivePreview = () => {
+    if (effectiveManifest.type === "static_website") {
+      setStaticPreviewStopped(true);
+      markPreviewStopped();
+      return;
+    }
+
+    if (effectiveManifest.type === "python_app" && runtimeStatus !== "running" && status !== "running") {
+      markPreviewStopped();
+      return;
+    }
+
+    void stopPreview();
+  };
+
+  useEffect(() => {
     if (!projectId) {
       return;
     }
@@ -745,20 +852,22 @@ export function PreviewPanel() {
         </button>
         <button
           className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isLoading || status !== "running"}
+          disabled={isLoading || !projectId}
           onClick={() => {
-            void syncPreview(projectId);
+            reloadPreview();
           }}
+          title={effectiveManifest.type === "static_website" ? "Reload static srcDoc preview" : "Refresh preview status"}
           type="button"
         >
           Reload
         </button>
         <button
           className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isLoading || status === "stopped"}
+          disabled={isLoading || (effectiveManifest.type === "static_website" && staticPreviewStopped)}
           onClick={() => {
-            void stopPreview();
+            stopActivePreview();
           }}
+          title={effectiveManifest.type === "static_website" ? "Stop static srcDoc preview" : "Stop preview runtime if one is running"}
           type="button"
         >
           Stop
@@ -832,9 +941,13 @@ export function PreviewPanel() {
 
       <div className="min-h-0 flex-1 overflow-hidden bg-black/35 p-2">
         {isPythonPreviewType ? (
-          <PythonAppSourceSummary committedFiles={committedFileMap} />
-        ) : effectiveManifest.type === "static_website" && hasIndexHtml ? (
-          <StaticWebsitePreview committedFiles={committedFileMap} />
+          <PythonAppSourceSummary committedFiles={committedFileMap} key={`python-${localPreviewVersion}`} />
+        ) : effectiveManifest.type === "static_website" && hasIndexHtml && !staticPreviewStopped ? (
+          <StaticWebsitePreview committedFiles={committedFileMap} key={`static-${localPreviewVersion}`} />
+        ) : effectiveManifest.type === "static_website" && staticPreviewStopped ? (
+          <div className="flex h-full items-center justify-center rounded-2xl border border-[hsl(var(--premium-border))] bg-black/40 p-6 text-center text-sm text-muted-foreground">
+            Static preview stopped. Click Reload to rebuild the srcDoc preview from committed files.
+          </div>
         ) : isRuntimePreviewType && runtimeStatus === "running" && iframeSource ? (
           <iframe
             className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"

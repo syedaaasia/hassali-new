@@ -124,6 +124,16 @@ import {
   validatePromptSovereignty,
   type PromptAcceptanceResult
 } from "@/lib/server/ai/prompt-sovereignty";
+import { buildWebsiteEditContext } from "@/lib/server/ai/website-edit-context";
+import {
+  classifyWebsiteEditIntent,
+  hasWebsiteEditSignal,
+  type WebsiteEditIntent
+} from "@/lib/server/ai/website-edit-intent";
+import {
+  planWebsiteEdit,
+  type WebsiteEditPlan
+} from "@/lib/server/ai/website-edit-planner";
 import {
   runSelfReview,
   type SelfReviewFile,
@@ -166,6 +176,36 @@ type WorkspaceContext = {
   fileList: string[];
   projectName?: string | null;
 };
+
+type GeneratedSourceFile = {
+  content: string;
+  path: string;
+  summary: string;
+};
+
+function workspaceHasWebsiteFiles(workspace: WorkspaceContext) {
+  const paths = new Set([
+    ...workspace.fileList,
+    ...Object.keys(workspace.fileContents ?? {})
+  ]);
+
+  return paths.has("index.html") && (paths.has("styles.css") || paths.has("main.js"));
+}
+
+function isolateCodeContractForMixedWorkspace(files: GeneratedSourceFile[], workspace: WorkspaceContext) {
+  if (!workspaceHasWebsiteFiles(workspace)) return files;
+
+  return files.map((file) => {
+    if (file.path !== "HASSALI.md") return file;
+
+    return {
+      ...file,
+      content: file.content.replace(/^# HASSALI\.md/im, "# HASSALI.code.md"),
+      path: "HASSALI.code.md",
+      summary: file.summary.replace(/HASSALI\.md/g, "HASSALI.code.md")
+    };
+  });
+}
 
 type ChatPersistenceContext = {
   mode: PersistedAiMode;
@@ -1468,7 +1508,7 @@ function createLocalProposal(
     const codeBrief = proposalContext?.codeGenerationBrief ?? null;
     const isMobilePhoneInventory = codeBrief?.appType === "inventory_system" ||
       (codeBrief?.domainId === "mobile_phone_shop" && codeBrief.modules.some((moduleName) => ["products", "stock", "sales", "suppliers", "repairs"].includes(moduleName)));
-    const sourceFiles = isMobilePhoneInventory
+    const sourceFiles = isolateCodeContractForMixedWorkspace(isMobilePhoneInventory
       ? generateMobilePhoneInventoryStreamlitSource({
           appName: appPreview.appName,
           brief: codeBrief,
@@ -1484,7 +1524,8 @@ function createLocalProposal(
           appName: appPreview.appName,
           brief: codeBrief,
           prompt
-        });
+        }), workspace);
+    const isPythonPreview = isMobilePhoneInventory || usePythonStack || codeBrief?.preferredFramework === "streamlit";
 
     return {
       changes: sourceFiles.map((file) => ({
@@ -1503,6 +1544,21 @@ function createLocalProposal(
       mode,
       previewMode: "code_plan",
       previewType: "code_app_preview",
+      previewMetadata: isPythonPreview
+        ? {
+            activeMode: "CODE",
+            entryPoint: "app.py",
+            framework: "python_streamlit",
+            previewType: "python_app_preview",
+            runtimePolicy: "summary_only"
+          }
+        : {
+            activeMode: "CODE",
+            entryPoint: "index.html",
+            framework: "react_vite",
+            previewType: "code_app_preview",
+            runtimePolicy: "explicit_enablement_required"
+          },
       projectId: diagnostic.projectId,
       status: "pending",
       summary:
@@ -3802,6 +3858,114 @@ function runSelfReviewForAskAnswer(input: {
   });
 }
 
+function selfReviewSystemRisksFromWebsiteEdit(plan: WebsiteEditPlan): SelfReviewSystemRisk[] {
+  if (plan.mode !== "blocked" || !plan.blockedReason) return [];
+
+  return [{
+    category: "website_edit",
+    code: "WEBSITE_EDIT_BLOCKED",
+    description: plan.blockedReason,
+    evidence: plan.summary,
+    recommendedFix: "Clarify the edit request or use a supported website edit action.",
+    repairStrategy: "clarify_or_use_supported_website_edit",
+    ruleId: "VAL001",
+    severity: "high",
+    title: "Website Edit Blocked"
+  }];
+}
+
+function createWebsiteEditProposal(input: {
+  context: ReturnType<typeof buildWebsiteEditContext>;
+  generatorContract: GeneratorContract;
+  intent: WebsiteEditIntent;
+  mode: "SUGGEST" | "EXECUTE";
+  plan: WebsiteEditPlan;
+  projectId: string | null;
+  prompt: string;
+  proposalContext: ProposalContext;
+}): DiffProposal {
+  const finalFiles = { ...input.context.files };
+  const baseProposal: DiffProposal = {
+    changes: input.plan.changes.map((change) => {
+      finalFiles[change.path] = change.content;
+
+      return {
+        action: input.context.files[change.path] ? ("update" as const) : ("create" as const),
+        diffPreview: createDiffPreview(input.context.files[change.path] ? "update" : "create", change.path, change.content),
+        path: change.path,
+        proposedContent: change.content,
+        summary: change.summary
+      };
+    }),
+    detectedDomain: input.context.domainId,
+    domainSource: "existing_project",
+    id: `proposal-${Date.now()}`,
+    mode: input.mode,
+    previewMode: "static_preview",
+    previewMetadata: {
+      activeMode: "WEBSITE",
+      entryPoint: "index.html",
+      framework: "static_html",
+      ignoredContractReason: input.context.ignoredContractReason ?? null,
+      previewType: "static_website",
+      source: input.context.mixedModeConflict ? "website_files_over_code_contract" : "website_contract"
+    },
+    previewType: "website_static_preview",
+    projectId: input.projectId,
+    proposalRoutingMode: input.plan.mode === "blocked" ? "blocked" : "review_required",
+    proposalRoutingReasons: input.plan.mode === "blocked"
+      ? [{
+          code: "website_edit_blocked",
+          message: input.plan.blockedReason ?? "Website edit was blocked.",
+          severity: "high"
+        }]
+      : [{
+          code: "website_edit",
+          message: input.plan.summary,
+          severity: "info"
+        }],
+    requiredPageCount: input.context.exactPageCount ?? (input.context.requestedPages.length || null),
+    requiresExtraReview: input.plan.mode === "blocked",
+    shouldBlockExecution: input.plan.mode === "blocked",
+    sourceOfTruthDomain: input.context.domainId,
+    sourceOfTruthPages: input.context.requestedPages,
+    sourceOfTruthPrompt: input.prompt,
+    status: "pending",
+    summary: input.plan.summary,
+    websiteValidationPassed: input.plan.mode !== "blocked"
+  };
+  const selfReview = runSelfReview({
+    domain: input.context.domainId ?? input.proposalContext.domain,
+    files: Object.entries(finalFiles).map(([path, content]) => ({ content, path })),
+    generator: `${input.generatorContract.contractId}_website_edit`,
+    manifest: {
+      framework: "static_html",
+      requiredFiles: input.context.requiredFiles,
+      type: "static_website"
+    },
+    intentContract: null,
+    mode: "WEBSITE",
+    projectId: input.projectId,
+    prompt: input.prompt,
+    requestedPages: input.context.requestedPages,
+    requiredFiles: input.context.requiredFiles,
+    systemRisks: selfReviewSystemRisksFromWebsiteEdit(input.plan)
+  });
+  const proposalWithSelfReview = applySelfReviewMetadata(baseProposal, selfReview);
+  const editApprovalContext: ProposalContext = {
+    ...input.proposalContext,
+    domain: input.context.domainId ?? input.proposalContext.domain,
+    pages: input.context.requestedPages.length ? input.context.requestedPages : input.proposalContext.pages,
+    requiredFiles: input.plan.mode === "blocked"
+      ? []
+      : baseProposal.changes
+          .filter((change) => isFileProposalAction(change.action) && change.path)
+          .map((change) => change.path as string)
+  };
+
+  return applyFinalApprovalAuthority(proposalWithSelfReview, editApprovalContext);
+}
+
 function evaluateAndRepairProposal(input: {
   blueprint: BusinessBlueprint;
   compositionPlan: CompositionPlan;
@@ -4667,6 +4831,114 @@ export async function POST(request: Request) {
 
       return createTextStream(directAskAnswer, persistence?.sessionId);
     }
+  }
+
+  if (
+    (mode === "SUGGEST" || mode === "EXECUTE") &&
+    productMode === "WEBSITE" &&
+    hasWebsiteEditSignal(effectiveUserPrompt)
+  ) {
+    const websiteEditContext = buildWebsiteEditContext(workspace);
+
+    if (websiteEditContext.hasWebsiteFiles) {
+      const websiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
+      const websiteEditPlan = planWebsiteEdit(websiteEditContext, websiteEditIntent);
+      const proposal = createWebsiteEditProposal({
+        context: websiteEditContext,
+        generatorContract,
+        intent: websiteEditIntent,
+        mode,
+        plan: websiteEditPlan,
+        projectId: requestedProjectId,
+        prompt: effectiveUserPrompt,
+        proposalContext
+      });
+      const visibleSummary =
+        websiteEditPlan.mode === "blocked"
+          ? "I reviewed the existing website edit request, but it is not safe to apply as-is."
+          : "I prepared a contract-aware website edit proposal for review. It will only apply if you approve it.";
+
+      persistence = await persistChatMessage(persistence, {
+        content: visibleSummary,
+        metadata: {
+          deterministic: true,
+          generatorContract: compactGeneratorContract(generatorContract),
+          intentTranslation: compactTranslatedIntent(translatedIntent),
+          model,
+          previewRuntime: compactPreviewRuntime(buildProposalPreviewRuntime(
+            proposal,
+            "WEBSITE",
+            "full_generation"
+          )),
+          projectContract: summarizeProjectContract(projectContract),
+          proposal,
+          selfReview: proposal.selfReview ? compactSelfReview(proposal.selfReview) : undefined,
+          websiteEditContext: {
+            activeMode: websiteEditContext.activeMode,
+            contractPath: websiteEditContext.contractPath,
+            domainId: websiteEditContext.domainId,
+            exactPageCount: websiteEditContext.exactPageCount,
+            ignoredContractReason: websiteEditContext.ignoredContractReason,
+            mixedModeConflict: websiteEditContext.mixedModeConflict,
+            requestedPages: websiteEditContext.requestedPages,
+            requiredFiles: websiteEditContext.requiredFiles
+          },
+          websiteEditIntent,
+          websiteEditPlan: {
+            mode: websiteEditPlan.mode,
+            preserved: websiteEditPlan.preserved,
+            targetFiles: websiteEditPlan.targetFiles
+          }
+        },
+        role: "assistant"
+      });
+
+      return createProposalStream(proposal, persistence?.sessionId);
+    }
+
+    const hasCodeProjectFiles = Boolean(workspace.fileList.includes("app.py") || workspace.fileContents?.["app.py"] || workspace.fileList.includes("requirements.txt"));
+    const blockedReason = hasCodeProjectFiles
+      ? "I found a CODE project, not a WEBSITE project. Please switch to CODE or generate/select a website project before making a WEBSITE edit."
+      : "I could not find an existing WEBSITE project to edit. Please generate a website first or select the project files.";
+    const blockedPlan: WebsiteEditPlan = {
+      blockedReason,
+      changes: [],
+      mode: "blocked",
+      preserved: [],
+      summary: hasCodeProjectFiles
+        ? "Website edit blocked: existing project files look like CODE, not WEBSITE."
+        : "Website edit blocked: no existing website files were available.",
+      targetFiles: []
+    };
+    const websiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
+    const proposal = createWebsiteEditProposal({
+      context: websiteEditContext,
+      generatorContract,
+      intent: websiteEditIntent,
+      mode,
+      plan: blockedPlan,
+      projectId: requestedProjectId,
+      prompt: effectiveUserPrompt,
+      proposalContext
+    });
+
+    persistence = await persistChatMessage(persistence, {
+      content: blockedReason,
+      metadata: {
+        deterministic: true,
+        model,
+        proposal,
+        selfReview: proposal.selfReview ? compactSelfReview(proposal.selfReview) : undefined,
+        websiteEditIntent,
+        websiteEditPlan: {
+          mode: blockedPlan.mode,
+          targetFiles: blockedPlan.targetFiles
+        }
+      },
+      role: "assistant"
+    });
+
+    return createProposalStream(proposal, persistence?.sessionId);
   }
 
   if (mode !== "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
