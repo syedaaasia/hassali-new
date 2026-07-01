@@ -76,9 +76,19 @@ function isMobilePhonePlan(plan: WebsitePlan) {
     text.includes("mobile_phone_shop");
 }
 
+function isUpholsteryPlan(plan: WebsitePlan) {
+  const text = `${plan.sourceOfTruthDomain ?? ""} ${plan.industry} ${plan.layoutType}`.toLowerCase();
+
+  return plan.industry === "upholstery" ||
+    text.includes("upholstery") ||
+    text.includes("reupholstery") ||
+    text.includes("furniture restoration");
+}
+
 function publicLayoutLabel(plan: WebsitePlan) {
   if (plan.industry === "car_rental") return "vehicle rental";
   if (plan.industry === "mobile_phone_shop") return "smartphone retail";
+  if (plan.industry === "upholstery") return "furniture restoration";
   if (plan.layoutType === "catalog_commerce") return "featured range";
   if (plan.layoutType === "beverage_brand") return "beverage brand";
 
@@ -459,6 +469,113 @@ function mobilePhonePageCopy(page: string) {
   return copy[page] ?? copy.home;
 }
 
+function upholsteryPageCopy(page: string) {
+  const copy: Record<string, {
+    cta: string;
+    eyebrow: string;
+    hero: string;
+    lede: string;
+    sections: Array<{
+      body: string;
+      title: string;
+      visual: string;
+    }>;
+  }> = {
+    about: {
+      cta: "See the workshop",
+      eyebrow: "Craft story / upholstery workshop",
+      hero: "A local upholstery workshop focused on careful furniture restoration and fabric guidance.",
+      lede: "We restore sofas, dining chairs, lounge chairs, cushions, and leather pieces with fabric selection, foam replacement, stitching, and clear before and after proof.",
+      sections: [
+        {
+          body: "Every project starts with furniture photos, material advice, and a free estimate before fabric, foam, stitching, or leather repair begins.",
+          title: "Craft-first restoration",
+          visual: "upholstery workshop with fabric samples"
+        },
+        {
+          body: "Customers can compare fabric textures, leather repair options, custom cushions, and workmanship details before approving the job.",
+          title: "Fabric and leather guidance",
+          visual: "fabric selection and leather repair samples"
+        }
+      ]
+    },
+    blog: {
+      cta: "Request a free estimate",
+      eyebrow: "Restoration notes / fabric care",
+      hero: "Practical guides for sofa reupholstery, chair restoration, fabric selection, and leather repair.",
+      lede: "Read upholstery notes about custom cushions, foam replacement, stitching, fabric durability, leather repair, and before and after furniture restoration.",
+      sections: [
+        {
+          body: "Learn when a sofa needs reupholstery, foam replacement, cushion reshaping, or a full furniture restoration plan.",
+          title: "When to reupholster a sofa",
+          visual: "before and after sofa reupholstery"
+        },
+        {
+          body: "Compare fabric selection, stain resistance, leather repair, stitching, and workshop care for everyday home furniture.",
+          title: "Choosing fabric and repair options",
+          visual: "fabric swatches and stitching detail"
+        }
+      ]
+    },
+    contact: {
+      cta: "Send furniture photos",
+      eyebrow: "Quotes / furniture photos",
+      hero: "Request a free estimate for sofa reupholstery, chair restoration, leather repair, or custom cushions.",
+      lede: "Share photos, measurements, fabric preferences, leather repair notes, and pickup needs so the workshop can prepare an accurate upholstery estimate.",
+      sections: [
+        {
+          body: "Upload or describe the sofa, chair, cushion, booth, or commercial upholstery item that needs repair or restoration.",
+          title: "Estimate request details",
+          visual: "estimate form with furniture photos"
+        },
+        {
+          body: "Ask about fabric selection, foam replacement, leather repair, stitching, free estimates, and before and after examples.",
+          title: "Workshop consultation",
+          visual: "upholstery consultation counter"
+        }
+      ]
+    },
+    home: {
+      cta: "Request a free estimate",
+      eyebrow: "Premium upholstery / furniture restoration",
+      hero: "Sofa reupholstery, chair restoration, fabric selection, and leather repair for renewed furniture.",
+      lede: "Restore home furniture and commercial seating with custom cushions, foam replacement, careful stitching, leather repair, workshop guidance, free estimates, and before and after proof.",
+      sections: [
+        {
+          body: "Bring sofas, dining chairs, lounge chairs, cushions, booths, and commercial upholstery back to life with material guidance and workmanship care.",
+          title: "Sofa reupholstery and chair restoration",
+          visual: "before and after furniture restoration"
+        },
+        {
+          body: "Choose fabric selection, leather repair, custom cushions, foam replacement, stitching details, and finish options with a clear estimate.",
+          title: "Fabric, leather, and cushion options",
+          visual: "fabric texture and custom cushions"
+        }
+      ]
+    },
+    services: {
+      cta: "Book a consultation",
+      eyebrow: "Services / restoration process",
+      hero: "Upholstery services for sofas, chairs, leather pieces, custom cushions, and commercial seating.",
+      lede: "Services include sofa reupholstery, chair restoration, fabric selection, leather repair, custom cushions, foam replacement, stitching, and furniture restoration.",
+      sections: [
+        {
+          body: "The workshop handles sofa reupholstery, chair restoration, dining seats, cushions, leather repair, and commercial upholstery with careful stitching.",
+          title: "Furniture repair and restoration",
+          visual: "sofa and chair restoration cards"
+        },
+        {
+          body: "Customers receive fabric selection guidance, foam replacement options, before and after expectations, and a free estimate before work begins.",
+          title: "Fabric selection and free estimates",
+          visual: "fabric samples and estimate notes"
+        }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
 function renderVisual(label: string, index: number) {
   return `<div class="visual visual-${(index % 4) + 1}" aria-label="${escapeHtml(label)}">
             <span>${escapeHtml(label)}</span>
@@ -478,7 +595,8 @@ function renderPage(input: {
   const beverageCopy = isBeveragePlan(input.plan) ? beveragePageCopy(input.page) : null;
   const carRentalCopy = isCarRentalPlan(input.plan) ? carRentalPageCopy(input.page) : null;
   const mobilePhoneCopy = isMobilePhonePlan(input.plan) ? mobilePhonePageCopy(input.page) : null;
-  const domainCopy = mobilePhoneCopy ?? carRentalCopy ?? beverageCopy ?? seafoodCopy;
+  const upholsteryCopy = isUpholsteryPlan(input.plan) ? upholsteryPageCopy(input.page) : null;
+  const domainCopy = upholsteryCopy ?? mobilePhoneCopy ?? carRentalCopy ?? beverageCopy ?? seafoodCopy;
   const heroTitle = domainCopy?.hero ?? (isHome ? leadSection.title : `${pageTitle} built around ${leadSection.title.toLowerCase()}`);
   const lede = domainCopy?.lede ?? (isHome ? leadSection.intent : leadSection.contentAngle);
   const cta = domainCopy?.cta ?? input.plan.goal;
@@ -527,23 +645,23 @@ ${sectionCards
         </article>`)
   .join("\n")}
       </section>
-      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : "Reservation request"}">
+      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${upholsteryCopy ? "Upholstery estimate" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : "Reservation request"}">
         <div>
-          <p class="eyebrow">${beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : "Reservation request"}</p>
-          <h2>${beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : carRentalCopy ? "Tell us your pickup date, dropoff location, and preferred vehicle category." : mobilePhoneCopy ? "Tell us which phone, accessory, repair, warranty, or setup support you need." : "Tell us your preferred date, party size, and seafood notes."}</h2>
-          <p>${beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : carRentalCopy ? "Share driver details, airport timing, mileage questions, insurance needs, and rental plan preferences." : mobilePhoneCopy ? "Share model, storage, color, accessory needs, repair issue, trade-in question, installment plan, or warranty detail before visiting." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
+          <p class="eyebrow">${upholsteryCopy ? "Upholstery estimate" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : "Reservation request"}</p>
+          <h2>${upholsteryCopy ? "Tell us about the furniture, fabric, leather repair, or custom cushion work you need." : beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : carRentalCopy ? "Tell us your pickup date, dropoff location, and preferred vehicle category." : mobilePhoneCopy ? "Tell us which phone, accessory, repair, warranty, or setup support you need." : "Tell us your preferred date, party size, and seafood notes."}</h2>
+          <p>${upholsteryCopy ? "Share photos, measurements, fabric preferences, foam replacement notes, and pickup needs for a free estimate." : beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : carRentalCopy ? "Share driver details, airport timing, mileage questions, insurance needs, and rental plan preferences." : mobilePhoneCopy ? "Share model, storage, color, accessory needs, repair issue, trade-in question, installment plan, or warranty detail before visiting." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
         </div>
         <form>
           <label>Name <input type="text" name="name" autocomplete="name" /></label>
           <label>Email <input type="email" name="email" autocomplete="email" /></label>
-          <label>${beverageCopy ? "Partnership notes" : carRentalCopy ? "Rental notes" : mobilePhoneCopy ? "Phone shop notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
-          <button class="button" type="button">${beverageCopy ? "Send partnership inquiry" : carRentalCopy ? "Send rental inquiry" : mobilePhoneCopy ? "Send phone inquiry" : "Send reservation request"}</button>
+          <label>${upholsteryCopy ? "Furniture and fabric notes" : beverageCopy ? "Partnership notes" : carRentalCopy ? "Rental notes" : mobilePhoneCopy ? "Phone shop notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
+          <button class="button" type="button">${upholsteryCopy ? "Send estimate request" : beverageCopy ? "Send partnership inquiry" : carRentalCopy ? "Send rental inquiry" : mobilePhoneCopy ? "Send phone inquiry" : "Send reservation request"}</button>
         </form>
       </section>` : ""}
     </main>
     <footer>
       <span>${escapeHtml(input.brandName)}</span>
-      <span>${escapeHtml(beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : carRentalCopy ? "Rental cars, vehicle fleet, booking, pickup and dropoff, insurance, mileage, and roadside support." : mobilePhoneCopy ? "Smartphones, iPhone, Samsung, Android phones, accessories, warranty, repairs, trade-ins, and device setup support." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : input.plan.visualStrategy)}</span>
+      <span>${escapeHtml(upholsteryCopy ? "Sofa reupholstery, chair restoration, fabric selection, leather repair, custom cushions, free estimates, and before and after workmanship." : beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : carRentalCopy ? "Rental cars, vehicle fleet, booking, pickup and dropoff, insurance, mileage, and roadside support." : mobilePhoneCopy ? "Smartphones, iPhone, Samsung, Android phones, accessories, warranty, repairs, trade-ins, and device setup support." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : input.plan.visualStrategy)}</span>
       <a href="mailto:hello@example.com">hello@example.com</a>
     </footer>
     <script src="./main.js"></script>

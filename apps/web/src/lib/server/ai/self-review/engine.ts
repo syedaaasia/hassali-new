@@ -14,6 +14,7 @@ import { askReviewer } from "@/lib/server/ai/self-review/reviewers/ask-reviewer"
 import { codeReviewer } from "@/lib/server/ai/self-review/reviewers/code-reviewer";
 import { systemRiskReviewer } from "@/lib/server/ai/self-review/reviewers/system-risk-reviewer";
 import { websiteReviewer } from "@/lib/server/ai/self-review/reviewers/website-reviewer";
+import type { IntentLockContract } from "@/lib/server/ai/industry-taxonomy";
 
 export type SelfReviewFile = {
   path: string;
@@ -49,6 +50,7 @@ export type SelfReviewInput = {
   domain?: string | null;
   files: SelfReviewFile[];
   generator: string;
+  intentContract?: IntentLockContract | null;
   manifest?: SelfReviewManifest | null;
   mode: SelfReviewMode;
   projectId?: string | null;

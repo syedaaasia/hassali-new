@@ -1,4 +1,5 @@
 import { buildDomainBlueprint } from "@/lib/server/ai/capability-domain-blueprint";
+import { classifyDomainIntent, getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
 
 export type IntentIntelligence = {
   brandName: string | null;
@@ -147,6 +148,16 @@ function extractPageCount(promptText: string) {
 
 function inferDomain(promptText: string, projectText: string) {
   const text = `${promptText}\n${projectText}`;
+  const taxonomy = classifyDomainIntent(promptText);
+
+  if (taxonomy.profile && taxonomy.confidence >= 0.58) {
+    return taxonomy.profile.id;
+  }
+
+  if (taxonomy.ambiguous) {
+    return "bike shop";
+  }
+
   const blueprint = buildDomainBlueprint({ prompt: promptText });
 
   if (blueprint.domainLabel && blueprint.domainLabel !== "business") {
@@ -291,6 +302,13 @@ function inferDomain(promptText: string, projectText: string) {
 }
 
 function inferSiteType(domain: string) {
+  const taxonomyProfile = getTaxonomyProfile(domain);
+
+  if (taxonomyProfile) {
+    if (taxonomyProfile.id === "crm_software") return "CRM software interface";
+    return `${taxonomyProfile.displayName.toLowerCase()} website`;
+  }
+
   if (domain.includes("csv")) {
     return "Python data tool";
   }

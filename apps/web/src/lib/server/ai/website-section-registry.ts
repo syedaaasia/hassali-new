@@ -1,7 +1,10 @@
 export type WebsiteIndustry =
   | "ai_product"
   | "beverage"
+  | "bicycle_shop"
   | "car_rental"
+  | "crm_software"
+  | "dental_clinic"
   | "ecommerce"
   | "healthcare"
   | "marketplace"
@@ -9,6 +12,8 @@ export type WebsiteIndustry =
   | "portfolio"
   | "real_estate"
   | "restaurant"
+  | "seafood_restaurant"
+  | "upholstery"
   | "saas";
 
 export type WebsiteLayoutType =
@@ -43,6 +48,101 @@ export type WebsiteIndustryProfile = {
 };
 
 const profiles: Record<WebsiteIndustry, WebsiteIndustryProfile> = {
+  upholstery: {
+    audience: "homeowners, designers, restaurants, offices, and local customers repairing or refreshing furniture",
+    contentStrategy: ["lead with craft restoration", "show fabric and leather options", "make estimate requests easy"],
+    goal: "turn furniture restoration interest into quote requests and workshop consultations",
+    industry: "upholstery",
+    layoutType: "creator_case_study",
+    optionalSections: [
+      section("fabric-options", "Fabric and Leather Options", "Show material choices and guidance.", "fabric sample cards", true),
+      section("before-after", "Before and After Projects", "Build trust with restoration proof.", "before and after gallery", true)
+    ],
+    requiredSections: [
+      section("upholstery-hero", "Sofa Reupholstery and Furniture Restoration", "Introduce upholstery services, fabric selection, and quote path.", "warm craft studio"),
+      section("services", "Sofa, Chair, Fabric, and Leather Repair", "Show core upholstery services.", "service cards with furniture details"),
+      section("process", "Restoration Process", "Explain photos, estimate, fabric choice, stitching, and pickup.", "restoration process timeline"),
+      section("trust", "Workshop Quality and Before/After Proof", "Surface workmanship, samples, and experience.", "fabric and restoration proof"),
+      section("contact", "Request a Free Estimate", "Close with furniture photo and consultation CTA.", "estimate request form")
+    ],
+    visualStrategy: "warm craft studio, fabric textures, before and after restoration, premium home interior feel"
+  },
+  bicycle_shop: {
+    audience: "cyclists, commuters, families, and riders looking for bicycles, accessories, and service",
+    contentStrategy: ["lead with bicycles and rider fit", "show service and accessories", "make workshop contact clear"],
+    goal: "turn visitors into bicycle buyers, tune-up bookings, and accessory shoppers",
+    industry: "bicycle_shop",
+    layoutType: "catalog_commerce",
+    optionalSections: [
+      section("accessories", "Helmets and Rider Gear", "Show add-ons and safety gear.", "rider gear shelf", true),
+      section("workshop", "Service Workshop", "Explain tune-ups and repair booking.", "bike repair stand", true)
+    ],
+    requiredSections: [
+      section("bike-hero", "Bicycles and Rider Service", "Introduce bicycle lineup, fitting, and service path.", "cycling showroom"),
+      section("bikes", "Road, Mountain, and Commuter Bikes", "Show bicycle categories.", "bicycle category cards"),
+      section("service", "Tune-ups and Bicycle Repair", "Explain workshop services.", "repair checklist"),
+      section("trust", "Fitting, Safety, and Support", "Build rider confidence.", "rider support proof"),
+      section("contact", "Visit the Bike Workshop", "Close with visit or service booking.", "service contact panel")
+    ],
+    visualStrategy: "cycling showroom, repair stand, rider gear, no car rental or motorcycle copy"
+  },
+  seafood_restaurant: {
+    audience: "diners, families, seafood lovers, and reservation guests looking for fresh coastal food",
+    contentStrategy: ["lead with fresh catch", "show menu and sourcing", "make reservations easy"],
+    goal: "drive seafood reservations, menu exploration, and contact inquiries",
+    industry: "seafood_restaurant",
+    layoutType: "table_to_order",
+    optionalSections: [
+      section("sourcing", "Sourcing and Sustainability", "Explain freshness and supplier care.", "fresh catch sourcing panel", true),
+      section("private-dining", "Private Dining", "Support event inquiries.", "coastal dining table", true)
+    ],
+    requiredSections: [
+      section("seafood-hero", "Fresh Catch Seafood Dining", "Lead with seafood menu and reservation path.", "fresh seafood plates"),
+      section("menu", "Oysters, Lobster, Grilled Fish, and Seasonal Catch", "Show menu range.", "seafood menu cards"),
+      section("fresh-catch", "Daily Catch and Chef Specials", "Build freshness proof.", "daily catch board"),
+      section("reservation", "Reservations and Hospitality", "Clarify booking and dining experience.", "reservation panel"),
+      section("contact", "Contact and Hours", "Make visit and inquiry details clear.", "contact hours panel")
+    ],
+    visualStrategy: "ocean-inspired seafood dining, fresh catch gallery, reservation warmth, no coffee or latte vocabulary"
+  },
+  dental_clinic: {
+    audience: "patients and families looking for calm, trustworthy dental care",
+    contentStrategy: ["lead with appointments", "show dental treatments", "surface hygiene and doctor trust"],
+    goal: "increase dental appointment requests and patient confidence",
+    industry: "dental_clinic",
+    layoutType: "clinical_trust",
+    optionalSections: [
+      section("insurance", "Insurance and Payment Information", "Clarify payment support.", "document cards", true),
+      section("emergency", "Urgent Dental Care Guidance", "Guide urgent visitors safely.", "alert panel", true)
+    ],
+    requiredSections: [
+      section("clinic-hero", "Dental Care and Appointment Path", "State dental care promise and appointment path.", "clinic glass panel"),
+      section("treatments", "Treatments and Services", "List dental care categories.", "service cards"),
+      section("team", "Dentists and Care Team", "Build trust through team presentation.", "team cards"),
+      section("booking", "Appointment Booking", "Make the appointment path visible.", "booking panel"),
+      section("trust-safety", "Hygiene, Safety, and Patient Trust", "Explain safety and reviews.", "trust checklist")
+    ],
+    visualStrategy: "calm clinic surfaces, dentist team cards, appointment panels, safety badges"
+  },
+  crm_software: {
+    audience: "sales teams, founders, operators, and support teams evaluating CRM software",
+    contentStrategy: ["show dashboard workflow", "explain customers, pipeline, and billing", "surface control boundaries"],
+    goal: "help users understand CRM modules and implementation readiness",
+    industry: "crm_software",
+    layoutType: "saas_conversion",
+    optionalSections: [
+      section("billing", "Billing and Revenue", "Explain invoice and billing workflow.", "billing chart cards", true),
+      section("activity", "Activity Feed", "Show sales activity and follow-up.", "activity timeline", true)
+    ],
+    requiredSections: [
+      section("crm-hero", "CRM Dashboard Workflow", "Introduce dashboard metrics and customer pipeline.", "dashboard frame"),
+      section("customers", "Customer Records", "Show customer table and status.", "customer table"),
+      section("pipeline", "Sales Pipeline", "Explain deals and stages.", "pipeline board"),
+      section("billing", "Billing Overview", "Show invoice and revenue clarity.", "billing cards"),
+      section("contact", "Implementation Notes", "Clarify mock data, auth, and database boundaries.", "architecture notes")
+    ],
+    visualStrategy: "dashboard metrics, customer tables, billing charts, no unrelated retail domain"
+  },
   ai_product: {
     audience: "founders, operators, builders, and teams evaluating an AI product",
     contentStrategy: ["show the product promise quickly", "explain workflow", "make trust and control visible"],

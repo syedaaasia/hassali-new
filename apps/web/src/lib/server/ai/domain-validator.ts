@@ -9,6 +9,7 @@ import type {
 } from "@/lib/server/ai/proposal-context";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
+import { getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
 
 export type DomainValidationMode = "pre_proposal_context" | "proposal_content";
 export type DomainValidationSeverity = ValidationSeverity;
@@ -101,6 +102,14 @@ const profiles: Record<string, ValidationProfile> = {
     forbidden: ["dental", "dentist", "coffee", "cafe", "seafood", "car rental", "cycling", "bicycle", "SaaS", "dashboard conversion"],
     required: ["smartphones", "iPhone", "Samsung", "Android phones", "phone accessories", "warranty", "repairs", "customer support"]
   },
+  upholstery: {
+    forbidden: ["mobile phone", "smartphone", "car rental", "bicycle", "SaaS", "dashboard conversion", "restaurant", "seafood"],
+    required: ["sofa reupholstery", "chair restoration", "fabric selection", "leather repair", "custom cushions", "furniture restoration", "free estimate", "before and after"]
+  },
+  bicycle_shop: {
+    forbidden: ["car rental", "motorcycle", "mobile phone", "SaaS", "vehicle rental"],
+    required: ["bicycles", "cycling", "bike fitting", "helmets", "rider gear", "bicycle repair"]
+  },
   floral: {
     forbidden: ["Local Service", "Clear Services Studio", "developer", "OLED", "QLED", "dental"],
     required: ["bouquet", "flowers", "wedding", "event", "delivery", "gifting", "freshness", "arrangements"]
@@ -155,6 +164,11 @@ function domainVocabulary(domain: string | null) {
     expanded.push("smartphones", "iPhone", "Samsung", "Android phones", "phone accessories", "cases", "chargers", "screen protectors", "unlocked phones", "warranty", "repairs", "device setup");
   }
 
+  const taxonomyProfile = getTaxonomyProfile(domain);
+  if (taxonomyProfile) {
+    expanded.push(...taxonomyProfile.websiteVocabulary);
+  }
+
   return unique(expanded);
 }
 
@@ -167,6 +181,16 @@ function contentFromFiles(files?: Record<string, string>) {
 function profileFor(domain: string | null) {
   const normalizedDomain = domain ? normalize(domain) : null;
   if (domain && profiles[domain]) return profiles[domain];
+  const taxonomyProfile = getTaxonomyProfile(domain);
+  if (taxonomyProfile) {
+    return {
+      forbidden: [
+        ...taxonomyProfile.conflicts.flatMap((conflict) => getTaxonomyProfile(conflict)?.websiteVocabulary ?? [conflict.replace(/_/g, " ")]),
+        ...taxonomyProfile.conflicts.map((conflict) => conflict.replace(/_/g, " "))
+      ],
+      required: taxonomyProfile.websiteVocabulary
+    };
+  }
   if (normalizedDomain?.includes("seafood") || normalizedDomain?.includes("restaurant")) return profiles.seafood_restaurant;
   if (normalizedDomain?.includes("crm")) return profiles.crm;
   if (normalizedDomain?.includes("dental")) return profiles.dental;

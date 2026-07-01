@@ -155,6 +155,280 @@ export const codeReviewer: SelfReviewReviewer = {
     const hasReactViteGenerated = generatedReactVite(paths);
     const hasPythonGenerated = generatedPython(paths);
     const isCrmDashboardPrompt = /\b(?:crm|dashboard|billing|pipeline|customers)\b/i.test(input.prompt);
+    const codeContract = input.intentContract?.mode === "CODE" ? input.intentContract : null;
+
+    if (codeContract) {
+      for (const requiredFile of input.requiredFiles ?? []) {
+        const normalizedRequiredFile = normalizePath(requiredFile);
+
+        if (normalizedRequiredFile && !paths.has(normalizedRequiredFile)) {
+          failures.push(codeIssue({
+            category: "missing_file",
+            confidence: 0.92,
+            description: `Generated CODE proposal is missing required brief file: ${normalizedRequiredFile}.`,
+            domain: input.domain,
+            evidence: [
+              {
+                expected: normalizedRequiredFile,
+                found: "missing",
+                source: "code_generation_brief"
+              }
+            ],
+            generator: input.generator,
+            id: `code_missing_required_file_${normalizedRequiredFile}`,
+            location: { path: normalizedRequiredFile },
+            mode: "CODE",
+            recommendedFix: "Regenerate the CODE proposal from the CodeGenerationBrief file plan.",
+            repairStrategy: "regenerate_exact_code_file_plan",
+            ruleId: "CODE001",
+            severity: "high",
+            timestamp,
+            title: "Required Code File Missing"
+          }));
+        }
+      }
+
+      const forbiddenStackSignals: Record<string, string[]> = {
+        next: ["next.config.ts", "next.config.js", "app/page.tsx", "pages/index.tsx"],
+        react_vite: ["package.json", "vite.config.ts", "vite.config.js", "src/main.tsx", "src/main.jsx", "src/App.tsx", "src/App.jsx"],
+        python: ["app.py", "requirements.txt", "pyproject.toml", "Pipfile"]
+      };
+
+      for (const stack of codeContract.forbiddenStacks) {
+        const forbiddenPaths = forbiddenStackSignals[stack] ?? [];
+        const found = forbiddenPaths.filter((path) => paths.has(path));
+
+        if (found.length > 0) {
+          failures.push(codeIssue({
+            category: "stack_consistency",
+            confidence: 0.95,
+            description: `Generated files include forbidden ${stack} stack files.`,
+            domain: input.domain,
+            evidence: [
+              {
+                expected: `zero ${stack} files`,
+                found: found.join(", "),
+                source: "code_generation_brief"
+              }
+            ],
+            generator: input.generator,
+            id: `code_forbidden_stack_${stack}`,
+            mode: "CODE",
+            recommendedFix: "Remove files from forbidden stacks and regenerate using the requested stack contract.",
+            repairStrategy: "remove_forbidden_stack_files",
+            ruleId: "STACK_CONTRACT001",
+            severity: "high",
+            timestamp,
+            title: "Forbidden Stack Files Generated"
+          }));
+        }
+      }
+
+      if (codeContract.requestedStack === "python" && hasReactViteGenerated && !hasPythonGenerated) {
+        failures.push(codeIssue({
+          category: "stack_consistency",
+          confidence: 0.96,
+          description: "The CODE intent contract requested Python, but generated files use React/Vite.",
+          domain: input.domain,
+          evidence: [
+            {
+              expected: "Python app files such as app.py and requirements.txt",
+              found: [...paths].filter((path) => ["package.json", "vite.config.ts", "vite.config.js", "src/main.tsx", "src/App.tsx"].includes(path)).join(", "),
+              source: "code_intent_contract"
+            }
+          ],
+          generator: input.generator,
+          id: "code_contract_stack_mismatch",
+          mode: "CODE",
+          recommendedFix: "Regenerate using the requested Python stack or ask a clarifying question before proposing files.",
+          repairStrategy: "regenerate_using_requested_stack_contract",
+          ruleId: "STACK_CONTRACT001",
+          severity: "high",
+          timestamp,
+          title: "CODE Stack Contract Not Honored"
+        }));
+      }
+
+      for (const moduleName of codeContract.modules) {
+        const modulePattern = new RegExp(`\\b${moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        if (!modulePattern.test(sourceText)) {
+          warnings.push(codeIssue({
+            category: "completeness",
+            confidence: 0.78,
+            description: `Generated source does not clearly represent requested module: ${moduleName}.`,
+            domain: input.domain,
+            evidence: [
+              {
+                expected: moduleName,
+                found: "not found in generated source text",
+                source: "code_intent_contract"
+              }
+            ],
+            generator: input.generator,
+            id: `code_contract_missing_module_${moduleName}`,
+            mode: "CODE",
+            recommendedFix: "Add a reachable module, screen, section, or clearly planned placeholder for the requested module.",
+            repairStrategy: "add_requested_module_or_planned_state",
+            ruleId: "CODE001",
+            severity: "medium",
+            timestamp,
+            title: "Requested Module Not Represented"
+          }));
+        }
+      }
+
+      const dataFiles = normalizedFiles
+        .filter((file) => /(?:data|model|schema|mock|app\.py|README|ARCHITECTURE)/i.test(file.path))
+        .map((file) => file.content)
+        .join("\n");
+
+      for (const entity of codeContract.entities) {
+        if (!new RegExp(`\\b${entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(dataFiles)) {
+          warnings.push(codeIssue({
+            category: "data_model",
+            confidence: 0.74,
+            description: `Data model files do not clearly mention expected entity: ${entity}.`,
+            domain: input.domain,
+            evidence: [
+              {
+                expected: entity,
+                found: "not found in data/model source",
+                source: "code_intent_contract"
+              }
+            ],
+            generator: input.generator,
+            id: `code_contract_missing_entity_${entity}`,
+            mode: "CODE",
+            recommendedFix: "Represent the expected entity in mock data, schema notes, or app data structures.",
+            repairStrategy: "add_entity_to_data_model_or_mock_data",
+            ruleId: "CODE001",
+            severity: "low",
+            timestamp,
+            title: "Expected Entity Not Represented"
+          }));
+        }
+      }
+
+      if (codeContract.previewStrategy === "python_streamlit_summary_until_runtime_enabled" && input.manifest?.type !== "python_app") {
+        failures.push(codeIssue({
+          category: "preview_strategy",
+          confidence: 0.9,
+          description: "CODE contract expects Python/Streamlit summary preview, but manifest does not describe a Python app.",
+          domain: input.domain,
+          evidence: [
+            {
+              expected: "python_app",
+              found: input.manifest?.type ?? "none",
+              source: "preview_manifest"
+            }
+          ],
+          generator: input.generator,
+          id: "code_contract_preview_mismatch",
+          mode: "CODE",
+          recommendedFix: "Align preview manifest with the generated Python app, or regenerate files for the claimed preview type.",
+          repairStrategy: "align_preview_manifest_with_code_contract",
+          ruleId: "PREVIEW001",
+          severity: "high",
+          timestamp,
+          title: "Preview Strategy Mismatch"
+        }));
+      }
+
+      const hassali = normalizedFiles.find((file) => file.path === "HASSALI.md")?.content ?? "";
+
+      if (hassali) {
+        const metadataChecks = [
+          ["appType", codeContract.appType],
+          ["requestedStack", codeContract.requestedStack],
+          ["modulesIncluded", codeContract.modules[0] ?? ""],
+          ["entitiesIncluded", codeContract.entities[0] ?? ""],
+          ["runtimePolicy", "explicit_user_start_only"],
+          ["previewStrategy", codeContract.previewStrategy]
+        ].filter(([, value]) => value);
+        const missingMetadata = metadataChecks.filter(([label, value]) =>
+          !hassali.toLowerCase().includes(label.toLowerCase()) ||
+          !hassali.toLowerCase().includes(value.toLowerCase())
+        );
+
+        if (missingMetadata.length > 0) {
+          warnings.push(codeIssue({
+            category: "metadata",
+            confidence: 0.84,
+            description: `HASSALI.md is missing CODE generation brief evidence: ${missingMetadata.map(([label]) => label).join(", ")}.`,
+            domain: input.domain,
+            evidence: [
+              {
+                expected: metadataChecks.map(([label]) => label).join(", "),
+                found: missingMetadata.map(([label]) => label).join(", "),
+                source: "HASSALI.md"
+              }
+            ],
+            generator: input.generator,
+            id: "code_hassali_contract_metadata_missing",
+            location: { path: "HASSALI.md" },
+            mode: "CODE",
+            recommendedFix: "Write HASSALI.md directly from the CodeGenerationBrief metadata.",
+            repairStrategy: "rewrite_hassali_code_contract_metadata_from_brief",
+            ruleId: "META001",
+            severity: "medium",
+            timestamp,
+            title: "CODE Contract Metadata Missing"
+          }));
+        }
+      }
+
+      if (!hassali && (input.requiredFiles ?? []).includes("HASSALI.md")) {
+        failures.push(codeIssue({
+          category: "metadata",
+          confidence: 0.9,
+          description: "CODE proposal is missing HASSALI.md contract metadata.",
+          domain: input.domain,
+          generator: input.generator,
+          id: "code_missing_hassali_contract",
+          location: { path: "HASSALI.md" },
+          mode: "CODE",
+          recommendedFix: "Generate HASSALI.md from the CodeGenerationBrief.",
+          repairStrategy: "generate_hassali_code_contract_metadata",
+          ruleId: "META001",
+          severity: "high",
+          timestamp,
+          title: "Missing CODE Contract"
+        }));
+      }
+
+      const hasOnlyStaticWebsiteShape = paths.has("index.html") &&
+        paths.has("styles.css") &&
+        paths.has("main.js") &&
+        !hasPythonGenerated &&
+        !hasReactViteSignals &&
+        !paths.has("next.config.ts") &&
+        !paths.has("next.config.js");
+
+      if (codeContract.appType !== "custom_app" && hasOnlyStaticWebsiteShape) {
+        failures.push(codeIssue({
+          category: "intent_lock",
+          confidence: 0.94,
+          description: `CODE contract expects ${codeContract.appType} software, but generated files look like a static marketing website.`,
+          domain: input.domain,
+          evidence: [
+            {
+              expected: `${codeContract.appType} software files`,
+              found: "index.html, styles.css, main.js without app source files",
+              source: "code_generation_brief"
+            }
+          ],
+          generator: input.generator,
+          id: "code_contract_generated_marketing_site",
+          mode: "CODE",
+          recommendedFix: "Regenerate a software scaffold from the CODE brief instead of a WEBSITE-mode static site.",
+          repairStrategy: "regenerate_code_software_from_contract",
+          ruleId: "INTENT_LOCK001",
+          severity: "high",
+          timestamp,
+          title: "CODE Contract Became Website Output"
+        }));
+      }
+    }
 
     for (const file of normalizedFiles) {
       if (isUnsafePath(file.path)) {

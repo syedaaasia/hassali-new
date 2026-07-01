@@ -171,6 +171,26 @@ function extractBusinessPhrase(prompt: string) {
 
 function classifyIndustry(promptText: string, businessPhrase: string | null) {
   const text = `${promptText} ${lower(businessPhrase ?? "")}`;
+  const taxonomy = classifyDomainIntent(text);
+
+  if (taxonomy.profile && taxonomy.confidence >= 0.58) {
+    return {
+      industry: taxonomy.profile.relatedIndustries[0] ?? taxonomy.profile.displayName.toLowerCase(),
+      label: taxonomy.profile.id,
+      productCategory: taxonomy.profile.websiteVocabulary.join(", "),
+      terms: taxonomy.profile.aliases
+    };
+  }
+
+  if (taxonomy.ambiguous) {
+    return {
+      industry: "ambiguous bike retail and service",
+      label: "bike shop",
+      productCategory: "bicycle or motorcycle retail/service; clarification recommended",
+      terms: taxonomy.detectedAliases
+    };
+  }
+
   const rules: Array<{
     industry: string;
     label: string;
@@ -683,3 +703,4 @@ export function isTechnicalBlueprint(blueprint: DomainBlueprint) {
 export function domainTitle(blueprint: DomainBlueprint) {
   return titleCase(blueprint.domainLabel || blueprint.industry || "Business");
 }
+import { classifyDomainIntent } from "@/lib/server/ai/industry-taxonomy";

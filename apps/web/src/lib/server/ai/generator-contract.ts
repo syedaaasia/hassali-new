@@ -9,6 +9,7 @@ import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { ProposalQualityGateResult } from "@/lib/server/ai/proposal-quality-gate";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
 import { buildWebsiteSourceOfTruth } from "@/lib/server/ai/website-source-of-truth";
+import { classifyDomainIntent, getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
 
 export type GeneratorContractStatus = "blocked" | "ready" | "warning";
 export type GeneratorMode = "answer_only" | "code_generation" | "small_edit" | "website_generation";
@@ -107,6 +108,18 @@ const domainSignals: Record<string, {
     pages: ["home", "about", "services", "contact"],
     visual: ["smartphone display", "phone accessories shelf", "repair counter", "device comparison cards"]
   },
+  upholstery: {
+    copy: ["sofa reupholstery", "chair restoration", "fabric selection", "leather repair", "custom cushions", "furniture restoration", "free estimate", "before and after"],
+    label: "Upholstery business website",
+    pages: ["home", "about", "services", "blog", "contact"],
+    visual: ["fabric texture", "before and after restoration", "warm craft studio", "premium home interior"]
+  },
+  bicycle_shop: {
+    copy: ["bicycles", "cycling", "bike fitting", "helmets", "rider gear", "tune-up", "bicycle repair"],
+    label: "Bicycle shop website",
+    pages: ["home", "about", "services", "contact"],
+    visual: ["cycling showroom", "repair stand", "rider gear"]
+  },
   floral: {
     copy: ["flowers", "bouquet", "wedding", "event", "delivery", "gifting", "freshness"],
     label: "Floral/flower website",
@@ -149,6 +162,16 @@ function unique(values: string[]) {
 
 function inferDomain(input: BuildGeneratorContractInput) {
   const prompt = normalize(input.currentPrompt);
+  const taxonomy = classifyDomainIntent(input.currentPrompt);
+
+  if (taxonomy.profile && taxonomy.confidence >= 0.58) {
+    return taxonomy.profile.id;
+  }
+
+  if (taxonomy.ambiguous) {
+    return null;
+  }
+
   const domain =
     input.compositionPlan.authoritativeDomain ??
     input.contextPriority.authoritativeDomain ??
@@ -245,8 +268,10 @@ function fileStrategy(input: BuildGeneratorContractInput, mode: GeneratorMode, p
 }
 
 export function buildGeneratorContract(input: BuildGeneratorContractInput): GeneratorContract {
+  const taxonomy = classifyDomainIntent(input.currentPrompt);
   const domain = inferDomain(input);
   const profile = domain ? domainSignals[domain] : null;
+  const taxonomyProfile = getTaxonomyProfile(domain);
   const mode = generatorMode(input);
   const pages = requiredPages(input, domain, mode);
   const requiredPageCount = mode === "website_generation"
@@ -258,12 +283,12 @@ export function buildGeneratorContract(input: BuildGeneratorContractInput): Gene
       ? unique(input.businessBlueprint.screens.length ? input.businessBlueprint.screens : input.compositionPlan.requiredSections.map((section) => section.title))
       : [];
   const requiredEntities = unique([
-    ...(profile?.copy ?? []),
+    ...(profile?.copy ?? taxonomyProfile?.websiteVocabulary ?? []),
     ...input.compositionPlan.productOrServiceEntities,
     ...input.businessBlueprint.mustInclude
   ]);
   const requiredVisualSignals = unique([
-    ...(profile?.visual ?? []),
+    ...(profile?.visual ?? taxonomyProfile?.visualHints ?? []),
     ...input.compositionPlan.assetIntent,
     ...input.compositionPlan.visualIntent,
     ...(input.assetVisualValidation?.expectedVisualSignals ?? [])
@@ -275,6 +300,9 @@ export function buildGeneratorContract(input: BuildGeneratorContractInput): Gene
     ...input.proposalQuality?.repairHints.flatMap((hint) => genericForbiddenTerms.filter((term) => normalize(hint).includes(normalize(term)))) ?? []
   ]);
   const contractBlocks = [
+    mode === "website_generation" && taxonomy.ambiguous
+      ? `ambiguous domain classification: ${taxonomy.ambiguityNotes.join("; ")}`
+      : "",
     mode === "website_generation" && requiredPageCount && pages.length < requiredPageCount
       ? `required page count ${requiredPageCount} could not be satisfied`
       : "",
@@ -287,7 +315,7 @@ export function buildGeneratorContract(input: BuildGeneratorContractInput): Gene
     mode === "website_generation" && requiredVisualSignals.length === 0 ? "No required visual signals were available." : ""
   ].filter(Boolean);
   const copyRules = [
-    `Use authoritative domain: ${profile?.label ?? domain ?? "unknown"}.`,
+    `Use authoritative domain: ${profile?.label ?? taxonomyProfile?.displayName ?? domain ?? "unknown"}.`,
     "Public copy must be customer-facing, not internal generator language.",
     "Do not use generic Local Service filler when a domain is known.",
     "Each page needs unique purpose and copy."

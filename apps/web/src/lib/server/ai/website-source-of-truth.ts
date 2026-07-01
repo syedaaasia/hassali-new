@@ -24,6 +24,7 @@ const domainDefaults: Record<string, string[]> = {
   car_rental: ["home", "about", "services", "blog", "contact"],
   car_showroom: ["home", "about", "services", "blog", "contact"],
   mobile_phone_shop: ["home", "about", "services", "contact"],
+  upholstery: ["home", "about", "services", "blog", "contact"],
   restaurant: ["home", "menu", "about", "gallery", "contact"],
   seafood_restaurant: ["home", "menu", "about", "gallery", "contact"]
 };

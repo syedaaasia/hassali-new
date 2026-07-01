@@ -2188,11 +2188,39 @@ export function generatePlannedWebsiteFiles(input: {
 }): PlannedWebsiteGeneration {
   const brandName = brandNameForIntent(input.intent, input.composition);
   const plan = planWebsite(input);
+  const brief = input.proposalContext?.websiteGenerationBrief ?? null;
   const plannedFiles = renderWebsitePlanFiles({
     brandName,
     plan
   });
-  plannedFiles["HASSALI.md"] = [
+  plannedFiles["HASSALI.md"] = brief ? [
+    "# HASSALI.md",
+    "",
+    "Project contract owned by Hassali.ai.",
+    "",
+    "mode: WEBSITE",
+    `domainId: ${brief.domainId ?? (plan.sourceOfTruthDomain === "unknown" ? "unclassified" : plan.sourceOfTruthDomain) ?? plan.industry ?? "unclassified"}`,
+    `displayName: ${brief.displayName}`,
+    `brand/app/site name: ${brandName}`,
+    `correctedTypos: ${brief.correctedTypos.map((typo) => `${typo.from}->${typo.to}`).join(", ") || "none"}`,
+    `requestedPages: ${brief.requestedPages.join(", ")}`,
+    `exactPageCount: ${brief.exactPageCount ?? brief.requestedPages.length}`,
+    `requiredFiles: ${brief.requiredFiles.join(", ")}`,
+    `expectedVocabulary: ${brief.expectedVocabulary.join(", ")}`,
+    `trustSignals: ${brief.trustSignals.join(", ")}`,
+    `ctaPatterns: ${brief.ctaPatterns.join(", ")}`,
+    `contentTone: ${brief.contentTone}`,
+    `conversionGoal: ${brief.conversionGoal}`,
+    `generatorBriefSummary: ${brief.hassaliMetadata.generatorBriefSummary}`,
+    "previewPolicy: static srcDoc only",
+    "runtimePolicy: no runtime for static websites",
+    "",
+    "navigationContract:",
+    ...brief.navigationContract.map((item) => `- ${item.label}: ${item.href}`),
+    "",
+    "safetyNotes:",
+    ...brief.hassaliMetadata.safetyNotes.map((note) => `- ${note}`)
+  ].join("\n") : [
     "# HASSALI.md",
     "",
     "Project contract owned by Hassali.ai.",

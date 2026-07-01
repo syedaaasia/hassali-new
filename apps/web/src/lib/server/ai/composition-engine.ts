@@ -4,6 +4,7 @@ import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
+import { classifyDomainIntent, getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
 
 export type CompositionStatus = "answer_only" | "planned" | "targeted";
 export type CompositionKind =
@@ -114,6 +115,20 @@ function pageToPath(page: string) {
 }
 
 const profiles: DomainCompositionProfile[] = [
+  {
+    assetIntent: ["fabric texture", "sofa restoration", "chair restoration", "before and after projects", "workshop"],
+    contentAngles: ["craft restoration", "fabric selection", "repair process", "free estimate"],
+    domain: "upholstery",
+    entities: ["sofa reupholstery", "chair restoration", "fabric selection", "leather repair", "custom cushions", "furniture restoration"],
+    forbiddenSections: ["mobile phone", "car rental", "SaaS", "restaurant", "Current Prompt Website"],
+    layoutIntent: ["craft hero", "service cards", "before and after gallery", "fabric options", "estimate CTA"],
+    optionalSections: ["fabric samples", "commercial upholstery", "workmanship guarantee"],
+    primaryCTA: "Request a quote",
+    requiredSections: ["hero", "services", "before and after", "fabric options", "restoration process", "testimonials", "contact"],
+    secondaryCTA: "Send furniture photos",
+    trustSignals: ["before and after gallery", "fabric samples", "workmanship guarantee", "local workshop", "free estimate"],
+    visualIntent: ["warm craft studio", "fabric texture", "premium home interior", "restoration workshop"]
+  },
   {
     assetIntent: ["room scenes", "sofas", "chairs", "tables", "cupboards", "showroom", "delivery"],
     contentAngles: ["room-by-room shopping", "materials and comfort", "showroom guidance", "delivery confidence"],
@@ -230,6 +245,15 @@ const profiles: DomainCompositionProfile[] = [
 
 function inferDomain(input: BuildCompositionInput) {
   const text = input.currentPrompt.toLowerCase();
+  const taxonomy = classifyDomainIntent(input.currentPrompt);
+
+  if (taxonomy.profile && taxonomy.confidence >= 0.58) {
+    return taxonomy.profile.id;
+  }
+
+  if (taxonomy.ambiguous) {
+    return "bike shop";
+  }
 
   if (text.includes("cola") || text.includes("soft drink") || text.includes("soda") || text.includes("beverage")) {
     return "cola company / soft drinks";
@@ -240,7 +264,7 @@ function inferDomain(input: BuildCompositionInput) {
   }
 
   if (input.contextPriority.authoritativeDomain === "floral") return "floral";
-  if (input.contextPriority.authoritativeDomain === "dental") return "dental";
+  if (input.contextPriority.authoritativeDomain === "dental" || input.contextPriority.authoritativeDomain === "dental_clinic") return "dental";
   if (input.contextPriority.authoritativeDomain === "coffee") return "coffee";
   if (input.contextPriority.authoritativeDomain === "electronics_retail") return "electronics_retail";
   if (input.contextPriority.authoritativeDomain === "crm" && input.contextPriority.authoritativeMode === "CODE") return "crm";
@@ -256,6 +280,24 @@ function inferDomain(input: BuildCompositionInput) {
 
 function profileFor(input: BuildCompositionInput) {
   const domain = inferDomain(input);
+  const taxonomyProfile = getTaxonomyProfile(domain);
+
+  if (taxonomyProfile && !profiles.some((profile) => profile.domain === domain)) {
+    return {
+      assetIntent: taxonomyProfile.visualHints,
+      contentAngles: taxonomyProfile.websiteVocabulary.slice(0, 5),
+      domain,
+      entities: taxonomyProfile.expectedEntities,
+      forbiddenSections: taxonomyProfile.conflicts.map((conflict) => conflict.replace(/_/g, " ")),
+      layoutIntent: taxonomyProfile.commonSections,
+      optionalSections: taxonomyProfile.commonSections.slice(4),
+      primaryCTA: taxonomyProfile.ctas[0] ?? "Contact us",
+      requiredSections: taxonomyProfile.commonSections,
+      secondaryCTA: taxonomyProfile.ctas[1] ?? "Learn more",
+      trustSignals: taxonomyProfile.trustSignals,
+      visualIntent: taxonomyProfile.visualHints
+    };
+  }
 
   const domainLabel = domain === "unknown" ? input.contextPriority.authoritativeBusinessType ?? "current request" : domain;
 

@@ -61,7 +61,8 @@ import {
 } from "@/lib/server/ai/domain-site-generator";
 import {
   generateCrmPythonStreamlitSource,
-  generateCrmViteSource
+  generateCrmViteSource,
+  generateMobilePhoneInventoryStreamlitSource
 } from "@/lib/server/ai/code-app-source-generator";
 import {
   buildExecutionPlan,
@@ -1399,13 +1400,24 @@ function createLocalProposal(
       ].filter(Boolean) as string[])
     );
     const usePythonStack = promptRequestsPythonStack(prompt) && !promptRequestsReactFrontendStack(prompt);
-    const sourceFiles = usePythonStack
+    const codeBrief = proposalContext?.codeGenerationBrief ?? null;
+    const isMobilePhoneInventory = codeBrief?.appType === "inventory_system" ||
+      (codeBrief?.domainId === "mobile_phone_shop" && codeBrief.modules.some((moduleName) => ["products", "stock", "sales", "suppliers", "repairs"].includes(moduleName)));
+    const sourceFiles = isMobilePhoneInventory
+      ? generateMobilePhoneInventoryStreamlitSource({
+          appName: appPreview.appName,
+          brief: codeBrief,
+          prompt
+        })
+      : usePythonStack || codeBrief?.preferredFramework === "streamlit"
       ? generateCrmPythonStreamlitSource({
           appName: appPreview.appName,
+          brief: codeBrief,
           prompt
         })
       : generateCrmViteSource({
           appName: appPreview.appName,
+          brief: codeBrief,
           prompt
         });
 
@@ -1429,7 +1441,9 @@ function createLocalProposal(
       projectId: diagnostic.projectId,
       status: "pending",
       summary:
-        usePythonStack
+        isMobilePhoneInventory
+            ? `Detected CODE-mode inventory management software for a mobile phone shop. I will create a Python / Streamlit inventory scaffold with products, stock, suppliers, sales, repairs, billing, and documentation. No package install or runtime command runs before approval.`
+          : usePythonStack || codeBrief?.preferredFramework === "streamlit"
           ? `Detected a CODE-mode ${appPreview.appName} ${systemName} request with explicit Python stack intent and ${requestedCapabilities.join(", ")}. I will create a Python / Streamlit CRM scaffold with mock data, dashboard metrics, billing charts, and documentation. No package install or runtime command runs before approval.`
           : `Detected a CODE-mode ${appPreview.appName} ${systemName} request with ${requestedCapabilities.join(", ")}. I will create runnable Vite React CRM source files plus architecture, data model, and security docs. No package install or runtime command runs before approval.`
     };
@@ -2143,6 +2157,7 @@ if ("IntersectionObserver" in window) {
       };
     }
     const generatedFileNames = Object.keys(websiteFiles);
+    const websiteBriefName = proposalContext?.websiteGenerationBrief?.displayName ?? composition.businessType;
     const standardFiles = Object.entries(websiteFiles).map(([path, content]) => ({
       content,
       path,
@@ -2170,11 +2185,11 @@ if ("IntersectionObserver" in window) {
       summary:
         mode === "EXECUTE"
           ? hasStandardWebFiles(diagnostic.fileList)
-            ? `Using composition-driven generation for ${composition.businessType}. I will update ${generatedFileNames.join(", ")} and prepare the preview runtime.`
-            : `Using composition-driven generation for ${composition.businessType}. I will create ${generatedFileNames.join(", ")} and prepare the preview runtime.`
+            ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")} and prepare the preview runtime.`
+            : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")} and prepare the preview runtime.`
           : hasStandardWebFiles(diagnostic.fileList)
-            ? `Using composition-driven generation for ${composition.businessType}. I will update ${generatedFileNames.join(", ")}.`
-            : `Using composition-driven generation for ${composition.businessType}. I will create ${generatedFileNames.join(", ")}.`,
+            ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")}.`
+            : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")}.`,
       websiteAudience: websiteGeneration.plan.audience,
       designTokenCount: websiteGeneration.designTokenCount,
       designTokenTheme: websiteGeneration.designTokenTheme,
@@ -3689,10 +3704,13 @@ function runSelfReviewForProposal(input: {
       requiredFiles: input.proposalContext.requiredFiles,
       type: input.productMode === "WEBSITE"
         ? "static_website"
+        : input.proposalContext.framework === "python_streamlit"
+          ? "python_app"
         : input.proposalContext.framework === "react_vite"
           ? "react_vite_app"
           : null
     },
+    intentContract: input.proposalContext.intentContract ?? null,
     mode: input.productMode,
     projectId: input.proposal.projectId,
     prompt: input.prompt,

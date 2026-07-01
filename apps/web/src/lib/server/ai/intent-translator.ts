@@ -1,4 +1,5 @@
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
+import { classifyDomainIntent } from "@/lib/server/ai/industry-taxonomy";
 
 export type IntentTranslatorMode = "ASK" | "CODE" | "WEBSITE";
 
@@ -203,6 +204,24 @@ function includesAny(text: string, terms: string[]) {
 }
 
 function extractDomain(text: string, contract?: ProjectContract | null) {
+  const taxonomy = classifyDomainIntent(text);
+
+  if (taxonomy.profile && taxonomy.confidence >= 0.58) {
+    return {
+      businessType: taxonomy.profile.displayName,
+      domain: taxonomy.profile.id,
+      fromPrompt: true
+    };
+  }
+
+  if (taxonomy.ambiguous) {
+    return {
+      businessType: "Ambiguous Bike Shop",
+      domain: "bike_shop",
+      fromPrompt: true
+    };
+  }
+
   const profile = domainProfiles.find((candidate) => includesAny(text, candidate.terms));
 
   if (profile) {

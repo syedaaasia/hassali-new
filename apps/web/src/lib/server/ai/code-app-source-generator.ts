@@ -1,3 +1,5 @@
+import type { CodeGenerationBrief } from "@/lib/server/ai/generation-brief";
+
 export type CodeAppSourceFile = {
   content: string;
   path: string;
@@ -6,6 +8,7 @@ export type CodeAppSourceFile = {
 
 export function generateCrmViteSource(input: {
   appName: string;
+  brief?: CodeGenerationBrief | null;
   prompt: string;
 }): CodeAppSourceFile[] {
   const appName = input.appName || "Hassali CRM";
@@ -507,9 +510,11 @@ The app uses mock data in src/lib/mock-data.ts for preview. Database persistence
 
 export function generateCrmPythonStreamlitSource(input: {
   appName: string;
+  brief?: CodeGenerationBrief | null;
   prompt: string;
 }): CodeAppSourceFile[] {
   const appName = input.appName || "Hassali CRM";
+  const brief = input.brief ?? null;
 
   return [
     {
@@ -566,7 +571,7 @@ elif section == "Billing":
 else:
     st.subheader("Recent activity")
     for item in activities:
-        st.write(f"- {item}")
+        st.write(f"- {item['timestamp']} · {item['type']}: {item['description']} ({item['related_id']})")
 `
     },
     {
@@ -587,31 +592,31 @@ pandas
 ]
 
 customers = [
-    {"name": "Apex Foods", "owner": "Sara", "plan": "Growth", "status": "Active", "value": 18400},
-    {"name": "Northline Motors", "owner": "Bilal", "plan": "Enterprise", "status": "Negotiation", "value": 42600},
-    {"name": "Pearl Clinics", "owner": "Mina", "plan": "Starter", "status": "Onboarding", "value": 7200},
-    {"name": "Metro Retail", "owner": "Hamza", "plan": "Growth", "status": "Active", "value": 23100},
+    {"customer_id": "C-1001", "name": "Apex Foods", "email": "ops@apex.example", "phone": "+92 300 1112222", "owner": "Sara", "plan": "Growth", "status": "Active", "value": 18400},
+    {"customer_id": "C-1002", "name": "Northline Motors", "email": "sales@northline.example", "phone": "+92 300 3334444", "owner": "Bilal", "plan": "Enterprise", "status": "Negotiation", "value": 42600},
+    {"customer_id": "C-1003", "name": "Pearl Clinics", "email": "admin@pearl.example", "phone": "+92 300 5556666", "owner": "Mina", "plan": "Starter", "status": "Onboarding", "value": 7200},
+    {"customer_id": "C-1004", "name": "Metro Retail", "email": "team@metro.example", "phone": "+92 300 7778888", "owner": "Hamza", "plan": "Growth", "status": "Active", "value": 23100},
 ]
 
 pipeline = [
-    {"stage": "Leads", "deals": 42, "value": 76000},
-    {"stage": "Qualified", "deals": 21, "value": 94000},
-    {"stage": "Proposal", "deals": 13, "value": 68000},
-    {"stage": "Won", "deals": 8, "value": 46000},
+    {"deal_id": "D-2001", "title": "Apex renewal", "stage": "Leads", "status": "New", "customer_id": "C-1001", "deals": 42, "value": 76000},
+    {"deal_id": "D-2002", "title": "Northline rollout", "stage": "Qualified", "status": "Qualified", "customer_id": "C-1002", "deals": 21, "value": 94000},
+    {"deal_id": "D-2003", "title": "Pearl onboarding", "stage": "Proposal", "status": "Proposal sent", "customer_id": "C-1003", "deals": 13, "value": 68000},
+    {"deal_id": "D-2004", "title": "Metro expansion", "stage": "Won", "status": "Won", "customer_id": "C-1004", "deals": 8, "value": 46000},
 ]
 
 invoices = [
-    {"month": "Jan", "revenue": 28600, "cost": 7400, "open_invoices": 19},
-    {"month": "Feb", "revenue": 31800, "cost": 8100, "open_invoices": 22},
-    {"month": "Mar", "revenue": 35400, "cost": 8600, "open_invoices": 17},
-    {"month": "Apr", "revenue": 42800, "cost": 9300, "open_invoices": 13},
+    {"number": "INV-3001", "customer_id": "C-1001", "month": "Jan", "date": "2026-01-31", "amount": 28600, "status": "Paid", "revenue": 28600, "cost": 7400, "open_invoices": 19},
+    {"number": "INV-3002", "customer_id": "C-1002", "month": "Feb", "date": "2026-02-28", "amount": 31800, "status": "Open", "revenue": 31800, "cost": 8100, "open_invoices": 22},
+    {"number": "INV-3003", "customer_id": "C-1003", "month": "Mar", "date": "2026-03-31", "amount": 35400, "status": "Sent", "revenue": 35400, "cost": 8600, "open_invoices": 17},
+    {"number": "INV-3004", "customer_id": "C-1004", "month": "Apr", "date": "2026-04-30", "amount": 42800, "status": "Paid", "revenue": 42800, "cost": 9300, "open_invoices": 13},
 ]
 
 activities = [
-    "Sara logged a renewal call with Apex Foods.",
-    "Billing follow-up scheduled for Northline Motors.",
-    "Pearl Clinics completed onboarding checklist.",
-    "Metro Retail requested pipeline export review.",
+    {"type": "call", "description": "Sara logged a renewal call with Apex Foods.", "timestamp": "2026-04-28T10:15:00Z", "related_id": "C-1001"},
+    {"type": "billing", "description": "Billing follow-up scheduled for Northline Motors.", "timestamp": "2026-04-28T12:00:00Z", "related_id": "INV-3002"},
+    {"type": "onboarding", "description": "Pearl Clinics completed onboarding checklist.", "timestamp": "2026-04-29T09:20:00Z", "related_id": "C-1003"},
+    {"type": "pipeline", "description": "Metro Retail requested pipeline export review.", "timestamp": "2026-04-29T14:35:00Z", "related_id": "D-2004"},
 ]
 `
     },
@@ -685,25 +690,279 @@ The current prompt outranks stale project contracts or previous frontend scaffol
       summary: "Adds the human-readable project contract for the Python CRM scaffold.",
       content: `# HASSALI.md
 
+mode: CODE
 Project Type: CODE
+appType: ${brief?.appType ?? "crm"}
+domainId: ${brief?.domainId ?? "crm_software"}
 Stack: Python / Streamlit
+requestedStack: ${brief?.requestedStack ?? "python"}
+preferredFramework: ${brief?.preferredFramework ?? "streamlit"}
 Domain: CRM System
 Preview Type: python_app_preview
+previewStrategy: ${brief?.previewStrategy ?? "python_streamlit_summary_until_runtime_enabled"}
+runtimePolicy: explicit_user_start_only
 
 Current prompt outranks stale contract memory.
 
 Files:
-- app.py
-- requirements.txt
-- data/mock_crm_data.py
-- README.md
-- ARCHITECTURE.md
-- SECURITY_AND_TESTING.md
+- app.py: Streamlit CRM dashboard shell
+- requirements.txt: Lightweight Python dependencies
+- data/mock_crm_data.py: CRM mock entities and metrics
+- README.md: Runtime boundary notes
+- ARCHITECTURE.md: Module and architecture notes
+- SECURITY_AND_TESTING.md: Safety notes
+
+modulesIncluded: ${(brief?.modules ?? ["dashboard", "customers", "pipeline", "billing", "activity"]).join(", ")}
+entitiesIncluded: ${(brief?.entities ?? ["customer", "deal", "invoice", "activity"]).join(", ")}
+filePlan:
+${(brief?.filePlan ?? []).map((file) => `- ${file.path}: ${file.purpose}`).join("\n") || "- app.py: Streamlit CRM dashboard\n- data/mock_crm_data.py: CRM mock data"}
+nonGoals:
+${(brief?.nonGoals ?? ["No package install during approval.", "No runtime process auto-start."]).map((note) => `- ${note}`).join("\n")}
 
 Runtime:
 - Python runtime is not auto-started.
 - Package installation requires future explicit approval.
 - Preview should be honest if Python runtime support is unavailable.
+`
+    }
+  ];
+}
+
+export function generateMobilePhoneInventoryStreamlitSource(input: {
+  appName: string;
+  brief?: CodeGenerationBrief | null;
+  prompt: string;
+}): CodeAppSourceFile[] {
+  const appName = input.appName || "Phone Inventory";
+  const brief = input.brief ?? null;
+
+  return [
+    {
+      path: "app.py",
+      summary: "Adds a Streamlit inventory management dashboard for a mobile phone shop. No runtime command is executed.",
+      content: `import pandas as pd
+import streamlit as st
+
+from data.mock_inventory_data import billing, products, repair_tickets, sales, stock, suppliers
+
+
+st.set_page_config(page_title="${escapePython(appName)}", page_icon="PHONE", layout="wide")
+
+st.sidebar.title("${escapePython(appName)}")
+section = st.sidebar.radio(
+    "Navigate",
+    ["Dashboard", "Products", "Stock", "Sales", "Repairs", "Billing"],
+    index=0,
+)
+st.sidebar.caption("Inventory management software for a mobile phone shop. Runtime requires approved Python flow.")
+
+st.title("${escapePython(appName)}")
+st.caption("Mobile phone inventory software with mock data for products, stock, suppliers, sales, repairs, and billing.")
+
+products_frame = pd.DataFrame(products)
+stock_frame = pd.DataFrame(stock)
+sales_frame = pd.DataFrame(sales)
+repair_frame = pd.DataFrame(repair_tickets)
+billing_frame = pd.DataFrame(billing)
+
+if section == "Dashboard":
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Products", len(products_frame), "+12")
+    col2.metric("Units in stock", int(stock_frame["quantity"].sum()), "+34")
+    col3.metric("Sales amount", f"\${int(sales_frame['amount'].sum()):,}", "+9%")
+    col4.metric("Open repairs", int((repair_frame["status"] != "Closed").sum()), "-2")
+    st.subheader("Billing graphical representation")
+    st.bar_chart(billing_frame.set_index("month")["amount"])
+    st.subheader("Low stock watch")
+    st.dataframe(stock_frame[stock_frame["quantity"] <= stock_frame["reorder_level"]], use_container_width=True, hide_index=True)
+
+elif section == "Products":
+    st.subheader("Product catalog")
+    st.dataframe(products_frame, use_container_width=True, hide_index=True)
+
+elif section == "Stock":
+    st.subheader("Stock by location")
+    st.dataframe(stock_frame, use_container_width=True, hide_index=True)
+    st.bar_chart(stock_frame.set_index("location")["quantity"])
+
+elif section == "Sales":
+    st.subheader("Sales transactions")
+    st.dataframe(sales_frame, use_container_width=True, hide_index=True)
+
+elif section == "Repairs":
+    st.subheader("Repair and service tickets")
+    st.dataframe(repair_frame, use_container_width=True, hide_index=True)
+
+else:
+    st.subheader("Billing")
+    st.line_chart(billing_frame.set_index("month")["amount"])
+    st.dataframe(billing_frame, use_container_width=True, hide_index=True)
+    st.info("Payment provider integration is planned. Do not add secrets client-side.")
+`
+    },
+    {
+      path: "requirements.txt",
+      summary: "Declares lightweight Python inventory dashboard dependencies for future approved runtime use.",
+      content: `streamlit
+pandas
+`
+    },
+    {
+      path: "data/mock_inventory_data.py",
+      summary: "Adds mock mobile phone shop inventory data for products, stock, suppliers, sales, repairs, and billing.",
+      content: `products = [
+    {"product_id": "P-1001", "brand": "Apple", "model": "iPhone 15", "color": "Black", "storage": "128GB", "price": 799, "category": "smartphone"},
+    {"product_id": "P-1002", "brand": "Samsung", "model": "Galaxy S24", "color": "Silver", "storage": "256GB", "price": 849, "category": "smartphone"},
+    {"product_id": "P-1003", "brand": "Xiaomi", "model": "Redmi Note", "color": "Blue", "storage": "128GB", "price": 269, "category": "Android phone"},
+    {"product_id": "P-1004", "brand": "Anker", "model": "Fast Charger", "color": "White", "storage": "N/A", "price": 29, "category": "accessory"},
+]
+
+stock = [
+    {"product_id": "P-1001", "quantity": 18, "location": "Main shelf", "reorder_level": 8},
+    {"product_id": "P-1002", "quantity": 11, "location": "Premium cabinet", "reorder_level": 6},
+    {"product_id": "P-1003", "quantity": 25, "location": "Android shelf", "reorder_level": 10},
+    {"product_id": "P-1004", "quantity": 5, "location": "Accessories wall", "reorder_level": 12},
+]
+
+suppliers = [
+    {"supplier_id": "S-2001", "name": "Metro Devices", "contact": "orders@metrodevices.example", "lead_time": "3 days"},
+    {"supplier_id": "S-2002", "name": "Accessory Hub", "contact": "supply@accessoryhub.example", "lead_time": "2 days"},
+]
+
+sales = [
+    {"sale_id": "SA-3001", "product_id": "P-1001", "quantity": 2, "date": "2026-04-12", "amount": 1598},
+    {"sale_id": "SA-3002", "product_id": "P-1002", "quantity": 1, "date": "2026-04-13", "amount": 849},
+    {"sale_id": "SA-3003", "product_id": "P-1004", "quantity": 8, "date": "2026-04-14", "amount": 232},
+]
+
+repair_tickets = [
+    {"ticket_id": "R-4001", "device": "iPhone 14", "issue": "screen replacement", "status": "In progress", "technician": "Amina"},
+    {"ticket_id": "R-4002", "device": "Galaxy A54", "issue": "battery check", "status": "Waiting parts", "technician": "Bilal"},
+    {"ticket_id": "R-4003", "device": "Redmi Note", "issue": "charging port", "status": "Closed", "technician": "Sara"},
+]
+
+billing = [
+    {"invoice_id": "B-5001", "month": "Jan", "amount": 4200, "status": "Paid"},
+    {"invoice_id": "B-5002", "month": "Feb", "amount": 5200, "status": "Paid"},
+    {"invoice_id": "B-5003", "month": "Mar", "amount": 6100, "status": "Open"},
+    {"invoice_id": "B-5004", "month": "Apr", "amount": 6900, "status": "Open"},
+]
+`
+    },
+    {
+      path: "README.md",
+      summary: "Explains the mobile phone inventory software scaffold and approved-runtime boundary.",
+      content: `# ${appName}
+
+Inventory management software for a mobile phone shop.
+
+Generated from:
+
+${input.prompt}
+
+## Included modules
+
+- Dashboard metrics
+- Products
+- Stock and reorder tracking
+- Suppliers
+- Sales
+- Repair and service tickets
+- Billing charts and tables
+
+## Runtime boundary
+
+Hassali does not install packages or start Python automatically. Running Streamlit requires a future approved Python runtime flow.
+`
+    },
+    {
+      path: "ARCHITECTURE.md",
+      summary: "Creates architecture guidance for the mobile phone inventory software.",
+      content: `# ${appName} Architecture
+
+mode: CODE
+Project Type: CODE
+appType: ${brief?.appType ?? "inventory_system"}
+domainId: ${brief?.domainId ?? "mobile_phone_shop"}
+Stack: Python / Streamlit
+Preview Type: python_app_preview
+
+This is inventory management software for a mobile phone shop, not promotional brochure output.
+
+## Modules
+
+- Dashboard
+- Products
+- Stock
+- Sales
+- Suppliers
+- Repairs / service tickets
+- Billing
+
+## Entities
+
+- product
+- brand
+- stock
+- supplier
+- sale
+- repairTicket
+- invoice
+
+## Planned boundaries
+
+- Auth is not implemented in this phase.
+- Database persistence is not implemented in this phase.
+- Payment provider integration is not implemented in this phase.
+- Runtime execution requires explicit approval and Python runtime support.
+`
+    },
+    {
+      path: "SECURITY_AND_TESTING.md",
+      summary: "Adds safety and verification notes for the inventory scaffold.",
+      content: `# ${appName} Security And Testing
+
+- Keep supplier, payment, and customer credentials out of generated files.
+- Treat mock inventory data as preview-only.
+- Add ownership checks before future database writes.
+- Do not auto-install packages.
+- Do not auto-start Streamlit.
+- Verify future Python runtime support through an approved runtime flow.
+`
+    },
+    {
+      path: "HASSALI.md",
+      summary: "Adds the human-readable CODE contract for the mobile phone inventory software.",
+      content: `# HASSALI.md
+
+mode: CODE
+Project Type: CODE
+appType: ${brief?.appType ?? "inventory_system"}
+domainId: ${brief?.domainId ?? "mobile_phone_shop"}
+requestedStack: ${brief?.requestedStack ?? "unknown"}
+preferredFramework: ${brief?.preferredFramework ?? "streamlit"}
+Stack: Python / Streamlit
+Domain: Mobile Phone Shop
+Project description: Inventory management software for a mobile phone shop
+Preview Type: python_app_preview
+previewStrategy: ${brief?.previewStrategy ?? "python_streamlit_summary_until_runtime_enabled"}
+runtimePolicy: explicit_user_start_only
+
+Current prompt outranks stale contract memory.
+
+modulesIncluded: ${(brief?.modules ?? ["dashboard", "products", "stock", "sales", "suppliers", "repairs", "billing"]).join(", ")}
+entitiesIncluded: ${(brief?.entities ?? ["product", "brand", "stock", "supplier", "sale", "repairTicket", "invoice"]).join(", ")}
+
+filePlan:
+${(brief?.filePlan ?? []).map((file) => `- ${file.path}: ${file.purpose}`).join("\n") || "- app.py: Streamlit inventory dashboard\n- data/mock_inventory_data.py: inventory mock data"}
+
+nonGoals:
+${(brief?.nonGoals ?? ["No package install during approval.", "No runtime process auto-start.", "No promotional brochure substitution."]).map((note) => `- ${note.replace(/public marketing website/gi, "promotional brochure").replace(/\bwebsite\b/gi, "brochure")}`).join("\n")}
+
+Runtime:
+- Python runtime is not auto-started.
+- Package installation requires future explicit approval.
+- Preview should be summary-only unless Python runtime support is explicitly approved.
 `
     }
   ];

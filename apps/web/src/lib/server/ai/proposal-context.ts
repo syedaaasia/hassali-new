@@ -1,5 +1,16 @@
 import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
+import {
+  buildCodeIntentContract,
+  buildWebsiteIntentContract,
+  type IntentLockContract
+} from "@/lib/server/ai/industry-taxonomy";
+import {
+  buildCodeGenerationBrief,
+  buildWebsiteGenerationBrief,
+  type CodeGenerationBrief,
+  type WebsiteGenerationBrief
+} from "@/lib/server/ai/generation-brief";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import { pageToHtmlPath } from "@/lib/server/ai/website-source-of-truth";
 
@@ -7,10 +18,12 @@ export type ProposalContextMode = "ASK" | "CODE" | "WEBSITE";
 
 export type ProposalContext = {
   businessName?: string;
+  codeGenerationBrief?: CodeGenerationBrief | null;
   designTheme?: string;
   domain: string;
   entities: string[];
   framework?: string;
+  intentContract?: IntentLockContract | null;
   isNewBuild: boolean;
   isRefinement: boolean;
   mode: ProposalContextMode;
@@ -22,6 +35,7 @@ export type ProposalContext = {
   sourcePrompt: string;
   tokenTheme?: string;
   validationRules: string[];
+  websiteGenerationBrief?: WebsiteGenerationBrief | null;
 };
 
 export type PromptOwnershipDecision = {
@@ -68,9 +82,24 @@ export function buildProposalContext(input: {
     mode: input.mode,
     prompt: input.prompt
   });
+  const intentContract = input.mode === "WEBSITE"
+    ? buildWebsiteIntentContract({
+        prompt: input.prompt,
+        requestedPagesFallback: input.translatedIntent.pages.names
+      })
+    : input.mode === "CODE"
+      ? buildCodeIntentContract({ prompt: input.prompt })
+      : null;
+  const websiteGenerationBrief = intentContract?.mode === "WEBSITE"
+    ? buildWebsiteGenerationBrief(intentContract)
+    : null;
+  const codeGenerationBrief = intentContract?.mode === "CODE"
+    ? buildCodeGenerationBrief(intentContract)
+    : null;
   const generatorDomain = input.generatorContract?.authoritativeDomain ?? null;
   const generatorBusiness = input.generatorContract?.authoritativeBusinessType ?? null;
   const domain =
+    intentContract?.domainId ||
     input.translatedIntent.domain ||
     input.translatedIntent.businessType ||
     generatorDomain ||
@@ -78,22 +107,25 @@ export function buildProposalContext(input: {
     (ownership.useContractMemory ? input.contract?.domain : null) ||
     "unknown";
   const pages = input.mode === "WEBSITE"
-    ? websitePagesFor(input)
+    ? websiteGenerationBrief?.requestedPages ?? websitePagesFor(input)
     : [];
   const usePythonStack = input.mode === "CODE" &&
-    promptRequestsPython(input.prompt) &&
-    !promptRequestsReactFrontend(input.prompt);
+    (codeGenerationBrief?.preferredFramework === "streamlit" ||
+      (promptRequestsPython(input.prompt) && !promptRequestsReactFrontend(input.prompt)));
   const requiredFiles = requiredFilesFor({
+    codeGenerationBrief,
     domain,
     generatorContract: input.generatorContract,
     mode: input.mode,
     pages,
     prompt: input.prompt,
-    translatedIntent: input.translatedIntent
+    translatedIntent: input.translatedIntent,
+    websiteGenerationBrief
   });
 
   return {
     businessName: input.translatedIntent.businessType ?? generatorBusiness ?? undefined,
+    codeGenerationBrief,
     designTheme: input.translatedIntent.theme ?? input.translatedIntent.visualLanguage ?? undefined,
     domain,
     entities: input.generatorContract?.requiredEntities.length
@@ -101,15 +133,18 @@ export function buildProposalContext(input: {
       : input.translatedIntent.extractedEntities,
     framework: usePythonStack
       ? "python_streamlit"
-      : input.mode === "CODE" && domain.toLowerCase().includes("crm")
+      : input.mode === "CODE" && (domain.toLowerCase().includes("crm") || codeGenerationBrief?.preferredFramework === "react_vite")
         ? "react_vite"
         : undefined,
     isNewBuild: ownership.useCurrentPromptOnly && !ownership.useContractMemory,
     isRefinement: ownership.useContractMemory,
+    intentContract,
     mode: input.mode,
     pages,
     previewType: input.mode === "CODE"
-      ? "dashboard"
+      ? usePythonStack
+        ? "python_app_preview"
+        : "dashboard"
       : input.mode === "WEBSITE"
         ? "website"
         : "none",
@@ -122,7 +157,8 @@ export function buildProposalContext(input: {
         : undefined,
     sourcePrompt: input.prompt,
     tokenTheme: input.mode === "WEBSITE" ? tokenThemeFor(domain) : undefined,
-    validationRules: validationRulesFor(input.mode, pages, requiredFiles)
+    validationRules: validationRulesFor(input.mode, pages, requiredFiles),
+    websiteGenerationBrief
   };
 }
 
@@ -142,12 +178,14 @@ export function enforceGeneratorContractWithProposalContext(
   }
 
   if (context.mode === "WEBSITE") {
+    const contractBlocks = contract.contractBlocks;
+
     return {
       ...contract,
       authoritativeBusinessType: context.businessName ?? contract.authoritativeBusinessType,
       authoritativeDomain: context.domain || contract.authoritativeDomain,
-      contractBlocks: [],
-      contractStatus: contract.contractWarnings.length ? "warning" : "ready",
+      contractBlocks,
+      contractStatus: contractBlocks.length ? "blocked" : contract.contractWarnings.length ? "warning" : "ready",
       requiredFileStrategy: context.requiredFiles,
       requiredPageCount: context.pages.length || contract.requiredPageCount,
       requiredPages: context.pages
@@ -171,6 +209,15 @@ function websitePagesFor(input: {
   prompt: string;
   translatedIntent: TranslatedIntentSpec;
 }) {
+  const contract = buildWebsiteIntentContract({
+    prompt: input.prompt,
+    requestedPagesFallback: input.translatedIntent.pages.names
+  });
+
+  if (contract.requestedPages.length) {
+    return contract.exactPageCount ? contract.requestedPages.slice(0, contract.exactPageCount) : contract.requestedPages;
+  }
+
   const explicitPages = input.translatedIntent.pages.names;
   const exactCount = input.translatedIntent.pages.count;
 
@@ -186,22 +233,32 @@ function websitePagesFor(input: {
 }
 
 function requiredFilesFor(input: {
+  codeGenerationBrief?: CodeGenerationBrief | null;
   domain: string;
   generatorContract?: GeneratorContract | null;
   mode: ProposalContextMode;
   pages: string[];
   prompt: string;
   translatedIntent: TranslatedIntentSpec;
+  websiteGenerationBrief?: WebsiteGenerationBrief | null;
 }) {
   if (input.mode === "ASK") return [];
 
   if (input.mode === "WEBSITE") {
+    if (input.websiteGenerationBrief?.requiredFiles.length) {
+      return input.websiteGenerationBrief.requiredFiles;
+    }
+
     return [
       ...input.pages.map(pageToHtmlPath),
       "styles.css",
       "main.js",
       "HASSALI.md"
     ];
+  }
+
+  if (input.mode === "CODE" && input.codeGenerationBrief?.filePlan.length) {
+    return input.codeGenerationBrief.filePlan.map((file) => file.path);
   }
 
   if (input.mode === "CODE" && promptRequestsPython(input.prompt) && !promptRequestsReactFrontend(input.prompt)) {

@@ -43,6 +43,17 @@ export function selectLayoutTemplate(domain: string): WebsiteLayoutType | "brand
   const d = domain.toLowerCase();
 
   if (
+    d.includes("upholstery") ||
+    d.includes("upholestry") ||
+    d.includes("reupholstery") ||
+    d.includes("sofa upholstery") ||
+    d.includes("furniture restoration") ||
+    d.includes("leather repair")
+  ) {
+    return "creator_case_study";
+  }
+
+  if (
     d.includes("car rental") ||
     d.includes("rent a car") ||
     d.includes("vehicle rental") ||
@@ -106,6 +117,18 @@ export function detectWebsiteIndustry(input: {
   intent: IntentIntelligence;
   proposalContext?: ProposalContext;
 }): WebsiteIndustry {
+  const briefDomain = input.proposalContext?.websiteGenerationBrief?.domainId;
+
+  if (briefDomain) {
+    if (briefDomain === "car_rental") return "car_rental";
+    if (briefDomain === "crm_software") return "crm_software";
+    if (briefDomain === "dental_clinic") return "dental_clinic";
+    if (briefDomain === "mobile_phone_shop") return "mobile_phone_shop";
+    if (briefDomain === "seafood_restaurant") return "seafood_restaurant";
+    if (briefDomain === "upholstery") return "upholstery";
+    if (briefDomain === "bicycle_shop") return "bicycle_shop";
+  }
+
   const text = [
     input.intent.domain,
     input.intent.siteType ?? "",
@@ -118,7 +141,12 @@ export function detectWebsiteIndustry(input: {
   ].join(" ").toLowerCase();
   const layoutTemplate = selectLayoutTemplate(text);
 
+  if (includesAny(text, ["upholstery", "upholestry", "reupholstery", "sofa upholstery", "furniture restoration", "chair restoration", "fabric repair", "leather repair"])) return "upholstery";
   if (includesAny(text, ["car rental", "rent a car", "vehicle rental", "car hire", "rental cars", "fleet rental", "airport rentals", "car_rental"])) return "car_rental";
+  if (includesAny(text, ["bicycle shop", "cycle shop", "cycling shop", "bicycle repair", "bicycle_shop"])) return "bicycle_shop";
+  if (includesAny(text, ["seafood restaurant", "seafood_restaurant", "sea food restaurant", "fresh catch", "oyster", "lobster"])) return "seafood_restaurant";
+  if (includesAny(text, ["dental_clinic", "dental clinic", "dentist", "orthodontic"])) return "dental_clinic";
+  if (includesAny(text, ["crm_software", "crm software", "crm app", "customer relationship"])) return "crm_software";
   if (includesAny(text, [
     "mobile phone shop",
     "phone shop",
@@ -162,6 +190,12 @@ function pagePlan(input: {
   proposalContext?: ProposalContext;
   requiredCount: number | null;
 }) {
+  const briefPages = input.proposalContext?.websiteGenerationBrief?.requestedPages;
+
+  if (input.proposalContext?.mode === "WEBSITE" && briefPages?.length) {
+    return Array.from(new Set(briefPages.map(normalizePage).filter(Boolean)));
+  }
+
   if (input.proposalContext?.mode === "WEBSITE" && input.proposalContext.pages.length) {
     return Array.from(new Set(input.proposalContext.pages.map(normalizePage).filter(Boolean)));
   }
@@ -177,7 +211,10 @@ function pagePlan(input: {
   const industryPage: Record<WebsiteIndustry, string> = {
     ai_product: "workflow",
     beverage: "lineup",
+    bicycle_shop: "services",
     car_rental: "services",
+    crm_software: "dashboard",
+    dental_clinic: "services",
     ecommerce: "products",
     healthcare: "services",
     marketplace: "listings",
@@ -185,6 +222,8 @@ function pagePlan(input: {
     portfolio: "work",
     real_estate: "listings",
     restaurant: "menu",
+    seafood_restaurant: "menu",
+    upholstery: "services",
     saas: "features"
   };
   const base = ["home", industryPage[input.industry], "about", "contact"];
@@ -196,7 +235,10 @@ function pagePlan(input: {
   const extras: Record<WebsiteIndustry, string[]> = {
     ai_product: ["security", "use-cases", "pricing"],
     beverage: ["campaigns", "distribution", "retail"],
+    bicycle_shop: ["accessories", "workshop", "fitting"],
     car_rental: ["fleet", "booking", "blog"],
+    crm_software: ["customers", "pipeline", "billing"],
+    dental_clinic: ["doctors", "appointments", "reviews"],
     ecommerce: ["collections", "support", "delivery"],
     healthcare: ["team", "appointments", "reviews"],
     marketplace: ["sell", "categories", "trust"],
@@ -204,6 +246,8 @@ function pagePlan(input: {
     portfolio: ["case-studies", "services", "process"],
     real_estate: ["neighborhoods", "agents", "valuation"],
     restaurant: ["reservations", "catering", "popular"],
+    seafood_restaurant: ["fresh-catch", "reservations", "sourcing"],
+    upholstery: ["before-after", "fabric-options", "blog"],
     saas: ["pricing", "integrations", "customers"]
   };
 
@@ -228,6 +272,8 @@ export function planWebsite(input: {
   const designTokens = generateDesignTokens({
     industry,
     intentText: [
+      input.proposalContext?.websiteGenerationBrief?.displayName ?? "",
+      ...(input.proposalContext?.websiteGenerationBrief?.expectedVocabulary ?? []),
       input.intent.domain,
       input.intent.siteType ?? "",
       input.composition.businessType,
@@ -252,8 +298,8 @@ export function planWebsite(input: {
     pages,
     requiredSections: profile.requiredSections,
     sectionRegistryVersion: "11.2B",
-    sourceOfTruthDomain: input.proposalContext?.domain ?? input.generatorContract?.authoritativeDomain ?? input.intent.domain,
-    sourceOfTruthPages: pages,
+    sourceOfTruthDomain: input.proposalContext?.websiteGenerationBrief?.domainId ?? input.proposalContext?.domain ?? input.generatorContract?.authoritativeDomain ?? input.intent.domain,
+    sourceOfTruthPages: input.proposalContext?.websiteGenerationBrief?.requestedPages ?? pages,
     tokensStudioExportAvailable: true,
     visualStrategy: profile.visualStrategy
   };

@@ -198,6 +198,176 @@ export const websiteReviewer: SelfReviewReviewer = {
       ...(input.requiredFiles ?? []).filter((path) => path.endsWith(".html")).map(normalizePath)
     ]));
     const generatedPublicText = visibleText(normalizedFiles.map((file) => file.content).join("\n"));
+    const websiteContract = input.intentContract?.mode === "WEBSITE" ? input.intentContract : null;
+
+    if (websiteContract) {
+      if (websiteContract.confidence < 0.58 || websiteContract.generatorStrategy === "clarify_domain_before_generation") {
+        addIssue(failures, {
+          category: "taxonomy",
+          confidence: Math.max(0.55, websiteContract.confidence),
+          description: websiteContract.assumptionNotes.join(" ") || "Domain classification confidence is too low for safe generation.",
+          domain: input.domain,
+          evidence: [
+            {
+              expected: "high-confidence taxonomy domain",
+              found: websiteContract.domainId ?? "ambiguous/unknown",
+              source: "intent_contract"
+            }
+          ],
+          generator: input.generator,
+          id: "website_taxonomy_low_confidence",
+          mode: input.mode,
+          recommendedFix: "Ask a clarifying question or regenerate after the user confirms the intended industry.",
+          repairStrategy: "clarify_domain_before_generation",
+          ruleId: websiteContract.generatorStrategy === "clarify_domain_before_generation" ? "TAXONOMY002" : "TAXONOMY001",
+          severity: "high",
+          timestamp,
+          title: websiteContract.generatorStrategy === "clarify_domain_before_generation" ? "Ambiguous Domain" : "Low-Confidence Domain Classification"
+        });
+      }
+
+      if (websiteContract.domainId && input.domain && input.domain !== websiteContract.domainId) {
+        addIssue(failures, {
+          category: "intent_lock",
+          confidence: 0.94,
+          description: `Intent contract domain ${websiteContract.domainId} differs from proposal domain ${input.domain}.`,
+          domain: input.domain,
+          evidence: [
+            {
+              expected: websiteContract.domainId,
+              found: input.domain,
+              source: "intent_contract"
+            }
+          ],
+          generator: input.generator,
+          id: "website_intent_domain_mismatch",
+          mode: input.mode,
+          recommendedFix: "Use the current prompt taxonomy contract as the authoritative domain before generation.",
+          repairStrategy: "regenerate_from_current_prompt_intent_contract",
+          ruleId: "INTENT_LOCK001",
+          severity: "high",
+          timestamp,
+          title: "Current Prompt Intent Was Overridden"
+        });
+      }
+
+      const expectedVocabularyFound = websiteContract.expectedVocabulary.filter((term) =>
+        generatedPublicText.toLowerCase().includes(term.toLowerCase())
+      );
+      const requiredVocabularyCount = Math.min(3, websiteContract.expectedVocabulary.length);
+
+      if (requiredVocabularyCount > 0 && expectedVocabularyFound.length < requiredVocabularyCount) {
+        addIssue(failures, {
+          category: "domain_consistency",
+          confidence: 0.9,
+          description: `Generated copy includes ${expectedVocabularyFound.length} taxonomy vocabulary term(s), expected at least ${requiredVocabularyCount}.`,
+          domain: input.domain,
+          evidence: [
+            {
+              expected: websiteContract.expectedVocabulary.slice(0, 8).join(", "),
+              found: expectedVocabularyFound.join(", ") || "none",
+              source: "website_public_copy"
+            }
+          ],
+          generator: input.generator,
+          id: "website_taxonomy_vocabulary_missing",
+          mode: input.mode,
+          recommendedFix: "Regenerate public copy using the taxonomy contract expectedVocabulary terms.",
+          repairStrategy: "regenerate_domain_specific_public_copy",
+          ruleId: "WEBSITE_DOMAIN001",
+          severity: "high",
+          timestamp,
+          title: "Taxonomy Vocabulary Missing"
+        });
+      }
+
+      const forbiddenFound = websiteContract.forbiddenVocabulary.filter((term) =>
+        term.length > 2 && generatedPublicText.toLowerCase().includes(term.toLowerCase())
+      );
+
+      if (forbiddenFound.length > 0) {
+        addIssue(failures, {
+          category: "domain_consistency",
+          confidence: 0.94,
+          description: `Generated output contains conflicting domain vocabulary: ${forbiddenFound.slice(0, 5).join(", ")}.`,
+          domain: input.domain,
+          evidence: [
+            {
+              expected: "zero conflicting taxonomy terms",
+              found: forbiddenFound.slice(0, 8).join(", "),
+              source: "website_public_copy"
+            }
+          ],
+          generator: input.generator,
+          id: "website_taxonomy_forbidden_vocabulary",
+          mode: input.mode,
+          recommendedFix: "Remove conflicting-domain language and regenerate from the current domain contract.",
+          repairStrategy: "remove_conflicting_domain_vocabulary",
+          ruleId: "DOMAIN_CONFLICT001",
+          severity: "high",
+          timestamp,
+          title: "Conflicting Domain Vocabulary"
+        });
+      }
+
+      const trustFound = websiteContract.trustSignals.filter((term) =>
+        generatedPublicText.toLowerCase().includes(term.toLowerCase())
+      );
+
+      if (websiteContract.trustSignals.length > 0 && trustFound.length === 0) {
+        addIssue(warnings, {
+          category: "completeness",
+          confidence: 0.82,
+          description: "Generated website does not clearly represent any taxonomy trust signal.",
+          domain: input.domain,
+          evidence: [
+            {
+              expected: websiteContract.trustSignals.join(", "),
+              found: "none",
+              source: "website_public_copy"
+            }
+          ],
+          generator: input.generator,
+          id: "website_taxonomy_trust_missing",
+          mode: input.mode,
+          recommendedFix: "Add one or more trust signals from the taxonomy contract.",
+          repairStrategy: "add_domain_trust_signal_copy",
+          ruleId: "STRUCT001",
+          severity: "medium",
+          timestamp,
+          title: "Trust Signal Missing"
+        });
+      }
+
+      const ctasFound = websiteContract.ctas.filter((term) =>
+        generatedPublicText.toLowerCase().includes(term.toLowerCase())
+      );
+
+      if (websiteContract.ctas.length > 0 && ctasFound.length === 0) {
+        addIssue(warnings, {
+          category: "conversion",
+          confidence: 0.82,
+          description: "Generated website does not clearly represent any CTA from the intent contract.",
+          domain: input.domain,
+          evidence: [
+            {
+              expected: websiteContract.ctas.join(", "),
+              found: "none",
+              source: "website_public_copy"
+            }
+          ],
+          generator: input.generator,
+          id: "website_contract_cta_missing",
+          mode: input.mode,
+          recommendedFix: "Add one or more CTA phrases from the generation brief.",
+          repairStrategy: "add_contract_cta_copy",
+          ruleId: "UX001",
+          severity: "medium",
+          timestamp,
+          title: "Contract CTA Missing"
+        });
+      }
+    }
 
     if (requestedCarRental(input.prompt, input.domain) && containsCyclingDomain(generatedPublicText)) {
       addIssue(failures, {
@@ -294,6 +464,77 @@ export const websiteReviewer: SelfReviewReviewer = {
         severity: "critical",
         timestamp
       });
+    }
+
+    for (const requiredFile of input.requiredFiles ?? []) {
+      const normalizedRequiredFile = normalizePath(requiredFile);
+
+      if (normalizedRequiredFile && !fileMap.has(normalizedRequiredFile)) {
+        addIssue(failures, {
+          category: "missing_file",
+          confidence: 0.94,
+          description: `Required file is missing: ${normalizedRequiredFile}.`,
+          domain: input.domain,
+          evidence: [
+            {
+              expected: normalizedRequiredFile,
+              found: "missing",
+              source: "generation_brief_required_files"
+            }
+          ],
+          generator: input.generator,
+          id: `website_missing_required_file_${normalizedRequiredFile}`,
+          location: { path: normalizedRequiredFile },
+          mode: input.mode,
+          recommendedFix: "Generate every required file from the website generation brief.",
+          repairStrategy: "regenerate_exact_required_file_set",
+          ruleId: normalizedRequiredFile.endsWith(".html") ? "PAGE001" : "STRUCT001",
+          severity: "high",
+          timestamp,
+          title: "Required File Missing"
+        });
+      }
+    }
+
+    if (websiteContract && fileMap.has("HASSALI.md")) {
+      const contractText = fileMap.get("HASSALI.md")?.content ?? "";
+      const metadataChecks = [
+        ["domainId", websiteContract.domainId ?? ""],
+        ["requestedPages", websiteContract.requestedPages.join(", ")],
+        ["exactPageCount", String(websiteContract.exactPageCount ?? websiteContract.requestedPages.length)],
+        ["expectedVocabulary", websiteContract.expectedVocabulary[0] ?? ""],
+        ["trustSignals", websiteContract.trustSignals[0] ?? ""]
+      ].filter(([, value]) => value);
+      const missingMetadata = metadataChecks.filter(([label, value]) =>
+        !contractText.toLowerCase().includes(label.toLowerCase()) ||
+        !contractText.toLowerCase().includes(value.toLowerCase())
+      );
+
+      if (missingMetadata.length > 0) {
+        addIssue(warnings, {
+          category: "metadata",
+          confidence: 0.84,
+          description: `HASSALI.md is missing contract evidence: ${missingMetadata.map(([label]) => label).join(", ")}.`,
+          domain: input.domain,
+          evidence: [
+            {
+              expected: metadataChecks.map(([label]) => label).join(", "),
+              found: missingMetadata.map(([label]) => label).join(", "),
+              source: "HASSALI.md"
+            }
+          ],
+          generator: input.generator,
+          id: "website_hassali_contract_metadata_missing",
+          location: { path: "HASSALI.md" },
+          mode: input.mode,
+          recommendedFix: "Write HASSALI.md directly from the WebsiteGenerationBrief metadata.",
+          repairStrategy: "rewrite_hassali_contract_metadata_from_brief",
+          ruleId: "META001",
+          severity: "medium",
+          timestamp,
+          title: "HASSALI Contract Metadata Missing"
+        });
+      }
     }
 
     for (const expectedPage of expectedPages) {

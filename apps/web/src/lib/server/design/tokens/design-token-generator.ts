@@ -13,7 +13,10 @@ import {
 const industryThemeMap: Record<WebsiteIndustry, DesignTokenThemeId> = {
   ai_product: "ai_product",
   beverage: "default_dark",
+  bicycle_shop: "luxury_ecommerce",
   car_rental: "real_estate",
+  crm_software: "saas",
+  dental_clinic: "healthcare",
   ecommerce: "luxury_ecommerce",
   healthcare: "healthcare",
   marketplace: "marketplace",
@@ -21,6 +24,8 @@ const industryThemeMap: Record<WebsiteIndustry, DesignTokenThemeId> = {
   portfolio: "portfolio",
   real_estate: "real_estate",
   restaurant: "restaurant",
+  seafood_restaurant: "restaurant",
+  upholstery: "portfolio",
   saas: "saas"
 };
 
