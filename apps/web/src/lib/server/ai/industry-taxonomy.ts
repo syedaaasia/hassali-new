@@ -152,7 +152,7 @@ function stubProfile(input: Pick<IndustryTaxonomyProfile, "aliases" | "conflicts
 
 export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   fullProfile({
-    aliases: ["upholstery", "upholestry", "reupholstery", "sofa upholstery", "furniture upholstery", "chair upholstery", "fabric repair", "leather repair", "furniture restoration"],
+    aliases: ["upholstery", "upholstry", "upholestry", "reupholstery", "sofa upholstery", "furniture upholstery", "chair upholstery", "fabric repair", "leather repair", "furniture restoration"],
     codeHints: {
       entities: ["customer", "job", "furniture item", "fabric", "estimate", "invoice"],
       possibleApps: ["estimate tracker", "job booking system", "fabric inventory", "repair workflow CRM"]
@@ -160,13 +160,13 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
     commonPages: ["home", "about", "services", "blog", "contact"],
     commonSections: ["hero", "services", "before_after", "fabric_options", "restoration_process", "testimonials", "estimate_cta", "contact"],
     conflicts: ["mobile_phone_shop", "car_rental", "bicycle_shop", "crm_software", "restaurant"],
-    ctas: ["Request a quote", "Book a consultation", "Send furniture photos", "Choose fabric options"],
+    ctas: ["Request a free estimate", "Book a consultation", "Send furniture photos", "Choose fabric options"],
     displayName: "Upholstery Business",
     expectedEntities: ["service", "fabric option", "furniture item", "estimate request", "before/after project"],
     id: "upholstery",
     relatedIndustries: ["furniture", "home services", "repair and restoration", "interior design"],
     trustSignals: ["before and after gallery", "fabric samples", "workmanship guarantee", "years of experience", "local workshop", "free estimate"],
-    typoVariants: [{ from: "upholestry", to: "upholstery" }],
+    typoVariants: [{ from: "upholstry", to: "upholstery" }, { from: "upholestry", to: "upholstery" }],
     visualHints: ["warm craft studio", "fabric texture", "before and after restoration", "premium home interior feel"],
     websiteVocabulary: ["sofa reupholstery", "chair restoration", "fabric selection", "leather repair", "custom cushions", "furniture restoration", "commercial upholstery", "home furniture", "foam replacement", "stitching", "before and after", "workshop", "free estimate"]
   }),
@@ -244,7 +244,7 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
     commonPages: ["home", "menu", "about", "contact"],
     commonSections: ["hero", "menu", "fresh_catch", "sourcing", "reservation", "contact"],
     conflicts: ["crm_software", "mobile_phone_shop", "car_rental"],
-    ctas: ["Reserve a table", "View fresh catch", "Ask about private dining"],
+    ctas: ["Reserve your table", "View menu", "Ask about private dining"],
     displayName: "Seafood Restaurant",
     expectedEntities: ["seafood dish", "fresh catch", "reservation", "supplier", "menu"],
     id: "seafood_restaurant",
@@ -292,11 +292,11 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   }),
   stubProfile({ aliases: ["motorcycle shop", "motorbike shop", "motor bike shop", "riding gear"], conflicts: ["bicycle_shop", "car_rental"], displayName: "Motorcycle Shop", id: "motorcycle_shop", typoVariants: [], websiteVocabulary: ["motorcycle", "motorbike", "helmets", "rider gear", "spare parts", "engine service", "test rides"] }),
   stubProfile({ aliases: ["bakery", "cake shop", "pastry shop", "bread bakery"], conflicts: ["dental_clinic", "crm_software"], displayName: "Bakery", id: "bakery", typoVariants: [], websiteVocabulary: ["bakery", "cakes", "pastries", "bread", "desserts", "fresh baked", "orders"] }),
-  stubProfile({ aliases: ["florist", "flower shop", "bridal flowers", "bouquet"], conflicts: ["crm_software", "mobile_phone_shop"], displayName: "Florist", id: "florist", typoVariants: [], websiteVocabulary: ["flowers", "bouquet", "wedding", "event", "delivery", "freshness", "arrangements"] }),
-  stubProfile({ aliases: ["cleaning service", "cleaning company", "cleaners", "home cleaning"], conflicts: ["restaurant", "crm_software"], displayName: "Cleaning Service", id: "cleaning_service", typoVariants: [], websiteVocabulary: ["cleaning", "deep clean", "home cleaning", "office cleaning", "schedule", "trusted cleaners"] }),
+  stubProfile({ aliases: ["florist", "flower shop", "bridal flowers", "bouquet"], conflicts: ["crm_software", "mobile_phone_shop"], ctas: ["Order flowers", "Request an arrangement", "Schedule delivery"], displayName: "Florist", id: "florist", trustSignals: ["seasonal collections", "wedding arrangements", "same-day delivery"], typoVariants: [], websiteVocabulary: ["flowers", "bouquet", "wedding", "event", "delivery", "freshness", "arrangements"] }),
+  stubProfile({ aliases: ["cleaning service", "cleaning company", "cleaners", "home cleaning"], conflicts: ["restaurant", "crm_software"], ctas: ["Book a cleaning", "Get a free quote", "Schedule recurring cleaning"], displayName: "Cleaning Service", id: "cleaning_service", trustSignals: ["insured cleaners", "local reviews", "recurring cleaning"], typoVariants: [], websiteVocabulary: ["cleaning", "deep clean", "home cleaning", "office cleaning", "move-in cleaning", "move-out cleaning", "schedule", "trusted cleaners"] }),
   stubProfile({ aliases: ["gym", "fitness studio", "gym fitness studio", "personal training"], conflicts: ["restaurant", "car_rental"], displayName: "Gym / Fitness Studio", id: "gym_fitness_studio", typoVariants: [], websiteVocabulary: ["gym", "fitness", "training", "classes", "coaches", "membership", "strength"] }),
   stubProfile({ aliases: ["beauty salon", "salon", "hair salon", "makeup studio"], conflicts: ["dental_clinic", "crm_software"], displayName: "Beauty Salon", id: "beauty_salon", typoVariants: [], websiteVocabulary: ["beauty", "salon", "hair", "makeup", "appointments", "styling", "care"] }),
-  stubProfile({ aliases: ["real estate", "real estate agency", "property agency", "realtor"], conflicts: ["car_rental", "crm_software"], displayName: "Real Estate", id: "real_estate", typoVariants: [], websiteVocabulary: ["property", "listings", "buyers", "sellers", "viewings", "neighborhoods", "agents"] }),
+  stubProfile({ aliases: ["real estate", "real estate agency", "property agency", "realtor"], conflicts: ["car_rental", "crm_software"], ctas: ["View listings", "Schedule a consultation", "Request a valuation"], displayName: "Real Estate", id: "real_estate", trustSignals: ["local market expertise", "buyer guidance", "seller strategy"], typoVariants: [], websiteVocabulary: ["property", "listings", "buyers", "sellers", "viewings", "neighborhoods", "agents"] }),
   stubProfile({ aliases: ["construction company", "builder", "contractor", "construction"], conflicts: ["software_saas" as DomainId, "restaurant" as DomainId].filter(Boolean) as DomainId[], displayName: "Construction Company", id: "construction_company", typoVariants: [], websiteVocabulary: ["construction", "contractor", "projects", "renovation", "site work", "estimates", "safety"] }),
   stubProfile({ aliases: ["law firm", "lawyer", "legal office", "attorney"], conflicts: ["restaurant", "ecommerce_store"], displayName: "Law Firm", id: "law_firm", typoVariants: [], websiteVocabulary: ["law firm", "legal", "attorney", "consultation", "cases", "practice areas", "confidential"] }),
   stubProfile({ aliases: ["accounting firm", "accountant", "tax firm", "bookkeeping"], conflicts: ["restaurant", "ecommerce_store"], displayName: "Accounting Firm", id: "accounting_firm", typoVariants: [], websiteVocabulary: ["accounting", "tax", "bookkeeping", "payroll", "financial reports", "compliance"] }),
@@ -304,7 +304,7 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   stubProfile({ aliases: ["hotel", "guesthouse", "guest house", "boutique hotel"], conflicts: ["restaurant", "car_rental"], displayName: "Hotel / Guesthouse", id: "hotel_guesthouse", typoVariants: [], websiteVocabulary: ["rooms", "booking", "amenities", "location", "guests", "breakfast", "hospitality"] }),
   stubProfile({ aliases: ["travel agency", "tour agency", "trip planner", "travel company"], conflicts: ["car_rental", "restaurant"], displayName: "Travel Agency", id: "travel_agency", typoVariants: [], websiteVocabulary: ["travel", "tours", "packages", "destinations", "itinerary", "booking", "support"] }),
   stubProfile({ aliases: ["car repair", "auto repair", "mechanic shop", "vehicle service"], conflicts: ["car_rental", "bicycle_shop"], displayName: "Car Repair", id: "car_repair", typoVariants: [], websiteVocabulary: ["car repair", "mechanic", "diagnostics", "oil change", "brakes", "service booking", "warranty"] }),
-  stubProfile({ aliases: ["electronics store", "electronics shop", "tv shop", "tv store"], conflicts: ["mobile_phone_shop", "dental_clinic"], displayName: "Electronics Store", id: "electronics_store", typoVariants: [], websiteVocabulary: ["electronics", "TV", "OLED", "QLED", "warranty", "installation", "delivery"] }),
+  stubProfile({ aliases: ["electronics store", "electronics shop", "tv shop", "tv store", "television shop", "television store", "smart tv shop", "smart tv store"], conflicts: ["mobile_phone_shop", "dental_clinic"], displayName: "Electronics Store", id: "electronics_store", typoVariants: [], websiteVocabulary: ["electronics", "TV", "OLED", "QLED", "warranty", "installation", "delivery"] }),
   stubProfile({ aliases: ["clothing brand", "fashion brand", "apparel store", "clothing store"], conflicts: ["crm_software", "restaurant"], displayName: "Clothing Brand", id: "clothing_brand", typoVariants: [], websiteVocabulary: ["clothing", "fashion", "collection", "lookbook", "sizes", "fabric", "shipping"] }),
   stubProfile({ aliases: ["interior design", "interior designer", "home interiors"], conflicts: ["upholstery", "construction_company"], displayName: "Interior Design", id: "interior_design", typoVariants: [], websiteVocabulary: ["interior design", "space planning", "materials", "moodboard", "consultation", "home styling"] }),
   stubProfile({ aliases: ["furniture store", "furniture shop", "sofa store", "chair store"], conflicts: ["upholstery", "mobile_phone_shop"], displayName: "Furniture Store", id: "furniture_store", typoVariants: [], websiteVocabulary: ["furniture", "sofa", "chair", "table", "showroom", "delivery", "collections"] }),

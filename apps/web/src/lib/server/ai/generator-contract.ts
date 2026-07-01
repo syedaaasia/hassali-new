@@ -156,6 +156,14 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function promptRequestsPythonStack(prompt: string) {
+  return /\b(?:python|py|streamlit|flask|fastapi|django|tkinter|pyside|pyqt)\b/i.test(prompt);
+}
+
+function promptRequestsReactFrontendStack(prompt: string) {
+  return /\b(?:react|vite|tsx|frontend react|react frontend|typescript frontend)\b/i.test(prompt);
+}
+
 function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
@@ -250,6 +258,19 @@ function fileStrategy(input: BuildGeneratorContractInput, mode: GeneratorMode, p
   if (mode === "answer_only") return [];
   if (mode === "small_edit") return ["single_targeted_patch", "only files containing source text"];
   if (mode === "code_generation") {
+    if (promptRequestsPythonStack(input.currentPrompt) && !promptRequestsReactFrontendStack(input.currentPrompt)) {
+      return [
+        "python_streamlit_app",
+        "app.py",
+        "requirements.txt",
+        "data/mock_crm_data.py or data/mock_inventory_data.py",
+        "README.md",
+        "ARCHITECTURE.md",
+        "SECURITY_AND_TESTING.md",
+        "HASSALI.md"
+      ];
+    }
+
     return [
       "runnable_vite_react_app",
       "package.json",
@@ -331,12 +352,21 @@ export function buildGeneratorContract(input: BuildGeneratorContractInput): Gene
         pages.length ? `Required pages: ${pages.join(", ")}.` : "Use composition pages if no explicit pages exist."
       ]
     : [];
+  const usePythonCodeStack = mode === "code_generation" &&
+    promptRequestsPythonStack(input.currentPrompt) &&
+    !promptRequestsReactFrontendStack(input.currentPrompt);
   const modeRules = mode === "code_generation"
-    ? [
-        "For app-building requests, create runnable app source files plus docs.",
-        "A Vite React app may include package.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and src/styles.css.",
-        "Do not create a public marketing website in place of CODE app source."
-      ]
+    ? usePythonCodeStack
+      ? [
+          "For explicit Python app-building requests, create Python / Streamlit source files plus docs.",
+          "Do not generate package.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, or React/Vite files unless the prompt explicitly asks for a React frontend.",
+          "Do not create a public marketing website in place of CODE app source."
+        ]
+      : [
+          "For app-building requests, create runnable app source files plus docs.",
+          "A Vite React app may include package.json, vite.config.ts, index.html, src/main.tsx, src/App.tsx, and src/styles.css.",
+          "Do not create a public marketing website in place of CODE app source."
+        ]
     : mode === "small_edit"
       ? ["Use a single targeted patch.", "Do not regenerate pages or assets."]
       : mode === "answer_only"

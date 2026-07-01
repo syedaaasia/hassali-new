@@ -71,7 +71,9 @@ type BuildProposalQualityGateInput = {
 };
 
 const placeholderPatterns = [
-  "placeholder",
+  "[placeholder]",
+  "placeholder image",
+  "insert content here",
   "replace me",
   "sample text",
   "example content",

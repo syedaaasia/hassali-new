@@ -14,7 +14,9 @@ const genericTerms = [
   "clear services studio",
   "local service",
   "lorem ipsum",
-  "placeholder",
+  "[placeholder]",
+  "placeholder image",
+  "insert content here",
   "replace me",
   "todo"
 ];

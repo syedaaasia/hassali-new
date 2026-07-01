@@ -123,6 +123,8 @@ export function detectWebsiteIndustry(input: {
     if (briefDomain === "car_rental") return "car_rental";
     if (briefDomain === "crm_software") return "crm_software";
     if (briefDomain === "dental_clinic") return "dental_clinic";
+    if (briefDomain === "cleaning_service") return "cleaning_service";
+    if (briefDomain === "florist") return "florist";
     if (briefDomain === "mobile_phone_shop") return "mobile_phone_shop";
     if (briefDomain === "seafood_restaurant") return "seafood_restaurant";
     if (briefDomain === "upholstery") return "upholstery";
@@ -146,6 +148,8 @@ export function detectWebsiteIndustry(input: {
   if (includesAny(text, ["bicycle shop", "cycle shop", "cycling shop", "bicycle repair", "bicycle_shop"])) return "bicycle_shop";
   if (includesAny(text, ["seafood restaurant", "seafood_restaurant", "sea food restaurant", "fresh catch", "oyster", "lobster"])) return "seafood_restaurant";
   if (includesAny(text, ["dental_clinic", "dental clinic", "dentist", "orthodontic"])) return "dental_clinic";
+  if (includesAny(text, ["cleaning_service", "cleaning service", "cleaning company", "home cleaning", "office cleaning", "cleaners"])) return "cleaning_service";
+  if (includesAny(text, ["florist", "flower shop", "bouquet", "bridal flowers"])) return "florist";
   if (includesAny(text, ["crm_software", "crm software", "crm app", "customer relationship"])) return "crm_software";
   if (includesAny(text, [
     "mobile phone shop",
@@ -213,9 +217,11 @@ function pagePlan(input: {
     beverage: "lineup",
     bicycle_shop: "services",
     car_rental: "services",
+    cleaning_service: "services",
     crm_software: "dashboard",
     dental_clinic: "services",
     ecommerce: "products",
+    florist: "services",
     healthcare: "services",
     marketplace: "listings",
     mobile_phone_shop: "services",
@@ -237,9 +243,11 @@ function pagePlan(input: {
     beverage: ["campaigns", "distribution", "retail"],
     bicycle_shop: ["accessories", "workshop", "fitting"],
     car_rental: ["fleet", "booking", "blog"],
+    cleaning_service: ["reviews", "move-cleaning", "booking"],
     crm_software: ["customers", "pipeline", "billing"],
     dental_clinic: ["doctors", "appointments", "reviews"],
     ecommerce: ["collections", "support", "delivery"],
+    florist: ["weddings", "delivery", "occasions"],
     healthcare: ["team", "appointments", "reviews"],
     marketplace: ["sell", "categories", "trust"],
     mobile_phone_shop: ["accessories", "repairs", "support"],

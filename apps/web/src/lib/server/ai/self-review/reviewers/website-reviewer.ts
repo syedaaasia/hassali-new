@@ -108,6 +108,24 @@ function hasEmailOrForm(content: string) {
   return /mailto:|<form\b|type=["']email["']|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(content);
 }
 
+function cssVarExists(css: string, name: string) {
+  return new RegExp(`--${name}\\s*:`, "i").test(css);
+}
+
+function bodyFontSizePx(css: string) {
+  const explicit = css.match(/--font-size-body\s*:\s*(\d+(?:\.\d+)?)px/i)?.[1] ??
+    css.match(/body\s*\{[\s\S]*?font-size\s*:\s*(\d+(?:\.\d+)?)px/i)?.[1];
+
+  return explicit ? Number(explicit) : null;
+}
+
+function countTextOccurrences(haystack: string, needle: string) {
+  if (!needle.trim()) return 0;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  return haystack.match(new RegExp(escaped, "gi"))?.length ?? 0;
+}
+
 function requestedCarRental(prompt: string, domain?: string | null) {
   const text = `${prompt} ${domain ?? ""}`;
 
@@ -197,8 +215,10 @@ export const websiteReviewer: SelfReviewReviewer = {
       ...(input.requestedPages ?? []).map(pageToPath),
       ...(input.requiredFiles ?? []).filter((path) => path.endsWith(".html")).map(normalizePath)
     ]));
-    const generatedPublicText = visibleText(normalizedFiles.map((file) => file.content).join("\n"));
+    const generatedPublicText = visibleText(htmlPages.map((file) => file.content).join("\n"));
     const websiteContract = input.intentContract?.mode === "WEBSITE" ? input.intentContract : null;
+    const cssContent = fileMap.get("styles.css")?.content ?? "";
+    const hassaliContent = fileMap.get("HASSALI.md")?.content ?? "";
 
     if (websiteContract) {
       if (websiteContract.confidence < 0.58 || websiteContract.generatorStrategy === "clarify_domain_before_generation") {
@@ -367,6 +387,147 @@ export const websiteReviewer: SelfReviewReviewer = {
           title: "Contract CTA Missing"
         });
       }
+
+      const primaryCta = websiteContract.ctas[0] ?? "";
+      if (primaryCta && countTextOccurrences(generatedPublicText, primaryCta) < 2) {
+        addIssue(warnings, {
+          category: "conversion",
+          confidence: 0.82,
+          description: "Primary CTA is not repeated after the hero/proof sections.",
+          domain: input.domain,
+          evidence: [
+            {
+              expected: `${primaryCta} appears above fold and repeats later`,
+              found: `${countTextOccurrences(generatedPublicText, primaryCta)} occurrence(s)`,
+              source: "website_public_copy"
+            }
+          ],
+          generator: input.generator,
+          id: "website_repeated_cta_missing",
+          mode: input.mode,
+          recommendedFix: "Place the primary CTA in the hero and repeat it after proof/services or in the footer.",
+          repairStrategy: "repeat_primary_cta_after_proof_or_services",
+          ruleId: "UX001",
+          severity: "medium",
+          timestamp,
+          title: "Repeated CTA Missing"
+        });
+      }
+    }
+
+    if (cssContent) {
+      const requiredVisualVars = [
+        "color-bg",
+        "color-surface",
+        "color-text",
+        "color-muted",
+        "color-primary",
+        "color-accent",
+        "font-heading",
+        "font-body",
+        "radius-card",
+        "shadow-soft",
+        "container",
+        "section-padding"
+      ];
+      const missingVisualVars = requiredVisualVars.filter((name) => !cssVarExists(cssContent, name));
+
+      if (missingVisualVars.length > 0) {
+        addIssue(warnings, {
+          category: "visual_identity",
+          confidence: 0.82,
+          description: `Generated CSS is missing premium design variables: ${missingVisualVars.join(", ")}.`,
+          domain: input.domain,
+          generator: input.generator,
+          id: "website_missing_visual_css_variables",
+          location: { path: "styles.css" },
+          mode: input.mode,
+          recommendedFix: "Add domain-specific CSS variables for palette, typography, spacing, radius, and shadow.",
+          repairStrategy: "add_creative_direction_css_variables",
+          ruleId: "STRUCT001",
+          severity: "medium",
+          timestamp,
+          title: "Visual CSS Variables Missing"
+        });
+      }
+
+      const bodyPx = bodyFontSizePx(cssContent);
+      if (bodyPx !== null && bodyPx < 16) {
+        addIssue(warnings, {
+          category: "typography",
+          confidence: 0.86,
+          description: `Body font size is ${bodyPx}px, below the 16px readability floor.`,
+          domain: input.domain,
+          evidence: [{ expected: ">= 16px", found: `${bodyPx}px`, source: "styles.css" }],
+          generator: input.generator,
+          id: "website_body_font_too_small",
+          location: { path: "styles.css" },
+          mode: input.mode,
+          recommendedFix: "Use a body font size of at least 16px.",
+          repairStrategy: "increase_body_font_size",
+          ruleId: "A11Y001",
+          severity: "medium",
+          timestamp,
+          title: "Body Font Too Small"
+        });
+      }
+
+      if (/--font-body\s*:\s*system-ui\s*,\s*sans-serif/i.test(cssContent) || /--font-heading\s*:\s*system-ui\s*,\s*sans-serif/i.test(cssContent)) {
+        addIssue(warnings, {
+          category: "typography",
+          confidence: 0.78,
+          description: "Generated CSS uses a generic system-only font stack instead of deliberate font choices.",
+          domain: input.domain,
+          generator: input.generator,
+          id: "website_generic_font_stack",
+          location: { path: "styles.css" },
+          mode: input.mode,
+          recommendedFix: "Use deliberate heading/body font stacks such as serif display headings with clean sans body copy.",
+          repairStrategy: "replace_generic_font_stack",
+          ruleId: "COPY001",
+          severity: "low",
+          timestamp,
+          title: "Generic Font Stack"
+        });
+      }
+    }
+
+    if (hassaliContent && !/##\s+Creative Direction/i.test(hassaliContent)) {
+      addIssue(warnings, {
+        category: "metadata",
+        confidence: 0.86,
+        description: "HASSALI.md does not include the Creative Direction section required for future visual edits.",
+        domain: input.domain,
+        generator: input.generator,
+        id: "website_missing_creative_direction_metadata",
+        location: { path: "HASSALI.md" },
+        mode: input.mode,
+        recommendedFix: "Record visual archetype, palette, typography, hero layout, CTA placement, proof strategy, and section rhythm.",
+        repairStrategy: "write_creative_direction_metadata",
+        ruleId: "META001",
+        severity: "medium",
+        timestamp,
+        title: "Creative Direction Metadata Missing"
+      });
+    }
+
+    if (htmlPages.some((page) => page.path === "index.html") && !/data-rhythm=["'][^"']+["']/i.test(fileMap.get("index.html")?.content ?? "")) {
+      addIssue(warnings, {
+        category: "visual_rhythm",
+        confidence: 0.78,
+        description: "Home page does not record a deterministic section rhythm marker.",
+        domain: input.domain,
+        generator: input.generator,
+        id: "website_missing_section_rhythm_marker",
+        location: { path: "index.html" },
+        mode: input.mode,
+        recommendedFix: "Render a domain-specific data-rhythm marker from the creative direction.",
+        repairStrategy: "add_home_section_rhythm_marker",
+        ruleId: "STRUCT001",
+        severity: "low",
+        timestamp,
+        title: "Section Rhythm Marker Missing"
+      });
     }
 
     if (requestedCarRental(input.prompt, input.domain) && containsCyclingDomain(generatedPublicText)) {
@@ -746,13 +907,14 @@ export const websiteReviewer: SelfReviewReviewer = {
         }
       }
 
-      const labelCounts = page.links.reduce<Record<string, number>>((counts, link) => {
+      const labelGroups = page.links.reduce<Record<string, Set<string>>>((groups, link) => {
         const label = link.label.toLowerCase();
-        if (!label) return counts;
-        counts[label] = (counts[label] ?? 0) + 1;
-        return counts;
+        if (!label) return groups;
+        groups[label] = groups[label] ?? new Set<string>();
+        groups[label].add(normalizeHref(link.href));
+        return groups;
       }, {});
-      const duplicateLabels = Object.entries(labelCounts).filter(([, count]) => count > 1);
+      const duplicateLabels = Object.entries(labelGroups).filter(([, hrefs]) => hrefs.size > 1);
       if (duplicateLabels.length > 0) {
         addIssue(warnings, {
           category: "navigation",

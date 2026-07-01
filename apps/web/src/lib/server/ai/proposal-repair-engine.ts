@@ -325,8 +325,19 @@ function simpleContractMd(contract: GeneratorContract) {
 `;
 }
 
+function isPythonStreamlitContext(input: BuildProposalRepairInput) {
+  return input.proposalContext?.framework === "python_streamlit" ||
+    input.proposalContext?.runtimeType === "python" ||
+    input.proposalContext?.codeGenerationBrief?.preferredFramework === "streamlit" ||
+    input.proposalContext?.codeGenerationBrief?.requestedStack === "python";
+}
+
 function requiredRepairFiles(input: BuildProposalRepairInput) {
   if (input.generatorContract.generatorMode === "website_generation") {
+    if (input.proposalContext?.mode === "WEBSITE" && input.proposalContext.requiredFiles.length) {
+      return input.proposalContext.requiredFiles;
+    }
+
     const pagePaths = (input.proposalContext?.pages.length ? input.proposalContext.pages : input.generatorContract.requiredPages)
       .map(pageToPath);
 
@@ -334,6 +345,26 @@ function requiredRepairFiles(input: BuildProposalRepairInput) {
   }
 
   if (input.generatorContract.generatorMode === "code_generation") {
+    if (input.proposalContext?.mode === "CODE" && input.proposalContext.requiredFiles.length) {
+      return input.proposalContext.requiredFiles;
+    }
+
+    if (isPythonStreamlitContext(input)) {
+      return [
+        "app.py",
+        "requirements.txt",
+        "data/mock_crm_data.py",
+        "README.md",
+        "ARCHITECTURE.md",
+        "SECURITY_AND_TESTING.md",
+        "HASSALI.md"
+      ];
+    }
+
+    if (input.generatorContract.requiredFileStrategy.length) {
+      return input.generatorContract.requiredFileStrategy;
+    }
+
     return ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx", "styles.css", "HASSALI.md"];
   }
 
@@ -342,6 +373,135 @@ function requiredRepairFiles(input: BuildProposalRepairInput) {
 
 function generatedRepairFile(path: string, input: BuildProposalRepairInput) {
   const appName = dominantPhrase(input.generatorContract);
+  const isPythonStack = isPythonStreamlitContext(input);
+
+  if (isPythonStack) {
+    if (path === "app.py") {
+      return `import streamlit as st
+import pandas as pd
+
+from data.mock_crm_data import CUSTOMERS, DEALS, INVOICES
+
+st.set_page_config(page_title=${JSON.stringify(appName)}, layout="wide")
+st.title(${JSON.stringify(appName)})
+st.caption("Python / Streamlit scaffold. Runtime and package installation require explicit approval.")
+
+customers = pd.DataFrame(CUSTOMERS)
+deals = pd.DataFrame(DEALS)
+invoices = pd.DataFrame(INVOICES)
+
+metric_cols = st.columns(3)
+metric_cols[0].metric("Customers", len(customers))
+metric_cols[1].metric("Open Pipeline", f"\${deals['value'].sum():,.0f}")
+metric_cols[2].metric("Billing Due", f"\${invoices['amount'].sum():,.0f}")
+
+section = st.sidebar.radio("CRM section", ["Dashboard", "Customers", "Pipeline", "Billing"])
+
+if section == "Customers":
+    st.dataframe(customers, use_container_width=True)
+elif section == "Pipeline":
+    st.bar_chart(deals.set_index("stage")["value"])
+elif section == "Billing":
+    st.dataframe(invoices, use_container_width=True)
+else:
+    st.line_chart(invoices.set_index("month")["amount"])
+`;
+    }
+
+    if (path === "requirements.txt") {
+      return "streamlit\npandas\n";
+    }
+
+    if (path === "data/mock_crm_data.py") {
+      return `CUSTOMERS = [
+    {"name": "Northstar Retail", "owner": "Amina", "status": "Active"},
+    {"name": "Metro Foods", "owner": "Bilal", "status": "Lead"},
+    {"name": "CarePlus Clinic", "owner": "Sara", "status": "Active"},
+]
+
+DEALS = [
+    {"stage": "Qualified", "value": 24000},
+    {"stage": "Proposal", "value": 38000},
+    {"stage": "Negotiation", "value": 19000},
+]
+
+INVOICES = [
+    {"month": "Jan", "amount": 7800, "status": "Paid"},
+    {"month": "Feb", "amount": 9400, "status": "Pending"},
+    {"month": "Mar", "amount": 11200, "status": "Pending"},
+]
+`;
+    }
+
+    if (path === "data/mock_inventory_data.py") {
+      return `PRODUCTS = [
+    {"sku": "IPH-15-128", "name": "iPhone 15 128GB", "stock": 18, "price": 799},
+    {"sku": "SAM-S24-256", "name": "Samsung Galaxy S24 256GB", "stock": 14, "price": 749},
+    {"sku": "AND-CASE-01", "name": "Protective Android Case", "stock": 46, "price": 19},
+]
+
+SALES = [
+    {"month": "Jan", "revenue": 12800},
+    {"month": "Feb", "revenue": 15350},
+    {"month": "Mar", "revenue": 17720},
+]
+
+REPAIRS = [
+    {"device": "iPhone 13", "issue": "screen replacement", "status": "Ready"},
+    {"device": "Galaxy A54", "issue": "battery service", "status": "In progress"},
+]
+`;
+    }
+
+    if (path === "README.md") {
+      return `# ${appName}
+
+Python / Streamlit CRM scaffold generated for review.
+
+Runtime is not started automatically. Package installation and Streamlit execution require explicit approved support.
+`;
+    }
+
+    if (path === "ARCHITECTURE.md") {
+      return `# ${appName} Architecture
+
+## Stack
+- Python
+- Streamlit
+- Pandas
+
+## Modules
+- Dashboard metrics
+- Customer table
+- Pipeline summary
+- Billing charts
+
+## Runtime Policy
+Hassali does not install packages or start Streamlit during proposal approval.
+`;
+    }
+
+    if (path === "SECURITY_AND_TESTING.md") {
+      return `# Security And Testing
+
+- Keep secrets out of generated files.
+- Add authentication, database persistence, and payment provider integrations only in approved future phases.
+- Treat mock data as local demonstration data.
+`;
+    }
+
+    if (path === "HASSALI.md") {
+      return `# HASSALI Contract
+
+- Project Type: CODE
+- Stack: Python / Streamlit
+- Domain: ${appName}
+- Preview: python_app_preview
+- Runtime: Package installation and Streamlit execution require explicit approved support.
+- Contract role: human-readable project notes only; not machine state.
+`;
+    }
+  }
 
   if (path === "package.json") {
     return JSON.stringify(

@@ -9,6 +9,10 @@ import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 import { renderWebsitePlanFiles } from "@/lib/server/ai/website-layout-engine";
 import {
+  getWebsiteCreativeDirection,
+  summarizeCreativeDirection
+} from "@/lib/server/ai/website-creative-direction";
+import {
   planWebsite,
   type WebsitePlan
 } from "@/lib/server/ai/website-planner";
@@ -2189,6 +2193,8 @@ export function generatePlannedWebsiteFiles(input: {
   const brandName = brandNameForIntent(input.intent, input.composition);
   const plan = planWebsite(input);
   const brief = input.proposalContext?.websiteGenerationBrief ?? null;
+  const creativeDirection = getWebsiteCreativeDirection({ brief, plan });
+  const creativeSummary = summarizeCreativeDirection(creativeDirection);
   const plannedFiles = renderWebsitePlanFiles({
     brandName,
     plan
@@ -2214,6 +2220,16 @@ export function generatePlannedWebsiteFiles(input: {
     `generatorBriefSummary: ${brief.hassaliMetadata.generatorBriefSummary}`,
     "previewPolicy: static srcDoc only",
     "runtimePolicy: no runtime for static websites",
+    "",
+    "## Creative Direction",
+    "",
+    `- Visual archetype: ${creativeSummary.visualArchetype}`,
+    `- Palette: ${creativeSummary.palette}`,
+    `- Typography: ${creativeSummary.headingFont} headings with ${creativeSummary.bodyFont} body copy`,
+    `- Hero layout: ${creativeSummary.heroLayout}`,
+    `- Primary CTA: ${brief.ctaPatterns[0] ?? "Contact us"} above the fold and repeated after proof/services`,
+    `- Proof strategy: ${creativeSummary.proofStrategy}`,
+    `- Section rhythm: ${creativeSummary.rhythm}`,
     "",
     "navigationContract:",
     ...brief.navigationContract.map((item) => `- ${item.label}: ${item.href}`),

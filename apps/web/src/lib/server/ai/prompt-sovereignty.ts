@@ -131,7 +131,14 @@ function contradictoryTermsFor(domain: string, capability: PromptSovereigntyCont
   const domainText = lower(domain);
   const contradictions: string[] = [];
 
-  if (!domainText.includes("inventory") && !domainText.includes("crm")) {
+  const allowsInventoryTerms =
+    domainText.includes("inventory") ||
+    domainText.includes("crm") ||
+    domainText.includes("mobile_phone_shop") ||
+    domainText.includes("mobile phone") ||
+    domainText.includes("phone shop");
+
+  if (!allowsInventoryTerms) {
     contradictions.push(
       "inventory system studio",
       "inventory system",

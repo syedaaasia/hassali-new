@@ -1,4 +1,8 @@
 import type { WebsitePlan } from "@/lib/server/ai/website-planner";
+import {
+  getWebsiteCreativeDirection,
+  type WebsiteCreativeDirection
+} from "@/lib/server/ai/website-creative-direction";
 
 function escapeHtml(value: string) {
   return value
@@ -83,6 +87,22 @@ function isUpholsteryPlan(plan: WebsitePlan) {
     text.includes("upholstery") ||
     text.includes("reupholstery") ||
     text.includes("furniture restoration");
+}
+
+function isDentalPlan(plan: WebsitePlan) {
+  return plan.industry === "dental_clinic" || `${plan.sourceOfTruthDomain ?? ""}`.includes("dental");
+}
+
+function isCleaningPlan(plan: WebsitePlan) {
+  return plan.industry === "cleaning_service" || `${plan.sourceOfTruthDomain ?? ""}`.includes("cleaning");
+}
+
+function isFloristPlan(plan: WebsitePlan) {
+  return plan.industry === "florist" || `${plan.sourceOfTruthDomain ?? ""}`.includes("florist");
+}
+
+function isRealEstatePlan(plan: WebsitePlan) {
+  return plan.industry === "real_estate" || `${plan.sourceOfTruthDomain ?? ""}`.includes("real_estate");
 }
 
 function publicLayoutLabel(plan: WebsitePlan) {
@@ -576,10 +596,235 @@ function upholsteryPageCopy(page: string) {
   return copy[page] ?? copy.home;
 }
 
+function dentalPageCopy(page: string) {
+  const copy: Record<string, ReturnType<typeof upholsteryPageCopy>> = {
+    about: {
+      cta: "Book appointment",
+      eyebrow: "Care team / gentle dentistry",
+      hero: "A calm dental clinic built around prevention, comfort, and clear treatment guidance.",
+      lede: "Meet licensed dentists focused on routine checkups, hygiene protocols, emergency dental guidance, and patient comfort from first call to follow-up.",
+      sections: [
+        { body: "Modern treatment rooms, hygiene protocols, and a gentle chairside approach help patients feel informed and safe.", title: "Comfort-first dental care", visual: "calm dental treatment room" },
+        { body: "The clinic supports checkups, whitening, fillings, orthodontic referrals, hygiene visits, and urgent dental questions.", title: "Treatments with clear guidance", visual: "dental service cards" }
+      ]
+    },
+    contact: {
+      cta: "Book appointment",
+      eyebrow: "Appointments / patient comfort",
+      hero: "Book an appointment for checkups, hygiene, urgent dental care, or treatment planning.",
+      lede: "Share your preferred time, dental concern, comfort needs, and appointment questions so the clinic can respond clearly.",
+      sections: [
+        { body: "Ask about checkup availability, emergency slots, hygiene visits, whitening, fillings, and follow-up care.", title: "Appointment request", visual: "appointment request panel" },
+        { body: "Patient comfort, gentle explanations, and transparent care steps guide every visit.", title: "Comfort and trust", visual: "patient comfort badge row" }
+      ]
+    },
+    home: {
+      cta: "Book appointment",
+      eyebrow: "Modern dental clinic",
+      hero: "Calm dental care, trusted appointments, and clear treatment guidance.",
+      lede: "A clean, patient-first dental clinic for checkups, hygiene protocols, whitening, emergency dental questions, patient reviews, and gentle care in a modern setting.",
+      sections: [
+        { body: "Book checkups, hygiene visits, fillings, whitening consultations, and urgent dental appointments through a clear contact path.", title: "Appointments and treatments", visual: "dental appointment trust badges" },
+        { body: "Licensed dentists, patient reviews, clear treatment plans, comfort, and patient communication are visible before the visitor reaches the form.", title: "Patient comfort and trust", visual: "clean clinic comfort proof" }
+      ]
+    },
+    services: {
+      cta: "View treatments",
+      eyebrow: "Treatments / dental services",
+      hero: "Dental treatments organized around prevention, comfort, and confidence.",
+      lede: "Services include checkups, hygiene appointments, whitening, fillings, emergency dental guidance, and clear treatment plans.",
+      sections: [
+        { body: "Preventive checkups, hygiene visits, oral exams, and gentle treatment explanations support long-term dental health.", title: "Preventive dental care", visual: "dental care checklist" },
+        { body: "Whitening, fillings, urgent dental questions, and specialist referrals are presented with calm patient guidance.", title: "Treatment support", visual: "treatment comfort cards" }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
+function cleaningPageCopy(page: string) {
+  const copy: Record<string, ReturnType<typeof upholsteryPageCopy>> = {
+    about: {
+      cta: "Get a free quote",
+      eyebrow: "Local cleaners / organized service",
+      hero: "A trusted cleaning team for homes, offices, deep cleans, and recurring schedules.",
+      lede: "The team brings organized checklists, insured cleaners, local reviews, and dependable scheduling to every cleaning visit.",
+      sections: [
+        { body: "Home cleaning, office cleaning, deep clean visits, and move-in cleaning are planned with room-by-room checklists.", title: "Organized cleaning process", visual: "fresh cleaning checklist" },
+        { body: "Trusted cleaners, recurring cleaning options, and local reviews give customers confidence before booking.", title: "Local trust and reviews", visual: "local cleaning review cards" }
+      ]
+    },
+    contact: {
+      cta: "Book a cleaning",
+      eyebrow: "Quotes / cleaning schedule",
+      hero: "Book a cleaning or request a free quote for home, office, or move-out service.",
+      lede: "Share rooms, schedule, deep clean needs, office cleaning details, and preferred visit times for a clear quote.",
+      sections: [
+        { body: "Ask for home cleaning, office cleaning, recurring cleaning, move-in cleaning, move-out cleaning, or deep clean support.", title: "Cleaning quote request", visual: "cleaning booking form" },
+        { body: "The team confirms scope, schedule, checklist, and visit expectations before arrival.", title: "Schedule with confidence", visual: "fresh service calendar" }
+      ]
+    },
+    home: {
+      cta: "Book a cleaning",
+      eyebrow: "Fresh local cleaning",
+      hero: "Reliable cleaning for brighter homes, offices, and move-in days.",
+      lede: "Book trusted cleaners for home cleaning, office cleaning, deep clean visits, move-in cleaning, move-out cleaning, and recurring cleaning schedules.",
+      sections: [
+        { body: "Choose home cleaning, office cleaning, deep clean, move-in cleaning, move-out cleaning, and recurring cleaning packages.", title: "Cleaning packages", visual: "bright cleaning package cards" },
+        { body: "Insured cleaners, clear schedules, trusted local reviews, and organized checklists make booking feel simple.", title: "Insured local proof", visual: "insured cleaning proof row" }
+      ]
+    },
+    services: {
+      cta: "Schedule recurring cleaning",
+      eyebrow: "Services / cleaning packages",
+      hero: "Cleaning packages for homes, offices, deep cleans, and recurring schedules.",
+      lede: "Services include home cleaning, office cleaning, kitchen and bathroom focus, deep clean support, move-out cleaning, and recurring visits.",
+      sections: [
+        { body: "Recurring cleaning keeps high-use rooms fresh with weekly, biweekly, or monthly schedules.", title: "Recurring home and office cleaning", visual: "clean room service cards" },
+        { body: "Move-in, move-out, and deep clean visits focus on kitchens, bathrooms, floors, dust, and reset details.", title: "Deep clean and moving support", visual: "before and after cleaning proof" }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
+function floristPageCopy(page: string) {
+  const copy: Record<string, ReturnType<typeof upholsteryPageCopy>> = {
+    about: {
+      cta: "Request an arrangement",
+      eyebrow: "Florist story / seasonal design",
+      hero: "A floral studio for emotional gifts, weddings, events, sympathy, and seasonal arrangements.",
+      lede: "Every bouquet, arrangement, and event piece is guided by freshness, occasion, color, and delivery needs.",
+      sections: [
+        { body: "Seasonal flowers, bouquet design, wedding flowers, sympathy arrangements, and event florals are tailored to each message.", title: "Occasion-led flowers", visual: "seasonal floral worktable" },
+        { body: "Freshness, careful wrapping, delivery timing, and arrangement guidance shape the customer experience.", title: "Freshness and delivery care", visual: "floral delivery proof" }
+      ]
+    },
+    contact: {
+      cta: "Order flowers",
+      eyebrow: "Orders / floral delivery",
+      hero: "Order flowers, request an arrangement, or discuss wedding and event florals.",
+      lede: "Share occasion, delivery date, bouquet style, color palette, budget, and message so the florist can prepare the right arrangement.",
+      sections: [
+        { body: "Ask about bouquets, sympathy flowers, wedding arrangements, seasonal collections, and same-day delivery.", title: "Arrangement inquiry", visual: "florist order form" },
+        { body: "Delivery windows, freshness care, and occasion notes are confirmed before the flowers leave the studio.", title: "Delivery and care", visual: "wrapped bouquet delivery" }
+      ]
+    },
+    home: {
+      cta: "Order flowers",
+      eyebrow: "Elegant floral design",
+      hero: "Seasonal flowers for gifts, weddings, events, and meaningful moments.",
+      lede: "A florist website shaped around fresh bouquets, wedding flowers, event arrangements, sympathy flowers, delivery, and seasonal collections.",
+      sections: [
+        { body: "Browse bouquets, seasonal arrangements, wedding flowers, sympathy flowers, and event florals with a clear order path.", title: "Flowers for every occasion", visual: "floral occasion gallery" },
+        { body: "Freshness, delivery, arrangement guidance, and event experience build trust before customers order.", title: "Freshness and event proof", visual: "seasonal arrangement proof" }
+      ]
+    },
+    services: {
+      cta: "Request an arrangement",
+      eyebrow: "Services / floral occasions",
+      hero: "Bouquets, weddings, events, sympathy flowers, delivery, and seasonal arrangements.",
+      lede: "Services include fresh bouquets, custom arrangements, wedding flowers, event florals, sympathy flowers, delivery, and seasonal collections.",
+      sections: [
+        { body: "Bouquets and custom arrangements are designed around occasion, color, budget, and recipient message.", title: "Bouquets and custom arrangements", visual: "bouquet design cards" },
+        { body: "Wedding flowers, event florals, sympathy arrangements, and delivery timing are handled with calm detail.", title: "Events, sympathy, and delivery", visual: "event floral gallery" }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
+function realEstatePageCopy(page: string) {
+  const copy: Record<string, ReturnType<typeof upholsteryPageCopy>> = {
+    about: {
+      cta: "Schedule a consultation",
+      eyebrow: "Local market / property guidance",
+      hero: "Real estate guidance for buyers, sellers, listings, valuations, and neighborhood decisions.",
+      lede: "The agency combines local market expertise, property listings, buyer guidance, seller strategy, and viewing coordination.",
+      sections: [
+        { body: "Agents guide buyers through neighborhoods, viewings, pricing context, offer steps, and property comparisons.", title: "Buyer guidance", visual: "buyer consultation cards" },
+        { body: "Sellers receive valuation advice, listing preparation, local market positioning, and viewing strategy.", title: "Seller strategy", visual: "property valuation proof" }
+      ]
+    },
+    contact: {
+      cta: "Schedule a consultation",
+      eyebrow: "Consultation / viewings",
+      hero: "Schedule a consultation for listings, valuations, buying, selling, or local market guidance.",
+      lede: "Share your property goals, neighborhood, budget, timeline, viewing needs, or valuation questions for a focused response.",
+      sections: [
+        { body: "Ask about listings, viewings, valuations, buyer consultation, seller strategy, and neighborhood expertise.", title: "Property inquiry", visual: "real estate contact panel" },
+        { body: "Agents respond with next steps for viewings, listing preparation, market context, and consultation timing.", title: "Next-step guidance", visual: "local market guidance notes" }
+      ]
+    },
+    home: {
+      cta: "View listings",
+      eyebrow: "Premium real estate guidance",
+      hero: "Find the right property path with listings, local expertise, and calm guidance.",
+      lede: "A premium real estate website for property listings, buyers, sellers, valuations, neighborhood guidance, viewings, and agent consultations.",
+      sections: [
+        { body: "Guide buyers and sellers through listings, property viewings, neighborhood decisions, valuations, and next steps.", title: "Buyer and seller paths", visual: "property path cards" },
+        { body: "Local market expertise, agent guidance, listing preparation, and testimonials make the consultation path trustworthy.", title: "Local property proof", visual: "premium property proof cards" }
+      ]
+    },
+    services: {
+      cta: "Request a valuation",
+      eyebrow: "Services / property strategy",
+      hero: "Real estate services for listings, valuations, buyers, sellers, and viewings.",
+      lede: "Services include buyer guidance, seller strategy, property listings, valuations, neighborhood advice, viewings, and agent consultation.",
+      sections: [
+        { body: "Buyers compare listings, neighborhoods, budgets, property features, and viewing schedules with agent guidance.", title: "Buyer and listing support", visual: "listing comparison cards" },
+        { body: "Sellers receive valuation, preparation, pricing strategy, local market advice, and viewing coordination.", title: "Seller valuation strategy", visual: "valuation and market cards" }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
 function renderVisual(label: string, index: number) {
   return `<div class="visual visual-${(index % 4) + 1}" aria-label="${escapeHtml(label)}">
             <span>${escapeHtml(label)}</span>
           </div>`;
+}
+
+function className(value: string) {
+  return value.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+}
+
+function rhythmLabel(direction: WebsiteCreativeDirection) {
+  return direction.rhythm.homeSections.join(" -> ");
+}
+
+function renderProofSection(input: {
+  cta: string;
+  direction: WebsiteCreativeDirection;
+  page: string;
+  plan: WebsitePlan;
+}) {
+  if (input.page !== "home") return "";
+
+  const proofItems = [
+    input.direction.proof.visualTreatment,
+    input.direction.proof.sectionTitle,
+    input.direction.conversion.ctaStyle
+  ];
+
+  return `<section class="proof-band" data-proof-type="${escapeHtml(input.direction.proof.type)}">
+        <div>
+          <p class="eyebrow">${escapeHtml(input.direction.visualArchetype)}</p>
+          <h2>${escapeHtml(input.direction.proof.sectionTitle)}</h2>
+        </div>
+        <div class="proof-list">
+${proofItems.map((item, index) => `          <article>
+            <span>${String(index + 1).padStart(2, "0")}</span>
+            <p>${escapeHtml(item)}</p>
+          </article>`).join("\n")}
+        </div>
+        <a class="button button-secondary" href="./${input.plan.pages.includes("contact") ? "contact.html" : pageToPath(input.plan.pages[input.plan.pages.length - 1] ?? "contact")}">${escapeHtml(input.cta)}</a>
+      </section>`;
 }
 
 function renderPage(input: {
@@ -591,12 +836,17 @@ function renderPage(input: {
   const pageTitle = titleCase(input.page);
   const pageSections = sectionsForPage(input.plan, input.page);
   const leadSection = pageSections[0] ?? input.plan.requiredSections[0];
+  const direction = getWebsiteCreativeDirection({ plan: input.plan });
   const seafoodCopy = isSeafoodPlan(input.plan) ? seafoodPageCopy(input.page) : null;
   const beverageCopy = isBeveragePlan(input.plan) ? beveragePageCopy(input.page) : null;
   const carRentalCopy = isCarRentalPlan(input.plan) ? carRentalPageCopy(input.page) : null;
   const mobilePhoneCopy = isMobilePhonePlan(input.plan) ? mobilePhonePageCopy(input.page) : null;
   const upholsteryCopy = isUpholsteryPlan(input.plan) ? upholsteryPageCopy(input.page) : null;
-  const domainCopy = upholsteryCopy ?? mobilePhoneCopy ?? carRentalCopy ?? beverageCopy ?? seafoodCopy;
+  const dentalCopy = isDentalPlan(input.plan) ? dentalPageCopy(input.page) : null;
+  const cleaningCopy = isCleaningPlan(input.plan) ? cleaningPageCopy(input.page) : null;
+  const floristCopy = isFloristPlan(input.plan) ? floristPageCopy(input.page) : null;
+  const realEstateCopy = isRealEstatePlan(input.plan) ? realEstatePageCopy(input.page) : null;
+  const domainCopy = upholsteryCopy ?? dentalCopy ?? mobilePhoneCopy ?? carRentalCopy ?? seafoodCopy ?? cleaningCopy ?? floristCopy ?? realEstateCopy ?? beverageCopy;
   const heroTitle = domainCopy?.hero ?? (isHome ? leadSection.title : `${pageTitle} built around ${leadSection.title.toLowerCase()}`);
   const lede = domainCopy?.lede ?? (isHome ? leadSection.intent : leadSection.contentAngle);
   const cta = domainCopy?.cta ?? input.plan.goal;
@@ -617,7 +867,7 @@ function renderPage(input: {
     <meta name="description" content="${escapeHtml(input.plan.goal)}" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body data-industry="${input.plan.industry}" data-layout="${input.plan.layoutType}">
+  <body class="creative-${escapeHtml(className(direction.hero.layout))} proof-${escapeHtml(className(direction.proof.type))}" data-archetype="${escapeHtml(direction.visualArchetype)}" data-industry="${input.plan.industry}" data-layout="${input.plan.layoutType}" data-rhythm="${escapeHtml(rhythmLabel(direction))}">
     <header class="site-header">
       <a class="brand" href="./index.html">${escapeHtml(input.brandName)}</a>
       <nav aria-label="Primary navigation">
@@ -630,10 +880,14 @@ function renderPage(input: {
           <p class="eyebrow">${escapeHtml(eyebrow)}</p>
           <h1>${escapeHtml(heroTitle)}</h1>
           <p class="lede">${escapeHtml(lede)}</p>
-          <a class="button" href="./${input.plan.pages.includes("contact") ? "contact.html" : pageToPath(input.plan.pages[input.plan.pages.length - 1] ?? "contact")}">${escapeHtml(cta)}</a>
+          <div class="hero-actions">
+            <a class="button" href="./${input.plan.pages.includes("contact") ? "contact.html" : pageToPath(input.plan.pages[input.plan.pages.length - 1] ?? "contact")}">${escapeHtml(cta)}</a>
+            <span class="proof-pill">${escapeHtml(direction.proof.sectionTitle)}</span>
+          </div>
         </div>
         ${renderVisual(domainCopy?.sections[0]?.visual ?? leadSection.visualIntent, 0)}
       </section>
+      ${renderProofSection({ cta, direction, page: input.page, plan: input.plan })}
       <section class="section-grid" aria-label="${escapeHtml(pageTitle)} sections">
 ${sectionCards
   .map((section, index) => `        <article class="section-card" data-section-id="${escapeHtml(section.id)}">
@@ -645,23 +899,23 @@ ${sectionCards
         </article>`)
   .join("\n")}
       </section>
-      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${upholsteryCopy ? "Upholstery estimate" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : "Reservation request"}">
+      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${upholsteryCopy ? "Upholstery estimate" : dentalCopy ? "Dental appointment" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : cleaningCopy ? "Cleaning quote" : floristCopy ? "Floral order" : realEstateCopy ? "Property consultation" : "Reservation request"}">
         <div>
-          <p class="eyebrow">${upholsteryCopy ? "Upholstery estimate" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : "Reservation request"}</p>
-          <h2>${upholsteryCopy ? "Tell us about the furniture, fabric, leather repair, or custom cushion work you need." : beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : carRentalCopy ? "Tell us your pickup date, dropoff location, and preferred vehicle category." : mobilePhoneCopy ? "Tell us which phone, accessory, repair, warranty, or setup support you need." : "Tell us your preferred date, party size, and seafood notes."}</h2>
-          <p>${upholsteryCopy ? "Share photos, measurements, fabric preferences, foam replacement notes, and pickup needs for a free estimate." : beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : carRentalCopy ? "Share driver details, airport timing, mileage questions, insurance needs, and rental plan preferences." : mobilePhoneCopy ? "Share model, storage, color, accessory needs, repair issue, trade-in question, installment plan, or warranty detail before visiting." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
+          <p class="eyebrow">${upholsteryCopy ? "Upholstery estimate" : dentalCopy ? "Dental appointment" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : cleaningCopy ? "Cleaning quote" : floristCopy ? "Floral order" : realEstateCopy ? "Property consultation" : "Reservation request"}</p>
+          <h2>${upholsteryCopy ? "Tell us about the furniture, fabric, leather repair, or custom cushion work you need." : dentalCopy ? "Tell us about the dental appointment, treatment, hygiene visit, or comfort need you want to plan." : beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : carRentalCopy ? "Tell us your pickup date, dropoff location, and preferred vehicle category." : mobilePhoneCopy ? "Tell us which phone, accessory, repair, warranty, or setup support you need." : cleaningCopy ? "Tell us about rooms, schedule, deep clean needs, and recurring cleaning preferences." : floristCopy ? "Tell us about the flowers, occasion, delivery date, colors, and arrangement style." : realEstateCopy ? "Tell us about listings, valuations, viewings, neighborhoods, or consultation timing." : "Tell us your preferred date, party size, and seafood notes."}</h2>
+          <p>${upholsteryCopy ? "Share photos, measurements, fabric preferences, foam replacement notes, and pickup needs for a free estimate." : dentalCopy ? "Share appointment timing, dental concerns, patient comfort needs, and treatment questions before your visit." : beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : carRentalCopy ? "Share driver details, airport timing, mileage questions, insurance needs, and rental plan preferences." : mobilePhoneCopy ? "Share model, storage, color, accessory needs, repair issue, trade-in question, installment plan, or warranty detail before visiting." : cleaningCopy ? "Share home cleaning, office cleaning, move-in cleaning, move-out cleaning, or recurring cleaning details for a quote." : floristCopy ? "Share bouquet, wedding, event, sympathy, delivery, and seasonal arrangement notes." : realEstateCopy ? "Share property goals, listing questions, valuation needs, buyer plans, seller plans, and viewing requests." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
         </div>
         <form>
           <label>Name <input type="text" name="name" autocomplete="name" /></label>
           <label>Email <input type="email" name="email" autocomplete="email" /></label>
-          <label>${upholsteryCopy ? "Furniture and fabric notes" : beverageCopy ? "Partnership notes" : carRentalCopy ? "Rental notes" : mobilePhoneCopy ? "Phone shop notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
-          <button class="button" type="button">${upholsteryCopy ? "Send estimate request" : beverageCopy ? "Send partnership inquiry" : carRentalCopy ? "Send rental inquiry" : mobilePhoneCopy ? "Send phone inquiry" : "Send reservation request"}</button>
+          <label>${upholsteryCopy ? "Furniture and fabric notes" : dentalCopy ? "Appointment notes" : beverageCopy ? "Partnership notes" : carRentalCopy ? "Rental notes" : mobilePhoneCopy ? "Phone shop notes" : cleaningCopy ? "Cleaning notes" : floristCopy ? "Arrangement notes" : realEstateCopy ? "Property notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
+          <button class="button" type="button">${upholsteryCopy ? "Send estimate request" : dentalCopy ? "Book appointment" : beverageCopy ? "Send partnership inquiry" : carRentalCopy ? "Send rental inquiry" : mobilePhoneCopy ? "Send phone inquiry" : cleaningCopy ? "Book a cleaning" : floristCopy ? "Order flowers" : realEstateCopy ? "Schedule a consultation" : "Send reservation request"}</button>
         </form>
       </section>` : ""}
     </main>
     <footer>
       <span>${escapeHtml(input.brandName)}</span>
-      <span>${escapeHtml(upholsteryCopy ? "Sofa reupholstery, chair restoration, fabric selection, leather repair, custom cushions, free estimates, and before and after workmanship." : beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : carRentalCopy ? "Rental cars, vehicle fleet, booking, pickup and dropoff, insurance, mileage, and roadside support." : mobilePhoneCopy ? "Smartphones, iPhone, Samsung, Android phones, accessories, warranty, repairs, trade-ins, and device setup support." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : input.plan.visualStrategy)}</span>
+      <span>${escapeHtml(upholsteryCopy ? "Sofa reupholstery, chair restoration, fabric selection, leather repair, custom cushions, free estimates, and before and after workmanship." : dentalCopy ? "Dental appointments, hygiene, treatments, comfort, emergency guidance, and patient trust." : beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : carRentalCopy ? "Rental cars, vehicle fleet, booking, pickup and dropoff, insurance, mileage, and roadside support." : mobilePhoneCopy ? "Smartphones, iPhone, Samsung, Android phones, accessories, warranty, repairs, trade-ins, and device setup support." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : cleaningCopy ? "Home cleaning, office cleaning, deep clean visits, trusted cleaners, local reviews, and recurring schedules." : floristCopy ? "Fresh flowers, bouquets, wedding arrangements, event florals, delivery, and seasonal collections." : realEstateCopy ? "Property listings, buyers, sellers, viewings, valuations, neighborhoods, and agent consultation." : input.plan.visualStrategy)}</span>
       <a href="mailto:hello@example.com">hello@example.com</a>
     </footer>
     <script src="./main.js"></script>
@@ -705,23 +959,58 @@ function renderWebsitePlanCss(plan: WebsitePlan) {
   const cssVariables = Object.entries(plan.designTokens.cssVariables)
     .map(([name, value]) => `  ${name}: ${value};`)
     .join("\n");
-  const colorScheme = plan.designTokens.tokens.color.background.value.toLowerCase().startsWith("#0") ? "dark" : "light";
+  const direction = getWebsiteCreativeDirection({ plan });
+  const colorScheme = direction.palette.background.toLowerCase().startsWith("#0") ? "dark" : "light";
 
   return `:root {
   color-scheme: ${colorScheme};
 ${cssVariables}
-  font-family: var(--font-sans);
+  --color-bg: ${direction.palette.background};
+  --color-surface: ${direction.palette.surface};
+  --color-surface-alt: ${direction.palette.surfaceAlt};
+  --color-text: ${direction.palette.text};
+  --color-muted: ${direction.palette.mutedText};
+  --color-primary: ${direction.palette.primary};
+  --color-primary-dark: ${direction.palette.primaryDark};
+  --color-accent: ${direction.palette.accent};
+  --color-border: ${direction.palette.border};
+  --font-heading: ${direction.typography.headingFont};
+  --font-body: ${direction.typography.bodyFont};
+  --font-size-body: ${direction.typography.baseSizePx}px;
+  --line-height-body: ${direction.typography.lineHeight};
+  --scale-h1: ${direction.typography.scale.h1};
+  --scale-h2: ${direction.typography.scale.h2};
+  --scale-h3: ${direction.typography.scale.h3};
+  --scale-body: ${direction.typography.scale.body};
+  --scale-small: ${direction.typography.scale.small};
+  --display-weight: ${direction.typography.displayWeight};
+  --heading-weight: ${direction.typography.headingWeight};
+  --body-weight: ${direction.typography.bodyWeight};
+  --radius-card: ${direction.spacing.cardRadius};
+  --radius-button: var(--token-radius-pill);
+  --shadow-soft: 0 24px 70px color-mix(in srgb, var(--color-primary-dark) 18%, transparent);
+  --container: ${direction.spacing.containerWidth};
+  --section-padding: ${direction.spacing.sectionPadding};
+  --card-padding: ${direction.spacing.cardPadding};
+  --hero-treatment: ${direction.hero.backgroundTreatment};
+  --proof-treatment: ${direction.proof.visualTreatment};
+  font-family: var(--font-body);
 }
 
 * { box-sizing: border-box; }
 body {
   margin: 0;
   min-height: 100vh;
+  font-family: var(--font-body);
+  font-size: var(--font-size-body);
+  font-weight: var(--body-weight);
+  line-height: var(--line-height-body);
   background:
-    radial-gradient(circle at 18% 10%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 28rem),
-    radial-gradient(circle at 82% 16%, color-mix(in srgb, var(--accent-2) 16%, transparent), transparent 26rem),
-    var(--canvas);
-  color: var(--ink);
+    radial-gradient(circle at 18% 10%, color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 30rem),
+    radial-gradient(circle at 82% 16%, color-mix(in srgb, var(--color-primary) 18%, transparent), transparent 27rem),
+    linear-gradient(135deg, var(--color-bg), color-mix(in srgb, var(--color-bg) 78%, var(--color-surface-alt))),
+    var(--color-bg);
+  color: var(--color-text);
 }
 a { color: inherit; text-decoration: none; }
 .site-header, main, footer { margin: 0 auto; max-width: var(--token-layout-max-width); }
@@ -732,77 +1021,102 @@ a { color: inherit; text-decoration: none; }
   gap: 1rem;
   padding: 1.1rem clamp(1rem, 4vw, 2rem);
 }
-.brand { font-weight: 900; letter-spacing: -0.03em; }
-nav { display: flex; flex-wrap: wrap; gap: 1rem; color: var(--muted); font-size: 0.92rem; }
-main { padding: var(--token-spacing-xl) var(--token-spacing-page); }
+.brand { font-family: var(--font-heading); font-weight: var(--heading-weight); letter-spacing: 0; }
+nav { display: flex; flex-wrap: wrap; gap: 1rem; color: var(--color-muted); font-size: 0.92rem; }
+main { max-width: var(--container); padding: var(--token-spacing-xl) var(--token-spacing-page); }
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 1.08fr) minmax(17rem, 0.72fr);
   gap: clamp(1.5rem, 5vw, 4rem);
   align-items: center;
   padding: var(--section-padding);
+  border-radius: calc(var(--radius-card) * 1.35);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-surface) 88%, transparent), color-mix(in srgb, var(--color-surface-alt) 52%, transparent));
 }
 .hero-copy { min-width: 0; }
 .eyebrow {
-  color: var(--accent);
+  color: var(--color-accent);
   font-size: 0.76rem;
   font-weight: 850;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 h1, h2, p { margin: 0; }
+h1, h2, h3 { font-family: var(--font-heading); letter-spacing: 0; }
 h1 {
   max-width: 13ch;
-  font-size: clamp(2.6rem, 7vw, 6rem);
-  line-height: 0.92;
-  letter-spacing: -0.045em;
+  font-size: var(--scale-h1);
+  font-weight: var(--display-weight);
+  line-height: 0.95;
 }
-h2 { margin-top: 0.5rem; font-size: clamp(1.35rem, 3vw, 2rem); line-height: 1.05; }
-.lede, .section-card p, footer { color: var(--muted); line-height: 1.72; }
+h2 { margin-top: 0.5rem; font-size: var(--scale-h2); font-weight: var(--heading-weight); line-height: 1.08; }
+h3 { font-size: var(--scale-h3); }
+.lede, .section-card p, footer { color: var(--color-muted); line-height: 1.72; }
 .lede { margin-top: 1rem; max-width: 650px; font-size: clamp(1rem, 1.8vw, 1.2rem); }
+.hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; margin-top: 1.25rem; }
 .button {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  margin-top: 1.25rem;
-  border-radius: var(--token-radius-pill);
-  background: var(--accent);
-  color: var(--token-color-primary-foreground);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  border-radius: var(--radius-button);
+  background: var(--color-accent);
+  color: var(--color-primary-dark);
   padding: var(--button-padding);
   font-weight: 850;
+}
+.button-secondary { background: transparent; color: var(--color-text); }
+.proof-pill {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-button);
+  color: var(--color-muted);
+  padding: 0.7rem 0.95rem;
+  font-size: var(--scale-small);
 }
 .section-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
   gap: 1rem;
+  margin-top: clamp(2rem, 5vw, 4rem);
 }
-.section-card, .visual {
-  border: 1px solid var(--line);
+.section-card, .visual, .proof-band {
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
-  background: var(--surface);
+  background: var(--color-surface);
   backdrop-filter: blur(16px) saturate(120%);
   box-shadow: var(--shadow-soft);
 }
 .section-card { display: grid; gap: 0.9rem; padding: var(--card-padding); }
-.section-card span { color: var(--accent-2); font-size: 0.76rem; font-weight: 900; }
+.section-card span { color: var(--color-primary); font-size: 0.76rem; font-weight: 900; }
+.proof-band {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: clamp(1rem, 3vw, 2rem);
+  margin-top: clamp(1.4rem, 4vw, 3rem);
+  padding: var(--card-padding);
+}
+.proof-list { display: grid; gap: 0.75rem; }
+.proof-list article { border-left: 3px solid var(--color-accent); padding-left: 0.85rem; }
+.proof-list span { color: var(--color-accent); font-size: var(--scale-small); font-weight: 900; }
 .contact-form {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(18rem, 1fr);
   gap: var(--token-spacing-lg);
   margin-top: var(--token-spacing-xl);
-  border: 1px solid var(--line);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
-  background: var(--surface);
+  background: var(--color-surface);
   padding: var(--card-padding);
 }
 form { display: grid; gap: 0.85rem; }
-label { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.9rem; }
+label { display: grid; gap: 0.35rem; color: var(--color-muted); font-size: 0.9rem; }
 input, textarea {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--color-border);
   border-radius: var(--token-radius-md);
-  background: color-mix(in srgb, var(--surface-elevated) 70%, transparent);
-  color: var(--ink);
+  background: color-mix(in srgb, var(--color-surface-alt) 48%, transparent);
+  color: var(--color-text);
   padding: 0.85rem 0.9rem;
   font: inherit;
 }
@@ -817,15 +1131,20 @@ input, textarea {
   font-weight: 950;
 }
 .visual span { max-width: 10ch; }
-.visual-1 { background: radial-gradient(circle at 22% 18%, color-mix(in srgb, var(--accent) 34%, transparent), transparent 8rem), linear-gradient(135deg, color-mix(in srgb, var(--surface-elevated) 84%, var(--accent)), color-mix(in srgb, var(--surface) 72%, var(--accent-2))); }
-.visual-2 { background: radial-gradient(circle at 70% 20%, color-mix(in srgb, var(--accent) 32%, transparent), transparent 9rem), linear-gradient(145deg, var(--surface-elevated), color-mix(in srgb, var(--surface) 78%, var(--accent-2))); }
-.visual-3 { background: radial-gradient(circle at 32% 70%, color-mix(in srgb, var(--accent-2) 30%, transparent), transparent 10rem), linear-gradient(145deg, var(--surface-elevated), color-mix(in srgb, var(--surface) 78%, var(--accent))); }
-.visual-4 { background: linear-gradient(135deg, color-mix(in srgb, var(--ink) 8%, transparent), color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--accent-2) 22%, transparent)); }
+.visual-1 { background: radial-gradient(circle at 22% 18%, color-mix(in srgb, var(--color-accent) 34%, transparent), transparent 8rem), linear-gradient(135deg, color-mix(in srgb, var(--color-surface-alt) 84%, var(--color-accent)), color-mix(in srgb, var(--color-surface) 72%, var(--color-primary))); }
+.visual-2 { background: radial-gradient(circle at 70% 20%, color-mix(in srgb, var(--color-accent) 32%, transparent), transparent 9rem), linear-gradient(145deg, var(--color-surface-alt), color-mix(in srgb, var(--color-surface) 78%, var(--color-primary))); }
+.visual-3 { background: radial-gradient(circle at 32% 70%, color-mix(in srgb, var(--color-primary) 30%, transparent), transparent 10rem), linear-gradient(145deg, var(--color-surface-alt), color-mix(in srgb, var(--color-surface) 78%, var(--color-accent))); }
+.visual-4 { background: linear-gradient(135deg, color-mix(in srgb, var(--color-text) 8%, transparent), color-mix(in srgb, var(--color-accent) 22%, transparent), color-mix(in srgb, var(--color-primary) 22%, transparent)); }
+.creative-trust-clinic .hero { grid-template-columns: minmax(0, 1fr); text-align: center; }
+.creative-booking-focused .hero { grid-template-columns: minmax(0, 0.82fr) minmax(18rem, 1fr); }
+.creative-retail-showcase .visual { min-height: 23rem; border-radius: 28px; }
+.creative-luxury-gallery .section-grid { grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); }
+.creative-service-local .hero { border-radius: 26px; }
 body[data-layout="${plan.layoutType}"] .section-card:first-child { grid-column: span 2; }
 @media (max-width: 860px) {
   .site-header, footer { align-items: flex-start; flex-direction: column; }
-  .hero { grid-template-columns: 1fr; }
-  .contact-form { grid-template-columns: 1fr; }
+  .hero, .contact-form, .proof-band { grid-template-columns: 1fr; }
+  .creative-luxury-gallery .section-grid { grid-template-columns: 1fr; }
   body[data-layout="${plan.layoutType}"] .section-card:first-child { grid-column: span 1; }
 }
 `;

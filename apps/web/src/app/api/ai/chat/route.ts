@@ -1362,6 +1362,71 @@ function promptRequestsReactFrontendStack(prompt: string) {
   return /\b(?:react|vite|tsx|frontend react|react frontend|typescript frontend)\b/i.test(prompt);
 }
 
+function compositionForCurrentWebsiteBrief(
+  composition: CompositionStrategy,
+  proposalContext?: ProposalContext
+): CompositionStrategy {
+  const brief = proposalContext?.websiteGenerationBrief;
+
+  if (!brief) return composition;
+
+  const pages = brief.requestedPages.length ? brief.requestedPages : composition.siteArchitecture.pages;
+  const vocabulary = brief.expectedVocabulary.slice(0, 8);
+  const audience = vocabulary.length
+    ? vocabulary.map((term) => `${brief.displayName} ${term}`)
+    : composition.audience;
+  const businessGoals = [
+    brief.conversionGoal,
+    ...brief.ctaPatterns.slice(0, 2)
+  ].filter(Boolean);
+  const trustSignals = brief.trustSignals.length ? brief.trustSignals : brief.expectedVocabulary.slice(0, 4);
+
+  return {
+    ...composition,
+    audience,
+    businessGoals: businessGoals.length ? businessGoals : composition.businessGoals,
+    businessType: `${brief.domainId} / ${brief.displayName}`,
+    brandPositioning: brief.expectedVocabulary.length
+      ? brief.expectedVocabulary.slice(0, 4)
+      : composition.brandPositioning,
+    contentStrategy: {
+      ...composition.contentStrategy,
+      ctaStrategy: brief.ctaPatterns.length ? brief.ctaPatterns : composition.contentStrategy.ctaStrategy,
+      heroGoal: brief.conversionGoal,
+      trustSignals
+    },
+    reasoningSummary:
+      `${brief.displayName} website derived from the current prompt contract. ` +
+      `Domain=${brief.domainId}; pages=${pages.join(", ")}; requiredFiles=${brief.requiredFiles.join(", ")}.`,
+    sectionPlan: pages.map((page) => ({
+      page,
+      sections: brief.pageIntentMap?.[page] ?? brief.expectedSections.slice(0, 4)
+    })),
+    siteArchitecture: {
+      pageCount: pages.length,
+      pages
+    }
+  };
+}
+
+function decisionForProposalContext(decision: DecisionPlan, proposalContext?: ProposalContext): DecisionPlan {
+  if (proposalContext?.mode === "CODE" && proposalContext.codeGenerationBrief && decision.requestType !== "code_system_generation") {
+    return {
+      ...decision,
+      reason: `${decision.reason} CODE proposal context overrides stale ${decision.requestType} routing.`,
+      requestType: "code_system_generation",
+      requiredFiles: proposalContext.requiredFiles,
+      siteStructure: {
+        pageCount: 0,
+        pages: [],
+        sections: proposalContext.codeGenerationBrief.modules
+      }
+    };
+  }
+
+  return decision;
+}
+
 function createLocalProposal(
   prompt: string,
   workspace: WorkspaceContext,
@@ -1375,7 +1440,7 @@ function createLocalProposal(
 ): DiffProposal {
   const renameRequest = detectRenameRequest(prompt);
 
-  if (decision.requestType === "code_system_generation") {
+  if (decision.requestType === "code_system_generation" || (proposalContext?.mode === "CODE" && proposalContext.codeGenerationBrief)) {
     const promptText = prompt.toLowerCase();
     const appPreview = createCodeAppPreview(prompt);
     const systemName = promptText.includes("crm")
@@ -2051,7 +2116,7 @@ if ("IntersectionObserver" in window) {
     };
   }
 
-  if (decision.requestType === "website_generation" || decision.requestType === "multi_page_generation") {
+  if (decision.requestType === "website_generation" || decision.requestType === "multi_page_generation" || (proposalContext?.mode === "WEBSITE" && proposalContext.websiteGenerationBrief)) {
     if (generatorContract?.contractBlocks.length) {
       return {
         changes: [],
@@ -2071,8 +2136,9 @@ if ("IntersectionObserver" in window) {
       };
     }
 
+    const websiteComposition = compositionForCurrentWebsiteBrief(composition, proposalContext);
     const websiteGeneration = generatePlannedWebsiteFiles({
-      composition,
+      composition: websiteComposition,
       generatorContract,
       intent,
       proposalContext
@@ -2157,7 +2223,7 @@ if ("IntersectionObserver" in window) {
       };
     }
     const generatedFileNames = Object.keys(websiteFiles);
-    const websiteBriefName = proposalContext?.websiteGenerationBrief?.displayName ?? composition.businessType;
+    const websiteBriefName = proposalContext?.websiteGenerationBrief?.displayName ?? websiteComposition.businessType;
     const standardFiles = Object.entries(websiteFiles).map(([path, content]) => ({
       content,
       path,
@@ -2166,7 +2232,7 @@ if ("IntersectionObserver" in window) {
           ? "Adds responsive premium styling for the static website."
           : path === "main.js"
             ? "Adds lightweight interactions for motion, hover polish, and reveal behavior."
-            : `Creates the ${path.replace(".html", "")} page for the ${composition.businessType} website.`
+            : `Creates the ${path.replace(".html", "")} page for the ${websiteBriefName} website.`
     }));
     const changes = [
       ...standardFiles.filter((file) => file.content.trim().length > 0).map((file) => ({
@@ -4035,22 +4101,24 @@ async function createFallbackProposalResponse(input: {
   proposalContext: ProposalContext;
   workspace: WorkspaceContext;
 }) {
+  const proposalComposition = compositionForCurrentWebsiteBrief(input.composition, input.proposalContext);
+  const proposalDecision = decisionForProposalContext(input.decision, input.proposalContext);
   const proposal = createLocalProposal(
     input.prompt,
     input.workspace,
     input.mode,
     input.diagnostic,
-    input.decision,
+    proposalDecision,
     input.intent,
-    input.composition,
+    proposalComposition,
     input.generatorContract,
     input.proposalContext
   );
   const proposalWithIntent = addCompositionDebugSummary(
     withProjectContractUpdate({
-      composition: input.composition,
+      composition: proposalComposition,
       contract: input.projectContract,
-      decision: input.decision,
+      decision: proposalDecision,
       generatorContract: input.generatorContract,
       intent: input.intent,
       kernel: input.kernel,
@@ -4059,12 +4127,12 @@ async function createFallbackProposalResponse(input: {
       workspace: input.workspace
     }),
     input.intent,
-    input.composition,
+    proposalComposition,
     input.kernel
   );
   const proposalWithRouting = enforcePromptSovereignty({
-    composition: input.composition,
-    decision: input.decision,
+    composition: proposalComposition,
+    decision: proposalDecision,
     intent: input.intent,
     prompt: input.prompt,
     proposalContext: input.proposalContext,
@@ -4073,7 +4141,7 @@ async function createFallbackProposalResponse(input: {
       input.kernel,
       input.routing,
       input.intent,
-      input.composition,
+      proposalComposition,
       input.prompt,
       input.translatedIntent,
       input.blueprint,
@@ -4110,7 +4178,7 @@ async function createFallbackProposalResponse(input: {
     content: visibleSummary,
     metadata: {
       fallbackReason: input.reason,
-      composition: input.composition,
+      composition: proposalComposition,
       intent: input.intent,
       intelligenceKernel: compactIntelligenceKernel(input.kernel),
       intentTranslation: compactTranslatedIntent(input.translatedIntent),
@@ -4633,21 +4701,23 @@ export async function POST(request: Request) {
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (shouldUseDeterministicProposal || !process.env.OPENROUTER_API_KEY)
   ) {
+    const proposalComposition = compositionForCurrentWebsiteBrief(composition, proposalContext);
+    const proposalDecision = decisionForProposalContext(decision, proposalContext);
     const localProposal = createLocalProposal(
       effectiveUserPrompt,
       workspace,
       mode,
       diagnostic,
-      decision,
+      proposalDecision,
       intent,
-      composition,
+      proposalComposition,
       generatorContract,
       proposalContext
     );
     const proposalWithContract = withProjectContractUpdate({
-      composition,
+      composition: proposalComposition,
       contract: activeProjectContract,
-      decision,
+      decision: proposalDecision,
       generatorContract,
       intent,
       kernel,
@@ -4656,8 +4726,8 @@ export async function POST(request: Request) {
       workspace
     });
     const routedProposal = enforcePromptSovereignty({
-      composition,
-      decision,
+      composition: proposalComposition,
+      decision: proposalDecision,
       intent,
       prompt: effectiveUserPrompt,
       proposalContext,
@@ -4665,13 +4735,13 @@ export async function POST(request: Request) {
         addCompositionDebugSummary(
           proposalWithContract,
           intent,
-          composition,
+          proposalComposition,
           kernel
         ),
         kernel,
         routing,
         intent,
-        composition,
+        proposalComposition,
         effectiveUserPrompt,
         translatedIntent,
         blueprint,
@@ -4707,7 +4777,7 @@ export async function POST(request: Request) {
     persistence = await persistChatMessage(persistence, {
       content: visibleSummary,
       metadata: {
-        composition,
+        composition: proposalComposition,
         model,
         intent,
         intentTranslation: compactTranslatedIntent(translatedIntent),
@@ -4906,17 +4976,19 @@ export async function POST(request: Request) {
       });
     }
 
+    const proposalComposition = compositionForCurrentWebsiteBrief(composition, proposalContext);
+    const proposalDecision = decisionForProposalContext(decision, proposalContext);
     const routedProposal: DiffProposal = enforcePromptSovereignty({
-      composition,
-      decision,
+      composition: proposalComposition,
+      decision: proposalDecision,
       intent,
       prompt: effectiveUserPrompt,
       proposalContext,
       proposal: attachProposalRoutingMetadata(
         addCompositionDebugSummary(withProjectContractUpdate({
-          composition,
+          composition: proposalComposition,
           contract: activeProjectContract,
-          decision,
+          decision: proposalDecision,
           generatorContract,
           intent,
           kernel,
@@ -4951,11 +5023,11 @@ export async function POST(request: Request) {
           })
           },
           workspace
-        }), intent, composition, kernel),
+        }), intent, proposalComposition, kernel),
         kernel,
         routing,
         intent,
-        composition,
+        proposalComposition,
         effectiveUserPrompt,
         translatedIntent,
         blueprint,
@@ -5017,8 +5089,8 @@ export async function POST(request: Request) {
 
     const quality = scoreProposalQuality({
       changes: proposal.changes,
-      composition,
-      decision,
+      composition: proposalComposition,
+      decision: proposalDecision,
       existingFileList: workspace.fileList,
       intent
     });
@@ -5053,7 +5125,7 @@ export async function POST(request: Request) {
     persistence = await persistChatMessage(persistence, {
       content: proposal.summary,
       metadata: {
-        composition,
+        composition: proposalComposition,
         intent,
         intentTranslation: compactTranslatedIntent(translatedIntent),
         blueprint: compactBusinessBlueprint(blueprint),

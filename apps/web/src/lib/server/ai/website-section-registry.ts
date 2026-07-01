@@ -5,7 +5,9 @@ export type WebsiteIndustry =
   | "car_rental"
   | "crm_software"
   | "dental_clinic"
+  | "cleaning_service"
   | "ecommerce"
+  | "florist"
   | "healthcare"
   | "marketplace"
   | "mobile_phone_shop"
@@ -237,6 +239,44 @@ const profiles: Record<WebsiteIndustry, WebsiteIndustryProfile> = {
       section("contact", "Reserve a Vehicle", "Close with contact, pickup location, date, and vehicle category inquiry.", "rental reservation form")
     ],
     visualStrategy: "premium vehicle fleet, reservation cards, pickup/dropoff cues, transparent pricing, roadside support, no SaaS dashboard imagery"
+  },
+  cleaning_service: {
+    audience: "homeowners, renters, offices, property managers, and local customers booking reliable cleaning",
+    contentStrategy: ["lead with easy booking", "show cleaning packages", "surface insured/local trust"],
+    goal: "turn cleaning interest into quote requests and scheduled visits",
+    industry: "cleaning_service",
+    layoutType: "clinical_trust",
+    optionalSections: [
+      section("reviews", "Local Reviews", "Build trust with local customer proof.", "fresh review cards", true),
+      section("move-cleaning", "Move-In and Move-Out Cleaning", "Support high-intent moving needs.", "move cleaning checklist", true)
+    ],
+    requiredSections: [
+      section("cleaning-hero", "Fresh Local Cleaning", "Lead with home cleaning, office cleaning, and quote path.", "bright cleaned room"),
+      section("packages", "Home, Office, and Deep Clean Packages", "Show practical cleaning service options.", "cleaning package cards"),
+      section("trust", "Insured Cleaners and Local Reviews", "Build confidence before booking.", "insured cleaning badges"),
+      section("schedule", "Recurring Cleaning Schedule", "Explain weekly, biweekly, and monthly service.", "cleaning calendar"),
+      section("contact", "Book a Cleaning", "Close with room details, schedule, and quote CTA.", "cleaning booking form")
+    ],
+    visualStrategy: "fresh bright cleaning surfaces, checklist cards, insured proof, local reviews"
+  },
+  florist: {
+    audience: "gift buyers, wedding clients, event planners, families, and seasonal flower customers",
+    contentStrategy: ["lead with emotional arrangement value", "show occasions", "make ordering and delivery clear"],
+    goal: "turn flower interest into orders, arrangement requests, and event inquiries",
+    industry: "florist",
+    layoutType: "creator_case_study",
+    optionalSections: [
+      section("weddings", "Wedding and Event Florals", "Support larger arrangement inquiries.", "event floral gallery", true),
+      section("delivery", "Delivery and Freshness", "Clarify delivery timing and care.", "delivery proof card", true)
+    ],
+    requiredSections: [
+      section("florist-hero", "Seasonal Floral Design", "Lead with bouquets, arrangements, and order path.", "seasonal bouquet gallery"),
+      section("occasions", "Flowers for Every Occasion", "Show gift, wedding, sympathy, and event paths.", "occasion cards"),
+      section("arrangements", "Featured Arrangements", "Show bouquet and floral arrangement variety.", "arrangement gallery"),
+      section("freshness", "Freshness and Delivery Care", "Build proof around freshness and delivery.", "freshness proof"),
+      section("contact", "Order Flowers", "Close with delivery date, occasion, and arrangement request.", "floral order form")
+    ],
+    visualStrategy: "soft floral gallery, seasonal arrangements, delivery proof, emotional gift cues"
   },
   healthcare: {
     audience: "patients and families looking for calm, trustworthy care",
