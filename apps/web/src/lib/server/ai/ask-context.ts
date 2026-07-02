@@ -1,3 +1,5 @@
+import { classifyAskIntent, createAskSeriousAnswer } from "./ask-serious-assistant";
+
 export type AskCapability = "calculator" | "current_time" | "file_context" | "weather" | "web_search";
 
 export type AskRuntimeContext = {
@@ -313,8 +315,13 @@ export function buildAskRuntimeContext(now = new Date()): AskRuntimeContext {
 
 export function detectAskLiveIntent(prompt: string): AskLiveIntent {
   const normalized = prompt.trim().toLowerCase();
+  const askIntent = classifyAskIntent(prompt);
 
-  if (isDraftingIntent(prompt)) {
+  if (
+    askIntent.intent !== "date_time_question" &&
+    askIntent.intent !== "wrong_mode_build_request" &&
+    askIntent.intent !== "general_answer"
+  ) {
     return "general";
   }
 
@@ -323,6 +330,7 @@ export function detectAskLiveIntent(prompt: string): AskLiveIntent {
   }
 
   if (
+    askIntent.intent === "date_time_question" ||
     /\b(?:what date is today|today'?s date|today date|current date|what day is it|what time is it|current time|time now|date today)\b/i.test(
       normalized
     )
@@ -331,6 +339,7 @@ export function detectAskLiveIntent(prompt: string): AskLiveIntent {
   }
 
   if (
+    askIntent.intent === "wrong_mode_build_request" ||
     /\b(?:create|build|generate|design|make|edit|update)\b[\s\S]{0,80}\b(?:website|site|app|tool|system|file|files|code)\b/i.test(
       prompt
     )
@@ -343,56 +352,6 @@ export function detectAskLiveIntent(prompt: string): AskLiveIntent {
   }
 
   return "general";
-}
-
-function isDraftingIntent(prompt: string) {
-  return /\b(?:write|draft|compose|prepare|create|make)\b[\s\S]{0,120}\b(?:message|email|reply|note|reminder|sms|whatsapp|dm|letter|caption|announcement)\b/i.test(prompt) ||
-    /\b(?:message|email|reply|note|reminder|sms|whatsapp|dm|letter|caption|announcement)\b[\s\S]{0,80}\b(?:to|for)\s+(?:a\s+)?(?:client|customer|team|manager|lead|user|patient|vendor|partner)\b/i.test(prompt);
-}
-
-function extractDraftInstruction(prompt: string) {
-  const match = prompt.match(/\b(?:saying|that says|to say|which says)\s+(.+?)(?:[.!?]\s*)?$/i);
-
-  if (match?.[1]) {
-    return match[1].trim().replace(/^["']|["']$/g, "");
-  }
-
-  return prompt
-    .replace(/^\s*(?:please\s+)?(?:write|draft|compose|prepare|create|make)\s+(?:a\s+|an\s+|the\s+)?/i, "")
-    .trim();
-}
-
-function createDraftingAnswer(prompt: string) {
-  const instruction = extractDraftInstruction(prompt);
-  const lower = instruction.toLowerCase();
-
-  if (/\breceived\b/.test(lower) && /\bconfirm\b/.test(lower) && /\boptions\b/.test(lower)) {
-    return (
-      "Here is a polished draft:\n\n" +
-      "Hi,\n\n" +
-      "Thank you for reaching out. We have received your request and will confirm the available options tomorrow morning.\n\n" +
-      "Best regards"
-    );
-  }
-
-  if (/\bmeeting\b/.test(lower) && /\bnext tuesday\b/.test(lower)) {
-    return (
-      "Here is a concise reminder:\n\n" +
-      "Hi,\n\n" +
-      "This is a quick reminder that our meeting is scheduled for next Tuesday.\n\n" +
-      "Best regards"
-    );
-  }
-
-  return [
-    "Here is a professional draft:",
-    "",
-    "Hi,",
-    "",
-    instruction,
-    "",
-    "Best regards"
-  ].join("\n");
 }
 
 function getTimezoneMatch(prompt: string, context: AskRuntimeContext): TimezoneMatch {
@@ -700,8 +659,10 @@ export function createDeterministicAskAnswer(
   prompt: string,
   context: AskRuntimeContext
 ): string | null {
-  if (isDraftingIntent(prompt)) {
-    return createDraftingAnswer(prompt);
+  const seriousAnswer = createAskSeriousAnswer(prompt, context);
+
+  if (seriousAnswer) {
+    return seriousAnswer;
   }
 
   const intent = detectAskLiveIntent(prompt);
