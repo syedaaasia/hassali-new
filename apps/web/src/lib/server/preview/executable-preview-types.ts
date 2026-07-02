@@ -5,6 +5,7 @@ export type ExecutablePreviewFramework =
   | FrameworkId
   | "next_app"
   | "node_api"
+  | "python_streamlit"
   | "react_component"
   | "react_vite"
   | "static_html"

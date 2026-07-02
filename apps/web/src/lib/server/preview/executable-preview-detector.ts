@@ -58,6 +58,9 @@ export function detectExecutablePreviewFramework(
   const hasIndexHtml = hasFile(files, /(^|\/)index\.html$/);
   const hasViteConfig = hasFile(files, /(^|\/)vite\.config\.(?:js|ts|mjs)$/);
   const hasNextConfig = hasFile(files, /(^|\/)next\.config\.(?:js|ts|mjs)$/);
+  const hasAppPy = hasFile(files, /(^|\/)app\.py$/);
+  const hasPythonFile = hasFile(files, /\.py$/);
+  const hasRequirementsTxt = hasFile(files, /(^|\/)requirements\.txt$/);
   const hasAppPage = hasFile(files, /(^|\/)app\/page\.(?:tsx|jsx|ts|js)$/);
   const hasPagesIndex = hasFile(files, /(^|\/)pages\/index\.(?:tsx|jsx|ts|js)$/);
   const hasSrcApp = hasFile(files, /(^|\/)src\/app\.(?:tsx|jsx)$/);
@@ -66,6 +69,16 @@ export function detectExecutablePreviewFramework(
   const packageMentionsNext = hasPackageJson && hasText(text, ['"next"', "'next'"]);
   const packageMentionsVite = hasPackageJson && hasText(text, ['"vite"', "'vite'"]);
   const packageMentionsReact = hasPackageJson && hasText(text, ['"react"', "'react'"]);
+
+  if ((hasAppPy || hasPythonFile) && (hasRequirementsTxt || hasText(text, ["streamlit", "st.", "pandas"]))) {
+    return detection("python_streamlit", 0.9, [
+      ...(hasAppPy ? ["app_py"] : []),
+      ...(hasPythonFile ? ["python_files"] : []),
+      ...(hasRequirementsTxt ? ["requirements_txt"] : []),
+      ...(hasText(text, ["streamlit"]) ? ["streamlit_term"] : []),
+      ...(hasText(text, ["st."]) ? ["streamlit_api"] : [])
+    ]);
+  }
 
   if (hasNextConfig || hasAppPage || hasPagesIndex || packageMentionsNext) {
     return detection("next_app", 0.92, [

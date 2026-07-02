@@ -207,6 +207,36 @@ function isolateCodeContractForMixedWorkspace(files: GeneratedSourceFile[], work
   });
 }
 
+function codeContractPathForWorkspace(workspace: WorkspaceContext) {
+  return workspaceHasWebsiteFiles(workspace) ? "HASSALI.code.md" : projectContractPath;
+}
+
+function isolateProposalContextForMixedCodeWorkspace(context: ProposalContext, workspace: WorkspaceContext): ProposalContext {
+  if (context.mode !== "CODE" || !workspaceHasWebsiteFiles(workspace)) {
+    return context;
+  }
+
+  const requiredFiles = context.requiredFiles.map((path) =>
+    path === projectContractPath ? "HASSALI.code.md" : path
+  );
+
+  return {
+    ...context,
+    codeGenerationBrief: context.codeGenerationBrief
+      ? {
+          ...context.codeGenerationBrief,
+          filePlan: context.codeGenerationBrief.filePlan.map((file) =>
+            file.path === projectContractPath ? { ...file, path: "HASSALI.code.md" } : file
+          )
+        }
+      : context.codeGenerationBrief,
+    requiredFiles,
+    validationRules: context.validationRules.map((rule) =>
+      rule.replace(/\bHASSALI\.md\b/g, "HASSALI.code.md")
+    )
+  };
+}
+
 type ChatPersistenceContext = {
   mode: PersistedAiMode;
   projectId: string;
@@ -2797,6 +2827,52 @@ function buildProposalPreviewRuntime(
   });
 }
 
+function isPythonCodePreviewContext(context?: ProposalContext) {
+  return context?.mode === "CODE" && (
+    context.framework === "python_streamlit" ||
+    context.runtimeType === "python" ||
+    context.previewType === "python_app_preview" ||
+    context.codeGenerationBrief?.preferredFramework === "streamlit" ||
+    context.codeGenerationBrief?.requestedStack === "python"
+  );
+}
+
+function normalizeProposalPreviewMetadata(
+  metadata: PreviewRuntimeResult["metadata"],
+  productMode: "ASK" | "CODE" | "WEBSITE",
+  proposalContext?: ProposalContext
+): Record<string, unknown> {
+  if (productMode !== "CODE" || !isPythonCodePreviewContext(proposalContext)) {
+    return metadata as Record<string, unknown>;
+  }
+
+  const executablePreview = metadata.executablePreview
+    ? {
+        ...metadata.executablePreview,
+        canExecuteNow: false,
+        commandPlan: {
+          ...metadata.executablePreview.commandPlan,
+          defaultPort: null,
+          devCommand: null,
+          renderMode: "none"
+        },
+        framework: "python_streamlit",
+        renderUrl: null,
+        warnings: ["Python app preview is summary-only. Hassali did not install packages or start Streamlit."]
+      }
+    : undefined;
+
+  return {
+    ...metadata,
+    activeMode: "CODE",
+    entryPoint: "app.py",
+    executablePreview,
+    framework: "python_streamlit",
+    previewType: "python_app_preview",
+    runtimePolicy: "summary_only"
+  };
+}
+
 function compactDomainValidation(domainValidation: DomainValidationResult) {
   return {
     acceptanceChecks: domainValidation.acceptanceChecks,
@@ -3069,6 +3145,11 @@ function attachProposalRoutingMetadata(
       blueprintPreviewType: blueprint?.previewType
     }
   });
+  const previewMetadata = normalizeProposalPreviewMetadata(
+    previewRuntime.metadata,
+    kernel.routingDecision.mode,
+    proposalContext
+  );
   const criticalRoutingReasons = routing.reasons.filter((reason) =>
     reason.code === "welcome_ts_pollution" ||
     reason.message.toLowerCase().includes("cross-project") ||
@@ -3147,7 +3228,7 @@ function attachProposalRoutingMetadata(
     previewCapabilities: previewRuntime.capabilities,
     previewClassification: compactPreviewClassification(previewRuntime),
     previewConfidence: previewRuntime.classification.confidence,
-    previewMetadata: previewRuntime.metadata,
+    previewMetadata,
     previewMode: previewRuntime.classification.previewType === "none"
       ? "answer_only"
       : previewRuntime.classification.previewType === "website"
@@ -4218,8 +4299,11 @@ function withProjectContractUpdate(input: {
     prompt: input.prompt
   });
   const proposedContent = renderProjectContract(updatedContract);
-  const action = input.workspace.fileList.includes(projectContractPath) ? "update" : "create";
-  const alreadyIncluded = input.proposal.changes.some((change) => change.path === projectContractPath);
+  const contractPath = input.decision.requestType === "code_system_generation"
+    ? codeContractPathForWorkspace(input.workspace)
+    : projectContractPath;
+  const action = input.workspace.fileList.includes(contractPath) ? "update" : "create";
+  const alreadyIncluded = input.proposal.changes.some((change) => change.path === contractPath);
 
   if (alreadyIncluded) {
     return input.proposal;
@@ -4231,13 +4315,17 @@ function withProjectContractUpdate(input: {
       ...input.proposal.changes,
       {
         action,
-        diffPreview: createDiffPreview(action, projectContractPath, proposedContent),
-        path: projectContractPath,
-        proposedContent,
-        summary: "Updates Hassali's project contract with current mode, domain, preview type, constraints, and do-not rules."
+        diffPreview: createDiffPreview(action, contractPath, proposedContent),
+        path: contractPath,
+        proposedContent: contractPath === "HASSALI.code.md"
+          ? proposedContent.replace(/^# HASSALI\.md/im, "# HASSALI.code.md")
+          : proposedContent,
+        summary: contractPath === "HASSALI.code.md"
+          ? "Updates the CODE project contract separately because this workspace also contains WEBSITE files."
+          : "Updates Hassali's project contract with current mode, domain, preview type, constraints, and do-not rules."
       }
     ],
-    summary: `${input.proposal.summary} Project contract will be ${action === "create" ? "created" : "updated"} in ${projectContractPath}.`
+    summary: `${input.proposal.summary} Project contract will be ${action === "create" ? "created" : "updated"} in ${contractPath}.`
   };
 }
 
@@ -4610,13 +4698,13 @@ export async function POST(request: Request) {
     taskDecomposition: decomposition,
     translatedIntent
   });
-  const proposalContext = buildProposalContext({
+  const proposalContext = isolateProposalContextForMixedCodeWorkspace(buildProposalContext({
     contract: activeProjectContract,
     generatorContract: initialGeneratorContract,
     mode: productMode,
     prompt: effectiveUserPrompt,
     translatedIntent
-  });
+  }), workspace);
   const generatorContract = enforceGeneratorContractWithProposalContext(
     initialGeneratorContract,
     proposalContext

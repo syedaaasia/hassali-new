@@ -107,6 +107,15 @@ function reviewWarnings(proposal: ProposalLike) {
   return unique([...reasonWarnings, ...explicitWarnings]);
 }
 
+function stripStaleBlockedSummary(summary: string | undefined) {
+  if (!summary) return summary;
+
+  return summary
+    .replace(/\s*(?:Prompt sovereignty|Domain validation|Proposal quality gate|Asset visual validator) blocked this proposal:[^.]*\./gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export function buildApprovalDecision(input: {
   proposal: ProposalLike;
   proposalContext: ProposalContext;
@@ -245,5 +254,6 @@ export function applyApprovalDecision<T extends ProposalLike>(
     blockedReason: decision.hasCriticalIssues ? decision.criticalIssues.join("; ") : proposal.blockedReason,
     proposalRoutingMode,
     shouldBlockExecution: decision.hasCriticalIssues,
+    summary: decision.hasCriticalIssues ? proposal.summary : stripStaleBlockedSummary(proposal.summary),
   };
 }

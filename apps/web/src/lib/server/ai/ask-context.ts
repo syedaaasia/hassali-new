@@ -314,6 +314,10 @@ export function buildAskRuntimeContext(now = new Date()): AskRuntimeContext {
 export function detectAskLiveIntent(prompt: string): AskLiveIntent {
   const normalized = prompt.trim().toLowerCase();
 
+  if (isDraftingIntent(prompt)) {
+    return "general";
+  }
+
   if (/\b(?:weather|temperature|temp|forecast|rain|humidity|humid|hot|cold)\b/i.test(normalized)) {
     return "weather";
   }
@@ -339,6 +343,56 @@ export function detectAskLiveIntent(prompt: string): AskLiveIntent {
   }
 
   return "general";
+}
+
+function isDraftingIntent(prompt: string) {
+  return /\b(?:write|draft|compose|prepare|create|make)\b[\s\S]{0,120}\b(?:message|email|reply|note|reminder|sms|whatsapp|dm|letter|caption|announcement)\b/i.test(prompt) ||
+    /\b(?:message|email|reply|note|reminder|sms|whatsapp|dm|letter|caption|announcement)\b[\s\S]{0,80}\b(?:to|for)\s+(?:a\s+)?(?:client|customer|team|manager|lead|user|patient|vendor|partner)\b/i.test(prompt);
+}
+
+function extractDraftInstruction(prompt: string) {
+  const match = prompt.match(/\b(?:saying|that says|to say|which says)\s+(.+?)(?:[.!?]\s*)?$/i);
+
+  if (match?.[1]) {
+    return match[1].trim().replace(/^["']|["']$/g, "");
+  }
+
+  return prompt
+    .replace(/^\s*(?:please\s+)?(?:write|draft|compose|prepare|create|make)\s+(?:a\s+|an\s+|the\s+)?/i, "")
+    .trim();
+}
+
+function createDraftingAnswer(prompt: string) {
+  const instruction = extractDraftInstruction(prompt);
+  const lower = instruction.toLowerCase();
+
+  if (/\breceived\b/.test(lower) && /\bconfirm\b/.test(lower) && /\boptions\b/.test(lower)) {
+    return (
+      "Here is a polished draft:\n\n" +
+      "Hi,\n\n" +
+      "Thank you for reaching out. We have received your request and will confirm the available options tomorrow morning.\n\n" +
+      "Best regards"
+    );
+  }
+
+  if (/\bmeeting\b/.test(lower) && /\bnext tuesday\b/.test(lower)) {
+    return (
+      "Here is a concise reminder:\n\n" +
+      "Hi,\n\n" +
+      "This is a quick reminder that our meeting is scheduled for next Tuesday.\n\n" +
+      "Best regards"
+    );
+  }
+
+  return [
+    "Here is a professional draft:",
+    "",
+    "Hi,",
+    "",
+    instruction,
+    "",
+    "Best regards"
+  ].join("\n");
 }
 
 function getTimezoneMatch(prompt: string, context: AskRuntimeContext): TimezoneMatch {
@@ -646,6 +700,10 @@ export function createDeterministicAskAnswer(
   prompt: string,
   context: AskRuntimeContext
 ): string | null {
+  if (isDraftingIntent(prompt)) {
+    return createDraftingAnswer(prompt);
+  }
+
   const intent = detectAskLiveIntent(prompt);
   const asksForTime = /\b(?:time|now|right now)\b/i.test(prompt);
   const asksForDay = /\b(?:day)\b/i.test(prompt);

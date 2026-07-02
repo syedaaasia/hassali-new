@@ -77,6 +77,16 @@ function commandPlanFor(framework: ExecutablePreviewFramework): ExecutablePrevie
     };
   }
 
+  if (framework === "python_streamlit") {
+    return {
+      defaultPort: null,
+      devCommand: null,
+      installCommand: null,
+      renderMode: "none",
+      status: "blocked_until_explicit_enablement"
+    };
+  }
+
   return {
     defaultPort: null,
     devCommand: framework === "unknown" ? null : "npm run dev",

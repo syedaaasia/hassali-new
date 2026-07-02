@@ -332,6 +332,13 @@ function isPythonStreamlitContext(input: BuildProposalRepairInput) {
     input.proposalContext?.codeGenerationBrief?.requestedStack === "python";
 }
 
+function activeCodeContractPath(input: BuildProposalRepairInput) {
+  return input.proposalContext?.mode === "CODE" &&
+    input.proposalContext.requiredFiles.includes("HASSALI.code.md")
+    ? "HASSALI.code.md"
+    : "HASSALI.md";
+}
+
 function requiredRepairFiles(input: BuildProposalRepairInput) {
   if (input.generatorContract.generatorMode === "website_generation") {
     if (input.proposalContext?.mode === "WEBSITE" && input.proposalContext.requiredFiles.length) {
@@ -357,7 +364,7 @@ function requiredRepairFiles(input: BuildProposalRepairInput) {
         "README.md",
         "ARCHITECTURE.md",
         "SECURITY_AND_TESTING.md",
-        "HASSALI.md"
+        activeCodeContractPath(input)
       ];
     }
 
@@ -365,7 +372,7 @@ function requiredRepairFiles(input: BuildProposalRepairInput) {
       return input.generatorContract.requiredFileStrategy;
     }
 
-    return ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx", "styles.css", "HASSALI.md"];
+    return ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx", "styles.css", activeCodeContractPath(input)];
   }
 
   return [];
@@ -490,8 +497,8 @@ Hassali does not install packages or start Streamlit during proposal approval.
 `;
     }
 
-    if (path === "HASSALI.md") {
-      return `# HASSALI Contract
+    if (path === "HASSALI.md" || path === "HASSALI.code.md") {
+      return `# ${path}
 
 - Project Type: CODE
 - Stack: Python / Streamlit
@@ -655,6 +662,13 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
   const repairedFiles: Record<string, string> = { ...input.proposedFiles };
   const actions: string[] = [];
   const strategies: ProposalRepairStrategy[] = [];
+  const contractPath = activeCodeContractPath(input);
+
+  if (contractPath === "HASSALI.code.md" && typeof repairedFiles["HASSALI.md"] === "string") {
+    repairedFiles["HASSALI.code.md"] = repairedFiles["HASSALI.code.md"] ??
+      repairedFiles["HASSALI.md"].replace(/^# HASSALI\.md/im, "# HASSALI.code.md");
+    delete repairedFiles["HASSALI.md"];
+  }
 
   if (input.contextPriority.authoritativeMode === "ASK") {
     return {
@@ -755,11 +769,11 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
       nextContent = visuals.content;
     }
 
-    if (path === "HASSALI.md") {
+    if (path === "HASSALI.md" || path === "HASSALI.code.md") {
       const contract = repairContractContent(nextContent, input.generatorContract);
       if (contract.changed) {
         strategies.push("contract_domain_sanitization");
-        actions.push("Sanitized HASSALI.md domain facts.");
+        actions.push(`Sanitized ${path} domain facts.`);
         nextContent = contract.content;
       }
     }

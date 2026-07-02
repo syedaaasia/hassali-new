@@ -171,6 +171,20 @@ function insertContactIfMissing(content: string, values: WebsiteEditIntent["extr
   return `${content}\n${wrapped}\n`;
 }
 
+function dedupePhoneContactDetails(content: string, phone: string) {
+  const normalizedPhone = telValue(phone);
+  let phoneBlockCount = 0;
+
+  return content.replace(/<div\b[^>]*class=["'][^"']*contact-details[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, (block) => {
+    if (!block.includes(`tel:${normalizedPhone}`) && !block.includes(phone)) {
+      return block;
+    }
+
+    phoneBlockCount += 1;
+    return phoneBlockCount === 1 ? block : "";
+  });
+}
+
 function replaceBrand(content: string, context: WebsiteEditContext, businessName: string) {
   let next = content;
   const candidates = unique([
@@ -366,6 +380,9 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
     for (const path of htmlFiles(context)) {
       let next = replaceKnownContact(files[path] ?? "", context, intent.extractedValues);
       next = insertContactIfMissing(next, intent.extractedValues);
+      if (intent.extractedValues.phone) {
+        next = dedupePhoneContactDetails(next, intent.extractedValues.phone);
+      }
       if (next !== files[path]) changes.push(change(path, next, "Updates contact details consistently."));
     }
 
