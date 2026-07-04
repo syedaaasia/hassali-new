@@ -1596,7 +1596,7 @@ function createLocalProposal(
             ? `Detected CODE-mode inventory management software for a mobile phone shop. I will create a Python / Streamlit inventory scaffold with products, stock, suppliers, sales, repairs, billing, and documentation. No package install or runtime command runs before approval.`
           : usePythonStack || codeBrief?.preferredFramework === "streamlit"
           ? `Detected a CODE-mode ${appPreview.appName} ${systemName} request with explicit Python stack intent and ${requestedCapabilities.join(", ")}. I will create a Python / Streamlit CRM scaffold with mock data, dashboard metrics, billing charts, and documentation. No package install or runtime command runs before approval.`
-          : `Detected a CODE-mode ${appPreview.appName} ${systemName} request with ${requestedCapabilities.join(", ")}. I will create runnable Vite React CRM source files plus architecture, data model, and security docs. No package install or runtime command runs before approval.`
+          : `Detected a CODE-mode ${appPreview.appName} React mini-product request. I will create a Product Intelligence Blueprint-driven Vite React app with tabs, local state, forms, computed metrics, realistic mock data, README, architecture, data model, and security docs. No package install or runtime command runs before approval.`
     };
     const architecture = `# ${systemName.toUpperCase()} Architecture Plan
 
@@ -2842,6 +2842,17 @@ function normalizeProposalPreviewMetadata(
   productMode: "ASK" | "CODE" | "WEBSITE",
   proposalContext?: ProposalContext
 ): Record<string, unknown> {
+  if (productMode === "CODE" && !isPythonCodePreviewContext(proposalContext)) {
+    return {
+      ...(metadata as Record<string, unknown>),
+      activeMode: "CODE",
+      entryPoint: "src/main.tsx",
+      framework: "react_vite",
+      previewType: "code_app_preview",
+      runtimePolicy: "explicit_enablement_required"
+    };
+  }
+
   if (productMode !== "CODE" || !isPythonCodePreviewContext(proposalContext)) {
     return metadata as Record<string, unknown>;
   }
@@ -3235,7 +3246,9 @@ function attachProposalRoutingMetadata(
         ? "static_preview"
         : "code_plan",
     previewRuntimeState: previewRuntime.state,
-    previewType: previewRuntime.classification.previewType,
+    previewType: proposalContext?.mode === "CODE" && proposal.previewType === "code_app_preview"
+      ? "code_app_preview"
+      : previewRuntime.classification.previewType,
     previewWarnings: previewRuntime.warnings,
     realPreview: previewRuntime.realPreview,
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
@@ -4232,6 +4245,15 @@ function addCompositionDebugSummary(
   composition: CompositionStrategy,
   kernel?: IntelligenceKernelResult
 ): DiffProposal {
+  if (proposal.previewType === "code_app_preview" || proposal.previewMetadata?.activeMode === "CODE") {
+    const kernelSummary = kernel ? ` Kernel: ${kernel.summary}` : "";
+
+    return {
+      ...proposal,
+      summary: `CODE product proposal active. Current prompt is source of truth. ${proposal.summary}${kernelSummary}`
+    };
+  }
+
   const palette = intent.palette.length
     ? intent.palette.join("/")
     : composition.visualLanguage.palette.join("/");
@@ -4919,6 +4941,44 @@ export async function POST(request: Request) {
 
       return createTextStream(directAskAnswer, persistence?.sessionId);
     }
+  }
+
+  if (productMode === "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
+    const directAskAnswer = await createAskDirectAnswer(
+      effectiveUserPrompt,
+      askRuntimeContext
+    );
+    const answerOnlyContent =
+      directAskAnswer ??
+      (
+        "I can answer this without changing files. " +
+        `${kernel.routingDecision.routingExplanation} ` +
+        "No proposal was created and no project files were touched."
+      );
+    const selfReview = runSelfReviewForAskAnswer({
+      answer: answerOnlyContent,
+      generator: directAskAnswer ? "ask_direct_answer" : "ask_answer_only_fallback",
+      projectId: requestedProjectId,
+      prompt: effectiveUserPrompt
+    });
+
+    persistence = await persistChatMessage(persistence, {
+      content: answerOnlyContent,
+      metadata: {
+        askLiveIntent,
+        askRuntimeContext,
+        deterministic: Boolean(directAskAnswer),
+        intelligenceKernel: compactIntelligenceKernel(kernel),
+        kernelRoutingDecision: kernel.routingDecision,
+        model,
+        productMode,
+        projectContract: summarizeProjectContract(projectContract),
+        selfReview: compactSelfReview(selfReview)
+      },
+      role: "assistant"
+    });
+
+    return createTextStream(answerOnlyContent, persistence?.sessionId);
   }
 
   if (

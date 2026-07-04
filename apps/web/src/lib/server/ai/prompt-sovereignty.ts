@@ -115,6 +115,7 @@ function expectedTermsForDomain(domain: string, baseTerms: string[]) {
     tv: ["television", "tv", "smart tv", "oled", "qled", "home cinema", "wall mounting", "warranty"],
     bike: ["bike", "rider", "showroom", "service", "gear"],
     bicycle: ["bicycle", "cycling", "tune-up", "accessories", "rider fitting"],
+    billing: ["billing", "invoice", "invoices", "payment", "payments", "dashboard"],
     motorbike: ["motorbike", "motorcycle", "helmet", "engine service", "spare parts", "test ride"]
   };
 
@@ -230,9 +231,13 @@ export function buildPromptSovereigntyContract(input: {
   const routedCapability = expectedCapabilityFor(input.decision);
   const promptAsWebsite = /\b(?:website|site|landing page|marketing page|product page)\b/.test(promptText);
   const expectedCapability =
-    routedCapability === "business_website" && blueprint.capabilityPath === "web_app" && !promptAsWebsite
+    input.proposalContext?.mode === "CODE" && input.proposalContext.isNewBuild
       ? "web_app"
-      : routedCapability;
+      : input.proposalContext?.mode === "CODE" && routedCapability === "business_website" && !promptAsWebsite
+        ? "web_app"
+        : routedCapability === "business_website" && blueprint.capabilityPath === "web_app" && !promptAsWebsite
+          ? "web_app"
+          : routedCapability;
   const explicitPages = input.intent.requestedPages.map(pageToPath);
   const requiredFiles =
     input.proposalContext?.requiredFiles.length
@@ -243,10 +248,20 @@ export function buildPromptSovereigntyContract(input: {
           ? unique([...explicitPages, ...(expectedCapability === "business_website" ? ["styles.css", "main.js"] : [])])
           : input.decision.requiredFiles;
   const expectedDomain = input.proposalContext?.domain ?? blueprint.domainLabel;
+  const baseTerms = input.proposalContext?.mode === "CODE"
+    ? unique([
+        expectedDomain,
+        input.proposalContext.framework ?? "",
+        ...input.proposalContext.entities,
+        ...(input.proposalContext.codeGenerationBrief?.modules ?? []),
+        ...(input.proposalContext.codeGenerationBrief?.filePlan.map((file) => file.purpose) ?? []),
+        ...blueprint.validationTerms
+      ])
+    : unique([expectedDomain, blueprint.domainLabel, ...blueprint.validationTerms, ...input.composition.businessType.split(/[\s/]+/)])
+        .filter((term) => term.length > 3);
   const expectedTerms = expectedTermsForDomain(
     expectedDomain,
-    unique([expectedDomain, blueprint.domainLabel, ...blueprint.validationTerms, ...input.composition.businessType.split(/[\s/]+/)])
-      .filter((term) => term.length > 3)
+    baseTerms.filter((term) => term.length > 3)
   );
 
   return {
