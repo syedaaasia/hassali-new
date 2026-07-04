@@ -399,6 +399,413 @@ function codeAppName(committedFiles: Map<string, VfsFile>) {
   return "App";
 }
 
+type ReactProductPreviewBlueprint = {
+  appName: string;
+  copyLines: string[];
+  disclaimer: string;
+  domain: string;
+  excitementGate?: string;
+  jobToBeDone: string;
+  metricLabels: string[];
+  records: Array<{
+    amount: number;
+    category: string;
+    note: string;
+    owner: string;
+    status: string;
+    title: string;
+  }>;
+  sections: string[];
+  targetUser: string;
+  workflowMap: string[];
+};
+
+function extractReactProductBlueprint(committedFiles: Map<string, VfsFile>): ReactProductPreviewBlueprint | null {
+  const appSource = committedFiles.get("src/App.tsx")?.content ?? committedFiles.get("src/App.jsx")?.content ?? "";
+  const match = appSource.match(/const blueprint = ([\s\S]*?);\s+type DemoRecord/);
+
+  if (!match?.[1]) return null;
+
+  try {
+    const parsed = JSON.parse(match[1]) as Partial<ReactProductPreviewBlueprint>;
+
+    if (
+      typeof parsed.appName === "string" &&
+      Array.isArray(parsed.sections) &&
+      Array.isArray(parsed.metricLabels) &&
+      Array.isArray(parsed.records)
+    ) {
+      return {
+        appName: parsed.appName,
+        copyLines: Array.isArray(parsed.copyLines) ? parsed.copyLines.filter((item): item is string => typeof item === "string") : [],
+        disclaimer: typeof parsed.disclaimer === "string" ? parsed.disclaimer : "Static product preview. Live runtime requires explicit enablement.",
+        domain: typeof parsed.domain === "string" ? parsed.domain : "React app",
+        excitementGate: typeof parsed.excitementGate === "string" ? parsed.excitementGate : undefined,
+        jobToBeDone: typeof parsed.jobToBeDone === "string" ? parsed.jobToBeDone : "",
+        metricLabels: parsed.metricLabels.filter((item): item is string => typeof item === "string"),
+        records: parsed.records.filter((record): record is ReactProductPreviewBlueprint["records"][number] =>
+          Boolean(record) &&
+          typeof record === "object" &&
+          typeof record.title === "string" &&
+          typeof record.owner === "string" &&
+          typeof record.status === "string"
+        ),
+        sections: parsed.sections.filter((item): item is string => typeof item === "string"),
+        targetUser: typeof parsed.targetUser === "string" ? parsed.targetUser : "",
+        workflowMap: Array.isArray(parsed.workflowMap) ? parsed.workflowMap.filter((item): item is string => typeof item === "string") : []
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function money(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 0,
+    style: "currency"
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function scriptJson(value: unknown) {
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+}
+
+function buildReactProductPreviewDoc(
+  blueprint: ReactProductPreviewBlueprint,
+  css: string,
+  framework: string | null
+) {
+  const records = blueprint.records.slice(0, 4);
+  const total = blueprint.records.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  const pending = blueprint.records.filter((record) => /pending|overdue|unpaid|watch|review/i.test(record.status));
+  const top = [...blueprint.records].sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0))[0];
+  const metrics = [
+    {
+      detail: "mock local total",
+      label: blueprint.metricLabels[0] ?? "Total",
+      value: money(total)
+    },
+    {
+      detail: `${pending.length} needs action`,
+      label: blueprint.metricLabels[1] ?? "Needs action",
+      value: money(pending.reduce((sum, record) => sum + Number(record.amount || 0), 0))
+    },
+    {
+      detail: top?.title ?? "No records yet",
+      label: blueprint.metricLabels[2] ?? "Top record",
+      value: top?.owner ?? "None"
+    },
+    {
+      detail: "static product preview",
+      label: blueprint.metricLabels[3] ?? "Tracked",
+      value: String(blueprint.records.length)
+    }
+  ];
+  const sectionButtons = blueprint.sections.map((section, index) =>
+    `<button class="tab ${index === 0 ? "active" : ""}" data-section="${escapeHtml(section)}" type="button">${escapeHtml(section)}</button>`
+  ).join("");
+  const metricCards = metrics.map((metric) => `
+    <article class="metric-card">
+      <span>${escapeHtml(metric.label)}</span>
+      <strong>${escapeHtml(metric.value)}</strong>
+      <small>${escapeHtml(metric.detail)}</small>
+    </article>
+  `).join("");
+  const recordCards = records.map((record) => `
+    <article class="record-card">
+      <div class="record-topline">
+        <span class="status-chip">${escapeHtml(record.status)}</span>
+        <strong>${escapeHtml(money(record.amount))}</strong>
+      </div>
+      <h4>${escapeHtml(record.title)}</h4>
+      <p>${escapeHtml(record.owner)} - ${escapeHtml(record.category)}</p>
+      <small>${escapeHtml(record.note)}</small>
+    </article>
+  `).join("");
+  const workflows = blueprint.workflowMap.slice(0, 7).map((item) => `<span>${escapeHtml(item)}</span>`).join("");
+  const statusOptions = Array.from(new Set([
+    ...blueprint.records.map((record) => record.status),
+    "pending",
+    "paid",
+    "completed",
+    "watch",
+    "review"
+  ].filter(Boolean))).slice(0, 8);
+  const statusOptionHtml = statusOptions.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`).join("");
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>${css}</style>
+  <style>
+    body { margin: 0; }
+    .hassali-preview-banner {
+      position: fixed; inset: 0 0 auto 0; z-index: 9999;
+      background: rgba(0,0,0,0.88); color: #d8fff7;
+      font: 700 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .06em; padding: 7px 14px; text-transform: uppercase;
+    }
+    .app-shell { padding-top: 38px; }
+    .preview-static-note { margin-top: .75rem; color: inherit; opacity: .78; }
+    .preview-control-row { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
+    .preview-control-row select { min-width: 10rem; }
+    .preview-live-note { margin-top: .85rem; border: 1px solid rgba(255,255,255,.16); border-radius: 16px; padding: .75rem .9rem; background: rgba(255,255,255,.08); }
+  </style>
+</head>
+<body>
+  <div class="hassali-preview-banner">
+    Interactive product preview - ${escapeHtml(blueprint.appName)} - ${escapeHtml(framework ?? "react_vite")} source generated - runtime not started
+  </div>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-mark">${escapeHtml(blueprint.appName.slice(0, 2))}</div>
+      <div>
+        <p class="eyebrow">${escapeHtml(blueprint.domain)}</p>
+        <h1>${escapeHtml(blueprint.appName)}</h1>
+        <p>${escapeHtml(blueprint.targetUser)}</p>
+      </div>
+      <nav class="tab-list" aria-label="${escapeHtml(blueprint.appName)} sections">${sectionButtons}</nav>
+    </aside>
+    <section class="workspace">
+      <header class="hero">
+        <div>
+          <p class="eyebrow" id="active-section-label">Interactive static preview</p>
+          <h2>${escapeHtml(blueprint.copyLines[0] ?? blueprint.appName)}</h2>
+          <p>${escapeHtml(blueprint.jobToBeDone)}</p>
+          <p class="preview-static-note">This is an interactive static preview generated from the product blueprint. Hassali did not install packages or start Vite.</p>
+        </div>
+        <div class="hero-card">
+          <strong>First 10 seconds</strong>
+          <span>${escapeHtml(blueprint.excitementGate ?? blueprint.copyLines[1] ?? blueprint.disclaimer)}</span>
+        </div>
+      </header>
+      <section class="metrics" aria-label="Dashboard metrics" id="preview-metrics">${metricCards}</section>
+      <section class="control-grid">
+        <article class="panel form-panel">
+          <div class="panel-heading">
+            <p class="eyebrow">Action preview</p>
+            <h3>${escapeHtml(blueprint.workflowMap[0] ?? "Add local record")}</h3>
+          </div>
+          <div class="form-grid">
+            <label>Title<input id="preview-title" value="${escapeHtml(records[0]?.title ?? "")}" /></label>
+            <label>Owner / client<input id="preview-owner" value="${escapeHtml(records[0]?.owner ?? "")}" /></label>
+            <label>Amount<input id="preview-amount" type="number" value="${escapeHtml(String(records[0]?.amount ?? ""))}" /></label>
+            <label>Status<select id="preview-status">${statusOptionHtml}</select></label>
+            <label class="wide-field">Note<textarea id="preview-note">${escapeHtml(records[0]?.note ?? "")}</textarea></label>
+          </div>
+          <div class="actions preview-control-row">
+            <button id="preview-add" type="button">${escapeHtml(blueprint.workflowMap[0] ?? "Add record")}</button>
+            <button class="secondary" id="preview-reset" type="button">Reset demo data</button>
+          </div>
+        </article>
+        <article class="panel">
+          <div class="panel-heading">
+            <p class="eyebrow">Workflow map</p>
+            <h3>What users can actually do</h3>
+          </div>
+          <div class="workflow-list">${workflows}</div>
+          <p class="disclaimer">${escapeHtml(blueprint.disclaimer)}</p>
+        </article>
+      </section>
+      <section class="panel">
+        <div class="panel-heading split">
+          <div>
+            <p class="eyebrow" id="record-section-label">${escapeHtml(blueprint.sections[0] ?? "Dashboard")}</p>
+            <h3>Realistic local demo records</h3>
+          </div>
+          <div class="preview-control-row">
+            <select id="preview-filter">
+              <option value="all">All statuses</option>
+              ${statusOptionHtml}
+            </select>
+          </div>
+        </div>
+        <div class="record-grid" id="preview-records">${recordCards}</div>
+        <div class="empty-state" id="preview-empty" hidden>
+          <strong>No records match this filter.</strong>
+          <p>Add a local preview record or reset demo data.</p>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script>
+    (function () {
+      var blueprint = ${scriptJson(blueprint)};
+      var records = [];
+      var activeSection = blueprint.sections[0] || "Dashboard";
+      var storageKey = "hassali-interactive-preview:" + (blueprint.appName || "app").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+      function cloneDemoRecords() {
+        return (blueprint.records || []).map(function (record) {
+          return {
+            amount: Number(record.amount || 0),
+            category: String(record.category || "General"),
+            note: String(record.note || ""),
+            owner: String(record.owner || ""),
+            status: String(record.status || "pending"),
+            title: String(record.title || "Untitled")
+          };
+        });
+      }
+
+      function loadRecords() {
+        try {
+          var raw = window.localStorage.getItem(storageKey);
+          records = raw ? JSON.parse(raw) : cloneDemoRecords();
+        } catch (error) {
+          records = cloneDemoRecords();
+        }
+      }
+
+      function saveRecords() {
+        try {
+          window.localStorage.setItem(storageKey, JSON.stringify(records));
+        } catch (error) {
+          // Preview stays interactive even if browser storage is blocked.
+        }
+      }
+
+      function money(value) {
+        return new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 0, style: "currency" }).format(Number(value || 0));
+      }
+
+      function setText(element, value) {
+        if (element) element.textContent = value;
+      }
+
+      function create(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) node.className = className;
+        if (typeof text === "string") node.textContent = text;
+        return node;
+      }
+
+      function renderMetrics() {
+        var root = document.getElementById("preview-metrics");
+        if (!root) return;
+        root.textContent = "";
+        var total = records.reduce(function (sum, record) { return sum + Number(record.amount || 0); }, 0);
+        var pending = records.filter(function (record) { return /pending|overdue|unpaid|watch|review/i.test(record.status); });
+        var top = records.slice().sort(function (a, b) { return Number(b.amount || 0) - Number(a.amount || 0); })[0];
+        var metrics = [
+          { label: blueprint.metricLabels[0] || "Total", value: money(total), detail: "preview local total" },
+          { label: blueprint.metricLabels[1] || "Needs action", value: money(pending.reduce(function (sum, record) { return sum + Number(record.amount || 0); }, 0)), detail: pending.length + " needs action" },
+          { label: blueprint.metricLabels[2] || "Top record", value: top ? top.owner : "None", detail: top ? top.title : "No records yet" },
+          { label: blueprint.metricLabels[3] || "Tracked", value: String(records.length), detail: "interactive preview records" }
+        ];
+        metrics.forEach(function (metric) {
+          var card = create("article", "metric-card");
+          card.appendChild(create("span", "", metric.label));
+          card.appendChild(create("strong", "", metric.value));
+          card.appendChild(create("small", "", metric.detail));
+          root.appendChild(card);
+        });
+      }
+
+      function renderRecords() {
+        var root = document.getElementById("preview-records");
+        var empty = document.getElementById("preview-empty");
+        if (!root) return;
+        var filter = document.getElementById("preview-filter");
+        var value = filter ? filter.value : "all";
+        var visible = value === "all" ? records : records.filter(function (record) { return record.status === value; });
+        root.textContent = "";
+        if (empty) empty.hidden = visible.length > 0;
+        visible.forEach(function (record) {
+          var card = create("article", "record-card");
+          var top = create("div", "record-topline");
+          top.appendChild(create("span", "status-chip", record.status));
+          top.appendChild(create("strong", "", money(record.amount)));
+          card.appendChild(top);
+          card.appendChild(create("h4", "", record.title));
+          card.appendChild(create("p", "", record.owner + " - " + record.category));
+          card.appendChild(create("small", "", record.note));
+          var actions = create("div", "mini-actions");
+          (blueprint.statusOptions || []).slice(0, 4).forEach(function (status) {
+            var button = create("button", "ghost", status);
+            button.type = "button";
+            button.addEventListener("click", function () {
+              record.status = status;
+              saveRecords();
+              render();
+            });
+            actions.appendChild(button);
+          });
+          card.appendChild(actions);
+          root.appendChild(card);
+        });
+      }
+
+      function renderTabs() {
+        document.querySelectorAll("[data-section]").forEach(function (button) {
+          var section = button.getAttribute("data-section") || "";
+          button.classList.toggle("active", section === activeSection);
+          button.addEventListener("click", function () {
+            activeSection = section;
+            render();
+          });
+        });
+        setText(document.getElementById("active-section-label"), activeSection + " preview");
+        setText(document.getElementById("record-section-label"), activeSection);
+      }
+
+      function addRecord() {
+        var title = document.getElementById("preview-title");
+        var owner = document.getElementById("preview-owner");
+        var amount = document.getElementById("preview-amount");
+        var status = document.getElementById("preview-status");
+        var note = document.getElementById("preview-note");
+        if (!title || !owner || !String(title.value).trim() || !String(owner.value).trim()) return;
+        records.unshift({
+          amount: Number(amount ? amount.value : 0),
+          category: activeSection,
+          note: note ? note.value || "Added in interactive static preview." : "Added in interactive static preview.",
+          owner: owner.value,
+          status: status ? status.value : "pending",
+          title: title.value
+        });
+        saveRecords();
+        if (title) title.value = "";
+        if (owner) owner.value = "";
+        if (amount) amount.value = "";
+        if (note) note.value = "";
+        render();
+      }
+
+      function resetDemoData() {
+        records = cloneDemoRecords();
+        saveRecords();
+        var filter = document.getElementById("preview-filter");
+        if (filter) filter.value = "all";
+        render();
+      }
+
+      function render() {
+        renderTabs();
+        renderMetrics();
+        renderRecords();
+      }
+
+      loadRecords();
+      var addButton = document.getElementById("preview-add");
+      var resetButton = document.getElementById("preview-reset");
+      var filter = document.getElementById("preview-filter");
+      if (addButton) addButton.addEventListener("click", addRecord);
+      if (resetButton) resetButton.addEventListener("click", resetDemoData);
+      if (filter) filter.addEventListener("change", render);
+      render();
+    })();
+  </script>
+</body>
+</html>`;
+}
+
 function CodeAppSourceSummary({
   committedFiles,
   manifest
@@ -410,50 +817,17 @@ function CodeAppSourceSummary({
   const sourceFiles = [...committedFiles.keys()].filter((path) => /\.(?:tsx|ts|jsx|js)$/.test(path));
   const componentFiles = sourceFiles.filter((path) => path.includes("/components/"));
   const css = committedFiles.get("src/styles.css")?.content ?? committedFiles.get("src/index.css")?.content ?? "";
+  const productBlueprint = extractReactProductBlueprint(committedFiles);
 
-  if (css) {
-    const previewDoc = `<!doctype html>
-<html>
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <style>${css}</style>
-</head>
-<body>
-  <div style="position:fixed;top:0;left:0;right:0;background:rgba(0,0,0,0.85);color:#60efff;font-size:0.72rem;padding:6px 14px;z-index:9999;font-family:monospace;letter-spacing:0.05em">
-    CSS preview - ${escapeHtml(appName)} - ${escapeHtml(manifest.framework ?? "React + Vite")} - Runtime not started
-  </div>
-  <div style="padding-top:34px">
-    <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand">${escapeHtml(appName)}</div>
-        <nav class="nav">
-          <a class="active" href="#">Dashboard</a>
-          <a href="#">Customers</a>
-          <a href="#">Pipeline</a>
-          <a href="#">Billing</a>
-        </nav>
-      </aside>
-      <main class="content">
-        <section class="hero-panel">
-          <div>
-            <p class="eyebrow">CSS preview only</p>
-            <h1>Layout ready. Start runtime for React interactivity.</h1>
-            <p class="muted">Source files committed. Vite requires explicit runtime enablement.</p>
-          </div>
-        </section>
-      </main>
-    </div>
-  </div>
-</body>
-</html>`;
+  if (css && productBlueprint) {
+    const previewDoc = buildReactProductPreviewDoc(productBlueprint, css, manifest.framework);
 
     return (
       <iframe
         className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"
         sandbox="allow-scripts"
         srcDoc={previewDoc}
-        title="CODE app CSS preview"
+        title="CODE app static product preview"
       />
     );
   }
@@ -464,7 +838,7 @@ function CodeAppSourceSummary({
         {appName} - {manifest.framework ?? "React + Vite"}
       </p>
       <p className="mt-2">
-        Runtime not started. Source files committed and ready.
+        Runtime not started. Source files committed and ready. Static product preview needs the generated Product Intelligence Blueprint in src/App.tsx.
       </p>
       <ul className="mt-4 list-inside list-disc">
         {sourceFiles.map((file) => (

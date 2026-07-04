@@ -179,6 +179,10 @@ function repairForbiddenTerms(content: string, contract: GeneratorContract) {
   return { changed, content: repaired.replace(/\s{3,}/g, " ") };
 }
 
+function canRewritePublicCopy(path: string) {
+  return /\.(?:html|md|mdx|txt)$/i.test(path);
+}
+
 function repairVisualPlaceholders(content: string, contract: GeneratorContract) {
   const visual = contract.requiredVisualSignals[0] ?? `${dominantPhrase(contract)} visual`;
   let repaired = content;
@@ -754,12 +758,14 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
 
   for (const [path, content] of Object.entries(repairedFiles)) {
     let nextContent = content;
-    const forbidden = repairForbiddenTerms(nextContent, input.generatorContract);
-    if (forbidden.changed) {
-      strategies.push("forbidden_term_rewrite");
-      strategies.push("domain_copy_rewrite");
-      actions.push(`Rewrote forbidden/generic terms in ${path}.`);
-      nextContent = forbidden.content;
+    if (canRewritePublicCopy(path)) {
+      const forbidden = repairForbiddenTerms(nextContent, input.generatorContract);
+      if (forbidden.changed) {
+        strategies.push("forbidden_term_rewrite");
+        strategies.push("domain_copy_rewrite");
+        actions.push(`Rewrote forbidden/generic terms in ${path}.`);
+        nextContent = forbidden.content;
+      }
     }
 
     const visuals = repairVisualPlaceholders(nextContent, input.generatorContract);

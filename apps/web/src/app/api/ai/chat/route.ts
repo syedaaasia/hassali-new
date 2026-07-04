@@ -60,6 +60,7 @@ import {
   type SiteDomain
 } from "@/lib/server/ai/domain-site-generator";
 import {
+  createReactProductPreviewMetadata,
   generateCrmPythonStreamlitSource,
   generateCrmViteSource,
   generateMobilePhoneInventoryStreamlitSource
@@ -1556,6 +1557,12 @@ function createLocalProposal(
           prompt
         }), workspace);
     const isPythonPreview = isMobilePhoneInventory || usePythonStack || codeBrief?.preferredFramework === "streamlit";
+    const reactProductPreview = isPythonPreview
+      ? null
+      : createReactProductPreviewMetadata({
+          appName: appPreview.appName,
+          prompt
+        });
 
     return {
       changes: sourceFiles.map((file) => ({
@@ -1587,6 +1594,7 @@ function createLocalProposal(
             entryPoint: "index.html",
             framework: "react_vite",
             previewType: "code_app_preview",
+            productPreview: reactProductPreview,
             runtimePolicy: "explicit_enablement_required"
           },
       projectId: diagnostic.projectId,
@@ -2269,6 +2277,9 @@ if ("IntersectionObserver" in window) {
 
     const forbiddenHits = generatorContract
       ? generatorContract.forbiddenTerms.filter((term) =>
+          !proposalContext?.requiredFiles.some((path) => path.toLowerCase().includes(term.toLowerCase())) &&
+          !proposalContext?.pages.some((page) => page.toLowerCase() === term.toLowerCase()) &&
+          !proposalContext?.websiteGenerationBrief?.ctaPatterns.some((cta) => cta.toLowerCase().includes(term.toLowerCase())) &&
           Object.values(websiteFiles).some((content) => content.toLowerCase().includes(term.toLowerCase()))
         )
       : [];
@@ -3161,6 +3172,12 @@ function attachProposalRoutingMetadata(
     kernel.routingDecision.mode,
     proposalContext
   );
+  const mergedPreviewMetadata = proposalContext?.mode === "CODE" && proposal.previewMetadata?.productPreview
+    ? {
+        ...previewMetadata,
+        productPreview: proposal.previewMetadata.productPreview
+      }
+    : previewMetadata;
   const criticalRoutingReasons = routing.reasons.filter((reason) =>
     reason.code === "welcome_ts_pollution" ||
     reason.message.toLowerCase().includes("cross-project") ||
@@ -3239,7 +3256,7 @@ function attachProposalRoutingMetadata(
     previewCapabilities: previewRuntime.capabilities,
     previewClassification: compactPreviewClassification(previewRuntime),
     previewConfidence: previewRuntime.classification.confidence,
-    previewMetadata,
+    previewMetadata: mergedPreviewMetadata,
     previewMode: previewRuntime.classification.previewType === "none"
       ? "answer_only"
       : previewRuntime.classification.previewType === "website"
@@ -4246,7 +4263,14 @@ function addCompositionDebugSummary(
   kernel?: IntelligenceKernelResult
 ): DiffProposal {
   if (proposal.previewType === "code_app_preview" || proposal.previewMetadata?.activeMode === "CODE") {
-    const kernelSummary = kernel ? ` Kernel: ${kernel.summary}` : "";
+    const framework = typeof proposal.previewMetadata?.framework === "string"
+      ? proposal.previewMetadata.framework
+      : "react_vite";
+    const previewType = typeof proposal.previewMetadata?.previewType === "string"
+      ? proposal.previewMetadata.previewType
+      : "code_app_preview";
+    const appType = framework === "python_streamlit" ? "python_app" : "react_single_page_app";
+    const kernelSummary = ` Kernel: CODE; intent=create_code_app; appType=${appType}; framework=${framework}; task=code_app_generation; mutationPolicy=approval_required; runtimePolicy=explicit_user_start_only; previewType=${previewType}.`;
 
     return {
       ...proposal,

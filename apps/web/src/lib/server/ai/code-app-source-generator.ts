@@ -6,6 +6,32 @@ export type CodeAppSourceFile = {
   summary: string;
 };
 
+export type ReactProductPreviewMetadata = {
+  appName: string;
+  copyLines: string[];
+  disclaimer: string;
+  domain: string;
+  metrics: string[];
+  productPreviewQuality: {
+    hasAppName: boolean;
+    hasDomainSections: boolean;
+    hasLocalOnlyLimitations: boolean;
+    hasMetrics: boolean;
+    hasSampleRecords: boolean;
+    hasStaticSnapshot: boolean;
+  };
+  sampleRecords: Array<{
+    amount: number;
+    category: string;
+    note: string;
+    owner: string;
+    status: string;
+    title: string;
+  }>;
+  sections: string[];
+  targetUser: string;
+};
+
 export function generateCrmViteSource(input: {
   appName: string;
   brief?: CodeGenerationBrief | null;
@@ -131,6 +157,32 @@ createRoot(document.getElementById("root")!).render(
       content: createReactMiniProductContract(blueprint)
     }
   ];
+}
+
+export function createReactProductPreviewMetadata(input: {
+  appName: string;
+  prompt: string;
+}): ReactProductPreviewMetadata {
+  const blueprint = buildReactProductBlueprint(input);
+
+  return {
+    appName: blueprint.appName,
+    copyLines: blueprint.copyLines,
+    disclaimer: blueprint.disclaimer,
+    domain: blueprint.domain,
+    metrics: blueprint.metricLabels,
+    productPreviewQuality: {
+      hasAppName: Boolean(blueprint.appName),
+      hasDomainSections: blueprint.sections.length >= 4,
+      hasLocalOnlyLimitations: /local|mock|no backend|no provider|not tax advice/i.test(blueprint.disclaimer),
+      hasMetrics: blueprint.metricLabels.length >= 4,
+      hasSampleRecords: blueprint.records.length >= 3,
+      hasStaticSnapshot: true
+    },
+    sampleRecords: blueprint.records.slice(0, 4),
+    sections: blueprint.sections,
+    targetUser: blueprint.targetUser
+  };
 }
 
 type ReactProductBlueprint = {

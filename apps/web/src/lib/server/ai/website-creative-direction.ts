@@ -302,7 +302,7 @@ const directions: Partial<Record<DomainId, WebsiteCreativeDirection>> = {
   cleaning_service: {
     ...baseDirection("cleaning_service"),
     hero: {
-      backgroundTreatment: "bright local-service panels with fresh checklist proof",
+      backgroundTreatment: "bright cleaning-team panels with fresh checklist proof",
       eyebrow: "Fresh local cleaning",
       layout: "service-local",
       proofPlacement: "below-hero"
@@ -332,7 +332,7 @@ const directions: Partial<Record<DomainId, WebsiteCreativeDirection>> = {
       headingFont: "\"Nunito Sans\", \"Segoe UI\", Arial, sans-serif",
       bodyFont: "\"Inter\", \"Segoe UI\", Arial, sans-serif"
     },
-    visualArchetype: "Fresh organized local service"
+    visualArchetype: "Fresh organized cleaning team"
   },
   florist: {
     ...baseDirection("florist"),

@@ -172,6 +172,21 @@ function domainVocabulary(domain: string | null) {
   return unique(expanded);
 }
 
+function isRequiredContractTerm(term: string, context?: ProposalContext) {
+  const normalized = normalize(term);
+
+  if (!normalized) return false;
+
+  return Boolean(
+    context?.pages.some((page) => normalize(page) === normalized) ||
+    context?.requiredFiles.some((path) => normalize(path).includes(normalized)) ||
+    context?.websiteGenerationBrief?.ctaPatterns.some((cta) => normalize(cta).includes(normalized)) ||
+    context?.websiteGenerationBrief?.navigationContract.some((item) =>
+      normalize(item.label) === normalized || normalize(item.page) === normalized || normalize(item.href).includes(normalized)
+    )
+  );
+}
+
 function contentFromFiles(files?: Record<string, string>) {
   return Object.entries(files ?? {})
     .map(([path, content]) => `\nFILE:${path}\n${content}`)
@@ -321,17 +336,21 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
     input.translatedIntent.businessType ??
     null;
   const profile = profileFor(domain);
+  const isCodeProposal = input.contextPriority.authoritativeMode === "CODE" || input.productMode === "CODE";
   const requiredSignals = unique([
     ...profile.required,
     ...input.compositionPlan.productOrServiceEntities,
     ...input.businessBlueprint.mustInclude
   ]);
   const forbiddenSignals = unique([
-    ...genericForbidden,
-    ...profile.forbidden,
-    ...input.compositionPlan.forbiddenSections,
-    ...input.businessBlueprint.mustAvoid
-  ]);
+    ...genericForbidden.filter((term) =>
+      !isCodeProposal ||
+      !/\b(?:public marketing website|workflow|dashboard|local service|clear services|detected services|practical details|customer use cases)\b/i.test(term)
+    ),
+    ...(isCodeProposal ? [] : profile.forbidden),
+    ...(isCodeProposal ? [] : input.compositionPlan.forbiddenSections),
+    ...(isCodeProposal ? [] : input.businessBlueprint.mustAvoid)
+  ]).filter((term) => !isRequiredContractTerm(term, input.proposalContext));
   const combinedContent = input.validationMode === "proposal_content"
     ? contentFromFiles(input.proposedFiles)
     : input.currentPrompt;
