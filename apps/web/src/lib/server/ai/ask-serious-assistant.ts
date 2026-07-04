@@ -1,17 +1,28 @@
 import type { AskRuntimeContext } from "./ask-context";
+import { classifyFileLiteIntent, createFileLiteAnswer } from "./file-lite";
 
 export type AskIntentName =
   | "bullet_format"
   | "business_plan"
   | "client_message"
+  | "cleaned_preview_request"
   | "data_work_guidance"
+  | "data_quality_check"
   | "date_time_question"
+  | "file_unavailable_explanation"
   | "general_answer"
+  | "large_data_workflow_guidance"
+  | "pasted_csv_analysis"
+  | "pasted_table_cleanup"
+  | "pasted_text_summary"
   | "polite_rewrite"
   | "summarize"
   | "task_checklist"
   | "teaching_explanation"
   | "translation_or_language_help"
+  | "unsupported_ocr_request"
+  | "unsupported_url_request"
+  | "wrong_mode_save_request"
   | "wrong_mode_build_request";
 
 export type AskIntentClassification = {
@@ -20,12 +31,14 @@ export type AskIntentClassification = {
   mutationPolicy: "never_mutate";
   reason: string;
   shouldCreateProposal: false;
+  shouldRunRuntime: false;
   shouldWriteFiles: false;
 };
 
 const mutationSafe = {
   mutationPolicy: "never_mutate",
   shouldCreateProposal: false,
+  shouldRunRuntime: false,
   shouldWriteFiles: false
 } as const;
 
@@ -110,12 +123,18 @@ function isWrongModeBuildRequest(prompt: string) {
 }
 
 export function classifyAskIntent(prompt: string): AskIntentClassification {
+  const fileLiteIntent = classifyFileLiteIntent(prompt);
+
+  if (fileLiteIntent) {
+    return classify(fileLiteIntent, 0.94, "The user is asking ASK mode to analyze pasted text/table data or explain unsupported file access.");
+  }
+
   if (isLiveUrlRequest(prompt)) {
-    return classify("general_answer", 0.98, "The user asked ASK mode to open or summarize a live URL.");
+    return classify("unsupported_url_request", 0.98, "The user asked ASK mode to open or summarize a live URL.");
   }
 
   if (isFileReadingRequest(prompt) || isImageReadingRequest(prompt)) {
-    return classify("general_answer", 0.97, "The user asked ASK mode to read a file or image that is not available to this layer.");
+    return classify("file_unavailable_explanation", 0.97, "The user asked ASK mode to read a file or image that is not available to this layer.");
   }
 
   if (isWritingIntent(prompt)) {
@@ -316,15 +335,23 @@ function createWrongModeAnswer(prompt: string) {
 
 function createNoFakeCapabilityAnswer(prompt: string) {
   if (isLiveUrlRequest(prompt)) {
-    return "I cannot open live URLs in ASK-I1 yet. Paste the content here and I can summarize or rewrite it.";
+    return "Live URL reading is not available in FILE-I1 Lite. Paste the page content here and I can summarize it.";
   }
 
   if (isFileReadingRequest(prompt)) {
-    return "I can help if you paste the text or rows here. File upload reading is not available in ASK-I1 yet.";
+    if (/\b(?:excel|xlsx)\b/i.test(prompt)) {
+      return "I cannot read the uploaded Excel file content in FILE-I1 Lite yet. Export it as CSV or paste the rows here, and I can help clean, summarize, or check the data.";
+    }
+
+    if (/\bpdf|contract\b/i.test(prompt)) {
+      return "I cannot read uploaded PDF content in FILE-I1 Lite yet. Paste the contract text here and I can summarize it.";
+    }
+
+    return "I cannot read uploaded file content in FILE-I1 Lite yet. Paste the text or CSV rows here and I can help analyze them.";
   }
 
   if (isImageReadingRequest(prompt)) {
-    return "Image/OCR understanding is not available in ASK-I1 yet. Describe the image or paste the text and I can help.";
+    return "OCR/image reading is not available in FILE-I1 Lite. Paste the visible text here and I can help.";
   }
 
   return null;
@@ -340,6 +367,12 @@ export function createAskSeriousAnswer(
 
   if (fakeCapabilityAnswer) {
     return fakeCapabilityAnswer;
+  }
+
+  const fileLiteAnswer = createFileLiteAnswer(prompt);
+
+  if (fileLiteAnswer) {
+    return fileLiteAnswer;
   }
 
   const intent = classifyAskIntent(prompt).intent;
@@ -370,6 +403,18 @@ export function createAskSeriousAnswer(
       return createTeachingAnswer(prompt);
     case "wrong_mode_build_request":
       return createWrongModeAnswer(prompt);
+    case "pasted_text_summary":
+      return createSummaryAnswer(prompt);
+    case "cleaned_preview_request":
+    case "data_quality_check":
+    case "file_unavailable_explanation":
+    case "large_data_workflow_guidance":
+    case "pasted_csv_analysis":
+    case "pasted_table_cleanup":
+    case "unsupported_ocr_request":
+    case "unsupported_url_request":
+    case "wrong_mode_save_request":
+      return null;
     case "date_time_question":
     case "general_answer":
       return null;
