@@ -238,6 +238,194 @@ function isolateProposalContextForMixedCodeWorkspace(context: ProposalContext, w
   };
 }
 
+type ExistingCodeAppIdentity = {
+  appName: string;
+  appType: string | null;
+  contractPath: string | null;
+  entryPoint: string | null;
+  framework: string | null;
+  previewType: string | null;
+};
+
+type RequestedCodeAppIdentity = {
+  appName: string;
+  framework: "python_streamlit" | "react_vite";
+  requestKind: "create_new_app" | "edit_existing_app" | "replace_current_app";
+};
+
+function workspaceText(workspace: WorkspaceContext, path: string) {
+  return workspace.fileContents?.[path] ?? (workspace.activePath === path ? workspace.activeFileContent : "");
+}
+
+function firstMatch(value: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[1]?.trim()) return cleanRenameValue(match[1]);
+  }
+
+  return null;
+}
+
+function extractExistingCodeAppIdentity(workspace: WorkspaceContext): ExistingCodeAppIdentity | null {
+  const codeContract = workspaceText(workspace, "HASSALI.code.md");
+  const rootContract = workspaceText(workspace, "HASSALI.md");
+  const rootContractIsCode = /\b(?:mode|Project Type):\s*CODE\b/i.test(rootContract);
+  const contractPath = codeContract ? "HASSALI.code.md" : rootContractIsCode ? "HASSALI.md" : null;
+  const contract = contractPath === "HASSALI.code.md" ? codeContract : contractPath === "HASSALI.md" ? rootContract : "";
+  const appSource = workspaceText(workspace, "src/App.tsx") || workspaceText(workspace, "src/App.jsx");
+  const packageJson = workspaceText(workspace, "package.json");
+  const appName =
+    firstMatch(contract, [
+      /Product identity:\s*([^\n\r]+)/i,
+      /appName:\s*([^\n\r]+)/i,
+      /Name:\s*([^\n\r]+)/i
+    ]) ??
+    firstMatch(appSource, [
+      /"appName"\s*:\s*"([^"]+)"/,
+      /appName:\s*["'`]([^"'`]+)["'`]/
+    ]) ??
+    firstMatch(packageJson, [
+      /"name"\s*:\s*"([^"]+)"/
+    ]);
+
+  const hasCodeEvidence =
+    Boolean(contractPath) ||
+    /"appName"\s*:/.test(appSource) ||
+    (workspace.fileList.includes("src/App.tsx") && workspace.fileList.includes("vite.config.ts")) ||
+    workspace.fileList.includes("app.py");
+
+  if (!hasCodeEvidence || !appName) return null;
+
+  return {
+    appName,
+    appType: firstMatch(contract, [/appType:\s*([^\n\r]+)/i]),
+    contractPath,
+    entryPoint: firstMatch(contract, [/entryPoint:\s*([^\n\r]+)/i]),
+    framework: firstMatch(contract, [/framework:\s*([^\n\r]+)/i]),
+    previewType: firstMatch(contract, [/previewType:\s*([^\n\r]+)/i])
+  };
+}
+
+function normalizeCodeAppName(value: string | null | undefined) {
+  return cleanRenameValue(value ?? "")
+    .toLowerCase()
+    .replace(/\b(?:app|application|dashboard|system|software)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function namesMeaningfullyDifferent(existing: string, requested: string) {
+  const left = normalizeCodeAppName(existing);
+  const right = normalizeCodeAppName(requested);
+
+  if (!left || !right) return false;
+  if (left === right) return false;
+  return !left.includes(right) && !right.includes(left);
+}
+
+function hasExplicitReplaceIntent(prompt: string) {
+  return /\b(?:replace current app|replace this app|replace the current app|start over with|overwrite this project|overwrite current app|replace current project)\b/i.test(prompt);
+}
+
+function hasCodeAppCreateIntent(prompt: string) {
+  return /\b(?:create|build|generate|make)\b[\s\S]{0,90}\b(?:react app|web app|browser app|dashboard app|dashboard|tracker|tool|single-page app|spa|frontend app|app)\b/i.test(prompt);
+}
+
+function hasCodeAppEditIntent(prompt: string, existingAppName?: string | null) {
+  const hasEditVerb = /\b(?:add|improve|update|change|tweak|refine|extend|include|make|polish)\b/i.test(prompt);
+  if (!hasEditVerb) return false;
+  if (/\b(?:create|build|generate)\b/i.test(prompt)) return false;
+
+  const existing = normalizeCodeAppName(existingAppName);
+  const promptName = normalizeCodeAppName(prompt);
+  return !existing || promptName.includes(existing) || /\b(?:this app|current app|dashboard|section|tab|colors?|filters?|reports?|payments?)\b/i.test(prompt);
+}
+
+function requestedCodeAppIdentity(input: {
+  appPreviewName: string;
+  existingAppName?: string | null;
+  isPythonPreview: boolean;
+  prompt: string;
+}): RequestedCodeAppIdentity {
+  const prompt = input.prompt;
+  const framework = input.isPythonPreview ? "python_streamlit" : "react_vite";
+  const metadataName = input.isPythonPreview
+    ? input.appPreviewName
+    : createReactProductPreviewMetadata({
+        appName: input.appPreviewName,
+        prompt
+      }).appName;
+  const requestKind = hasExplicitReplaceIntent(prompt)
+    ? "replace_current_app"
+    : hasCodeAppEditIntent(prompt, input.existingAppName)
+      ? "edit_existing_app"
+      : hasCodeAppCreateIntent(prompt)
+        ? "create_new_app"
+        : "edit_existing_app";
+
+  return {
+    appName: metadataName,
+    framework,
+    requestKind
+  };
+}
+
+function createCodeAppCollisionProposal(input: {
+  existing: ExistingCodeAppIdentity;
+  mode: "SUGGEST" | "EXECUTE";
+  projectId: string | null;
+  requested: RequestedCodeAppIdentity;
+}): DiffProposal {
+  const summary =
+    `This project already contains a CODE app: ${input.existing.appName}. ` +
+    `Your new request looks like a different app: ${input.requested.appName}.\n\n` +
+    `To avoid overwriting your current app, choose one:\n` +
+    `1. Replace the current app\n` +
+    `2. Create/open a new project and run this prompt there\n` +
+    `3. Cancel and keep editing ${input.existing.appName}\n\n` +
+    `If you want to replace it, reply: Replace current app with ${input.requested.appName}.`;
+
+  return {
+    approvalDisabled: true,
+    approvalRecommendation: "reject",
+    blockedReason: "CODE_APP_COLLISION: Different CODE app detected in the same project.",
+    changes: [],
+    id: `proposal-${Date.now()}`,
+    mode: input.mode,
+    previewMode: "answer_only",
+    previewMetadata: {
+      activeMode: "CODE",
+      previewType: "none",
+      runtimePolicy: "not_applicable_collision_guard"
+    },
+    projectId: input.projectId,
+    proposalRoutingMode: "blocked",
+    proposalRoutingReasons: [{
+      code: "code_app_collision",
+      message: `Existing CODE app ${input.existing.appName} would be overwritten by ${input.requested.appName}.`,
+      severity: "high"
+    }],
+    shouldBlockExecution: true,
+    status: "pending",
+    summary
+  };
+}
+
+function cleanCodeAppCollisionSummary(proposal: DiffProposal): DiffProposal {
+  if (!proposal.summary.includes("This project already contains a CODE app:")) {
+    return proposal;
+  }
+
+  const match = proposal.summary.match(/This project already contains a CODE app:[\s\S]*?If you want to replace it, reply: Replace current app with [^.]+[.]/);
+  const summary = match?.[0] ?? proposal.summary;
+
+  return {
+    ...proposal,
+    blockedReason: "CODE_APP_COLLISION: Different CODE app detected in the same project.",
+    summary
+  };
+}
+
 type ChatPersistenceContext = {
   mode: PersistedAiMode;
   projectId: string;
@@ -1539,6 +1727,28 @@ function createLocalProposal(
     const codeBrief = proposalContext?.codeGenerationBrief ?? null;
     const isMobilePhoneInventory = codeBrief?.appType === "inventory_system" ||
       (codeBrief?.domainId === "mobile_phone_shop" && codeBrief.modules.some((moduleName) => ["products", "stock", "sales", "suppliers", "repairs"].includes(moduleName)));
+    const isPythonPreview = isMobilePhoneInventory || usePythonStack || codeBrief?.preferredFramework === "streamlit";
+    const existingCodeApp = extractExistingCodeAppIdentity(workspace);
+    const requestedCodeApp = requestedCodeAppIdentity({
+      appPreviewName: appPreview.appName,
+      existingAppName: existingCodeApp?.appName,
+      isPythonPreview,
+      prompt
+    });
+    const isDifferentNewCodeApp =
+      existingCodeApp &&
+      requestedCodeApp.requestKind === "create_new_app" &&
+      namesMeaningfullyDifferent(existingCodeApp.appName, requestedCodeApp.appName);
+
+    if (isDifferentNewCodeApp) {
+      return createCodeAppCollisionProposal({
+        existing: existingCodeApp,
+        mode,
+        projectId: diagnostic.projectId,
+        requested: requestedCodeApp
+      });
+    }
+
     const sourceFiles = isolateCodeContractForMixedWorkspace(isMobilePhoneInventory
       ? generateMobilePhoneInventoryStreamlitSource({
           appName: appPreview.appName,
@@ -1556,7 +1766,6 @@ function createLocalProposal(
           brief: codeBrief,
           prompt
         }), workspace);
-    const isPythonPreview = isMobilePhoneInventory || usePythonStack || codeBrief?.preferredFramework === "streamlit";
     const reactProductPreview = isPythonPreview
       ? null
       : createReactProductPreviewMetadata({
@@ -1604,7 +1813,7 @@ function createLocalProposal(
             ? `Detected CODE-mode inventory management software for a mobile phone shop. I will create a Python / Streamlit inventory scaffold with products, stock, suppliers, sales, repairs, billing, and documentation. No package install or runtime command runs before approval.`
           : usePythonStack || codeBrief?.preferredFramework === "streamlit"
           ? `Detected a CODE-mode ${appPreview.appName} ${systemName} request with explicit Python stack intent and ${requestedCapabilities.join(", ")}. I will create a Python / Streamlit CRM scaffold with mock data, dashboard metrics, billing charts, and documentation. No package install or runtime command runs before approval.`
-          : `Detected a CODE-mode ${appPreview.appName} React mini-product request. I will create a Product Intelligence Blueprint-driven Vite React app with tabs, local state, forms, computed metrics, realistic mock data, README, architecture, data model, and security docs. No package install or runtime command runs before approval.`
+          : `${requestedCodeApp.requestKind === "replace_current_app" && existingCodeApp ? `This will replace the existing CODE app in this project (${existingCodeApp.appName}) with ${requestedCodeApp.appName}. ` : ""}Detected a CODE-mode ${appPreview.appName} React mini-product request. I will create a Product Intelligence Blueprint-driven Vite React app with tabs, local state, forms, computed metrics, realistic mock data, README, architecture, data model, and security docs. No package install or runtime command runs before approval.`
     };
     const architecture = `# ${systemName.toUpperCase()} Architecture Plan
 
@@ -4136,6 +4345,32 @@ function evaluateAndRepairProposal(input: {
     translatedIntent: input.translatedIntent
   });
   const proposalWithAssets = applyAssetVisualValidationMetadata(proposalWithQuality, assetVisualValidation);
+  const skipRepairForCodeAppCollision =
+    input.proposal.blockedReason?.startsWith("CODE_APP_COLLISION") ||
+    proposalWithAssets.blockedReason?.startsWith("CODE_APP_COLLISION") ||
+    input.proposal.proposalRoutingReasons?.some((reason) => reason.code === "code_app_collision") ||
+    proposalWithAssets.proposalRoutingReasons?.some((reason) => reason.code === "code_app_collision") ||
+    input.proposal.summary.includes("This project already contains a CODE app:") ||
+    proposalWithAssets.summary.includes("This project already contains a CODE app:");
+  const repairSkippedForCollision: ProposalRepairResult = {
+    originalBlockReasons: [input.proposal.blockedReason, proposalWithAssets.blockedReason].filter((reason): reason is string => Boolean(reason)),
+    repairActions: [],
+    repairApplied: false,
+    repairAttempted: false,
+    repairConfidence: 0.95,
+    repairId: `repair-skip-${Date.now()}`,
+    repairedFiles: {},
+    repairedSummary: proposalWithAssets.summary,
+    repairSeverity: "high",
+    repairStatus: "keep_blocked",
+    repairStrategy: "none",
+    repairWarnings: ["CODE app collision guard blocked repair so no placeholder or replacement files are added."],
+    revalidationPassed: false,
+    revalidationRequired: false,
+    shouldKeepBlocked: true,
+    shouldPresentRepairedProposal: false,
+    unresolvedIssues: [input.proposal.blockedReason, proposalWithAssets.blockedReason].filter((reason): reason is string => Boolean(reason))
+  };
   const repair = repairProposal({
     assetVisualValidation,
     businessBlueprint: input.blueprint,
@@ -4154,9 +4389,10 @@ function evaluateAndRepairProposal(input: {
     taskDecomposition: input.decomposition,
     translatedIntent: input.translatedIntent
   });
+  const effectiveRepair = skipRepairForCodeAppCollision ? repairSkippedForCollision : repair;
 
-  if (!repair.repairApplied) {
-    const proposalWithRepair = applyProposalRepairMetadata(proposalWithAssets, repair);
+  if (!effectiveRepair.repairApplied) {
+    const proposalWithRepair = applyProposalRepairMetadata(proposalWithAssets, effectiveRepair);
     const proposalWithApproval = applyFinalApprovalAuthority(proposalWithRepair, input.proposalContext);
     const selfReview = runSelfReviewForProposal({
       generatorContract: input.generatorContract,
@@ -4169,9 +4405,9 @@ function evaluateAndRepairProposal(input: {
     return {
       assetVisualValidation,
       domainValidation,
-      proposal: applySelfReviewMetadata(proposalWithApproval, selfReview),
+      proposal: cleanCodeAppCollisionSummary(applySelfReviewMetadata(proposalWithApproval, selfReview)),
       proposalQuality,
-      proposalRepair: repair,
+      proposalRepair: effectiveRepair,
       selfReview
     };
   }

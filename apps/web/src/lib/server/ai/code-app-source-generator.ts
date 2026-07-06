@@ -13,12 +13,18 @@ export type ReactProductPreviewMetadata = {
   domain: string;
   metrics: string[];
   productPreviewQuality: {
+    distinctLayoutKinds: number;
     hasAppName: boolean;
     hasDomainSections: boolean;
     hasLocalOnlyLimitations: boolean;
     hasMetrics: boolean;
     hasSampleRecords: boolean;
     hasStaticSnapshot: boolean;
+    maxLayoutKindShare: number;
+    screenGateFailures: string[];
+    screenGateWarnings: string[];
+    screenLayoutGatePassed: boolean;
+    totalScreens: number;
   };
   sampleRecords: Array<{
     amount: number;
@@ -29,6 +35,20 @@ export type ReactProductPreviewMetadata = {
     title: string;
   }>;
   sections: string[];
+  screenQualityGate: {
+    distinctLayoutKinds: number;
+    failures: string[];
+    maxLayoutKindShare: number;
+    passed: boolean;
+    totalScreens: number;
+    warnings: string[];
+  };
+  screens: Array<{
+    label: string;
+    layoutKind: string;
+    purpose: string;
+    screenId: string;
+  }>;
   targetUser: string;
 };
 
@@ -172,15 +192,35 @@ export function createReactProductPreviewMetadata(input: {
     domain: blueprint.domain,
     metrics: blueprint.metricLabels,
     productPreviewQuality: {
+      distinctLayoutKinds: blueprint.screenQualityGate.distinctLayoutKinds,
       hasAppName: Boolean(blueprint.appName),
       hasDomainSections: blueprint.sections.length >= 4,
       hasLocalOnlyLimitations: /local|mock|no backend|no provider|not tax advice/i.test(blueprint.disclaimer),
       hasMetrics: blueprint.metricLabels.length >= 4,
       hasSampleRecords: blueprint.records.length >= 3,
-      hasStaticSnapshot: true
+      hasStaticSnapshot: true,
+      maxLayoutKindShare: blueprint.screenQualityGate.maxLayoutKindShare,
+      screenGateFailures: blueprint.screenQualityGate.failures,
+      screenGateWarnings: blueprint.screenQualityGate.warnings,
+      screenLayoutGatePassed: blueprint.screenQualityGate.passed,
+      totalScreens: blueprint.screenQualityGate.totalScreens
     },
     sampleRecords: blueprint.records.slice(0, 4),
     sections: blueprint.sections,
+    screenQualityGate: {
+      distinctLayoutKinds: blueprint.screenQualityGate.distinctLayoutKinds,
+      failures: blueprint.screenQualityGate.failures,
+      maxLayoutKindShare: blueprint.screenQualityGate.maxLayoutKindShare,
+      passed: blueprint.screenQualityGate.passed,
+      totalScreens: blueprint.screenQualityGate.totalScreens,
+      warnings: blueprint.screenQualityGate.warnings
+    },
+    screens: blueprint.screens.map((screen) => ({
+      label: screen.label,
+      layoutKind: screen.layoutKind,
+      purpose: screen.purpose,
+      screenId: screen.screenId
+    })),
     targetUser: blueprint.targetUser
   };
 }
@@ -214,12 +254,426 @@ type ReactProductBlueprint = {
     title: string;
   }>;
   sections: string[];
+  screenQualityGate: ReactScreenQualityGate;
+  screens: ReactProductScreen[];
   statusOptions: string[];
   targetUser: string;
   tone: string;
   type: "afforfix" | "generic" | "safe_client_check" | "tax_dedo";
   workflowMap: string[];
 };
+
+type ReactScreenLayoutKind =
+  | "calendar_or_schedule"
+  | "dashboard_overview"
+  | "form_and_queue"
+  | "kanban_status_board"
+  | "package_or_pricing_cards"
+  | "payments_revenue"
+  | "people_roster"
+  | "quality_issues"
+  | "records_table"
+  | "settings_or_docs_summary";
+
+type ReactProductScreen = {
+  actions: string[];
+  domainVocabulary: string[];
+  emptyState: string;
+  fields: string[];
+  label: string;
+  layoutKind: ReactScreenLayoutKind;
+  metrics: string[];
+  primaryEntity: string;
+  purpose: string;
+  sampleRecords: ReactProductBlueprint["records"];
+  screenId: string;
+  statusOptions: string[];
+};
+
+type ReactScreenQualityGate = {
+  distinctLayoutKinds: number;
+  failures: string[];
+  maxLayoutKindShare: number;
+  passed: boolean;
+  thresholds: {
+    distinctLayoutKindsMinimumWhenFourScreens: number;
+    maxSingleLayoutKindShareWhenFourScreens: number;
+  };
+  totalScreens: number;
+  warnings: string[];
+};
+
+type ReactProductBlueprintDraft = Omit<ReactProductBlueprint, "screenQualityGate">;
+
+function finalizeBlueprint(blueprint: ReactProductBlueprintDraft, prompt: string): ReactProductBlueprint {
+  return {
+    ...blueprint,
+    screenQualityGate: buildScreenQualityGate(blueprint.screens, prompt)
+  };
+}
+
+function screen(input: Omit<ReactProductScreen, "screenId">): ReactProductScreen {
+  return {
+    ...input,
+    screenId: slug(input.label)
+  };
+}
+
+function buildScreenQualityGate(screens: ReactProductScreen[], prompt: string): ReactScreenQualityGate {
+  const totalScreens = screens.length;
+  const layoutCounts = screens.reduce<Record<string, number>>((counts, item) => {
+    counts[item.layoutKind] = (counts[item.layoutKind] ?? 0) + 1;
+    return counts;
+  }, {});
+  const distinctLayoutKinds = Object.keys(layoutCounts).length;
+  const maxLayoutKindShare = totalScreens
+    ? Math.max(...Object.values(layoutCounts)) / totalScreens
+    : 0;
+  const failures: string[] = [];
+  const warnings: string[] = [];
+
+  if (totalScreens >= 4 && distinctLayoutKinds < 3) {
+    failures.push(`screen layout variety failed: N=${totalScreens}, D=${distinctLayoutKinds}; D must be >= 3 when N >= 4.`);
+  }
+
+  if (totalScreens >= 4 && maxLayoutKindShare > 0.6) {
+    failures.push(`screen layout dominance failed: max layout share ${maxLayoutKindShare.toFixed(2)} exceeds 0.60 when N >= 4.`);
+  }
+
+  screens.forEach((item) => {
+    const label = item.label.toLowerCase();
+    const expected =
+      /dashboard|overview|summary/.test(label) ? "dashboard_overview" :
+      /status board|pipeline|board|filing status/.test(label) ? "kanban_status_board" :
+      /payment|invoice|income|revenue|remittance|billing/.test(label) ? "payments_revenue" :
+      /package|pricing|service categor/.test(label) ? "package_or_pricing_cards" :
+      /client|cleaner|people|customer/.test(label) ? "people_roster" :
+      /review|quality|issue|risk/.test(label) ? "quality_issues" :
+      /deadline|schedule|calendar/.test(label) ? "calendar_or_schedule" :
+      null;
+
+    if (expected && item.layoutKind !== expected) {
+      warnings.push(`semantic layout mismatch: ${item.label} uses ${item.layoutKind}; expected ${expected}.`);
+    }
+  });
+
+  const promptFeatures = [
+    "bookings",
+    "cleaners",
+    "customer requests",
+    "job status",
+    "service categories",
+    "filters",
+    "demo records",
+    "client records",
+    "invoice",
+    "tax status",
+    "income summary",
+    "due payments"
+  ].filter((feature) => prompt.toLowerCase().includes(feature));
+  const screenText = screens.map((item) => [
+    item.label,
+    item.purpose,
+    item.primaryEntity,
+    ...item.actions,
+    ...item.domainVocabulary
+  ].join(" ")).join(" ").toLowerCase();
+
+  promptFeatures.forEach((feature) => {
+    const normalized = feature.replace(/\s+/g, " ");
+    if (!screenText.includes(normalized) && !(feature === "filters" && screenText.includes("filter"))) {
+      warnings.push(`requested feature may be underrepresented in screens: ${feature}.`);
+    }
+  });
+
+  return {
+    distinctLayoutKinds,
+    failures,
+    maxLayoutKindShare: Number(maxLayoutKindShare.toFixed(2)),
+    passed: failures.length === 0,
+    thresholds: {
+      distinctLayoutKindsMinimumWhenFourScreens: 3,
+      maxSingleLayoutKindShareWhenFourScreens: 0.6
+    },
+    totalScreens,
+    warnings
+  };
+}
+
+function afforfixScreens(records: ReactProductBlueprint["records"], statusOptions: string[]): ReactProductScreen[] {
+  return [
+    screen({
+      actions: ["Review today's jobs", "Filter urgent bookings", "Open dispatch notes", "Reset demo records"],
+      domainVocabulary: ["cleaning service", "today's jobs", "booking", "quality", "demo records"],
+      emptyState: "No jobs match this operational filter.",
+      fields: ["job title", "client", "service tier", "status", "cleaner note"],
+      label: "Dashboard",
+      layoutKind: "dashboard_overview",
+      metrics: ["Today's jobs", "Revenue estimate", "Cleaner workload", "Quality issues"],
+      primaryEntity: "operations snapshot",
+      purpose: "Show the dispatcher the daily cleaning operation at a glance.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add booking", "Assign cleaner", "Filter by status", "Review customer requests"],
+      domainVocabulary: ["booking", "client request", "customer requests", "home cleaning", "office cleaning"],
+      emptyState: "No bookings match this status.",
+      fields: ["booking", "client", "address", "service", "status"],
+      label: "Bookings",
+      layoutKind: "records_table",
+      metrics: ["Bookings", "Confirmed", "Pending", "Cancelled"],
+      primaryEntity: "booking",
+      purpose: "Track cleaning requests with practical dispatch details.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Review client notes", "Check repeat customers", "Flag special instructions"],
+      domainVocabulary: ["clients", "homeowners", "customer notes"],
+      emptyState: "No clients found for this filter.",
+      fields: ["client", "location", "notes", "last service"],
+      label: "Clients",
+      layoutKind: "people_roster",
+      metrics: ["Clients", "Repeat clients", "Notes", "Follow-ups"],
+      primaryEntity: "client",
+      purpose: "Keep client preferences and notes visible for service quality.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Assign cleaner", "Review workload", "Check availability"],
+      domainVocabulary: ["cleaners", "workload", "availability", "ratings"],
+      emptyState: "No cleaners match this availability filter.",
+      fields: ["cleaner", "workload", "rating", "availability"],
+      label: "Cleaners",
+      layoutKind: "people_roster",
+      metrics: ["Available cleaners", "Busy cleaners", "Average rating", "Open slots"],
+      primaryEntity: "cleaner",
+      purpose: "Balance cleaner assignments without overloading one person.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Compare packages", "Review inclusions", "Prepare quote"],
+      domainVocabulary: ["Basic", "Deep Clean", "Move-in Clean", "service categories"],
+      emptyState: "No service packages configured yet.",
+      fields: ["package", "duration", "price", "included tasks"],
+      label: "Service Packages",
+      layoutKind: "package_or_pricing_cards",
+      metrics: ["Packages", "Popular tier", "Starting price", "Average duration"],
+      primaryEntity: "service package",
+      purpose: "Present service tiers as clear marketplace-ready packages.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Move booking status", "Spot blocked jobs", "Review completed work"],
+      domainVocabulary: ["job status", "pending", "confirmed", "completed", "cancelled"],
+      emptyState: "No jobs in this board column.",
+      fields: ["job", "status", "cleaner", "client"],
+      label: "Job Status Board",
+      layoutKind: "kanban_status_board",
+      metrics: ["Pending", "Confirmed", "In progress", "Completed"],
+      primaryEntity: "job",
+      purpose: "Make job movement visible as a status board.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Track unpaid bookings", "Mark paid", "Review revenue estimate"],
+      domainVocabulary: ["payments", "paid", "unpaid", "revenue estimate"],
+      emptyState: "No payment records match this filter.",
+      fields: ["booking", "amount", "payment status", "client"],
+      label: "Payments",
+      layoutKind: "payments_revenue",
+      metrics: ["Revenue estimate", "Paid", "Unpaid", "Refunded"],
+      primaryEntity: "payment",
+      purpose: "Separate operational completion from payment state.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Log quality issue", "Review ratings", "Queue second pass"],
+      domainVocabulary: ["reviews", "quality issues", "second pass", "cleaning checklist"],
+      emptyState: "No quality issues are open.",
+      fields: ["issue", "client", "severity", "resolution"],
+      label: "Reviews / Quality Issues",
+      layoutKind: "quality_issues",
+      metrics: ["Reviews", "Open issues", "Resolved", "Second-pass jobs"],
+      primaryEntity: "quality issue",
+      purpose: "Track customer feedback and cleaning quality follow-up.",
+      sampleRecords: records,
+      statusOptions
+    })
+  ];
+}
+
+function taxDedoScreens(records: ReactProductBlueprint["records"], statusOptions: string[]): ReactProductScreen[] {
+  return [
+    screen({
+      actions: ["Review income", "Check filing readiness", "Open due reminders"],
+      domainVocabulary: ["tax filing", "income summary", "Pakistan freelancers", "not tax advice"],
+      emptyState: "No finance records are visible yet.",
+      fields: ["income", "pending", "client", "deadline"],
+      label: "Dashboard",
+      layoutKind: "dashboard_overview",
+      metrics: ["Monthly income", "Pending amount", "Top client", "Overdue reminders"],
+      primaryEntity: "finance snapshot",
+      purpose: "Show income, overdue money, and filing readiness in the first view.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add client", "Review risk notes", "Filter active clients"],
+      domainVocabulary: ["client records", "freelancer clients", "client ghosting risk"],
+      emptyState: "No client records match this filter.",
+      fields: ["client", "country", "risk", "last payment"],
+      label: "Clients",
+      layoutKind: "people_roster",
+      metrics: ["Clients", "Risk notes", "Active retainers", "Follow-ups"],
+      primaryEntity: "client",
+      purpose: "Track freelancer clients and payment reliability.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add invoice", "Mark paid", "Filter pending payments"],
+      domainVocabulary: ["invoice", "payment status", "due payments", "receipts"],
+      emptyState: "No invoices match this status.",
+      fields: ["invoice", "client", "amount", "status"],
+      label: "Invoices",
+      layoutKind: "payments_revenue",
+      metrics: ["Invoices", "Paid", "Pending", "Overdue"],
+      primaryEntity: "invoice",
+      purpose: "Keep invoice and payment status visible without a backend.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Move filing status", "Review missing proof", "Flag review items"],
+      domainVocabulary: ["tax status", "filing board", "proof saved", "readiness"],
+      emptyState: "No filing items are on the board.",
+      fields: ["filing task", "status", "proof", "notes"],
+      label: "Tax Filing Status",
+      layoutKind: "kanban_status_board",
+      metrics: ["Ready", "Needs proof", "Review", "Filed locally"],
+      primaryEntity: "filing task",
+      purpose: "Represent tax-readiness as a board, not legal advice.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add expense", "Attach receipt note", "Flag formula-safe export"],
+      domainVocabulary: ["deductions", "expenses", "receipt proof", "mock estimate"],
+      emptyState: "No expense records match this filter.",
+      fields: ["expense", "category", "amount", "receipt"],
+      label: "Deductions / Expenses",
+      layoutKind: "records_table",
+      metrics: ["Expenses", "Proof saved", "Missing proof", "Mock deductible total"],
+      primaryEntity: "expense",
+      purpose: "Track expense proof for later human review.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add deadline", "Mark reminder", "Review overdue follow-up"],
+      domainVocabulary: ["deadlines", "due payments", "reminders", "filing due"],
+      emptyState: "No upcoming reminders in this view.",
+      fields: ["deadline", "owner", "date", "status"],
+      label: "Deadlines",
+      layoutKind: "calendar_or_schedule",
+      metrics: ["Upcoming", "Overdue", "Due this week", "Completed"],
+      primaryEntity: "deadline",
+      purpose: "Make payment and filing deadlines visible.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Review local summary", "Check disclaimer", "Prepare accountant notes"],
+      domainVocabulary: ["reports", "tax readiness", "local summaries", "not tax advice"],
+      emptyState: "No report summary is ready yet.",
+      fields: ["summary", "period", "notes", "disclaimer"],
+      label: "Reports",
+      layoutKind: "settings_or_docs_summary",
+      metrics: ["Reports", "Summaries", "Notes", "Disclaimers"],
+      primaryEntity: "report",
+      purpose: "Summarize local records for later professional review.",
+      sampleRecords: records,
+      statusOptions
+    })
+  ];
+}
+
+function genericScreens(records: ReactProductBlueprint["records"], statusOptions: string[]): ReactProductScreen[] {
+  return [
+    screen({
+      actions: ["Review overview", "Check metrics", "Open priority items"],
+      domainVocabulary: ["dashboard", "records", "metrics"],
+      emptyState: "No dashboard records yet.",
+      fields: ["metric", "owner", "status"],
+      label: "Dashboard",
+      layoutKind: "dashboard_overview",
+      metrics: ["Active records", "Open value", "Needs review", "Completed"],
+      primaryEntity: "overview",
+      purpose: "Show the app's main local operating picture.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add record", "Filter records", "Update status"],
+      domainVocabulary: ["records", "table", "status"],
+      emptyState: "No records match this filter.",
+      fields: ["title", "owner", "amount", "status"],
+      label: "Records",
+      layoutKind: "records_table",
+      metrics: ["Records", "Open", "Done", "Watch"],
+      primaryEntity: "record",
+      purpose: "Manage the core trackable records.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Move status", "Review queue", "Spot blockers"],
+      domainVocabulary: ["workflow", "board", "status"],
+      emptyState: "No board items in this column.",
+      fields: ["record", "status", "owner"],
+      label: "Workflow Board",
+      layoutKind: "kanban_status_board",
+      metrics: ["Pending", "Active", "Watch", "Completed"],
+      primaryEntity: "workflow item",
+      purpose: "Show progress as a board instead of another list.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Review contacts", "Add note", "Filter people"],
+      domainVocabulary: ["clients", "owners", "contacts"],
+      emptyState: "No people records visible.",
+      fields: ["person", "role", "status", "note"],
+      label: "Clients",
+      layoutKind: "people_roster",
+      metrics: ["People", "Follow-ups", "Active", "Review"],
+      primaryEntity: "person",
+      purpose: "Keep people and ownership clear.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Review notes", "Document limitation", "Reset demo"],
+      domainVocabulary: ["notes", "local demo", "limitations"],
+      emptyState: "No documentation notes yet.",
+      fields: ["note", "owner", "status"],
+      label: "Settings",
+      layoutKind: "settings_or_docs_summary",
+      metrics: ["Notes", "Local data", "Safety", "Reset"],
+      primaryEntity: "setting",
+      purpose: "Explain local-only limits and demo controls.",
+      sampleRecords: records,
+      statusOptions
+    })
+  ];
+}
 
 function buildReactProductBlueprint(input: {
   appName: string;
@@ -228,7 +682,14 @@ function buildReactProductBlueprint(input: {
   const prompt = input.prompt.toLowerCase();
 
   if (/\b(?:anthropic|openai|gemini|claude|ai api|api key|browser api|directly from the browser)\b/i.test(input.prompt)) {
-    return {
+    const records = [
+      { amount: 82, category: "Mock review", note: "Looks healthy in local demo data. Real model review requires backend proxy.", owner: "Ayesha Malik", status: "ready", title: "Studio Nova" },
+      { amount: 61, category: "Needs follow-up", note: "Missing signed scope. Flagged locally without external provider call.", owner: "Daniel Reed", status: "watch", title: "Atlas Retail" },
+      { amount: 44, category: "High caution", note: "Payment terms unclear. Add human review before onboarding.", owner: "Mina Chen", status: "review", title: "Northstar Labs" }
+    ];
+    const statusOptions = ["ready", "watch", "review", "approved", "blocked"];
+
+    return finalizeBlueprint({
       appName: input.appName && !/^software app$/i.test(input.appName) ? input.appName : "Safe Client Check Studio",
       copyLines: [
         "Client check workflow, safely mocked in the browser.",
@@ -252,22 +713,27 @@ function buildReactProductBlueprint(input: {
       },
       primaryActionLabel: "Add client check",
       recordLabel: "client check",
-      records: [
-        { amount: 82, category: "Mock review", note: "Looks healthy in local demo data. Real model review requires backend proxy.", owner: "Ayesha Malik", status: "ready", title: "Studio Nova" },
-        { amount: 61, category: "Needs follow-up", note: "Missing signed scope. Flagged locally without external provider call.", owner: "Daniel Reed", status: "watch", title: "Atlas Retail" },
-        { amount: 44, category: "High caution", note: "Payment terms unclear. Add human review before onboarding.", owner: "Mina Chen", status: "review", title: "Northstar Labs" }
-      ],
+      records,
       sections: ["Dashboard", "Client Queue", "Risk Notes", "Review Form", "Backend Proxy Plan", "Security Checklist"],
-      statusOptions: ["ready", "watch", "review", "approved", "blocked"],
+      screens: genericScreens(records, statusOptions),
+      statusOptions,
       targetUser: "Freelancers and small teams designing a safe client checking workflow",
       tone: "clear, security-aware, practical",
       type: "safe_client_check",
       workflowMap: ["Add client check", "Update review status", "Record risk note", "Review backend proxy requirements", "Reset demo data"]
-    };
+    }, input.prompt);
   }
 
   if (prompt.includes("afforfix") || prompt.includes("cleaning service") || prompt.includes("cleaner")) {
-    return {
+    const records = [
+      { amount: 9500, category: "Deep Clean", note: "Client wants pet-safe products and balcony focus.", owner: "Nadia Khan", status: "confirmed", title: "Gulberg apartment reset" },
+      { amount: 6200, category: "Basic", note: "Assign cleaner near Clifton route.", owner: "Hamza Mir", status: "pending", title: "Clifton weekly clean" },
+      { amount: 14800, category: "Move-in Clean", note: "Quality issue: kitchen cabinets need second pass.", owner: "Maira Ali", status: "in-progress", title: "DHA move-in clean" },
+      { amount: 7200, category: "Basic", note: "Payment unpaid. Follow up after completion photos.", owner: "Sameer Shah", status: "completed", title: "Bahria family home" }
+    ];
+    const statusOptions = ["pending", "confirmed", "in-progress", "completed", "cancelled", "unpaid", "paid", "refunded"];
+
+    return finalizeBlueprint({
       appName: input.appName && !/^software app$/i.test(input.appName) ? input.appName : "Afforfix Cleaner",
       copyLines: [
         "Today’s jobs without the WhatsApp chaos.",
@@ -291,23 +757,28 @@ function buildReactProductBlueprint(input: {
       },
       primaryActionLabel: "Add booking",
       recordLabel: "booking",
-      records: [
-        { amount: 9500, category: "Deep Clean", note: "Client wants pet-safe products and balcony focus.", owner: "Nadia Khan", status: "confirmed", title: "Gulberg apartment reset" },
-        { amount: 6200, category: "Basic", note: "Assign cleaner near Clifton route.", owner: "Hamza Mir", status: "pending", title: "Clifton weekly clean" },
-        { amount: 14800, category: "Move-in Clean", note: "Quality issue: kitchen cabinets need second pass.", owner: "Maira Ali", status: "in-progress", title: "DHA move-in clean" },
-        { amount: 7200, category: "Basic", note: "Payment unpaid. Follow up after completion photos.", owner: "Sameer Shah", status: "completed", title: "Bahria family home" }
-      ],
+      records,
       sections: ["Dashboard", "Bookings", "Clients", "Cleaners", "Service Packages", "Job Status Board", "Payments", "Reviews / Quality Issues"],
-      statusOptions: ["pending", "confirmed", "in-progress", "completed", "cancelled", "unpaid", "paid", "refunded"],
+      screens: afforfixScreens(records, statusOptions),
+      statusOptions,
       targetUser: "cleaning marketplace owner, dispatcher, and home-cleaning operations team",
       tone: "clean, trustworthy, operational, marketplace-ready",
       type: "afforfix",
       workflowMap: ["Add booking", "Assign cleaner", "Change booking status", "Filter by status", "Track payment state", "Log quality issue", "Reset demo data"]
-    };
+    }, input.prompt);
   }
 
-  if (prompt.includes("tax dedo") || prompt.includes("pakistani freelancer") || prompt.includes("remittance") || prompt.includes("receipts")) {
-    return {
+  if (prompt.includes("tax dedo") || prompt.includes("pakistani freelancer") || prompt.includes("pakistan freelancer") || prompt.includes("tax filing") || prompt.includes("accounting") || prompt.includes("invoice/tax") || prompt.includes("remittance") || prompt.includes("receipts")) {
+    const records = [
+      { amount: 1800, category: "Wise remittance", note: "Upwork milestone, invoice TD-104, billing proof saved before panic.", owner: "Amina Qureshi", status: "paid", title: "Lumen Studio retainer" },
+      { amount: 950, category: "Payoneer", note: "Client ghosting risk: billing is 6 days late. Reminder queued for overdue payments.", owner: "Bilal Ahmed", status: "overdue", title: "Nordic SaaS landing page" },
+      { amount: 1240, category: "Bank transfer", note: "Direct client invoices and receipt screenshot logged.", owner: "Sara Khan", status: "pending", title: "Toronto UX sprint" },
+      { amount: 640, category: "Subscription retainer", note: "Monthly subscriptions-style design support payment marked for review.", owner: "Hamza Malik", status: "watch", title: "Berlin product icons" },
+      { amount: 520, category: "Wise remittance", note: "Small service seller campaign assets.", owner: "Omar Farooq", status: "paid", title: "Dubai ecommerce copy" }
+    ];
+    const statusOptions = ["pending", "paid", "overdue", "watch", "proof saved"];
+
+    return finalizeBlueprint({
       appName: input.appName && !/^software app$/i.test(input.appName) ? input.appName : "Tax Dedo",
       copyLines: [
         "Your paisa dashboard, minus the spreadsheet panic.",
@@ -331,25 +802,26 @@ function buildReactProductBlueprint(input: {
       },
       primaryActionLabel: "Add income",
       recordLabel: "payment",
-      records: [
-        { amount: 1800, category: "Wise remittance", note: "Upwork milestone, invoice TD-104, billing proof saved before panic.", owner: "Amina Qureshi", status: "paid", title: "Lumen Studio retainer" },
-        { amount: 950, category: "Payoneer", note: "Client ghosting risk: billing is 6 days late. Reminder queued for overdue payments.", owner: "Bilal Ahmed", status: "overdue", title: "Nordic SaaS landing page" },
-        { amount: 1240, category: "Bank transfer", note: "Direct client invoices and receipt screenshot logged.", owner: "Sara Khan", status: "pending", title: "Toronto UX sprint" },
-        { amount: 640, category: "Subscription retainer", note: "Monthly subscriptions-style design support payment marked for review.", owner: "Hamza Malik", status: "watch", title: "Berlin product icons" },
-        { amount: 520, category: "Wise remittance", note: "Small service seller campaign assets.", owner: "Omar Farooq", status: "paid", title: "Dubai ecommerce copy" }
-      ],
-      sections: ["Dashboard", "Income Tracker", "Receipts / Proof Log", "Remittance Comparison", "Client Tracker", "Payment Reminders", "Client Check / Risk Notes", "Tax Readiness Summary"],
-      statusOptions: ["pending", "paid", "overdue", "watch", "proof saved"],
+      records,
+      sections: ["Dashboard", "Clients", "Invoices", "Tax Filing Status", "Deductions / Expenses", "Deadlines", "Reports"],
+      screens: taxDedoScreens(records, statusOptions),
+      statusOptions,
       targetUser: "Pakistani freelancers, remote workers, and small service sellers",
       tone: "practical, slightly desi, friendly, still professional",
       type: "tax_dedo",
-      workflowMap: ["Add new client", "Add income entry", "Add billing/proof record", "Mark payment status", "Compare mock remittance channels", "Review tax-readiness disclaimer", "Reset demo data"]
-    };
+      workflowMap: ["Add client record", "Add invoice", "Log expense proof", "Move tax filing status", "Review deadlines", "Read not-tax-advice disclaimer", "Reset demo data"]
+    }, input.prompt);
   }
 
   const fallbackName = input.appName && !/^software app$/i.test(input.appName) ? input.appName : "Local Product Studio";
+  const records = [
+    { amount: 3200, category: "Priority", note: "Needs confirmation before final handoff.", owner: "Aisha", status: "pending", title: "Client onboarding" },
+    { amount: 1800, category: "Operations", note: "Ready for review.", owner: "Bilal", status: "completed", title: "Weekly tracker" },
+    { amount: 2400, category: "Follow-up", note: "Waiting on updated details.", owner: "Sara", status: "watch", title: "Proposal review" }
+  ];
+  const statusOptions = ["pending", "active", "watch", "completed"];
 
-  return {
+  return finalizeBlueprint({
     appName: fallbackName,
     copyLines: [
       "A local-first operations dashboard for the work you actually track.",
@@ -373,18 +845,15 @@ function buildReactProductBlueprint(input: {
     },
     primaryActionLabel: "Add record",
     recordLabel: "record",
-    records: [
-      { amount: 3200, category: "Priority", note: "Needs confirmation before final handoff.", owner: "Aisha", status: "pending", title: "Client onboarding" },
-      { amount: 1800, category: "Operations", note: "Ready for review.", owner: "Bilal", status: "completed", title: "Weekly tracker" },
-      { amount: 2400, category: "Follow-up", note: "Waiting on updated details.", owner: "Sara", status: "watch", title: "Proposal review" }
-    ],
+    records,
     sections: ["Dashboard", "Records", "Workflow Board", "Clients", "Notes", "Metrics", "Quality Checks", "Settings"],
-    statusOptions: ["pending", "active", "watch", "completed"],
+    screens: genericScreens(records, statusOptions),
+    statusOptions,
     targetUser: "small business operator",
     tone: "calm, useful, product-focused",
     type: "generic",
     workflowMap: ["Add record", "Change status", "Filter list", "Review notes", "Reset demo data"]
-  };
+  }, input.prompt);
 }
 
 function createReactMiniProductApp(blueprint: ReactProductBlueprint) {
@@ -421,6 +890,9 @@ export default function App() {
   const visibleRecords = useMemo(() => {
     return statusFilter === "all" ? records : records.filter((record) => record.status === statusFilter);
   }, [records, statusFilter]);
+  const activeScreen = useMemo(() => {
+    return blueprint.screens.find((screen) => screen.label === activeTab) ?? blueprint.screens[0];
+  }, [activeTab, blueprint.screens]);
 
   const metrics = useMemo(() => {
     const total = records.reduce((sum, record) => sum + Number(record.amount || 0), 0);
@@ -469,6 +941,154 @@ export default function App() {
     setActiveTab(blueprint.sections[0]);
   }
 
+  function screenRecords() {
+    return visibleRecords.slice(0, 6);
+  }
+
+  function renderScreenContent() {
+    const current = activeScreen;
+    const rows = screenRecords();
+
+    if (current.layoutKind === "dashboard_overview") {
+      return (
+        <div className="screen-overview">
+          <div className="overview-copy">
+            <p className="eyebrow">{current.primaryEntity}</p>
+            <h3>{current.purpose}</h3>
+            <p>{current.domainVocabulary.join(" / ")}</p>
+          </div>
+          <div className="mini-metric-grid">
+            {current.metrics.map((metric, index) => (
+              <article className="mini-metric" key={metric}>
+                <span>{metric}</span>
+                <strong>{index === 0 ? metrics[0].value : index === 1 ? metrics[1].value : index === 2 ? metrics[2].value : metrics[3].value}</strong>
+              </article>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (current.layoutKind === "records_table") {
+      return (
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>{current.fields.slice(0, 4).map((field) => <th key={field}>{field}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((record, index) => (
+                <tr key={\`\${record.title}-\${index}\`}>
+                  <td>{record.title}</td>
+                  <td>{record.owner}</td>
+                  <td>{money(record.amount)}</td>
+                  <td><span className="status-chip">{record.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    if (current.layoutKind === "kanban_status_board") {
+      return (
+        <div className="kanban-board">
+          {blueprint.statusOptions.slice(0, 4).map((status) => (
+            <article className="kanban-column" key={status}>
+              <h4>{status}</h4>
+              {records.filter((record) => record.status === status).slice(0, 3).map((record) => (
+                <div className="kanban-card" key={record.title}>
+                  <strong>{record.title}</strong>
+                  <span>{record.owner}</span>
+                </div>
+              ))}
+            </article>
+          ))}
+        </div>
+      );
+    }
+
+    if (current.layoutKind === "people_roster") {
+      return (
+        <div className="people-roster">
+          {rows.map((record) => (
+            <article className="person-card" key={record.title}>
+              <div className="avatar">{record.owner.slice(0, 2)}</div>
+              <div>
+                <strong>{record.owner}</strong>
+                <span>{record.title}</span>
+                <small>{record.note}</small>
+              </div>
+            </article>
+          ))}
+        </div>
+      );
+    }
+
+    if (current.layoutKind === "package_or_pricing_cards") {
+      return (
+        <div className="package-grid">
+          {rows.map((record) => (
+            <article className="package-card" key={record.title}>
+              <span>{record.category}</span>
+              <strong>{money(record.amount)}</strong>
+              <p>{record.note}</p>
+              <button className="ghost" type="button">{current.actions[0]}</button>
+            </article>
+          ))}
+        </div>
+      );
+    }
+
+    if (current.layoutKind === "payments_revenue") {
+      return (
+        <div className="revenue-layout">
+          <div className="revenue-total">{metrics[0].value}<span>{current.metrics[0]}</span></div>
+          <div className="payment-list">
+            {rows.map((record) => <p key={record.title}><strong>{record.owner}</strong><span>{money(record.amount)} - {record.status}</span></p>)}
+          </div>
+        </div>
+      );
+    }
+
+    if (current.layoutKind === "quality_issues") {
+      return (
+        <div className="issue-list">
+          {rows.map((record) => (
+            <article className="issue-card" key={record.title}>
+              <span className="status-chip">{record.status}</span>
+              <strong>{record.title}</strong>
+              <p>{record.note}</p>
+            </article>
+          ))}
+        </div>
+      );
+    }
+
+    if (current.layoutKind === "calendar_or_schedule") {
+      return (
+        <div className="schedule-list">
+          {rows.map((record, index) => (
+            <article className="schedule-row" key={record.title}>
+              <time>Day {index + 1}</time>
+              <strong>{record.title}</strong>
+              <span>{record.status}</span>
+            </article>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="docs-summary">
+        <h3>{current.purpose}</h3>
+        <ul>{current.actions.map((action) => <li key={action}>{action}</li>)}</ul>
+        <p>{blueprint.disclaimer}</p>
+      </div>
+    );
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -479,14 +1099,14 @@ export default function App() {
           <p>{blueprint.targetUser}</p>
         </div>
         <nav className="tab-list" aria-label={\`\${blueprint.appName} sections\`}>
-          {blueprint.sections.map((section) => (
+          {blueprint.screens.map((section) => (
             <button
-              className={section === activeTab ? "tab active" : "tab"}
-              key={section}
-              onClick={() => setActiveTab(section)}
+              className={section.label === activeTab ? "tab active" : "tab"}
+              key={section.screenId}
+              onClick={() => setActiveTab(section.label)}
               type="button"
             >
-              {section}
+              {section.label}
             </button>
           ))}
         </nav>
@@ -563,11 +1183,12 @@ export default function App() {
           </article>
         </section>
 
-        <section className="panel">
+        <section className={\`panel screen-panel layout-\${activeScreen.layoutKind}\`}>
           <div className="panel-heading split">
             <div>
-              <p className="eyebrow">{activeTab}</p>
-              <h3>{activeTab === "Dashboard" ? "Live local demo records" : \`\${activeTab} workspace\`}</h3>
+              <p className="eyebrow">{activeScreen.layoutKind}</p>
+              <h3>{activeScreen.label}</h3>
+              <p>{activeScreen.purpose}</p>
             </div>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="all">All statuses</option>
@@ -578,29 +1199,10 @@ export default function App() {
           {visibleRecords.length === 0 ? (
             <div className="empty-state">
               <strong>No records match this filter.</strong>
-              <p>Add a new local record or reset demo data to bring the product back to life.</p>
+              <p>{activeScreen.emptyState}</p>
             </div>
           ) : (
-            <div className="record-grid">
-              {visibleRecords.map((record, index) => (
-                <article className="record-card" key={\`\${record.title}-\${record.owner}-\${index}\`}>
-                  <div className="record-topline">
-                    <span className={\`status-chip status-\${record.status.replace(/\\s+/g, "-")}\`}>{record.status}</span>
-                    <strong>{money(record.amount)}</strong>
-                  </div>
-                  <h4>{record.title}</h4>
-                  <p>{record.owner} - {record.category}</p>
-                  <small>{record.note}</small>
-                  <div className="mini-actions">
-                    {blueprint.statusOptions.slice(0, 4).map((status) => (
-                      <button className="ghost" key={status} onClick={() => updateStatus(records.indexOf(record), status)} type="button">
-                        {status}
-                      </button>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </div>
+            renderScreenContent()
           )}
         </section>
       </section>
@@ -774,7 +1376,7 @@ button.secondary, button.ghost {
   padding: clamp(1rem, 3vw, 2rem);
 }
 
-.hero, .panel, .metric-card, .record-card {
+.hero, .panel, .metric-card, .record-card, .person-card, .package-card, .issue-card, .kanban-column, .schedule-row {
   background: ${blueprint.palette.surface};
   border: 1px solid rgba(0,0,0,0.07);
   border-radius: 28px;
@@ -926,6 +1528,136 @@ textarea {
   font-size: 1.35rem;
 }
 
+.screen-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.screen-overview {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.95fr);
+}
+
+.overview-copy, .docs-summary, .revenue-total {
+  background: linear-gradient(135deg, ${blueprint.palette.soft}, rgba(255,255,255,0.72));
+  border-radius: 24px;
+  padding: 1.1rem;
+}
+
+.mini-metric-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mini-metric {
+  background: rgba(255,255,255,0.76);
+  border-radius: 20px;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.9rem;
+}
+
+.mini-metric strong, .revenue-total {
+  color: ${blueprint.palette.accent};
+  font-size: 1.45rem;
+  font-weight: 950;
+}
+
+.data-table-wrap {
+  overflow-x: auto;
+}
+
+.data-table {
+  border-collapse: collapse;
+  min-width: 42rem;
+  width: 100%;
+}
+
+.data-table th, .data-table td {
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  padding: 0.8rem;
+  text-align: left;
+}
+
+.kanban-board {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.kanban-column {
+  background: rgba(255,255,255,0.72);
+  border-radius: 22px;
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem;
+}
+
+.kanban-card {
+  background: ${blueprint.palette.soft};
+  border-radius: 16px;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.75rem;
+}
+
+.people-roster, .package-grid, .issue-list, .schedule-list, .payment-list {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.person-card {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.85rem;
+  padding: 1rem;
+}
+
+.avatar {
+  align-items: center;
+  background: ${blueprint.palette.accent};
+  border-radius: 18px;
+  color: white;
+  display: grid;
+  flex: 0 0 3rem;
+  font-weight: 950;
+  height: 3rem;
+  place-items: center;
+}
+
+.person-card div:last-child, .package-card, .issue-card, .schedule-row, .payment-list p {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.package-card, .issue-card, .schedule-row {
+  padding: 1rem;
+}
+
+.revenue-layout {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(14rem, 0.45fr) minmax(0, 1fr);
+}
+
+.revenue-total span {
+  color: ${blueprint.palette.ink};
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 750;
+  margin-top: 0.35rem;
+}
+
+.payment-list p {
+  background: rgba(255,255,255,0.72);
+  border-radius: 18px;
+  margin: 0;
+  padding: 0.8rem;
+}
+
 .empty-state {
   border: 1px dashed rgba(0,0,0,0.16);
   border-radius: 22px;
@@ -940,7 +1672,7 @@ textarea {
 }
 
 @media (max-width: 980px) {
-  .app-shell, .hero, .control-grid, .metrics, .record-grid {
+  .app-shell, .hero, .control-grid, .metrics, .record-grid, .screen-overview, .kanban-board, .people-roster, .package-grid, .issue-list, .schedule-list, .revenue-layout, .payment-list {
     grid-template-columns: 1fr;
   }
 

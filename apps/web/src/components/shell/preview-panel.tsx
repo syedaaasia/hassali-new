@@ -416,6 +416,19 @@ type ReactProductPreviewBlueprint = {
     title: string;
   }>;
   sections: string[];
+  screens?: Array<{
+    actions?: string[];
+    domainVocabulary?: string[];
+    emptyState?: string;
+    fields?: string[];
+    label: string;
+    layoutKind: string;
+    metrics?: string[];
+    primaryEntity?: string;
+    purpose?: string;
+    screenId?: string;
+    statusOptions?: string[];
+  }>;
   targetUser: string;
   workflowMap: string[];
 };
@@ -451,6 +464,28 @@ function extractReactProductBlueprint(committedFiles: Map<string, VfsFile>): Rea
           typeof record.status === "string"
         ),
         sections: parsed.sections.filter((item): item is string => typeof item === "string"),
+        screens: Array.isArray(parsed.screens)
+          ? parsed.screens
+            .filter((screen): screen is NonNullable<ReactProductPreviewBlueprint["screens"]>[number] =>
+              Boolean(screen) &&
+              typeof screen === "object" &&
+              typeof screen.label === "string" &&
+              typeof screen.layoutKind === "string"
+            )
+            .map((screen) => ({
+              actions: Array.isArray(screen.actions) ? screen.actions.filter((item): item is string => typeof item === "string") : [],
+              domainVocabulary: Array.isArray(screen.domainVocabulary) ? screen.domainVocabulary.filter((item): item is string => typeof item === "string") : [],
+              emptyState: typeof screen.emptyState === "string" ? screen.emptyState : "No records match this screen.",
+              fields: Array.isArray(screen.fields) ? screen.fields.filter((item): item is string => typeof item === "string") : [],
+              label: screen.label,
+              layoutKind: screen.layoutKind,
+              metrics: Array.isArray(screen.metrics) ? screen.metrics.filter((item): item is string => typeof item === "string") : [],
+              primaryEntity: typeof screen.primaryEntity === "string" ? screen.primaryEntity : "",
+              purpose: typeof screen.purpose === "string" ? screen.purpose : "",
+              screenId: typeof screen.screenId === "string" ? screen.screenId : screen.label.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+              statusOptions: Array.isArray(screen.statusOptions) ? screen.statusOptions.filter((item): item is string => typeof item === "string") : []
+            }))
+          : undefined,
         targetUser: typeof parsed.targetUser === "string" ? parsed.targetUser : "",
         workflowMap: Array.isArray(parsed.workflowMap) ? parsed.workflowMap.filter((item): item is string => typeof item === "string") : []
       };
@@ -479,6 +514,21 @@ function buildReactProductPreviewDoc(
   css: string,
   framework: string | null
 ) {
+  const screens = blueprint.screens?.length
+    ? blueprint.screens
+    : blueprint.sections.map((section, index) => ({
+      actions: blueprint.workflowMap.slice(0, 4),
+      domainVocabulary: [blueprint.domain],
+      emptyState: "No records match this screen.",
+      fields: ["Title", "Owner", "Amount", "Status"],
+      label: section,
+      layoutKind: index === 0 ? "dashboard_overview" : index === 1 ? "records_table" : index === 2 ? "kanban_status_board" : "people_roster",
+      metrics: blueprint.metricLabels,
+      primaryEntity: "record",
+      purpose: `${section} workspace for ${blueprint.appName}.`,
+      screenId: section.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      statusOptions: []
+    }));
   const records = blueprint.records.slice(0, 4);
   const total = blueprint.records.reduce((sum, record) => sum + Number(record.amount || 0), 0);
   const pending = blueprint.records.filter((record) => /pending|overdue|unpaid|watch|review/i.test(record.status));
@@ -505,8 +555,8 @@ function buildReactProductPreviewDoc(
       value: String(blueprint.records.length)
     }
   ];
-  const sectionButtons = blueprint.sections.map((section, index) =>
-    `<button class="tab ${index === 0 ? "active" : ""}" data-section="${escapeHtml(section)}" type="button">${escapeHtml(section)}</button>`
+  const sectionButtons = screens.map((screen, index) =>
+    `<button class="tab ${index === 0 ? "active" : ""}" data-section="${escapeHtml(screen.label)}" type="button">${escapeHtml(screen.label)}</button>`
   ).join("");
   const metricCards = metrics.map((metric) => `
     <article class="metric-card">
@@ -556,6 +606,21 @@ function buildReactProductPreviewDoc(
     .preview-control-row { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
     .preview-control-row select { min-width: 10rem; }
     .preview-live-note { margin-top: .85rem; border: 1px solid rgba(255,255,255,.16); border-radius: 16px; padding: .75rem .9rem; background: rgba(255,255,255,.08); }
+    .screen-preview { display: block; }
+    .screen-overview, .revenue-layout { display: grid; gap: 1rem; grid-template-columns: minmax(0,1fr) minmax(18rem,.9fr); }
+    .overview-copy, .docs-summary, .revenue-total { border-radius: 22px; padding: 1rem; background: rgba(255,255,255,.72); }
+    .mini-metric-grid, .people-roster, .package-grid, .issue-list, .schedule-list, .payment-list { display: grid; gap: .8rem; grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .mini-metric, .person-card, .package-card, .issue-card, .schedule-row, .kanban-column, .payment-list p { border-radius: 20px; padding: .9rem; background: rgba(255,255,255,.72); }
+    .data-table-wrap { overflow-x: auto; }
+    .data-table { border-collapse: collapse; min-width: 42rem; width: 100%; }
+    .data-table th, .data-table td { border-bottom: 1px solid rgba(0,0,0,.08); padding: .75rem; text-align: left; }
+    .kanban-board { display: grid; gap: .8rem; grid-template-columns: repeat(4,minmax(0,1fr)); }
+    .kanban-card { border-radius: 15px; padding: .7rem; background: rgba(0,0,0,.05); display: grid; gap: .2rem; }
+    .person-card { align-items: flex-start; display: flex; gap: .8rem; }
+    .avatar { align-items: center; border-radius: 16px; background: rgba(0,0,0,.82); color: white; display: grid; flex: 0 0 2.8rem; font-weight: 900; height: 2.8rem; place-items: center; }
+    .revenue-total { color: inherit; font-size: 1.8rem; font-weight: 900; }
+    .revenue-total span { display: block; font-size: .85rem; font-weight: 700; opacity: .75; }
+    @media (max-width: 760px) { .screen-overview, .revenue-layout, .mini-metric-grid, .people-roster, .package-grid, .issue-list, .schedule-list, .payment-list, .kanban-board { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -616,7 +681,7 @@ function buildReactProductPreviewDoc(
       <section class="panel">
         <div class="panel-heading split">
           <div>
-            <p class="eyebrow" id="record-section-label">${escapeHtml(blueprint.sections[0] ?? "Dashboard")}</p>
+            <p class="eyebrow" id="record-section-label">${escapeHtml(screens[0]?.label ?? "Dashboard")}</p>
             <h3>Realistic local demo records</h3>
           </div>
           <div class="preview-control-row">
@@ -637,8 +702,9 @@ function buildReactProductPreviewDoc(
   <script>
     (function () {
       var blueprint = ${scriptJson(blueprint)};
+      blueprint.screens = ${scriptJson(screens)};
       var records = [];
-      var activeSection = blueprint.sections[0] || "Dashboard";
+      var activeSection = (blueprint.screens[0] && blueprint.screens[0].label) || "Dashboard";
       var storageKey = "hassali-interactive-preview:" + (blueprint.appName || "app").toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
       function cloneDemoRecords() {
@@ -686,6 +752,20 @@ function buildReactProductPreviewDoc(
         return node;
       }
 
+      function activeScreen() {
+        return (blueprint.screens || []).find(function (screen) { return screen.label === activeSection; }) || (blueprint.screens || [])[0] || {
+          actions: blueprint.workflowMap || [],
+          domainVocabulary: [blueprint.domain || "local app"],
+          emptyState: "No records match this screen.",
+          fields: ["Title", "Owner", "Amount", "Status"],
+          label: activeSection,
+          layoutKind: "records_table",
+          metrics: blueprint.metricLabels || [],
+          primaryEntity: "record",
+          purpose: activeSection + " workspace"
+        };
+      }
+
       function renderMetrics() {
         var root = document.getElementById("preview-metrics");
         if (!root) return;
@@ -715,31 +795,143 @@ function buildReactProductPreviewDoc(
         var filter = document.getElementById("preview-filter");
         var value = filter ? filter.value : "all";
         var visible = value === "all" ? records : records.filter(function (record) { return record.status === value; });
+        var screen = activeScreen();
         root.textContent = "";
+        root.className = "screen-preview layout-" + String(screen.layoutKind || "records_table").replace(/[^a-z0-9_-]+/g, "-");
         if (empty) empty.hidden = visible.length > 0;
-        visible.forEach(function (record) {
-          var card = create("article", "record-card");
-          var top = create("div", "record-topline");
-          top.appendChild(create("span", "status-chip", record.status));
-          top.appendChild(create("strong", "", money(record.amount)));
-          card.appendChild(top);
-          card.appendChild(create("h4", "", record.title));
-          card.appendChild(create("p", "", record.owner + " - " + record.category));
-          card.appendChild(create("small", "", record.note));
-          var actions = create("div", "mini-actions");
-          (blueprint.statusOptions || []).slice(0, 4).forEach(function (status) {
-            var button = create("button", "ghost", status);
-            button.type = "button";
-            button.addEventListener("click", function () {
-              record.status = status;
-              saveRecords();
-              render();
-            });
-            actions.appendChild(button);
+        if (!visible.length) {
+          var detail = empty ? empty.querySelector("p") : null;
+          if (detail) detail.textContent = screen.emptyState || "No records match this screen.";
+          return;
+        }
+        if (screen.layoutKind === "dashboard_overview") {
+          var overview = create("div", "screen-overview");
+          var copy = create("div", "overview-copy");
+          copy.appendChild(create("p", "eyebrow", screen.primaryEntity || "overview"));
+          copy.appendChild(create("h3", "", screen.purpose || "Product overview"));
+          copy.appendChild(create("p", "", (screen.domainVocabulary || []).join(" / ")));
+          overview.appendChild(copy);
+          var mini = create("div", "mini-metric-grid");
+          (screen.metrics || blueprint.metricLabels || []).slice(0, 4).forEach(function (metric, index) {
+            var card = create("article", "mini-metric");
+            card.appendChild(create("span", "", metric));
+            card.appendChild(create("strong", "", index === 0 ? money(records.reduce(function (sum, record) { return sum + Number(record.amount || 0); }, 0)) : index === 1 ? String(records.filter(function (record) { return /pending|unpaid|overdue|watch/i.test(record.status); }).length) : index === 2 ? (records[0] ? records[0].owner : "None") : String(records.length)));
+            mini.appendChild(card);
           });
-          card.appendChild(actions);
-          root.appendChild(card);
-        });
+          overview.appendChild(mini);
+          root.appendChild(overview);
+          return;
+        }
+        if (screen.layoutKind === "records_table") {
+          var tableWrap = create("div", "data-table-wrap");
+          var table = create("table", "data-table");
+          var thead = create("thead");
+          var headRow = create("tr");
+          (screen.fields || ["Title", "Owner", "Amount", "Status"]).slice(0, 4).forEach(function (field) { headRow.appendChild(create("th", "", field)); });
+          thead.appendChild(headRow);
+          table.appendChild(thead);
+          var body = create("tbody");
+          visible.forEach(function (record) {
+            var row = create("tr");
+            [record.title, record.owner, money(record.amount), record.status].forEach(function (cell) { row.appendChild(create("td", "", cell)); });
+            body.appendChild(row);
+          });
+          table.appendChild(body);
+          tableWrap.appendChild(table);
+          root.appendChild(tableWrap);
+          return;
+        }
+        if (screen.layoutKind === "kanban_status_board") {
+          var board = create("div", "kanban-board");
+          (blueprint.statusOptions || []).slice(0, 4).forEach(function (status) {
+            var column = create("article", "kanban-column");
+            column.appendChild(create("h4", "", status));
+            records.filter(function (record) { return record.status === status; }).slice(0, 4).forEach(function (record) {
+              var item = create("div", "kanban-card");
+              item.appendChild(create("strong", "", record.title));
+              item.appendChild(create("span", "", record.owner));
+              column.appendChild(item);
+            });
+            board.appendChild(column);
+          });
+          root.appendChild(board);
+          return;
+        }
+        if (screen.layoutKind === "people_roster") {
+          var people = create("div", "people-roster");
+          visible.forEach(function (record) {
+            var card = create("article", "person-card");
+            card.appendChild(create("div", "avatar", String(record.owner || "?").slice(0, 2)));
+            var body = create("div");
+            body.appendChild(create("strong", "", record.owner));
+            body.appendChild(create("span", "", record.title));
+            body.appendChild(create("small", "", record.note));
+            card.appendChild(body);
+            people.appendChild(card);
+          });
+          root.appendChild(people);
+          return;
+        }
+        if (screen.layoutKind === "package_or_pricing_cards") {
+          var packages = create("div", "package-grid");
+          visible.forEach(function (record) {
+            var card = create("article", "package-card");
+            card.appendChild(create("span", "", record.category));
+            card.appendChild(create("strong", "", money(record.amount)));
+            card.appendChild(create("p", "", record.note));
+            packages.appendChild(card);
+          });
+          root.appendChild(packages);
+          return;
+        }
+        if (screen.layoutKind === "payments_revenue") {
+          var revenue = create("div", "revenue-layout");
+          var total = create("div", "revenue-total", money(visible.reduce(function (sum, record) { return sum + Number(record.amount || 0); }, 0)));
+          total.appendChild(create("span", "", (screen.metrics || ["Revenue"])[0]));
+          revenue.appendChild(total);
+          var list = create("div", "payment-list");
+          visible.forEach(function (record) {
+            var row = create("p");
+            row.appendChild(create("strong", "", record.owner));
+            row.appendChild(create("span", "", money(record.amount) + " - " + record.status));
+            list.appendChild(row);
+          });
+          revenue.appendChild(list);
+          root.appendChild(revenue);
+          return;
+        }
+        if (screen.layoutKind === "quality_issues") {
+          var issues = create("div", "issue-list");
+          visible.forEach(function (record) {
+            var card = create("article", "issue-card");
+            card.appendChild(create("span", "status-chip", record.status));
+            card.appendChild(create("strong", "", record.title));
+            card.appendChild(create("p", "", record.note));
+            issues.appendChild(card);
+          });
+          root.appendChild(issues);
+          return;
+        }
+        if (screen.layoutKind === "calendar_or_schedule") {
+          var schedule = create("div", "schedule-list");
+          visible.forEach(function (record, index) {
+            var row = create("article", "schedule-row");
+            row.appendChild(create("time", "", "Day " + (index + 1)));
+            row.appendChild(create("strong", "", record.title));
+            row.appendChild(create("span", "", record.status));
+            schedule.appendChild(row);
+          });
+          root.appendChild(schedule);
+          return;
+        }
+        var docs = create("div", "docs-summary");
+        docs.appendChild(create("h3", "", screen.purpose || "Local demo notes"));
+        var list = create("ul");
+        (screen.actions || blueprint.workflowMap || []).forEach(function (action) { list.appendChild(create("li", "", action)); });
+        docs.appendChild(list);
+        docs.appendChild(create("p", "", blueprint.disclaimer || "Local demo only."));
+        root.appendChild(docs);
+        return;
       }
 
       function renderTabs() {
@@ -752,7 +944,8 @@ function buildReactProductPreviewDoc(
           });
         });
         setText(document.getElementById("active-section-label"), activeSection + " preview");
-        setText(document.getElementById("record-section-label"), activeSection);
+        var screen = activeScreen();
+        setText(document.getElementById("record-section-label"), (screen.layoutKind || "screen") + " - " + activeSection);
       }
 
       function addRecord() {

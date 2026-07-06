@@ -243,6 +243,8 @@ function fileStrategyIssues(input: ValidateDomainInput) {
   const fileNames = Object.keys(input.proposedFiles ?? {});
   const hasStaticTrio = ["index.html", "styles.css", "main.js"].every((path) => fileNames.includes(path));
   const hasRunnableAppSource = fileNames.some((path) => path === "vite.config.ts" || path === "vite.config.js" || path.startsWith("src/"));
+  const explicitCodeAppReplace = input.contextPriority.authoritativeMode === "CODE" &&
+    /\b(?:replace current app|replace this app|replace the current app|start over with|overwrite this project|overwrite current app|replace current project)\b/i.test(input.currentPrompt);
   const issues: string[] = [];
 
   if (input.contextPriority.authoritativeMode === "CODE" && hasStaticTrio && !hasRunnableAppSource && !input.currentPrompt.toLowerCase().includes("landing page")) {
@@ -251,6 +253,7 @@ function fileStrategyIssues(input: ValidateDomainInput) {
 
   if (
     input.contextPriority.authoritativeIntentFamily === "targeted_text_replacement" &&
+    !explicitCodeAppReplace &&
     fileNames.some((path) => ["index.html", "styles.css", "main.js"].includes(path)) &&
     fileNames.length > 1
   ) {

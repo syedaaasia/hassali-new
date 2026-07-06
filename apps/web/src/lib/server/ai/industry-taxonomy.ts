@@ -423,7 +423,38 @@ function normalizePage(value: string) {
   if (normalized === "blogs" || normalized === "articles") return "blog";
   if (normalized === "about us") return "about";
   if (normalized === "index") return "home";
+  if (normalized === "service" || normalized === "services") return "services";
+  if (normalized === "homepage") return "home";
   return normalized.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "page";
+}
+
+function extractExplicitPageList(prompt: string) {
+  const patterns = [
+    /\binclude\s+([\s\S]{0,180}?)\s+pages?\b/i,
+    /\bwith\s+(?:exactly\s+)?(?:\d+|one|two|three|four|five|six|seven)\s+pages?\s*:?\s*([\s\S]{0,180})/i,
+    /\bpages?\s*:?\s*([\s\S]{0,180})/i
+  ];
+  const pageWordPattern = /about us|our story|about|services?|blogs?|blog|contact|story|products?|menu|pricing|gallery|shop|fleet|booking|home|homepage/gi;
+
+  for (const pattern of patterns) {
+    const match = prompt.match(pattern);
+    const rawList = match?.[1];
+    if (!rawList) continue;
+
+    const boundaryLimited = rawList
+      .split(/\b(?:with|and\s+strong|using|for|that|which|plus)\b/i)[0]
+      .replace(/\.$/, "");
+    const listed = boundaryLimited
+      .match(pageWordPattern)
+      ?.map(normalizePage)
+      .filter(Boolean) ?? [];
+
+    if (listed.length >= 2) {
+      return unique(listed);
+    }
+  }
+
+  return [];
 }
 
 export function extractRequestedPages(prompt: string, fallback: string[] = []) {
@@ -434,11 +465,7 @@ export function extractRequestedPages(prompt: string, fallback: string[] = []) {
       ? wordNumber(countMatch[1])
       : Number(countMatch[1])
     : null;
-  const afterPages = prompt.match(/\bpages?\b\s*:?\s*([\s\S]{0,160})/i)?.[1] ?? "";
-  const listed = afterPages
-    .match(/about us|our story|about|services?|blogs?|blog|contact|story|products?|menu|pricing|gallery|shop|fleet|booking|home/gi)
-    ?.map(normalizePage)
-    .filter(Boolean) ?? [];
+  const listed = extractExplicitPageList(prompt);
   const requestedPages = unique(listed.length ? listed : fallback).slice(0, exactPageCount ?? undefined);
 
   return {
