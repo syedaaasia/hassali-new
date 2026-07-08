@@ -3,6 +3,7 @@ import { classifyFileLiteIntent, createFileLiteAnswer } from "./file-lite";
 
 export type AskIntentName =
   | "accounting_or_finance_guidance"
+  | "auth_or_security_guidance"
   | "brand_naming"
   | "bullet_format"
   | "business_plan"
@@ -105,6 +106,34 @@ type AskQualityProfile = {
   sensitivity: "accounting_finance" | "child_family" | "emotional_support" | "legal" | "medical" | "normal";
   tone: "concise" | "direct" | "expert" | "human" | "polite_but_firm" | "professional" | "supportive" | "teacher_like" | "warm" | null;
 };
+
+type AskCodingCategory =
+  | "api_integration_help"
+  | "architecture_or_folder_structure"
+  | "auth_or_security_guidance"
+  | "code_review_or_refactor"
+  | "debugging_error_help"
+  | "deployment_guidance"
+  | "docker_or_docker_compose"
+  | "environment_variables_guidance"
+  | "fastify_api"
+  | "git_github_help"
+  | "html_css_js_static_site"
+  | "nextjs_app_code_text"
+  | "node_express_api"
+  | "npm_pnpm_yarn_setup"
+  | "php_form_or_backend"
+  | "php_xampp_app"
+  | "project_execution_boundary"
+  | "python_data_task"
+  | "python_script"
+  | "python_web_app_flask_fastapi_streamlit"
+  | "react_app_code_text"
+  | "shopify_help"
+  | "sql_database_schema_or_queries"
+  | "typescript_javascript_help"
+  | "windows_cmd_setup"
+  | "wordpress_help";
 
 const mutationSafe = {
   mutationPolicy: "never_mutate",
@@ -292,13 +321,52 @@ function isWebsiteCodeTextRequest(prompt: string) {
 }
 
 function isCodingTextRequest(prompt: string) {
-  return /\b(?:write me|make me|give me|show me|create)\b[\s\S]{0,80}\b(?:code|script|php|python|react|javascript|js|html|css|xampp|cmd commands?)\b/i.test(prompt) &&
+  return /\b(?:write me|make me|give me|show me|create|explain|tell me how|how do i|starter|schema)\b[\s\S]{0,140}\b(?:code|script|php|python|react|next\.?js|express|fastify|docker|sql|wordpress|shopify|git|javascript|typescript|js|html|css|xampp|cmd commands?|api|route|schema|compose)\b/i.test(prompt) &&
     !wantsProjectExecution(prompt);
 }
 
 function isWrongModeBuildRequest(prompt: string) {
   return wantsProjectExecution(prompt) &&
     /\b(?:add|build|create|make|generate|design|edit|update|change|install|run|fix)\b[\s\S]{0,160}\b(?:website|site|homepage|app|tool|system|file|files|code|crm|dashboard|streamlit|app\.py|testimonials|python|react)\b/i.test(prompt);
+}
+
+function detectDangerousCodingRequest(prompt: string) {
+  return /\b(?:steal|exfiltrate|dump|harvest)\b[\s\S]{0,80}\b(?:password|credential|cookie|token|browser saved|session)\b/i.test(prompt) ||
+    /\b(?:ransomware|keylogger|phishing|bypass authentication|hack someone|exploit a site|malware)\b/i.test(prompt);
+}
+
+function detectCodingCategory(prompt: string): AskCodingCategory | null {
+  const text = normalizePrompt(prompt);
+
+  if (detectDangerousCodingRequest(prompt)) return "auth_or_security_guidance";
+  if (/\bmodule not found|can't resolve|cannot find module|eresolve|port \d+.*in use|hydration failed|property .* does not exist on type|importerror|no module named|apache shutdown unexpectedly|cors policy|unexpected token '<'|error:\b/i.test(prompt)) return "debugging_error_help";
+  if (wantsProjectExecution(prompt)) return "project_execution_boundary";
+  if (/\bwordpress|shortcode|functions\.php|plugin|child theme\b/i.test(prompt)) return "wordpress_help";
+  if (/\bshopify|liquid|theme section|product page|theme editor\b/i.test(prompt)) return "shopify_help";
+  if (/\bgit\b|\bgithub\b|\bcommit\b|\bbranch\b|\bclone\b|\bpull\b|\bpush\b|\brestore\b|\breset\b/i.test(prompt)) return "git_github_help";
+  if (/\bdocker\b|\bdocker compose\b|\bdocker-compose\b|\bcompose\.ya?ml\b/i.test(prompt)) return "docker_or_docker_compose";
+  if (/\bsql\b|\bcreate table\b|\bschema\b|\bselect\b|\binsert\b|\bpostgres\b|\bmysql\b/i.test(prompt)) return "sql_database_schema_or_queries";
+  if (/\bfastify\b/i.test(prompt)) return "fastify_api";
+  if (/\bexpress\b|\bnode api\b|\bnode\.?js api\b|\busers route\b/i.test(prompt)) return "node_express_api";
+  if (/\bnext\.?js\b|\bapp router\b|\bcreate-next-app\b/i.test(prompt)) return "nextjs_app_code_text";
+  if (/\breact\b|\bvite\b|\bsrc\/app\b|\bsrc\\app\b/i.test(prompt)) return "react_app_code_text";
+  if (/\bxampp\b/i.test(prompt)) return "php_xampp_app";
+  if (/\bphp\b/i.test(prompt)) return /\bform\b|\bcontact\b|\bbackend\b/i.test(text) ? "php_form_or_backend" : "php_xampp_app";
+  if (/\bpython\b/i.test(prompt) && /\b(?:csv|excel|data|merge|clean|duplicates|split)\b/i.test(prompt)) return "python_data_task";
+  if (/\b(?:flask|fastapi|streamlit)\b/i.test(prompt)) return "python_web_app_flask_fastapi_streamlit";
+  if (/\bpython\b|\b\.py\b/i.test(prompt)) return "python_script";
+  if (/\bhtml\b|\bcss\b|\bjavascript\b|\bstatic site\b|\bone page\b/i.test(prompt)) return "html_css_js_static_site";
+  if (/\bnpm\b|\bpnpm\b|\byarn\b|\bpackage\.json\b/i.test(prompt)) return "npm_pnpm_yarn_setup";
+  if (/\bcmd\b|\bwindows command\b|\bcommand prompt\b/i.test(prompt)) return "windows_cmd_setup";
+  if (/\benv\b|\benvironment variable\b|\.env\b/i.test(prompt)) return "environment_variables_guidance";
+  if (/\bauth\b|\blogin\b|\bsecurity\b|\bapi key\b|\bjwt\b/i.test(prompt)) return "auth_or_security_guidance";
+  if (/\bdeploy\b|\bdeployment\b|\bvercel\b|\brender\b|\bnetlify\b/i.test(prompt)) return "deployment_guidance";
+  if (/\bapi integration\b|\bfetch api\b|\bthird[- ]party api\b|\brest api\b/i.test(prompt)) return "api_integration_help";
+  if (/\barchitecture\b|\bfolder structure\b|\bproject structure\b/i.test(prompt)) return "architecture_or_folder_structure";
+  if (/\brefactor\b|\breview this code\b|\bcode review\b/i.test(prompt)) return "code_review_or_refactor";
+  if (/\btypescript\b|\bjavascript\b|\bjs\b|\bts\b/i.test(prompt)) return "typescript_javascript_help";
+
+  return null;
 }
 
 function classify(
@@ -344,8 +412,9 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (isLiveUrlRequest(prompt)) return classify(prompt, "unsupported_url_request", 0.98, "The user asked ASK mode to open or summarize a live URL.");
   if (isFileReadingRequest(prompt) || isImageReadingRequest(prompt)) return classify(prompt, "file_unavailable_explanation", 0.97, "The user asked ASK mode to read a file or image that is not available to this layer.");
   if (isWrongModeBuildRequest(prompt)) return classify(prompt, "mode_boundary_request", 0.94, "The user asks ASK to create/apply/run project files.");
+  if (detectDangerousCodingRequest(prompt)) return classify(prompt, "auth_or_security_guidance", 0.96, "The user asked for harmful code; ASK should refuse and redirect to defensive security.");
   if (isWebsiteCodeTextRequest(prompt)) return classify(prompt, "website_code_text_only", 0.92, "The user asks for website code in chat only.");
-  if (isCodingTextRequest(prompt)) return classify(prompt, /\b(?:xampp|cmd|localhost|install|run)\b/i.test(prompt) ? "local_setup_guidance" : "coding_help_text_only", 0.9, "The user asks for code or setup guidance as text.");
+  if (detectCodingCategory(prompt) || isCodingTextRequest(prompt)) return classify(prompt, /\b(?:xampp|cmd|localhost|install|run|commands?|setup)\b/i.test(prompt) ? "local_setup_guidance" : "coding_help_text_only", 0.9, "The user asks for code or setup guidance as text.");
   if (/\b(?:write it|write this|say politely|say this|make it|rewrite)\b/i.test(prompt) && (explicitMaxWordsFor(prompt) || /\b(?:human|sarcastic(?:ally)?|firm|simple|general)\b/i.test(prompt))) return classify(prompt, "writing_or_rewriting", 0.88, "The user asks for wording refinement with quality constraints.");
   if (/\b(?:debug|error|bug|fix this|not working|stack trace)\b/i.test(prompt)) return classify(prompt, "debugging_help", 0.86, "The user asks for debugging help.");
   if (/\b(?:brand name|name for|powerful word|suggest.*names?|naming)\b/i.test(prompt) || /\bcombine\b[\s\S]{0,100}\b(?:words?|names?|theme)\b/i.test(prompt)) return classify(prompt, "brand_naming", 0.9, "The user asks for naming ideas.");
@@ -573,18 +642,25 @@ function createPhpContactFormAnswer() {
     "Run it on Windows:",
     "",
     "```cmd",
+    "cd /d C:\\xampp\\htdocs",
     "mkdir C:\\xampp\\htdocs\\contact-demo",
+    "cd contact-demo",
     "notepad C:\\xampp\\htdocs\\contact-demo\\index.html",
     "notepad C:\\xampp\\htdocs\\contact-demo\\send.php",
     "```",
     "",
-    "Start Apache in XAMPP, then open:",
+    "Start Apache in the XAMPP Control Panel, then open:",
     "",
     "```text",
     "http://localhost/contact-demo/",
     "```",
     "",
-    "This demo displays the message locally. Real email sending needs SMTP setup."
+    "Test it by filling the form and pressing Send.",
+    "",
+    "Common fixes:",
+    "- If the page does not load, Apache is probably not running.",
+    "- If PHP code shows as text, the file is outside `htdocs` or Apache/PHP is not serving it.",
+    "- PHP `mail()` usually will not send real email locally without SMTP setup."
   ].join("\n");
 }
 
@@ -637,7 +713,16 @@ function createToyWebsiteCodeAnswer() {
     "document.getElementById('pickBtn').addEventListener('click', () => {",
     "  alert('Today\\'s gift pick: ' + picks[Math.floor(Math.random() * picks.length)]);",
     "});",
-    "```"
+    "```",
+    "",
+    "Run locally:",
+    "",
+    "```cmd",
+    "cd /d C:\\toy-shop-site",
+    "python -m http.server 5500",
+    "```",
+    "",
+    "Open `http://localhost:5500/`, or simply double-click `index.html` for a quick static preview."
   ].join("\n");
 }
 
@@ -651,6 +736,7 @@ function createCsvMergeAnswer() {
     "  input\\",
     "    file1.csv",
     "    file2.csv",
+    "  output\\",
     "```",
     "",
     "`merge_csv.py`",
@@ -659,7 +745,9 @@ function createCsvMergeAnswer() {
     "import csv",
     "",
     "input_dir = Path('input')",
-    "output_file = Path('merged.csv')",
+    "output_dir = Path('output')",
+    "output_dir.mkdir(exist_ok=True)",
+    "output_file = output_dir / 'merged.csv'",
     "",
     "csv_files = sorted(input_dir.glob('*.csv'))",
     "if not csv_files:",
@@ -689,13 +777,407 @@ function createCsvMergeAnswer() {
     "```cmd",
     "mkdir C:\\csv-merge",
     "mkdir C:\\csv-merge\\input",
+    "mkdir C:\\csv-merge\\output",
     "notepad C:\\csv-merge\\merge_csv.py",
     "cd /d C:\\csv-merge",
+    "python --version",
     "python merge_csv.py",
     "```",
     "",
-    "No extra pip package is needed. Test with two small CSV files first, then check the row count in `merged.csv`."
+    "No extra pip package is needed. Test with two small CSV files first, then check `C:\\csv-merge\\output\\merged.csv` and confirm the row count."
   ].join("\n");
+}
+
+function createReactViteAnswer() {
+  return [
+    "Here is a simple React/Vite inventory dashboard you can copy manually.",
+    "",
+    "Folder structure:",
+    "```text",
+    "inventory-dashboard\\",
+    "  package.json",
+    "  index.html",
+    "  src\\main.jsx",
+    "  src\\App.jsx",
+    "  src\\styles.css",
+    "```",
+    "",
+    "`package.json`",
+    "```json",
+    "{\"scripts\":{\"dev\":\"vite\",\"build\":\"vite build\"},\"dependencies\":{\"@vitejs/plugin-react\":\"latest\",\"vite\":\"latest\",\"react\":\"latest\",\"react-dom\":\"latest\"},\"devDependencies\":{}}",
+    "```",
+    "",
+    "`src/App.jsx`",
+    "```jsx",
+    "import './styles.css';",
+    "const products = [{ name: 'Bluetooth Speaker', stock: 18, billing: 128500 }, { name: 'USB-C Cable', stock: 4, billing: 42800 }];",
+    "export default function App() {",
+    "  const cashIn = products.reduce((sum, item) => sum + item.billing, 0);",
+    "  return <main className=\"app\"><h1>Inventory Dashboard</h1><nav><button>Products</button><button>Billing</button><button>Cash In / Out</button><button>Graphs</button></nav><section className=\"cards\"><article>Cash in: Rs {cashIn}</article><article>Low stock: {products.filter(p => p.stock < 5).length}</article></section><section>{products.map(p => <div className=\"row\" key={p.name}><strong>{p.name}</strong><span>Stock: {p.stock}</span><span>Billing: Rs {p.billing}</span></div>)}</section><div className=\"bar\" style={{ width: '70%' }}>Sales graph</div></main>;",
+    "}",
+    "```",
+    "",
+    "`src/main.jsx`",
+    "```jsx",
+    "import React from 'react';",
+    "import { createRoot } from 'react-dom/client';",
+    "import App from './App.jsx';",
+    "createRoot(document.getElementById('root')).render(<App />);",
+    "```",
+    "",
+    "`src/styles.css`",
+    "```css",
+    "body { margin: 0; font-family: Arial, sans-serif; background: #f6f7fb; color: #151515; }",
+    ".app { padding: 32px; max-width: 1000px; margin: auto; }",
+    "nav, .cards { display: flex; gap: 12px; flex-wrap: wrap; }",
+    "button, article, .row { border: 1px solid #ddd; border-radius: 12px; padding: 12px 16px; background: white; }",
+    ".row { display: grid; grid-template-columns: 1fr auto auto; gap: 16px; margin-top: 12px; }",
+    ".bar { margin-top: 20px; background: #2563eb; color: white; padding: 10px; border-radius: 10px; }",
+    "```",
+    "",
+    "`index.html` needs `<div id=\"root\"></div><script type=\"module\" src=\"/src/main.jsx\"></script>`.",
+    "",
+    "CMD setup:",
+    "```cmd",
+    "npm create vite@latest inventory-dashboard -- --template react",
+    "cd inventory-dashboard",
+    "npm install",
+    "npm run dev",
+    "```",
+    "Open the localhost URL Vite prints, usually `http://localhost:5173/`. To have Hassali apply files automatically, switch to CODE mode."
+  ].join("\n");
+}
+
+function createNextJsAnswer() {
+  return [
+    "Use the Next.js App Router.",
+    "",
+    "CMD:",
+    "```cmd",
+    "npx create-next-app@latest landing-demo",
+    "cd landing-demo",
+    "npm run dev",
+    "```",
+    "Open `http://localhost:3000/`.",
+    "",
+    "`app/layout.tsx`",
+    "```tsx",
+    "import './globals.css';",
+    "export default function RootLayout({ children }: { children: React.ReactNode }) {",
+    "  return <html lang=\"en\"><body>{children}</body></html>;",
+    "}",
+    "```",
+    "",
+    "`app/page.tsx`",
+    "```tsx",
+    "export default function Page() {",
+    "  return <main style={{ padding: 48, fontFamily: 'Arial' }}><p>Premium landing page</p><h1>Build a cleaner business presence.</h1><button>Get started</button></main>;",
+    "}",
+    "```",
+    "",
+    "App Router uses the `app` folder and server components by default. The older Pages Router uses `pages/index.tsx`."
+  ].join("\n");
+}
+
+function createExpressAnswer() {
+  return [
+    "Simple Express API:",
+    "",
+    "```cmd",
+    "mkdir users-api",
+    "cd users-api",
+    "npm init -y",
+    "npm install express cors dotenv",
+    "notepad server.js",
+    "node server.js",
+    "```",
+    "",
+    "`server.js`",
+    "```js",
+    "const express = require('express');",
+    "const cors = require('cors');",
+    "const app = express();",
+    "app.use(cors());",
+    "app.use(express.json());",
+    "const users = [{ id: 1, name: 'Ali' }, { id: 2, name: 'Sara' }];",
+    "app.get('/health', (req, res) => res.json({ ok: true }));",
+    "app.get('/users', (req, res) => res.json(users));",
+    "app.listen(3000, () => console.log('API running on http://localhost:3000'));",
+    "```",
+    "",
+    "Test in browser: `http://localhost:3000/users`",
+    "Or CMD: `curl http://localhost:3000/users`"
+  ].join("\n");
+}
+
+function createFastifyAnswer() {
+  return [
+    "Fastify starter:",
+    "```cmd",
+    "mkdir fastify-api",
+    "cd fastify-api",
+    "npm init -y",
+    "npm install fastify",
+    "notepad server.js",
+    "node server.js",
+    "```",
+    "`server.js`",
+    "```js",
+    "const fastify = require('fastify')({ logger: true });",
+    "fastify.get('/health', async () => ({ ok: true }));",
+    "fastify.listen({ port: 3000 }, (err) => { if (err) throw err; console.log('http://localhost:3000/health'); });",
+    "```",
+    "Test: `curl http://localhost:3000/health`"
+  ].join("\n");
+}
+
+function createDockerAnswer() {
+  return [
+    "Docker Compose lets you start related services with one command.",
+    "",
+    "`Dockerfile`",
+    "```dockerfile",
+    "FROM node:20-alpine",
+    "WORKDIR /app",
+    "COPY package*.json ./",
+    "RUN npm install",
+    "COPY . .",
+    "EXPOSE 3000",
+    "CMD [\"npm\", \"start\"]",
+    "```",
+    "`docker-compose.yml`",
+    "```yaml",
+    "services:",
+    "  app:",
+    "    build: .",
+    "    ports:",
+    "      - \"3000:3000\"",
+    "    volumes:",
+    "      - .:/app",
+    "```",
+    "`.dockerignore`",
+    "```text",
+    "node_modules",
+    ".git",
+    "```",
+    "Commands:",
+    "```cmd",
+    "docker --version",
+    "docker compose up --build",
+    "docker compose down",
+    "```"
+  ].join("\n");
+}
+
+function createSqlAnswer() {
+  return [
+    "Postgres-style schema:",
+    "```sql",
+    "CREATE TABLE customers (id SERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE);",
+    "CREATE TABLE products (id SERIAL PRIMARY KEY, name TEXT NOT NULL, price NUMERIC(10,2) NOT NULL);",
+    "CREATE TABLE invoices (id SERIAL PRIMARY KEY, customer_id INT REFERENCES customers(id), created_at DATE DEFAULT CURRENT_DATE);",
+    "CREATE TABLE invoice_items (invoice_id INT REFERENCES invoices(id), product_id INT REFERENCES products(id), quantity INT NOT NULL, PRIMARY KEY (invoice_id, product_id));",
+    "INSERT INTO customers (name, email) VALUES ('Ali', 'ali@example.com');",
+    "INSERT INTO products (name, price) VALUES ('Toy Blocks', 19.99);",
+    "SELECT i.id, c.name, SUM(p.price * ii.quantity) AS total FROM invoices i JOIN customers c ON c.id=i.customer_id JOIN invoice_items ii ON ii.invoice_id=i.id JOIN products p ON p.id=ii.product_id GROUP BY i.id, c.name;",
+    "CREATE INDEX idx_invoices_customer_id ON invoices(customer_id);",
+    "```",
+    "Use `DELETE` or `DROP` only after taking a backup and checking the `WHERE` clause."
+  ].join("\n");
+}
+
+function createWordPressAnswer() {
+  return [
+    "Safest option: put this in a small custom plugin or a child theme `functions.php`. Back up the site first.",
+    "```php",
+    "function hassali_contact_button_shortcode() {",
+    "  return '<a class=\"contact-button\" href=\"/contact\">Contact us</a>';",
+    "}",
+    "add_shortcode('contact_button', 'hassali_contact_button_shortcode');",
+    "```",
+    "Use it in a page/post:",
+    "```text",
+    "[contact_button]",
+    "```",
+    "Avoid editing a parent theme directly because theme updates can overwrite your code."
+  ].join("\n");
+}
+
+function createShopifyAnswer() {
+  return [
+    "Duplicate your theme first: Online Store -> Themes -> ... -> Duplicate.",
+    "",
+    "Create a new section like `sections/announcement-banner.liquid`:",
+    "```liquid",
+    "<section style=\"padding: 14px; text-align:center; background: {{ section.settings.bg }}; color: {{ section.settings.color }};\">",
+    "  {{ section.settings.text }}",
+    "</section>",
+    "{% schema %}",
+    "{\"name\":\"Announcement banner\",\"settings\":[{\"type\":\"text\",\"id\":\"text\",\"label\":\"Text\",\"default\":\"Free delivery this week\"},{\"type\":\"color\",\"id\":\"bg\",\"label\":\"Background\",\"default\":\"#111111\"},{\"type\":\"color\",\"id\":\"color\",\"label\":\"Text color\",\"default\":\"#ffffff\"}],\"presets\":[{\"name\":\"Announcement banner\"}]}",
+    "{% endschema %}",
+    "```",
+    "Then add it from the Shopify theme editor. Do not paste API keys into Liquid theme files."
+  ].join("\n");
+}
+
+function createGitAnswer() {
+  return [
+    "Safe way to inspect and undo one file:",
+    "```cmd",
+    "git status",
+    "git diff -- path\\to\\file.ext",
+    "git restore -- path\\to\\file.ext",
+    "git status",
+    "```",
+    "If the file was already staged:",
+    "```cmd",
+    "git restore --staged -- path\\to\\file.ext",
+    "git restore -- path\\to\\file.ext",
+    "```",
+    "Avoid `git reset --hard` unless you are completely sure you want to discard all local changes."
+  ].join("\n");
+}
+
+function createDebuggingAnswer(prompt: string) {
+  if (/module not found|can't resolve ['"].\/App/i.test(prompt)) {
+    return [
+      "Likely cause: the import path and file name do not match.",
+      "",
+      "Check:",
+      "```cmd",
+      "dir src",
+      "```",
+      "If your file is `src/App.jsx`, import it like:",
+      "```js",
+      "import App from './App.jsx';",
+      "```",
+      "If it is `src/App.tsx`, use:",
+      "```ts",
+      "import App from './App';",
+      "```",
+      "Also check uppercase/lowercase: `App` is not the same as `app` on many systems. Then rerun `npm run dev`."
+    ].join("\n");
+  }
+
+  if (/port\s+3000.*in use/i.test(prompt)) {
+    return [
+      "Find and stop the process using port 3000:",
+      "```cmd",
+      "netstat -ano | findstr :3000",
+      "taskkill /PID <PID_FROM_LAST_COLUMN> /F",
+      "```",
+      "Or run on another port:",
+      "```cmd",
+      "npm run dev -- -p 3001",
+      "```",
+      "Only kill a process if you recognize it or you are okay stopping that local dev server."
+    ].join("\n");
+  }
+
+  if (/no module named pandas|importerror/i.test(prompt)) {
+    return [
+      "Your Python environment does not have `pandas` installed.",
+      "```cmd",
+      "python --version",
+      "python -m pip install pandas",
+      "python your_script.py",
+      "```",
+      "If that fails, check which Python is running:",
+      "```cmd",
+      "where python",
+      "python -m pip --version",
+      "```"
+    ].join("\n");
+  }
+
+  return "Paste the exact error, command you ran, and the file name. I will identify the likely cause, give the exact fix, and include a command to verify it.";
+}
+
+function createDangerousCodingSafetyAnswer() {
+  return [
+    "I cannot help write code to steal browser passwords, credentials, cookies, tokens, or other private data.",
+    "",
+    "I can help with defensive security instead:",
+    "- how to protect saved passwords",
+    "- how to detect credential theft attempts",
+    "- how to store secrets safely",
+    "- how to add input validation and secure authentication",
+    "- how to audit your own app for exposed tokens"
+  ].join("\n");
+}
+
+function createCodingGuideAnswer(prompt: string) {
+  const category = detectCodingCategory(prompt);
+
+  switch (category) {
+    case "auth_or_security_guidance":
+      return detectDangerousCodingRequest(prompt)
+        ? createDangerousCodingSafetyAnswer()
+        : "Keep secrets server-side, use environment variables, validate inputs, hash passwords with a trusted library, and never put API keys in frontend code.";
+    case "debugging_error_help":
+      return createDebuggingAnswer(prompt);
+    case "docker_or_docker_compose":
+      return createDockerAnswer();
+    case "fastify_api":
+      return createFastifyAnswer();
+    case "git_github_help":
+      return createGitAnswer();
+    case "html_css_js_static_site":
+      return createToyWebsiteCodeAnswer();
+    case "nextjs_app_code_text":
+      return createNextJsAnswer();
+    case "node_express_api":
+      return createExpressAnswer();
+    case "php_form_or_backend":
+    case "php_xampp_app":
+      return createPhpContactFormAnswer();
+    case "python_data_task":
+      return createCsvMergeAnswer();
+    case "python_script":
+      return [
+        "Use this basic Python script structure:",
+        "```cmd",
+        "mkdir C:\\python-task",
+        "cd /d C:\\python-task",
+        "notepad script.py",
+        "python --version",
+        "python script.py",
+        "```",
+        "```python",
+        "def main():",
+        "    print('Hello from Python')",
+        "",
+        "if __name__ == '__main__':",
+        "    main()",
+        "```"
+      ].join("\n");
+    case "react_app_code_text":
+      return createReactViteAnswer();
+    case "shopify_help":
+      return createShopifyAnswer();
+    case "sql_database_schema_or_queries":
+      return createSqlAnswer();
+    case "wordpress_help":
+      return createWordPressAnswer();
+    case "npm_pnpm_yarn_setup":
+      return "For npm projects on Windows: `node -v`, `npm -v`, `npm install`, then `npm run dev`. If install fails, delete `node_modules` and lockfile only when you understand the impact, then reinstall.";
+    case "windows_cmd_setup":
+      return "Use `cd /d C:\\path\\to\\folder` to switch drives/folders in CMD, then run the project command. Use `dir` to confirm files are in the right folder.";
+    case "api_integration_help":
+      return "For API integrations, keep keys in `.env`, call external APIs from the backend, validate responses, handle errors, and never expose secrets in browser code.";
+    case "architecture_or_folder_structure":
+      return "A clean small app structure is: `src/` for code, `src/components/` for UI, `src/lib/` for helpers, `src/data/` for mock data, and `README.md` for run steps.";
+    case "deployment_guidance":
+      return "Deployment checklist: build locally, set environment variables in the host dashboard, never commit secrets, run the production build command, then test the live URL.";
+    case "environment_variables_guidance":
+      return "Use `.env` for local secrets, add `.env` to `.gitignore`, document safe example values in `.env.example`, and read variables from server-side code.";
+    case "python_web_app_flask_fastapi_streamlit":
+      return "For a small Python web app, choose Flask for simple pages/APIs, FastAPI for typed APIs, or Streamlit for quick dashboards. Create a virtual environment, install dependencies, then run the framework command.";
+    case "code_review_or_refactor":
+    case "typescript_javascript_help":
+    default:
+      return "I can help with code as text. Share the language, current file, and target behavior, and I will give exact code, file names, run commands, and a quick test step.";
+  }
 }
 
 function createLegalGuidanceAnswer() {
@@ -974,12 +1456,10 @@ export function createAskSeriousAnswer(
       break;
     case "coding_help_text_only":
     case "local_setup_guidance":
-      if (/\bphp\b/i.test(prompt) && /\bxampp\b/i.test(prompt)) answer = createPhpContactFormAnswer();
-      else if (/\bpython\b/i.test(prompt) && /\bcsv\b/i.test(prompt)) answer = createCsvMergeAnswer();
-      else answer = "I can write code as text here in ASK mode. Tell me the language, files, and target behavior, and I will include file names, code blocks, run commands, and tests.";
+      answer = createCodingGuideAnswer(prompt);
       break;
     case "website_code_text_only":
-      answer = createToyWebsiteCodeAnswer();
+      answer = detectCodingCategory(prompt) === "react_app_code_text" ? createReactViteAnswer() : createToyWebsiteCodeAnswer();
       break;
     case "mode_boundary_request":
     case "wrong_mode_build_request":
@@ -993,6 +1473,9 @@ export function createAskSeriousAnswer(
       break;
     case "accounting_or_finance_guidance":
       answer = createAccountingGuidanceAnswer();
+      break;
+    case "auth_or_security_guidance":
+      answer = createCodingGuideAnswer(prompt);
       break;
     case "bullet_format":
       answer = createBulletAnswer(prompt);
@@ -1034,7 +1517,7 @@ export function createAskSeriousAnswer(
       answer = "I am here with you. Tell me what happened in one or two sentences, and I can help you sort the feeling, choose the next small step, and write what you need to say.";
       break;
     case "debugging_help":
-      answer = "Paste the error message, the file name, and the smallest code snippet that reproduces it. I will help you isolate the cause and suggest a safe fix as text.";
+      answer = createDebuggingAnswer(prompt);
       break;
     case "travel_or_lifestyle_planning":
       answer = "Share the city, dates, budget, and what kind of trip you want. I can turn that into a practical itinerary with priorities and tradeoffs.";
