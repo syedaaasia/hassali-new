@@ -61,7 +61,8 @@ function isWebsiteCreationRequest(promptText: string) {
   return (
     (includesAny(promptText, ["create", "build", "design", "generate"]) ||
       /\bmake\s+(?:me|a|an|new)\b/.test(promptText)) &&
-    includesAny(promptText, ["website", "site", "landing page", "web page", "pages"])
+    (includesAny(promptText, ["website", "site", "landing page", "web page", "pages"]) ||
+      /\b(?:ecommerce|e-commerce|online store|storefront)\b/.test(promptText))
   );
 }
 
@@ -162,6 +163,8 @@ function sectionsForDomain(domain: DiagnosticContext["inferredDomain"]) {
 function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"]) {
   const pageCount = requestedPageCount(promptText);
   const blueprint = buildDomainBlueprint({ prompt: `${promptText} ${domain}` });
+  const isCommercePrompt = /\b(?:ecommerce|e-commerce|online store|toy shop|toy store|product store|shop|store)\b/.test(promptText);
+  const hasExplicitServicesPage = /\b(?:services page|services pages|page(?:s)?\s*:?[^\n.]{0,120}\bservices\b|include[^\n.]{0,120}\bservices\b[^\n.]{0,80}\bpages?)\b/.test(promptText);
   const explicitPageTerms: Record<string, string[]> = {
     "about.html": ["about", "about us"],
     "bikes.html": ["bikes", "motorbikes", "motorcycles"],
@@ -173,7 +176,7 @@ function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"
     "index.html": ["home", "homepage", "landing"],
     "menu.html": ["menu"],
     "products.html": ["products", "product page", "shop page", "store page"],
-    "services.html": ["services", "service"],
+    "services.html": hasExplicitServicesPage ? ["services"] : [],
     "story.html": ["story", "our story"]
   };
   const pages = ["index.html"];
@@ -188,7 +191,11 @@ function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"
     pages.push("episodes.html");
   }
 
-  if (includesAny(promptText, ["services", "sponsorship", "sponsor"]) || pageCount >= 2) {
+  if (isCommercePrompt && !pages.includes("products.html")) {
+    pages.push("products.html");
+  }
+
+  if (hasExplicitServicesPage || includesAny(promptText, ["sponsorship", "sponsor"]) || (!isCommercePrompt && pageCount >= 2)) {
     pages.push("services.html");
   }
 
@@ -203,7 +210,9 @@ function pagePlan(promptText: string, domain: DiagnosticContext["inferredDomain"
   const blueprintPages = blueprint.modules
     .filter((moduleName) => /^[a-z0-9 -]+$/i.test(moduleName))
     .map((moduleName) => pageToPath(moduleName));
-  const fallbackPages = [...blueprintPages, "services.html", "about.html", "contact.html", "gallery.html", "blog.html"];
+  const fallbackPages = isCommercePrompt
+    ? [...blueprintPages, "products.html", "about.html", "contact.html", "cart.html", "gallery.html", "blog.html"]
+    : [...blueprintPages, "services.html", "about.html", "contact.html", "gallery.html", "blog.html"];
   const effectivePageCount = Math.max(pageCount, pages.length);
 
   for (const nextPage of fallbackPages) {

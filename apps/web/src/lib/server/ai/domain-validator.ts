@@ -193,6 +193,16 @@ function contentFromFiles(files?: Record<string, string>) {
     .join("\n");
 }
 
+function visibleWebsiteContentFromFiles(files?: Record<string, string>) {
+  return Object.entries(files ?? {})
+    .filter(([path]) => path.toLowerCase().endsWith(".html"))
+    .map(([path, content]) => `\nFILE:${path}\n${content
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<[^>]+>/g, " ")}`)
+    .join("\n");
+}
+
 function profileFor(domain: string | null) {
   const normalizedDomain = domain ? normalize(domain) : null;
   if (domain && profiles[domain]) return profiles[domain];
@@ -355,7 +365,9 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
     ...(isCodeProposal ? [] : input.businessBlueprint.mustAvoid)
   ]).filter((term) => !isRequiredContractTerm(term, input.proposalContext));
   const combinedContent = input.validationMode === "proposal_content"
-    ? contentFromFiles(input.proposedFiles)
+    ? input.contextPriority.authoritativeMode === "WEBSITE"
+      ? visibleWebsiteContentFromFiles(input.proposedFiles)
+      : contentFromFiles(input.proposedFiles)
     : input.currentPrompt;
   const detectedForbiddenSignals = detectForbidden(combinedContent, forbiddenSignals);
   const detectedGenericCopy = detectGenericCopy(combinedContent);

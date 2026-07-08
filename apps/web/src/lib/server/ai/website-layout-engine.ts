@@ -101,6 +101,17 @@ function isFloristPlan(plan: WebsitePlan) {
   return plan.industry === "florist" || `${plan.sourceOfTruthDomain ?? ""}`.includes("florist");
 }
 
+function isToyStorePlan(plan: WebsitePlan) {
+  const text = `${plan.sourceOfTruthDomain ?? ""} ${plan.industry} ${plan.layoutType}`.toLowerCase();
+
+  return text.includes("toy_store") ||
+    text.includes("toy shop") ||
+    text.includes("toy store") ||
+    text.includes("educational toys") ||
+    text.includes("plush toys") ||
+    text.includes("building blocks");
+}
+
 function isRealEstatePlan(plan: WebsitePlan) {
   return plan.industry === "real_estate" || `${plan.sourceOfTruthDomain ?? ""}`.includes("real_estate");
 }
@@ -784,6 +795,113 @@ function realEstatePageCopy(page: string) {
   return copy[page] ?? copy.home;
 }
 
+function toyStorePageCopy(page: string) {
+  const copy: Record<string, {
+    cta: string;
+    eyebrow: string;
+    hero: string;
+    lede: string;
+    sections: Array<{
+      body: string;
+      title: string;
+      visual: string;
+    }>;
+  }> = {
+    about: {
+      cta: "Meet the toy team",
+      eyebrow: "Toy shop / age-group guidance",
+      hero: "A premium toy shop built around safe picks, playful learning, and easy gifting.",
+      lede: "We help families choose toys by age group, interest, and occasion, from educational toys and puzzles to plush toys, building blocks, and birthday gift picks.",
+      sections: [
+        {
+          body: "Every category is organized around kids, age groups, and gift moments so shoppers can compare quickly without noisy generic ecommerce filler.",
+          title: "Curated for kids and families",
+          visual: "age-group toy shelves"
+        },
+        {
+          body: "Delivery, returns, safe checkout, and customer support are visible so parents can shop with confidence.",
+          title: "Trust before checkout",
+          visual: "safe checkout and returns badges"
+        }
+      ]
+    },
+    cart: {
+      cta: "Review gift basket",
+      eyebrow: "Cart / safe checkout",
+      hero: "Build a gift-ready cart with toy categories, delivery notes, and safe checkout clarity.",
+      lede: "Preview plush toys, educational toys, puzzles, and building blocks with clear delivery, returns, and support details before checkout.",
+      sections: [
+        {
+          body: "The cart path highlights gift picks, age-group notes, and delivery timing for parents and gift buyers.",
+          title: "Basket confidence",
+          visual: "toy basket checkout"
+        },
+        {
+          body: "Returns and safe checkout guidance are presented early so families understand the purchase path.",
+          title: "Clear delivery and returns",
+          visual: "delivery and returns cards"
+        }
+      ]
+    },
+    contact: {
+      cta: "Ask about a toy",
+      eyebrow: "Support / delivery",
+      hero: "Contact the toy shop for age-group recommendations, delivery, returns, and gift help.",
+      lede: "Ask about educational toys, puzzles, plush toys, building blocks, safe checkout, delivery windows, and returns before placing an order.",
+      sections: [
+        {
+          body: "Share the child age group, interests, budget, and event date so the team can suggest better gift picks.",
+          title: "Gift help that feels human",
+          visual: "toy support counter"
+        },
+        {
+          body: "Delivery questions, returns, and category guidance stay visible instead of being hidden behind generic support copy.",
+          title: "Support for parents",
+          visual: "delivery support badges"
+        }
+      ]
+    },
+    home: {
+      cta: "Shop toy categories",
+      eyebrow: "Toy shop / premium ecommerce",
+      hero: "A bright toy shop for educational toys, plush friends, puzzles, and building blocks.",
+      lede: "Explore toys by age group, category, and gift moment with safe checkout, delivery, returns, and family-friendly support built into the shopping path.",
+      sections: [
+        {
+          body: "Educational toys, plush toys, puzzles, building blocks, and gift picks are grouped into clear categories for kids and parents.",
+          title: "Toy categories that make choosing easy",
+          visual: "premium toy category grid"
+        },
+        {
+          body: "Age groups, delivery, returns, and safe checkout details help shoppers move from discovery to purchase with confidence.",
+          title: "Safe shopping for families",
+          visual: "family shopping trust row"
+        }
+      ]
+    },
+    products: {
+      cta: "Browse featured toys",
+      eyebrow: "Products / categories",
+      hero: "Featured toys for kids, learning, gifting, and creative play.",
+      lede: "Browse educational toys, plush toys, puzzles, building blocks, and age-group categories with gift-ready toy picks.",
+      sections: [
+        {
+          body: "Toy tiles can group picks by toddlers, preschool, school-age kids, creative play, STEM learning, and cozy plush gifts.",
+          title: "Age groups and categories",
+          visual: "age-filtered toy cards"
+        },
+        {
+          body: "Delivery, returns, safe checkout, and customer support sit close to the catalog so the ecommerce path feels complete.",
+          title: "Checkout confidence",
+          visual: "checkout support strip"
+        }
+      ]
+    }
+  };
+
+  return copy[page] ?? copy.home;
+}
+
 function renderVisual(label: string, index: number) {
   return `<div class="visual visual-${(index % 4) + 1}" aria-label="${escapeHtml(label)}">
             <span>${escapeHtml(label)}</span>
@@ -845,8 +963,9 @@ function renderPage(input: {
   const dentalCopy = isDentalPlan(input.plan) ? dentalPageCopy(input.page) : null;
   const cleaningCopy = isCleaningPlan(input.plan) ? cleaningPageCopy(input.page) : null;
   const floristCopy = isFloristPlan(input.plan) ? floristPageCopy(input.page) : null;
+  const toyStoreCopy = isToyStorePlan(input.plan) ? toyStorePageCopy(input.page) : null;
   const realEstateCopy = isRealEstatePlan(input.plan) ? realEstatePageCopy(input.page) : null;
-  const domainCopy = upholsteryCopy ?? dentalCopy ?? mobilePhoneCopy ?? carRentalCopy ?? seafoodCopy ?? cleaningCopy ?? floristCopy ?? realEstateCopy ?? beverageCopy;
+  const domainCopy = upholsteryCopy ?? dentalCopy ?? mobilePhoneCopy ?? carRentalCopy ?? seafoodCopy ?? cleaningCopy ?? floristCopy ?? toyStoreCopy ?? realEstateCopy ?? beverageCopy;
   const heroTitle = domainCopy?.hero ?? (isHome ? leadSection.title : `${pageTitle} built around ${leadSection.title.toLowerCase()}`);
   const lede = domainCopy?.lede ?? (isHome ? leadSection.intent : leadSection.contentAngle);
   const cta = domainCopy?.cta ?? input.plan.goal;
@@ -899,23 +1018,23 @@ ${sectionCards
         </article>`)
   .join("\n")}
       </section>
-      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${upholsteryCopy ? "Upholstery estimate" : dentalCopy ? "Dental appointment" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : cleaningCopy ? "Cleaning quote" : floristCopy ? "Floral order" : realEstateCopy ? "Property consultation" : "Reservation request"}">
+      ${domainCopy && input.page === "contact" ? `<section class="contact-form" aria-label="${upholsteryCopy ? "Upholstery estimate" : dentalCopy ? "Dental appointment" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : cleaningCopy ? "Cleaning quote" : floristCopy ? "Floral order" : toyStoreCopy ? "Toy shop support" : realEstateCopy ? "Property consultation" : "Reservation request"}">
         <div>
-          <p class="eyebrow">${upholsteryCopy ? "Upholstery estimate" : dentalCopy ? "Dental appointment" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : cleaningCopy ? "Cleaning quote" : floristCopy ? "Floral order" : realEstateCopy ? "Property consultation" : "Reservation request"}</p>
-          <h2>${upholsteryCopy ? "Tell us about the furniture, fabric, leather repair, or custom cushion work you need." : dentalCopy ? "Tell us about the dental appointment, treatment, hygiene visit, or comfort need you want to plan." : beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : carRentalCopy ? "Tell us your pickup date, dropoff location, and preferred vehicle category." : mobilePhoneCopy ? "Tell us which phone, accessory, repair, warranty, or setup support you need." : cleaningCopy ? "Tell us about rooms, schedule, deep clean needs, and recurring cleaning preferences." : floristCopy ? "Tell us about the flowers, occasion, delivery date, colors, and arrangement style." : realEstateCopy ? "Tell us about listings, valuations, viewings, neighborhoods, or consultation timing." : "Tell us your preferred date, party size, and seafood notes."}</h2>
-          <p>${upholsteryCopy ? "Share photos, measurements, fabric preferences, foam replacement notes, and pickup needs for a free estimate." : dentalCopy ? "Share appointment timing, dental concerns, patient comfort needs, and treatment questions before your visit." : beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : carRentalCopy ? "Share driver details, airport timing, mileage questions, insurance needs, and rental plan preferences." : mobilePhoneCopy ? "Share model, storage, color, accessory needs, repair issue, trade-in question, installment plan, or warranty detail before visiting." : cleaningCopy ? "Share home cleaning, office cleaning, move-in cleaning, move-out cleaning, or recurring cleaning details for a quote." : floristCopy ? "Share bouquet, wedding, event, sympathy, delivery, and seasonal arrangement notes." : realEstateCopy ? "Share property goals, listing questions, valuation needs, buyer plans, seller plans, and viewing requests." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
+          <p class="eyebrow">${upholsteryCopy ? "Upholstery estimate" : dentalCopy ? "Dental appointment" : beverageCopy ? "Partner inquiry" : carRentalCopy ? "Rental inquiry" : mobilePhoneCopy ? "Phone shop inquiry" : cleaningCopy ? "Cleaning quote" : floristCopy ? "Floral order" : toyStoreCopy ? "Toy shop support" : realEstateCopy ? "Property consultation" : "Reservation request"}</p>
+          <h2>${upholsteryCopy ? "Tell us about the furniture, fabric, leather repair, or custom cushion work you need." : dentalCopy ? "Tell us about the dental appointment, treatment, hygiene visit, or comfort need you want to plan." : beverageCopy ? "Tell us about your retail, distributor, or campaign partnership needs." : carRentalCopy ? "Tell us your pickup date, dropoff location, and preferred vehicle category." : mobilePhoneCopy ? "Tell us which phone, accessory, repair, warranty, or setup support you need." : cleaningCopy ? "Tell us about rooms, schedule, deep clean needs, and recurring cleaning preferences." : floristCopy ? "Tell us about the flowers, occasion, delivery date, colors, and arrangement style." : toyStoreCopy ? "Tell us about the age group, toy category, gift moment, delivery question, return question, or checkout support you need." : realEstateCopy ? "Tell us about listings, valuations, viewings, neighborhoods, or consultation timing." : "Tell us your preferred date, party size, and seafood notes."}</h2>
+          <p>${upholsteryCopy ? "Share photos, measurements, fabric preferences, foam replacement notes, and pickup needs for a free estimate." : dentalCopy ? "Share appointment timing, dental concerns, patient comfort needs, and treatment questions before your visit." : beverageCopy ? "Share region, store count, campaign timing, and preferred cola lineup details." : carRentalCopy ? "Share driver details, airport timing, mileage questions, insurance needs, and rental plan preferences." : mobilePhoneCopy ? "Share model, storage, color, accessory needs, repair issue, trade-in question, installment plan, or warranty detail before visiting." : cleaningCopy ? "Share home cleaning, office cleaning, move-in cleaning, move-out cleaning, or recurring cleaning details for a quote." : floristCopy ? "Share bouquet, wedding, event, sympathy, delivery, and seasonal arrangement notes." : toyStoreCopy ? "Share kids' ages, preferred toys, educational goals, plush or puzzle interests, building block sets, delivery timing, and return questions." : realEstateCopy ? "Share property goals, listing questions, valuation needs, buyer plans, seller plans, and viewing requests." : "Share allergies, raw bar preferences, private dining requests, or seasonal catch questions before your visit."}</p>
         </div>
         <form>
           <label>Name <input type="text" name="name" autocomplete="name" /></label>
           <label>Email <input type="email" name="email" autocomplete="email" /></label>
-          <label>${upholsteryCopy ? "Furniture and fabric notes" : dentalCopy ? "Appointment notes" : beverageCopy ? "Partnership notes" : carRentalCopy ? "Rental notes" : mobilePhoneCopy ? "Phone shop notes" : cleaningCopy ? "Cleaning notes" : floristCopy ? "Arrangement notes" : realEstateCopy ? "Property notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
-          <button class="button" type="button">${upholsteryCopy ? "Send estimate request" : dentalCopy ? "Book appointment" : beverageCopy ? "Send partnership inquiry" : carRentalCopy ? "Send rental inquiry" : mobilePhoneCopy ? "Send phone inquiry" : cleaningCopy ? "Book a cleaning" : floristCopy ? "Order flowers" : realEstateCopy ? "Schedule a consultation" : "Send reservation request"}</button>
+          <label>${upholsteryCopy ? "Furniture and fabric notes" : dentalCopy ? "Appointment notes" : beverageCopy ? "Partnership notes" : carRentalCopy ? "Rental notes" : mobilePhoneCopy ? "Phone shop notes" : cleaningCopy ? "Cleaning notes" : floristCopy ? "Arrangement notes" : toyStoreCopy ? "Toy and gift notes" : realEstateCopy ? "Property notes" : "Reservation notes"} <textarea name="notes" rows="4"></textarea></label>
+          <button class="button" type="button">${upholsteryCopy ? "Send estimate request" : dentalCopy ? "Book appointment" : beverageCopy ? "Send partnership inquiry" : carRentalCopy ? "Send rental inquiry" : mobilePhoneCopy ? "Send phone inquiry" : cleaningCopy ? "Book a cleaning" : floristCopy ? "Order flowers" : toyStoreCopy ? "Ask about toys" : realEstateCopy ? "Schedule a consultation" : "Send reservation request"}</button>
         </form>
       </section>` : ""}
     </main>
     <footer>
       <span>${escapeHtml(input.brandName)}</span>
-      <span>${escapeHtml(upholsteryCopy ? "Sofa reupholstery, chair restoration, fabric selection, leather repair, custom cushions, free estimates, and before and after workmanship." : dentalCopy ? "Dental appointments, hygiene, treatments, comfort, emergency guidance, and patient trust." : beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : carRentalCopy ? "Rental cars, vehicle fleet, booking, pickup and dropoff, insurance, mileage, and roadside support." : mobilePhoneCopy ? "Smartphones, iPhone, Samsung, Android phones, accessories, warranty, repairs, trade-ins, and device setup support." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : cleaningCopy ? "Home cleaning, office cleaning, deep clean visits, trusted cleaners, local reviews, and recurring schedules." : floristCopy ? "Fresh flowers, bouquets, wedding arrangements, event florals, delivery, and seasonal collections." : realEstateCopy ? "Property listings, buyers, sellers, viewings, valuations, neighborhoods, and agent consultation." : input.plan.visualStrategy)}</span>
+      <span>${escapeHtml(upholsteryCopy ? "Sofa reupholstery, chair restoration, fabric selection, leather repair, custom cushions, free estimates, and before and after workmanship." : dentalCopy ? "Dental appointments, hygiene, treatments, comfort, emergency guidance, and patient trust." : beverageCopy ? "Bold cola flavor, sparkling bottles, campaign launches, and regional distribution partnerships." : carRentalCopy ? "Rental cars, vehicle fleet, booking, pickup and dropoff, insurance, mileage, and roadside support." : mobilePhoneCopy ? "Smartphones, iPhone, Samsung, Android phones, accessories, warranty, repairs, trade-ins, and device setup support." : seafoodCopy ? "Ocean-inspired seafood dining, seasonal catch, reservations, and warm hospitality." : cleaningCopy ? "Home cleaning, office cleaning, deep clean visits, trusted cleaners, local reviews, and recurring schedules." : floristCopy ? "Fresh flowers, bouquets, wedding arrangements, event florals, delivery, and seasonal collections." : toyStoreCopy ? "Toy shop categories, educational toys, plush toys, puzzles, building blocks, age groups, safe checkout, delivery, returns, and gift picks." : realEstateCopy ? "Property listings, buyers, sellers, viewings, valuations, neighborhoods, and agent consultation." : input.plan.visualStrategy)}</span>
       <a href="mailto:hello@example.com">hello@example.com</a>
     </footer>
     <script src="./main.js"></script>

@@ -219,6 +219,21 @@ function publicCopyLeakIssues(content: string) {
     .map(([, issue]) => issue);
 }
 
+function promptAllowsContradictoryTerm(prompt: string, term: string) {
+  const promptText = lower(prompt);
+  const normalizedTerm = lower(term);
+  const inventoryPrompt = /\b(?:inventory|inventory management|inventory system|stock|products?|billing|invoice|invoices|cash in|cash out|sales|purchase records?|suppliers?)\b/.test(promptText);
+
+  if (
+    inventoryPrompt &&
+    /\b(?:inventory system studio|inventory system|purchase orders|records table|operations software|stock|suppliers|products?|billing|cash in|cash out|sales|purchase records?)\b/.test(normalizedTerm)
+  ) {
+    return true;
+  }
+
+  return promptText.includes(normalizedTerm);
+}
+
 export function buildPromptSovereigntyContract(input: {
   composition: CompositionStrategy;
   decision: DecisionPlan;
@@ -364,7 +379,7 @@ export function validatePromptSovereignty(input: {
   const leakedTerms = input.contract.contradictoryTerms.filter((term) => {
     const normalized = lower(term);
 
-    return !lower(input.contract.prompt).includes(normalized) && content.includes(normalized);
+    return !promptAllowsContradictoryTerm(input.contract.prompt, normalized) && content.includes(normalized);
   });
 
   if (leakedTerms.length > 0) {

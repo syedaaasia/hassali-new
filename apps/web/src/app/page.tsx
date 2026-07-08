@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { InteractiveSpotlightFooter } from "@/components/marketing/interactive-spotlight-footer";
 import { CommandCapsule, PremiumPanel, SystemBadge } from "@/components/ui/premium";
 
@@ -162,8 +163,14 @@ export default function HomePage() {
         <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-5 py-6 sm:px-8">
           <header className="flex items-center justify-between">
             <Link className="flex items-center gap-3" href="/">
-              <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/[0.04]">
-                <span className="h-5 w-5 rounded-full bg-[radial-gradient(circle,hsl(var(--premium-accent-soft)),hsl(var(--premium-accent))_45%,transparent_48%)] shadow-[0_0_32px_hsl(var(--premium-accent)/0.55)]" />
+              <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/[0.04] p-1">
+                <Image
+                  alt="Hassali.ai"
+                  className="h-8 w-8 object-contain"
+                  height={32}
+                  src="/apple-icon.png"
+                  width={32}
+                />
               </span>
               <span>
                 <span className="block text-sm font-semibold">Hassali.ai</span>

@@ -259,7 +259,7 @@ type ReactProductBlueprint = {
   statusOptions: string[];
   targetUser: string;
   tone: string;
-  type: "afforfix" | "generic" | "safe_client_check" | "tax_dedo";
+  type: "afforfix" | "generic" | "inventory_system" | "safe_client_check" | "tax_dedo";
   workflowMap: string[];
 };
 
@@ -605,6 +605,141 @@ function taxDedoScreens(records: ReactProductBlueprint["records"], statusOptions
   ];
 }
 
+function inventoryScreens(records: ReactProductBlueprint["records"], statusOptions: string[]): ReactProductScreen[] {
+  return [
+    screen({
+      actions: ["Review stock value", "Check low-stock alerts", "Open billing summary", "Reset demo records"],
+      domainVocabulary: ["inventory system", "stock levels", "billing", "cash in", "cash out"],
+      emptyState: "No inventory records visible yet.",
+      fields: ["stock value", "low stock", "cash flow", "open invoices"],
+      label: "Dashboard",
+      layoutKind: "dashboard_overview",
+      metrics: ["Stock value", "Low-stock alerts", "Cash in / cash out", "Open invoices"],
+      primaryEntity: "inventory snapshot",
+      purpose: "Show product movement, stock risk, billing, and cash flow at a glance.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add product", "Update SKU", "Filter category", "Review supplier note"],
+      domainVocabulary: ["products", "SKU", "categories", "inventory records"],
+      emptyState: "No products match this filter.",
+      fields: ["product", "SKU", "category", "stock quantity"],
+      label: "Products",
+      layoutKind: "records_table",
+      metrics: ["Products", "Categories", "Active SKUs", "Supplier-linked"],
+      primaryEntity: "product",
+      purpose: "Track product records with SKU, category, supplier, and quantity context.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Update quantity", "Review reorder point", "Mark stock counted"],
+      domainVocabulary: ["stock levels", "quantity", "reorder point", "stock count"],
+      emptyState: "No stock records match this filter.",
+      fields: ["item", "quantity", "reorder point", "status"],
+      label: "Stock Levels",
+      layoutKind: "records_table",
+      metrics: ["In stock", "Low stock", "Out of stock", "Reorder value"],
+      primaryEntity: "stock item",
+      purpose: "Keep stock quantities and reorder thresholds visible.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Flag reorder", "Review supplier", "Clear alert"],
+      domainVocabulary: ["low stock alerts", "out of stock", "reorder", "supplier follow-up"],
+      emptyState: "No low-stock alerts are open.",
+      fields: ["alert", "product", "supplier", "priority"],
+      label: "Low Stock Alerts",
+      layoutKind: "quality_issues",
+      metrics: ["Alerts", "Out of stock", "Reorder soon", "Supplier notes"],
+      primaryEntity: "stock alert",
+      purpose: "Turn inventory risk into a visible action queue.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Create invoice", "Mark paid", "Review due billing"],
+      domainVocabulary: ["billing", "invoices", "invoice due", "paid"],
+      emptyState: "No invoice records match this filter.",
+      fields: ["invoice", "amount", "customer", "status"],
+      label: "Billing / Invoices",
+      layoutKind: "payments_revenue",
+      metrics: ["Open invoices", "Paid invoices", "Invoice due", "Billing total"],
+      primaryEntity: "invoice",
+      purpose: "Connect stock movement to billing and invoice status.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Record cash in", "Record cash out", "Review cash movement"],
+      domainVocabulary: ["cash in", "cash out", "cash flow", "margin"],
+      emptyState: "No cash movement records match this filter.",
+      fields: ["movement", "amount", "reason", "status"],
+      label: "Cash In / Cash Out",
+      layoutKind: "payments_revenue",
+      metrics: ["Cash in", "Cash out", "Net movement", "Review items"],
+      primaryEntity: "cash movement",
+      purpose: "Track simple local cash movement without pretending to be accounting software.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Review sales", "Compare products", "Open sales graph"],
+      domainVocabulary: ["sales", "sold", "sales records", "graphs"],
+      emptyState: "No sales records match this filter.",
+      fields: ["sale", "product", "amount", "status"],
+      label: "Sales",
+      layoutKind: "kanban_status_board",
+      metrics: ["Sales", "Sold items", "Top category", "Graph trend"],
+      primaryEntity: "sale",
+      purpose: "Show sales movement and product outcomes as a status workflow.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add purchase", "Review supplier bill", "Mark received"],
+      domainVocabulary: ["purchases", "purchase records", "supplier", "received stock"],
+      emptyState: "No purchase records match this filter.",
+      fields: ["purchase", "supplier", "amount", "received"],
+      label: "Purchases",
+      layoutKind: "records_table",
+      metrics: ["Purchases", "Received", "Pending", "Supplier spend"],
+      primaryEntity: "purchase record",
+      purpose: "Track incoming stock and supplier purchase records.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Review graph bars", "Compare stock value", "Prepare local summary"],
+      domainVocabulary: ["reports", "graphs", "stats", "stock value"],
+      emptyState: "No report data is visible yet.",
+      fields: ["report", "period", "metric", "note"],
+      label: "Reports / Graphs",
+      layoutKind: "settings_or_docs_summary",
+      metrics: ["Reports", "Graphs", "Stats", "Local summaries"],
+      primaryEntity: "report",
+      purpose: "Summarize inventory stats and chart-like local bars.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Review supplier", "Add supplier note", "Filter active suppliers"],
+      domainVocabulary: ["suppliers", "vendors", "purchase records", "lead time"],
+      emptyState: "No supplier records match this filter.",
+      fields: ["supplier", "category", "lead time", "status"],
+      label: "Suppliers",
+      layoutKind: "people_roster",
+      metrics: ["Suppliers", "Active", "Purchase due", "Lead time"],
+      primaryEntity: "supplier",
+      purpose: "Keep supplier context close to stock and purchase records.",
+      sampleRecords: records,
+      statusOptions
+    })
+  ];
+}
+
 function genericScreens(records: ReactProductBlueprint["records"], statusOptions: string[]): ReactProductScreen[] {
   return [
     screen({
@@ -810,6 +945,51 @@ function buildReactProductBlueprint(input: {
       tone: "practical, slightly desi, friendly, still professional",
       type: "tax_dedo",
       workflowMap: ["Add client record", "Add invoice", "Log expense proof", "Move tax filing status", "Review deadlines", "Read not-tax-advice disclaimer", "Reset demo data"]
+    }, input.prompt);
+  }
+
+  if (/\b(?:inventory|inventory management|inventory system|stock levels?|low stock|products?|billing|cash in|cash out|purchase records?|sales records?)\b/.test(prompt)) {
+    const records = [
+      { amount: 128500, category: "Electronics", note: "SKU INV-1042. Stock 18, reorder point 12, billing ready.", owner: "Apex Wholesale", status: "in stock", title: "Bluetooth Speaker Pro" },
+      { amount: 42800, category: "Accessories", note: "SKU INV-2210. Stock 4, low stock alert active, supplier follow-up needed.", owner: "Bright Supply Co.", status: "low stock", title: "USB-C Charging Cable" },
+      { amount: 93500, category: "Home Goods", note: "SKU INV-3308. Purchase record received, invoice pending.", owner: "Metro Traders", status: "purchase due", title: "Kitchen Storage Set" },
+      { amount: 68200, category: "Retail", note: "Sale recorded. Cash in Rs 68,200, cash out Rs 41,500, margin review needed.", owner: "Walk-in Sales", status: "sold", title: "Kids Learning Tablet" },
+      { amount: 15400, category: "Stationery", note: "Stock 0. Reorder immediately before next billing cycle.", owner: "Paperline Supplier", status: "out of stock", title: "Premium Notebook Pack" }
+    ];
+    const statusOptions = ["in stock", "low stock", "out of stock", "sold", "purchase due", "invoice due", "paid"];
+
+    return finalizeBlueprint({
+      appName: input.appName && !/^software app$/i.test(input.appName) ? input.appName : "Inventory System",
+      copyLines: [
+        "Stock, billing, and cash flow without the spreadsheet fog.",
+        "Track products, SKU quantities, low-stock alerts, invoices, sales, purchases, cash in, and cash out in one local dashboard.",
+        "Local demo only - no live backend, barcode scanner, or accounting authority."
+      ],
+      disclaimer: "Local inventory demo only. No backend, accounting authority, payment processing, barcode hardware, cloud sync, or real finance reporting is included.",
+      domain: "inventory management system",
+      excitementGate: "An operator sees stock value, low-stock alerts, billing status, cash in/out, and sales movement in the first screen.",
+      jobToBeDone: "Help shop owners and operators track products, stock levels, low stock alerts, billing, invoices, cash in, cash out, sales, purchases, reports, suppliers, and product records.",
+      localStorageKey: "hassali-inventory-system-demo",
+      metricLabels: ["Stock value", "Low-stock alerts", "Cash in / cash out", "Open invoices"],
+      palette: {
+        accent: "#2563eb",
+        accent2: "#16a34a",
+        canvas: "#f6f8fb",
+        ink: "#111827",
+        muted: "#64748b",
+        soft: "#dbeafe",
+        surface: "rgba(255,255,255,0.88)"
+      },
+      primaryActionLabel: "Add product",
+      recordLabel: "product",
+      records,
+      sections: ["Dashboard", "Products", "Stock Levels", "Low Stock Alerts", "Billing / Invoices", "Cash In / Cash Out", "Sales", "Purchases", "Reports / Graphs", "Suppliers"],
+      screens: inventoryScreens(records, statusOptions),
+      statusOptions,
+      targetUser: "retail operators, shop owners, inventory clerks, and small businesses tracking stock and billing",
+      tone: "clear, operational, numbers-first, local-first",
+      type: "inventory_system",
+      workflowMap: ["Add product", "Update stock quantity", "Flag low stock", "Create invoice", "Record cash in", "Record cash out", "Review sales graph", "Reset demo data"]
     }, input.prompt);
   }
 

@@ -23,10 +23,12 @@ const pageAliases: Record<string, string> = {
 const domainDefaults: Record<string, string[]> = {
   car_rental: ["home", "about", "services", "blog", "contact"],
   car_showroom: ["home", "about", "services", "blog", "contact"],
+  ecommerce_store: ["home", "products", "cart", "contact"],
   mobile_phone_shop: ["home", "about", "services", "contact"],
   upholstery: ["home", "about", "services", "blog", "contact"],
   restaurant: ["home", "menu", "about", "gallery", "contact"],
-  seafood_restaurant: ["home", "menu", "about", "gallery", "contact"]
+  seafood_restaurant: ["home", "menu", "about", "gallery", "contact"],
+  toy_store: ["home", "products", "about", "contact"]
 };
 
 function normalize(value: string) {
@@ -38,7 +40,7 @@ function unique(values: string[]) {
 }
 
 export function isNewWebsiteRequest(prompt: string) {
-  return /\b(?:build|create|generate|design|make)\b[\s\S]{0,80}\b(?:website|site|web page|landing page)\b/i.test(prompt);
+  return /\b(?:build|create|generate|design|make)\b[\s\S]{0,100}\b(?:website|site|web page|landing page|ecommerce|e-commerce|online store|storefront)\b/i.test(prompt);
 }
 
 export function buildWebsiteSourceOfTruth(input: {

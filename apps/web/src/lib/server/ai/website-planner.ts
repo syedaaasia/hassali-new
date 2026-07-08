@@ -127,6 +127,7 @@ export function detectWebsiteIndustry(input: {
     if (briefDomain === "florist") return "florist";
     if (briefDomain === "mobile_phone_shop") return "mobile_phone_shop";
     if (briefDomain === "seafood_restaurant") return "seafood_restaurant";
+    if (briefDomain === "toy_store") return "ecommerce";
     if (briefDomain === "upholstery") return "upholstery";
     if (briefDomain === "bicycle_shop") return "bicycle_shop";
   }
@@ -173,7 +174,7 @@ export function detectWebsiteIndustry(input: {
   if (includesAny(text, ["clinic", "dental", "health", "healthcare", "doctor", "patient", "medical"])) return "healthcare";
   if (includesAny(text, ["portfolio", "photographer", "designer", "artist", "creator", "agency portfolio"])) return "portfolio";
   if (includesAny(text, ["marketplace", "buyers", "sellers", "vendors", "multi vendor", "listings"])) return "marketplace";
-  if (includesAny(text, ["ecommerce", "e-commerce", "shop", "store", "products", "catalog", "controller", "furniture", "flower", "floral", "tv"])) return "ecommerce";
+  if (includesAny(text, ["toy shop", "toy store", "educational toys", "plush toys", "building blocks", "ecommerce", "e-commerce", "shop", "store", "products", "catalog", "controller", "furniture", "flower", "floral", "tv"])) return "ecommerce";
 
   return "saas";
 }
@@ -232,7 +233,11 @@ function pagePlan(input: {
     upholstery: "services",
     saas: "features"
   };
-  const base = ["home", industryPage[input.industry], "about", "contact"];
+  const domainText = `${input.proposalContext?.websiteGenerationBrief?.domainId ?? ""} ${input.proposalContext?.sourcePrompt ?? ""}`.toLowerCase();
+  const isToyCommerce = input.industry === "ecommerce" && /\b(?:toy shop|toy store|kids toy|educational toys?|plush toys?|building blocks|toy_store)\b/.test(domainText);
+  const base = isToyCommerce
+    ? ["home", "products", "about", "contact"]
+    : ["home", industryPage[input.industry], "about", "contact"];
   if (input.industry === "restaurant") {
     const target = Math.max(input.requiredCount ?? 5, 4);
     return ["home", "menu", "about", "gallery", "contact"].slice(0, target);

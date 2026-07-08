@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState, type ReactNode } from "react";
 import { Panel } from "@/components/ui/panel";
 import { useChatStore } from "@/lib/chat-store";
@@ -237,7 +238,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
             aria-expanded={isFolder ? !isCollapsed : undefined}
             className={`group relative flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${
               isSelected || isActiveFile
-                ? "bg-[#7c6cff]/15 text-[#f4f1e8] shadow-[inset_0_0_0_1px_rgba(124,108,255,0.24)]"
+                ? "bg-[hsl(var(--premium-accent)/0.15)] text-[hsl(var(--premium-paper))] shadow-[inset_0_0_0_1px_hsl(var(--premium-accent)/0.24)]"
                 : "text-muted-foreground hover:bg-white/[0.045] hover:text-foreground"
             }`}
             onClick={() => {
@@ -253,7 +254,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
             type="button"
           >
             {isActiveFile ? (
-              <span className="absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 rounded-full bg-[#8b7cf6]" />
+              <span className="absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 rounded-full bg-[hsl(var(--premium-accent))]" />
             ) : null}
             <span className="w-2 shrink-0 text-[10px] text-muted-foreground group-hover:text-foreground">
               {isFolder ? (isCollapsed ? ">" : "v") : ""}
@@ -265,7 +266,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
             {isDirty ? (
               <span
                 aria-label={`${node.path} has unsaved changes`}
-                className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[#8b7cf6]"
+                className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[hsl(var(--premium-accent))]"
               />
             ) : null}
           </button>
@@ -278,17 +279,19 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
 
   if (collapsed) {
     return (
-      <Panel className="hidden w-14 shrink-0 flex-col items-center rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.72)] py-2 backdrop-blur-xl md:flex">
+      <Panel className="hidden w-14 shrink-0 flex-col items-center rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.72)] py-2 shadow-[0_20px_70px_rgba(0,0,0,0.22)] backdrop-blur-xl [.light_&]:bg-white md:flex">
         <button
           aria-label="Open sidebar"
-          className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/[0.04] hover:border-[#7c6cff]/50"
+          className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/10 bg-white/[0.04] p-1 hover:border-[hsl(var(--premium-accent)/0.5)]"
           onClick={onToggleCollapsed}
           type="button"
         >
-          <img
+          <Image
             alt="Hassali.ai"
-            className="h-full w-full object-contain"
-            src="/brand/hassali-logo.png"
+            className="h-8 w-8 object-contain"
+            height={32}
+            src="/apple-icon.png"
+            width={32}
           />
         </button>
         <div className="mt-4 flex flex-1 flex-col items-center gap-2">
@@ -304,7 +307,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
         </div>
         <button
           aria-label="Expand project sidebar"
-          className="mb-1 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-xs text-muted-foreground hover:border-[#7c6cff]/50 hover:text-foreground"
+          className="mb-1 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-xs text-muted-foreground hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-foreground"
           onClick={onToggleCollapsed}
           type="button"
         >
@@ -315,15 +318,15 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
   }
 
   return (
-    <Panel className="hidden w-40 shrink-0 flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.74)] backdrop-blur-xl md:flex lg:w-[10.5rem] 2xl:w-44">
+    <Panel className="hidden w-40 shrink-0 flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.74)] shadow-[0_20px_70px_rgba(0,0,0,0.22)] backdrop-blur-xl [.light_&]:bg-white md:flex lg:w-[10.5rem] 2xl:w-44">
       <div className="border-b border-[hsl(var(--premium-border))] px-3 py-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground [.light_&]:text-[#4b403a]">
             Project
           </div>
           <button
             aria-label="Collapse sidebar"
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.035] text-xs text-muted-foreground hover:border-[#7c6cff]/50 hover:text-foreground"
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/[0.035] text-xs text-muted-foreground hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-foreground [.light_&]:border-[#d8d1c6] [.light_&]:bg-white [.light_&]:text-[#000000]"
             onClick={onToggleCollapsed}
             type="button"
           >
@@ -335,11 +338,11 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
         </div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-        <div className="rounded-2xl border border-white/[0.055] bg-white/[0.025] p-2">
+        <div className="rounded-2xl border border-white/[0.055] bg-white/[0.025] p-2 [.light_&]:border-slate-200 [.light_&]:bg-slate-50">
           <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium">
             <button
               aria-expanded={expandedSections.projects}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left text-foreground hover:text-[#8b7cf6]"
+              className="flex min-w-0 flex-1 items-center gap-2 text-left text-foreground hover:text-[hsl(var(--premium-accent-soft))]"
               onClick={() => toggleSection("projects")}
               type="button"
             >
@@ -349,7 +352,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
               <span className="truncate">Projects</span>
             </button>
             <button
-              className="rounded-full border border-[#7c6cff]/35 px-2.5 py-1 text-[11px] text-[#a59bff] hover:bg-[#7c6cff]/10 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-[hsl(var(--premium-accent)/0.35)] px-2.5 py-1 text-[11px] text-[hsl(var(--premium-accent-soft))] hover:bg-[hsl(var(--premium-accent)/0.1)] disabled:cursor-not-allowed disabled:opacity-50 [.light_&]:border-[#DE7356] [.light_&]:text-[#000000] [.light_&]:hover:bg-[#DE7356]/10"
               disabled={isLoading}
               onClick={createProjectFromPrompt}
               type="button"
@@ -369,10 +372,10 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
 
               return (
                 <button
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${
                     isActive
-                      ? "bg-[hsl(var(--premium-accent)/0.15)] text-[hsl(var(--premium-paper))] shadow-[inset_0_0_0_1px_hsl(var(--premium-accent)/0.24)]"
-                      : "text-muted-foreground hover:bg-white/[0.045] hover:text-foreground"
+                      ? "bg-[hsl(var(--premium-accent)/0.15)] text-[hsl(var(--premium-paper))] shadow-[inset_0_0_0_1px_hsl(var(--premium-accent)/0.24)] [.light_&]:text-[#000000]"
+                      : "text-muted-foreground hover:bg-white/[0.045] hover:text-foreground [.light_&]:text-[#2f2a27] [.light_&]:hover:bg-white [.light_&]:hover:text-[#000000]"
                   } disabled:cursor-not-allowed disabled:opacity-60`}
                   disabled={isLoading || isActive}
                   key={project.id}
@@ -396,11 +399,11 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
           )}
           {error ? <p className="mt-2 px-1 text-xs leading-5 text-destructive">{error}</p> : null}
         </div>
-        <div className="rounded-2xl border border-white/[0.055] bg-white/[0.025] p-2">
+        <div className="rounded-2xl border border-white/[0.055] bg-white/[0.025] p-2 [.light_&]:border-slate-200 [.light_&]:bg-slate-50">
           <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium">
             <button
               aria-expanded={expandedSections.workspace}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left text-foreground hover:text-[#8b7cf6]"
+              className="flex min-w-0 flex-1 items-center gap-2 text-left text-foreground hover:text-[hsl(var(--premium-accent-soft))]"
               onClick={() => toggleSection("workspace")}
               type="button"
             >
@@ -417,7 +420,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
           <>
           <div className="mb-2 mt-2 grid grid-cols-2 gap-1">
             <button
-              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 [.light_&]:border-[#d8d1c6] [.light_&]:text-[#000000] [.light_&]:hover:border-[#DE7356]"
               disabled={isLoading || !projectId}
               onClick={createFileFromPrompt}
               type="button"
@@ -425,7 +428,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
               New file
             </button>
             <button
-              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 [.light_&]:border-[#d8d1c6] [.light_&]:text-[#000000] [.light_&]:hover:border-[#DE7356]"
               disabled={isLoading || !projectId}
               onClick={createFolderFromPrompt}
               type="button"
@@ -433,7 +436,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
               New folder
             </button>
             <button
-              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 [.light_&]:border-[#d8d1c6] [.light_&]:text-[#000000] [.light_&]:hover:border-[#DE7356]"
               disabled={isLoading || !selectedPath}
               onClick={renameSelectedPath}
               type="button"
@@ -441,7 +444,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
               Rename
             </button>
             <button
-              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg border border-[hsl(var(--royal-border-soft))] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 [.light_&]:border-[#d8d1c6] [.light_&]:text-[#000000] [.light_&]:hover:border-[#DE7356]"
               disabled={isLoading || !selectedPath}
               onClick={deleteSelectedPath}
               type="button"
@@ -463,7 +466,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
         <div className="mt-auto rounded-2xl border border-white/[0.045] bg-white/[0.018] p-2">
           <button
             aria-expanded={expandedSections.git}
-            className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-[#8b7cf6]"
+            className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-[hsl(var(--premium-accent-soft))]"
             onClick={() => toggleSection("git")}
             type="button"
           >
@@ -482,7 +485,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
         <div className="rounded-2xl border border-white/[0.045] bg-white/[0.018] p-2">
           <button
             aria-expanded={expandedSections.search}
-            className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-[#8b7cf6]"
+            className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-[hsl(var(--premium-accent-soft))]"
             onClick={() => toggleSection("search")}
             type="button"
           >

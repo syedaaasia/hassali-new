@@ -1,4 +1,5 @@
 import type { WebsitePlan } from "@/lib/server/ai/website-planner";
+import { getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
 
 export type WebsiteValidationResult = {
   blockedReasons: string[];
@@ -51,9 +52,14 @@ export function validateWebsitePlanAndFiles(input: {
   const allContent = Object.values(input.files).join("\n").toLowerCase();
   const sectionIds = input.plan.requiredSections.map((section) => section.id);
   const duplicateSections = duplicateValues(sectionIds);
-  const genericLayoutDetected =
+  const profile = getTaxonomyProfile(input.plan.sourceOfTruthDomain ?? input.plan.industry);
+  const vocabularyHits = (profile?.websiteVocabulary ?? [])
+    .filter((term) => allContent.includes(term.toLowerCase()));
+  const hasSpecificVocabulary = vocabularyHits.length >= Math.min(3, Math.max(1, profile?.websiteVocabulary.length ?? 0));
+  const rawGenericLayoutDetected =
     sectionIds.join(",") === "hero,features,pricing,footer" ||
     genericTerms.some((term) => allContent.includes(term));
+  const genericLayoutDetected = rawGenericLayoutDetected && !hasSpecificVocabulary;
   const placeholderDetected = /https?:\/\/|<img\b|alt=["'](?:hero|image|placeholder)["']/i.test(Object.values(input.files).join("\n"));
   const emptyFiles = Object.entries(input.files)
     .filter(([, content]) => content.trim().length === 0)

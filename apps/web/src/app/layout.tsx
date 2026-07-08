@@ -6,8 +6,8 @@ export const metadata: Metadata = {
   title: "Hassali.ai",
   description: "A calm AI-native coding workspace.",
   icons: {
-    apple: "/apple-icon.png",
-    icon: "/favicon.png"
+    apple: [{ url: "/apple-icon-brand.png", sizes: "180x180", type: "image/png" }],
+    icon: [{ url: "/favicon-brand.png", sizes: "32x32", type: "image/png" }]
   }
 };
 

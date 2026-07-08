@@ -1725,9 +1725,14 @@ function createLocalProposal(
     );
     const usePythonStack = promptRequestsPythonStack(prompt) && !promptRequestsReactFrontendStack(prompt);
     const codeBrief = proposalContext?.codeGenerationBrief ?? null;
-    const isMobilePhoneInventory = codeBrief?.appType === "inventory_system" ||
-      (codeBrief?.domainId === "mobile_phone_shop" && codeBrief.modules.some((moduleName) => ["products", "stock", "sales", "suppliers", "repairs"].includes(moduleName)));
-    const isPythonPreview = isMobilePhoneInventory || usePythonStack || codeBrief?.preferredFramework === "streamlit";
+    const promptRequestsReactApp = promptRequestsReactFrontendStack(prompt) || codeBrief?.requestedStack === "react_vite" || codeBrief?.preferredFramework === "react_vite";
+    const promptMentionsPhoneInventory = /\b(?:mobile phone shop|phone shop|smartphone store|mobile store|cellphone shop|phone retail|phone accessories|iphone|samsung|android phones?|unlocked phones?|phone repair shop)\b/.test(promptText);
+    const isMobilePhoneInventory =
+      !promptRequestsReactApp &&
+      codeBrief?.domainId === "mobile_phone_shop" &&
+      promptMentionsPhoneInventory &&
+      codeBrief.modules.some((moduleName) => ["products", "stock", "sales", "suppliers", "repairs"].includes(moduleName));
+    const isPythonPreview = isMobilePhoneInventory || usePythonStack || (!promptRequestsReactApp && codeBrief?.preferredFramework === "streamlit");
     const existingCodeApp = extractExistingCodeAppIdentity(workspace);
     const requestedCodeApp = requestedCodeAppIdentity({
       appPreviewName: appPreview.appName,
@@ -1755,7 +1760,7 @@ function createLocalProposal(
           brief: codeBrief,
           prompt
         })
-      : usePythonStack || codeBrief?.preferredFramework === "streamlit"
+      : usePythonStack || (!promptRequestsReactApp && codeBrief?.preferredFramework === "streamlit")
       ? generateCrmPythonStreamlitSource({
           appName: appPreview.appName,
           brief: codeBrief,
@@ -2484,12 +2489,15 @@ if ("IntersectionObserver" in window) {
       };
     }
 
+    const publicWebsiteFiles = Object.entries(websiteFiles)
+      .filter(([path]) => path.toLowerCase().endsWith(".html"))
+      .map(([, content]) => content.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<script[\s\S]*?<\/script>/gi, ""));
     const forbiddenHits = generatorContract
       ? generatorContract.forbiddenTerms.filter((term) =>
           !proposalContext?.requiredFiles.some((path) => path.toLowerCase().includes(term.toLowerCase())) &&
           !proposalContext?.pages.some((page) => page.toLowerCase() === term.toLowerCase()) &&
           !proposalContext?.websiteGenerationBrief?.ctaPatterns.some((cta) => cta.toLowerCase().includes(term.toLowerCase())) &&
-          Object.values(websiteFiles).some((content) => content.toLowerCase().includes(term.toLowerCase()))
+          publicWebsiteFiles.some((content) => content.toLowerCase().includes(term.toLowerCase()))
         )
       : [];
 
@@ -2508,7 +2516,7 @@ if ("IntersectionObserver" in window) {
         requiresExtraReview: true,
         shouldBlockExecution: true,
         status: "pending",
-        summary: "Generator contract blocked local website generation because forbidden terms remained in the proposed output.",
+        summary: `Generator contract blocked local website generation because forbidden terms remained in the proposed output: ${forbiddenHits.slice(0, 8).join(", ")}.`,
         designTokenCount: websiteGeneration.designTokenCount,
         designTokenTheme: websiteGeneration.designTokenTheme,
         designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,

@@ -29,6 +29,7 @@ export type DomainId =
   | "restaurant"
   | "seafood_restaurant"
   | "travel_agency"
+  | "toy_store"
   | "upholstery";
 
 export type CorrectedTypo = {
@@ -301,6 +302,22 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   stubProfile({ aliases: ["law firm", "lawyer", "legal office", "attorney"], conflicts: ["restaurant", "ecommerce_store"], displayName: "Law Firm", id: "law_firm", typoVariants: [], websiteVocabulary: ["law firm", "legal", "attorney", "consultation", "cases", "practice areas", "confidential"] }),
   stubProfile({ aliases: ["accounting firm", "accountant", "tax firm", "bookkeeping"], conflicts: ["restaurant", "ecommerce_store"], displayName: "Accounting Firm", id: "accounting_firm", typoVariants: [], websiteVocabulary: ["accounting", "tax", "bookkeeping", "payroll", "financial reports", "compliance"] }),
   stubProfile({ aliases: ["ecommerce store", "online store", "shop", "product store"], conflicts: ["crm_software", "car_rental"], displayName: "Ecommerce Store", id: "ecommerce_store", typoVariants: [], websiteVocabulary: ["products", "categories", "cart", "checkout", "delivery", "returns", "support"] }),
+  stubProfile({
+    aliases: ["toy shop", "toy store", "kids toy shop", "kids toy store", "children toy shop", "children's toy shop", "educational toy shop", "toy ecommerce", "toy ecommerce store"],
+    codeHints: { entities: ["product", "age group", "category", "order", "invoice"], possibleApps: ["toy inventory app", "kids product catalog", "toy shop POS"] },
+    commonPages: ["home", "products", "about", "contact"],
+    commonSections: ["hero", "product_categories", "featured_toys", "age_groups", "delivery_returns", "contact"],
+    conflicts: ["crm_software", "dental_clinic", "car_rental", "upholstery", "cleaning_service"],
+    ctas: ["Shop toys", "Browse age groups", "Ask about delivery"],
+    displayName: "Toy Shop",
+    expectedEntities: ["toy", "age group", "category", "gift pick", "checkout"],
+    id: "toy_store",
+    relatedIndustries: ["ecommerce", "children retail", "gift shop"],
+    trustSignals: ["safe checkout", "delivery and returns", "age-group guidance", "gift picks"],
+    typoVariants: [],
+    visualHints: ["premium toy shelves", "playful but clean product cards", "age-group filters", "gift-ready catalog"],
+    websiteVocabulary: ["toy shop", "toys", "kids", "age groups", "educational toys", "plush toys", "puzzles", "building blocks", "gifts", "gift picks", "safe checkout", "delivery", "returns", "categories"]
+  }),
   stubProfile({ aliases: ["hotel", "guesthouse", "guest house", "boutique hotel"], conflicts: ["restaurant", "car_rental"], displayName: "Hotel / Guesthouse", id: "hotel_guesthouse", typoVariants: [], websiteVocabulary: ["rooms", "booking", "amenities", "location", "guests", "breakfast", "hospitality"] }),
   stubProfile({ aliases: ["travel agency", "tour agency", "trip planner", "travel company"], conflicts: ["car_rental", "restaurant"], displayName: "Travel Agency", id: "travel_agency", typoVariants: [], websiteVocabulary: ["travel", "tours", "packages", "destinations", "itinerary", "booking", "support"] }),
   stubProfile({ aliases: ["car repair", "auto repair", "mechanic shop", "vehicle service"], conflicts: ["car_rental", "bicycle_shop"], displayName: "Car Repair", id: "car_repair", typoVariants: [], websiteVocabulary: ["car repair", "mechanic", "diagnostics", "oil change", "brakes", "service booking", "warranty"] }),
@@ -374,7 +391,10 @@ export function classifyDomainIntent(prompt: string): DomainClassification {
   const scored = industryTaxonomyProfiles
     .map((profile) => {
       const matches = aliasMatches(prompt, profile);
-      return { matches, profile, score: matches.reduce((sum, match) => sum + Math.max(1, match.split(/\s+/).length), 0) };
+      const specificityBoost = profile.id === "toy_store" && /\b(?:toy shop|toy store|kids toy|children'?s toy|educational toys?|plush toys?|building blocks)\b/.test(normalized)
+        ? 2
+        : 0;
+      return { matches, profile, score: matches.reduce((sum, match) => sum + Math.max(1, match.split(/\s+/).length), 0) + specificityBoost };
     })
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score || b.matches[0].length - a.matches[0].length);
@@ -553,11 +573,15 @@ function featureMatches(prompt: string) {
   const text = normalizeText(prompt);
   const features: Record<string, string[]> = {
     activity: ["activity", "feed", "timeline"],
-    billing: ["billing", "invoice", "payment", "cost"],
+    billing: ["billing", "invoice", "invoices", "payment", "cost"],
+    cash_flow: ["cash in", "cash out", "cashflow", "cash flow"],
     customers: ["customers", "clients", "contacts"],
-    dashboard: ["dashboard", "metrics", "graphical", "charts"],
+    dashboard: ["dashboard", "metrics", "graphical", "charts", "graphs", "stats"],
+    low_stock_alerts: ["low stock", "reorder", "alerts"],
     pipeline: ["pipeline", "deals", "sales"],
     products: ["products", "inventory", "stock"],
+    purchases: ["purchase", "purchases", "purchase records"],
+    reports: ["reports", "graphs", "stats", "analytics"],
     repairs: ["repairs", "tickets", "service counter"],
     sales: ["sales", "orders", "checkout"],
     stock: ["stock", "quantity", "reorder"],
@@ -575,14 +599,16 @@ export function buildCodeIntentContract(input: {
   const classification = classifyDomainIntent(input.prompt);
   const text = normalizeText(input.prompt);
   const isCrm = /\bcrm\b|customer relationship|sales pipeline/.test(text);
-  const isInventory = /\b(?:inventory|stock|products|sales|supplier|suppliers|repair tickets?|service tickets?)\b/.test(text);
+  const isInventory = /\b(?:inventory|inventory management|inventory system|stock|products|sales|supplier|suppliers|billing|cash in|cash out|purchase records?|low stock|repair tickets?|service tickets?)\b/.test(text);
   const stack = requestedStack(input.prompt);
   const requestedFeatures = featureMatches(input.prompt);
   const domainProfile = isCrm ? getTaxonomyProfile("crm_software") : classification.profile;
   const isMobilePhoneInventory = !isCrm && isInventory && domainProfile?.id === "mobile_phone_shop";
+  const isGenericInventory = !isCrm && isInventory && !isMobilePhoneInventory;
   const modules = unique([
     ...(isCrm ? ["dashboard", "customers", "pipeline", "billing", "activity"] : []),
     ...(isMobilePhoneInventory ? ["dashboard", "products", "stock", "sales", "suppliers", "repairs", "billing"] : []),
+    ...(isGenericInventory ? ["dashboard", "products", "stock", "low_stock_alerts", "billing", "cash_flow", "sales", "purchases", "reports"] : []),
     ...requestedFeatures,
     ...(domainProfile?.codeHints.possibleApps.length && !isCrm ? ["dashboard"] : [])
   ]);
@@ -590,6 +616,8 @@ export function buildCodeIntentContract(input: {
     ? ["customer", "deal", "invoice", "activity"]
     : isMobilePhoneInventory
       ? ["product", "brand", "stock", "supplier", "sale", "repairTicket", "invoice"]
+      : isGenericInventory
+        ? ["product", "SKU", "stock level", "low stock alert", "invoice", "sale", "purchase", "supplier", "cash movement"]
       : domainProfile?.codeHints.entities ?? []);
   const selectedFramework = stack === "python" || (stack === "unknown" && isMobilePhoneInventory)
     ? "streamlit"
@@ -598,14 +626,14 @@ export function buildCodeIntentContract(input: {
       : "unknown";
 
   return {
-    appType: isCrm ? "crm" : isMobilePhoneInventory ? "inventory_system" : domainProfile?.id ?? "custom_app",
+    appType: isCrm ? "crm" : isMobilePhoneInventory || isGenericInventory ? "inventory_system" : domainProfile?.id ?? "custom_app",
     assumptionNotes: [
       ...classification.assumptionNotes,
       ...(isMobilePhoneInventory && stack === "unknown"
         ? ["No implementation stack was specified; Hassali selected Python / Streamlit for a low-spec inventory dashboard scaffold."]
         : [])
     ],
-    confidence: isCrm ? 0.94 : classification.confidence,
+    confidence: isCrm ? 0.94 : isGenericInventory ? 0.9 : classification.confidence,
     correctedTypos: classification.correctedTypos,
     dataModelHints: entities,
     domainId: isCrm ? "crm_software" : classification.domainId,

@@ -5,11 +5,11 @@ export const hassaliTheme = {
     warmCharcoal: "#111111",
     panel: "#151515",
     panelRaised: "#1e1e1e",
-    neonRed: "#7c6cff",
-    neonRedSoft: "#a59bff",
-    emerald: "#1fb8c8",
-    magenta: "#d94dff",
-    cream: "#e9dfd0",
+    neonRed: "#DE7356",
+    neonRedSoft: "#eea18d",
+    emerald: "#DE7356",
+    magenta: "#DE7356",
+    cream: "#F4F3EE",
     mutedCream: "#a8a09a",
     border: "rgba(124, 108, 255, 0.22)",
     borderSoft: "rgba(255, 255, 255, 0.08)",
@@ -19,13 +19,13 @@ export const hassaliTheme = {
   },
   typography: {
     display:
-      "Inter, Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+      '"Helvetica Neue", Helvetica, "Claude Sans", Arial, sans-serif',
     heading:
-      "Inter, Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+      '"Helvetica Neue", Helvetica, "Claude Sans", Arial, sans-serif',
     body:
-      "Inter, Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+      '"Helvetica Neue", Helvetica, "Claude Sans", Arial, sans-serif',
     caption:
-      "Inter, Geist, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+      '"Helvetica Neue", Helvetica, "Claude Sans", Arial, sans-serif',
     mono:
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace",
     landingSerif: "Georgia, Cambria, Times New Roman, serif"

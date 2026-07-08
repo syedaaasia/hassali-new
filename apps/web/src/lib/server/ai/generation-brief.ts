@@ -88,6 +88,7 @@ function pageLabel(page: string) {
 function conversionGoalFor(contract: WebsiteIntentContract) {
   if (contract.domainId === "upholstery") return "turn furniture restoration interest into estimate requests";
   if (contract.domainId === "mobile_phone_shop") return "help shoppers compare phones, accessories, repairs, and support";
+  if (contract.domainId === "toy_store") return "help families browse toys, age groups, gift picks, delivery, returns, and checkout confidence";
   if (contract.domainId === "car_rental") return "turn visitors into rental reservations and fleet inquiries";
   if (contract.domainId === "seafood_restaurant") return "drive menu exploration, reservations, and dining inquiries";
 

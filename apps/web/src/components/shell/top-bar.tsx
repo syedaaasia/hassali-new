@@ -1,10 +1,12 @@
 "use client";
 
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useChatStore } from "@/lib/chat-store";
 
-const themeStorageKey = "hassali:theme";
+const legacyThemeStorageKey = "hassali:theme";
+const themeStorageKey = "hassali:theme:v2";
 type ThemeMode = "dark" | "light";
 type BrowserGlobal = {
   document?: {
@@ -16,6 +18,7 @@ type BrowserGlobal = {
   };
   localStorage?: {
     getItem: (key: string) => string | null;
+    removeItem: (key: string) => void;
     setItem: (key: string, value: string) => void;
   };
 };
@@ -50,11 +53,12 @@ export function TopBar() {
   const productMode = useChatStore((state) => state.productMode);
 
   useEffect(() => {
-    const savedTheme = (globalThis as BrowserGlobal).localStorage?.getItem(themeStorageKey);
-    const nextTheme: ThemeMode = savedTheme === "light" ? "light" : "dark";
+    const nextTheme: ThemeMode = "dark";
 
     setTheme(nextTheme);
     applyTheme(nextTheme);
+    (globalThis as BrowserGlobal).localStorage?.removeItem(legacyThemeStorageKey);
+    (globalThis as BrowserGlobal).localStorage?.setItem(themeStorageKey, nextTheme);
   }, []);
 
   const toggleTheme = () => {
@@ -68,11 +72,13 @@ export function TopBar() {
   return (
     <header className="relative z-20 flex h-11 shrink-0 items-center justify-between border-b border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-void)/0.88)] px-4 backdrop-blur-xl">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full">
-          <img
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05] p-1.5 shadow-[0_10px_30px_hsl(var(--premium-accent)/0.12)]">
+          <Image
             alt="Hassali.ai"
-            className="h-full w-full object-contain"
-            src="/brand/hassali-logo.png"
+            className="h-7 w-7 object-contain"
+            height={28}
+            src="/apple-icon.png"
+            width={28}
           />
         </div>
         <div className="min-w-0">

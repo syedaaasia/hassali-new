@@ -73,7 +73,8 @@ function isWebsiteCreationRequest(promptText: string) {
   return (
     (includesAny(promptText, ["create", "build", "design", "generate"]) ||
       /\bmake\s+(?:me|a|an|new)\b/.test(promptText)) &&
-    includesAny(promptText, ["website", "site", "landing page", "web page", "pages", "html", "css", "javascript"])
+    (includesAny(promptText, ["website", "site", "landing page", "web page", "pages", "html", "css", "javascript"]) ||
+      /\b(?:ecommerce|e-commerce|online store|storefront)\b/.test(promptText))
   );
 }
 

@@ -206,6 +206,15 @@ function manifestFromApprovedMetadata(metadata: Record<string, unknown> | undefi
     };
   }
 
+  if (previewType === "code_app_preview" && framework === "react_vite") {
+    return {
+      type: "react_vite_app",
+      framework: "react_vite",
+      entryPoint: entryPoint ?? "src/main.tsx",
+      requiredFiles: ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx"]
+    };
+  }
+
   return null;
 }
 
@@ -1025,22 +1034,41 @@ function CodeAppSourceSummary({
     );
   }
 
+  const generatedFiles = [...committedFiles.keys()]
+    .filter((path) =>
+      ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx", "src/styles.css", "src/lib/mock-data.ts"].includes(path)
+    )
+    .sort((left, right) => left.localeCompare(right));
+
   return (
-    <div className="h-full overflow-auto rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel)/0.5)] p-8 font-mono text-xs leading-6 text-muted-foreground">
-      <p className="text-[#60efff]">
-        {appName} - {manifest.framework ?? "React + Vite"}
+    <div className="h-full overflow-auto rounded-xl border border-[hsl(var(--premium-border))] bg-[#0b0b0b] p-6 text-sm leading-6 text-[#F4F3EE]">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#DE7356]">
+        React app preview fallback
       </p>
-      <p className="mt-2">
-        Runtime not started. Source files committed and ready. Static product preview needs the generated Product Intelligence Blueprint in src/App.tsx.
+      <h3 className="mt-2 text-xl font-semibold text-white">
+        React app preview metadata is missing.
+      </h3>
+      <p className="mt-3 max-w-xl text-[#F4F3EE]/78">
+        Files were generated, but Hassali cannot render the interactive static preview yet. This fallback is shown instead of a blank preview.
       </p>
-      <ul className="mt-4 list-inside list-disc">
-        {sourceFiles.map((file) => (
-          <li key={file}>{file}</li>
-        ))}
-      </ul>
-      <p className="mt-4">
-        {componentFiles.length} component(s) detected.
-      </p>
+      <div className="mt-5 grid gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4">
+        <p><span className="text-[#F4F3EE]/55">App:</span> {appName}</p>
+        <p><span className="text-[#F4F3EE]/55">Framework:</span> {manifest.framework ?? "react_vite"}</p>
+        <p><span className="text-[#F4F3EE]/55">Entry point:</span> {manifest.entryPoint ?? "src/main.tsx"}</p>
+      </div>
+      <section className="mt-5 rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#F4F3EE]/60">
+          Generated files
+        </p>
+        <ul className="mt-3 list-inside list-disc font-mono text-xs text-[#F4F3EE]/78">
+          {(generatedFiles.length ? generatedFiles : sourceFiles).map((file) => (
+            <li key={file}>{file}</li>
+          ))}
+        </ul>
+        <p className="mt-4 text-xs text-[#F4F3EE]/58">
+          {componentFiles.length} component file(s) detected. Runtime is not started and no packages were installed.
+        </p>
+      </section>
     </div>
   );
 }
@@ -1322,6 +1350,12 @@ export function PreviewPanel() {
   };
 
   const reloadPreview = () => {
+    if (effectiveManifest.type === "react_vite_app" || effectiveManifest.type === "next_app") {
+      setLocalPreviewVersion((version) => version + 1);
+      void refreshRuntimeStatus(projectId);
+      return;
+    }
+
     if (effectiveManifest.type === "static_website") {
       setStaticPreviewStopped(false);
       setLocalPreviewVersion((version) => version + 1);
@@ -1344,6 +1378,11 @@ export function PreviewPanel() {
   };
 
   const stopActivePreview = () => {
+    if ((effectiveManifest.type === "react_vite_app" || effectiveManifest.type === "next_app") && runtimeStatus !== "running" && status !== "running") {
+      markPreviewStopped();
+      return;
+    }
+
     if (effectiveManifest.type === "static_website") {
       setStaticPreviewStopped(true);
       markPreviewStopped();
@@ -1407,7 +1446,7 @@ export function PreviewPanel() {
 
       <div className="flex items-center gap-2 border-b border-[hsl(var(--premium-border))] p-3">
         <button
-          className="rounded-full border border-[#7c6cff]/35 bg-[#7c6cff] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           disabled={Boolean(startDisabledReason)}
           onClick={() => {
             void startPreview(projectId);

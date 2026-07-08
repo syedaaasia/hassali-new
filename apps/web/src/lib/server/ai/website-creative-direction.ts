@@ -69,7 +69,8 @@ const priorityDomains: DomainId[] = [
   "seafood_restaurant",
   "cleaning_service",
   "florist",
-  "real_estate"
+  "real_estate",
+  "toy_store"
 ];
 
 function baseDirection(domainId: string): WebsiteCreativeDirection {
@@ -393,6 +394,41 @@ const directions: Partial<Record<DomainId, WebsiteCreativeDirection>> = {
       homeSections: ["hero", "buyer-seller-paths", "property-local-proof", "testimonials", "consultation-cta"]
     },
     visualArchetype: "Premium local property expert"
+  },
+  toy_store: {
+    ...baseDirection("toy_store"),
+    hero: {
+      backgroundTreatment: "bright product-shelf cards with age-group and gift-pick proof",
+      eyebrow: "Premium toy shop",
+      layout: "retail-showcase",
+      proofPlacement: "hero-side"
+    },
+    palette: {
+      accent: "#e4a33a",
+      background: "#fffaf2",
+      border: "rgba(68, 46, 24, 0.14)",
+      mutedText: "#665b52",
+      primary: "#DE7356",
+      primaryDark: "#2f211a",
+      surface: "rgba(255, 255, 255, 0.92)",
+      surfaceAlt: "#f5e5cb",
+      text: "#201711"
+    },
+    proof: {
+      sectionTitle: "Age groups, safe checkout, delivery, returns, and gift picks",
+      type: "trust-badges",
+      visualTreatment: "toy category cards, age-group chips, plush and puzzle shelves"
+    },
+    rhythm: {
+      avoidPatterns: ["local service filler", "clinic copy", "SaaS dashboard"],
+      homeSections: ["hero", "toy-categories", "age-groups", "gift-picks", "delivery-returns", "contact"]
+    },
+    typography: {
+      ...baseDirection("toy_store").typography,
+      headingFont: "\"Helvetica Neue\", Helvetica, Arial, sans-serif",
+      bodyFont: "\"Helvetica Neue\", Helvetica, Arial, sans-serif"
+    },
+    visualArchetype: "Playful premium toy retail"
   }
 };
 

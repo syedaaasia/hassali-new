@@ -899,7 +899,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
   return (
     <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-transparent">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] bg-black/10 px-4 py-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] bg-black/10 px-4 py-1.5 [.light_&]:bg-white">
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             {productMode === "ASK" ? "Ask" : productMode === "WEBSITE" ? "Website" : "Code"}
@@ -908,7 +908,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             {modeHints[productMode]}
           </div>
         </div>
-        <div className="order-3 grid w-full grid-cols-3 gap-1 rounded-full border border-[hsl(var(--premium-border))] bg-black/35 p-0.5 md:order-none md:w-[29rem]">
+        <div className="order-3 grid w-full grid-cols-3 gap-1 rounded-full border border-[hsl(var(--premium-border))] bg-black/35 p-0.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)] [.light_&]:border-[#d8d1c6] [.light_&]:bg-[#F4F3EE] [.light_&]:shadow-[0_10px_30px_rgba(0,0,0,0.08)] md:order-none md:w-[29rem]">
           {productModes.map((item) => {
             const isActive = item.label === productMode;
 
@@ -916,8 +916,8 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               <button
                 className={`rounded-full px-3 py-1 text-center transition ${
                   isActive
-                    ? "bg-[hsl(var(--premium-paper))] text-black shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
-                    : "text-muted-foreground hover:bg-white/[0.06] hover:text-foreground"
+                    ? "bg-[#DE7356] text-[#000000] shadow-[0_0_0_1px_rgba(0,0,0,0.12),0_10px_24px_rgba(222,115,86,0.26)]"
+                    : "text-[#F4F3EE]/80 hover:bg-white/[0.06] hover:text-[#F4F3EE] [.light_&]:text-[#000000] [.light_&]:hover:bg-white [.light_&]:hover:text-[#000000]"
                 }`}
                 key={item.label}
                 onClick={() => {
@@ -945,14 +945,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         {productMode !== "ASK" ? (
           <div className="flex shrink-0 items-center gap-2">
             <button
-              className="rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-muted-foreground hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-foreground"
+              className="rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-[#F4F3EE]/75 hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-[#F4F3EE] [.light_&]:border-[#d8d1c6] [.light_&]:bg-white [.light_&]:text-[#000000] [.light_&]:hover:border-[#DE7356]"
               onClick={onToggleEditor}
               type="button"
             >
               {isEditorOpen ? "Hide files" : "Files"}
             </button>
             <button
-              className="rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-muted-foreground hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-foreground"
+              className="rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-[#F4F3EE]/75 hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-[#F4F3EE] [.light_&]:border-[#d8d1c6] [.light_&]:bg-white [.light_&]:text-[#000000] [.light_&]:hover:border-[#DE7356]"
               onClick={togglePreview}
               type="button"
             >
@@ -971,14 +971,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               transition={{ duration: 0.16, ease: "easeOut" }}
               className={`mx-auto w-full max-w-4xl rounded-2xl border px-4 py-3 text-[13px] leading-6 ${
                 message.role === "user"
-                  ? "border-[hsl(var(--premium-accent)/0.25)] bg-[hsl(var(--premium-accent)/0.1)] text-[hsl(var(--premium-paper))]"
-                  : "border-white/10 bg-white/[0.035] text-[#c7c1b4]"
+                  ? "border-[hsl(var(--premium-accent)/0.25)] bg-[hsl(var(--premium-accent)/0.1)] text-[hsl(var(--premium-paper))] [.light_&]:text-[#000000]"
+                  : "border-white/10 bg-white/[0.035] text-[#e8dfcf] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-900"
               }`}
             >
               <div className="mb-1 flex items-center justify-between gap-2 font-medium text-foreground">
                 <span>{message.role === "user" ? "You" : "Hassali"}</span>
                 {message.role === "assistant" && isStreaming && message.content.length === 0 ? (
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#8b7cf6] shadow-[0_0_16px_rgba(139,124,246,0.55)]" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[hsl(var(--premium-accent))] shadow-[0_0_16px_hsl(var(--premium-accent)/0.5)]" />
                 ) : null}
               </div>
               <div className="whitespace-pre-wrap break-words">
@@ -989,7 +989,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           {proposal ? (
             <motion.div
               animate={{ opacity: 1, y: 0 }}
-              className="mx-auto w-full max-w-4xl rounded-[22px] border border-white/10 bg-white/[0.045] p-4 text-xs shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
+              className="mx-auto w-full max-w-4xl rounded-[22px] border border-white/10 bg-white/[0.045] p-4 text-xs shadow-[0_0_0_1px_rgba(255,255,255,0.02)] [.light_&]:border-[#d8d1c6] [.light_&]:bg-white [.light_&]:text-[#000000]"
               initial={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.16, ease: "easeOut" }}
             >
@@ -1004,12 +1004,12 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   </div>
                   <div className="mt-1 text-muted-foreground">{proposal.summary}</div>
                   {proposal.mode === "EXECUTE" ? (
-                    <div className="mt-1 text-[11px] text-[#a59bff]">
+                    <div className="mt-1 text-[11px] text-[hsl(var(--premium-accent-soft))]">
                       Approval is required before any file or preview action runs.
                     </div>
                   ) : null}
                 </div>
-                <span className="rounded-full border border-[#7c6cff]/25 px-2 py-1 text-[10px] text-[#a59bff]">
+                <span className="rounded-full border border-[hsl(var(--premium-accent)/0.25)] px-2 py-1 text-[10px] text-[hsl(var(--premium-accent-soft))]">
                   pending
                 </span>
               </div>
@@ -1018,7 +1018,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               <div className="mt-3 space-y-3">
                 {proposal.changes.map((change) => (
                   <div
-                    className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.42)] p-3"
+                    className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.42)] p-3 [.light_&]:border-[#d8d1c6] [.light_&]:bg-[#F4F3EE]"
                     key={`${proposal.id}-${change.action}-${change.path ?? change.summary}`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -1074,7 +1074,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   Reject
                 </button>
                 <button
-                  className="rounded-xl border border-[#7c6cff]/35 bg-[#7c6cff] px-3 py-1.5 text-xs font-medium text-white shadow-[0_12px_30px_rgba(124,108,255,0.18)] hover:bg-[#8b7cf6] disabled:cursor-not-allowed disabled:border-red-500/20 disabled:bg-red-500/10 disabled:text-red-200/60 disabled:shadow-none disabled:hover:opacity-100"
+                  className="rounded-xl border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3 py-1.5 text-xs font-medium text-white shadow-[0_12px_30px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] disabled:cursor-not-allowed disabled:border-red-500/20 disabled:bg-red-500/10 disabled:text-red-200/60 disabled:shadow-none disabled:hover:opacity-100"
                   disabled={isApprovalBlocked || isProposalApplied}
                   onClick={() => {
                     void approveProposal();
@@ -1095,13 +1095,13 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         </div>
 
         <form
-          className="shrink-0 border-t border-white/10 bg-[#0b0b0b] px-4 py-3 lg:px-6"
+          className="shrink-0 border-t border-white/10 bg-[#0b0b0b] px-4 py-3 [.light_&]:border-slate-200 [.light_&]:bg-[#F4F3EE] lg:px-6"
           onSubmit={(event) => {
             event.preventDefault();
             void sendWithContext();
           }}
         >
-          <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] border border-white/10 bg-[#1d1d1d] px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] focus-within:border-[#7c6cff]/55 focus-within:ring-2 focus-within:ring-[#7c6cff]/10">
+          <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] border border-white/10 bg-[#161616] px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] focus-within:border-[hsl(var(--premium-accent)/0.55)] focus-within:ring-2 focus-within:ring-[hsl(var(--premium-accent)/0.1)] [.light_&]:border-slate-300 [.light_&]:bg-white [.light_&]:shadow-[0_16px_44px_rgba(0,0,0,0.08)]">
             <button
               aria-label="Add context"
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg leading-none text-muted-foreground hover:bg-white/[0.04] hover:text-foreground [.light_&]:hover:bg-slate-200 [.light_&]:hover:text-slate-950"
@@ -1110,7 +1110,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               +
             </button>
             <textarea
-              className="max-h-28 min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-[14px] leading-5 text-[#f4f1e8] outline-none placeholder:text-muted-foreground"
+              className="max-h-28 min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-[14px] leading-5 text-[#f4f1e8] outline-none placeholder:text-muted-foreground [.light_&]:text-slate-950 [.light_&]:placeholder:text-slate-500"
               onChange={(event) =>
                 setInput((event.currentTarget as unknown as { value: string }).value)
               }
@@ -1142,7 +1142,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               aria-label={isListening ? "Stop voice input" : "Start voice input"}
               className={`mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
                 isListening
-                  ? "border-[#7c6cff]/45 bg-[#7c6cff]/20 text-[#d8d2ff]"
+                  ? "border-[hsl(var(--premium-accent)/0.45)] bg-[hsl(var(--premium-accent)/0.2)] text-[hsl(var(--premium-accent-soft))]"
                   : "border-white/10 bg-white/[0.04] text-muted-foreground hover:text-foreground"
               }`}
               onClick={toggleVoiceInput}
@@ -1151,7 +1151,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               <MicIcon />
             </button>
             <button
-              className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#7c6cff]/35 bg-[#7c6cff] text-[10px] font-semibold text-white shadow-[0_14px_34px_rgba(124,108,255,0.18)] hover:bg-[#8b7cf6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6cff]/20 disabled:cursor-not-allowed disabled:opacity-45"
+              className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] text-[10px] font-semibold text-white shadow-[0_14px_34px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--premium-accent)/0.2)] disabled:cursor-not-allowed disabled:opacity-45"
               disabled={isStreaming || input.trim().length === 0}
               type="submit"
             >

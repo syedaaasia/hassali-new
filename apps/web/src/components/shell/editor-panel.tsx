@@ -29,9 +29,9 @@ const configureMonacoTheme: MonacoBeforeMount = (monaco) => {
       "editor.background": "#070707",
       "editor.foreground": "#eee6d4",
       "editor.lineHighlightBackground": "#151515",
-      "editorCursor.foreground": "#8b7cf6",
+      "editorCursor.foreground": "#DE7356",
       "editorLineNumber.foreground": "#5f5b58",
-      "editorLineNumber.activeForeground": "#a59bff",
+      "editorLineNumber.activeForeground": "#F0A18B",
       "editor.selectionBackground": "#2d285f",
       "editor.inactiveSelectionBackground": "#17152d"
     }
@@ -77,13 +77,13 @@ export function EditorPanel() {
                 type="button"
               >
                 {isActive ? (
-                  <span className="absolute inset-x-3 top-0 h-px rounded-full bg-[#8b7cf6] shadow-[0_0_16px_rgba(139,124,246,0.5)]" />
+                  <span className="absolute inset-x-3 top-0 h-px rounded-full bg-[hsl(var(--premium-accent))] shadow-[0_0_16px_hsl(var(--premium-accent)/0.5)]" />
                 ) : null}
                 <span className="truncate">{tabPath}</span>
                 {isDirty ? (
                   <span
                     aria-label={`${tabPath} has unsaved changes`}
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#8b7cf6]"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-[hsl(var(--premium-accent))]"
                   />
                 ) : null}
                 {openTabs.length > 1 ? (
@@ -116,7 +116,7 @@ export function EditorPanel() {
             <span className="hidden text-xs text-muted-foreground sm:inline">Unsaved changes</span>
           ) : null}
           <button
-            className="rounded-full border border-[#7c6cff]/35 bg-[#7c6cff]/12 px-3.5 py-1.5 text-xs font-medium text-[#f4f1e8] shadow-sm hover:bg-[#7c6cff]/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7c6cff]/20"
+            className="rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent)/0.12)] px-3.5 py-1.5 text-xs font-medium text-[hsl(var(--premium-paper))] shadow-sm hover:bg-[hsl(var(--premium-accent)/0.2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--premium-accent)/0.2)]"
             disabled={!activeFile}
             onClick={() => {
               void saveActiveFile();
