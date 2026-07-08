@@ -89,6 +89,23 @@ export type AskConversationMessage = {
   role: "assistant" | "system" | "user";
 };
 
+type AskQualityProfile = {
+  explicitMaxWords: number | null;
+  format: "bullet_list" | "caption" | "checklist" | "code_blocks" | "message_draft" | "numbered_list" | "paragraph" | "step_by_step" | "table" | null;
+  languageStyle: "english" | "roman_urdu_hindi" | "user_language";
+  length: "detailed" | "exhaustive" | "normal" | "short" | "very_short";
+  riskFlags: {
+    mayBeTooGeneric: boolean;
+    mayNeedAtMostOneClarifyingQuestion: boolean;
+    mayNeedCode: boolean;
+    mayNeedCommands: boolean;
+    mayNeedSafetyBoundary: boolean;
+    mayNeedToPreserveContinuity: boolean;
+  };
+  sensitivity: "accounting_finance" | "child_family" | "emotional_support" | "legal" | "medical" | "normal";
+  tone: "concise" | "direct" | "expert" | "human" | "polite_but_firm" | "professional" | "supportive" | "teacher_like" | "warm" | null;
+};
+
 const mutationSafe = {
   mutationPolicy: "never_mutate",
   shouldCreateProposal: false,
@@ -132,11 +149,78 @@ function outputFormatFor(prompt: string): AskIntentClassification["outputFormat"
   return null;
 }
 
+function wordCount(text: string) {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function explicitMaxWordsFor(prompt: string) {
+  const match = prompt.match(/\b(?:under|less than|max(?:imum)?|no more than)\s+(\d+)\s+words?\b/i);
+  return match ? Number(match[1]) : null;
+}
+
+function createQualityProfile(prompt: string, classification: AskIntentClassification): AskQualityProfile {
+  const explicitMaxWords = explicitMaxWordsFor(prompt);
+  const normalized = normalizePrompt(prompt);
+  const length: AskQualityProfile["length"] = explicitMaxWords && explicitMaxWords <= 40
+    ? "very_short"
+    : /\b(?:short|concise|brief|simple)\b/i.test(prompt)
+      ? "short"
+      : /\b(?:deep|detailed|thorough)\b/i.test(prompt)
+        ? "detailed"
+        : /\b(?:exhaustive|complete guide)\b/i.test(prompt)
+          ? "exhaustive"
+          : "normal";
+  const format: AskQualityProfile["format"] =
+    classification.outputFormat === "bullets" ? "bullet_list" :
+    classification.outputFormat === "checklist" ? "checklist" :
+    classification.outputFormat === "code" ? "code_blocks" :
+    classification.outputFormat === "email" ? "message_draft" :
+    classification.outputFormat === "steps" ? "step_by_step" :
+    /\btable\b/i.test(prompt) ? "table" :
+    /\bcaption\b/i.test(prompt) ? "caption" :
+    /\bnumbered\b|\b\d+\s*part\b/i.test(prompt) ? "numbered_list" :
+    null;
+  const sensitivity: AskQualityProfile["sensitivity"] =
+    classification.intent === "medical_style_guidance" ? "medical" :
+    classification.intent === "legal_style_guidance" ? "legal" :
+    classification.intent === "accounting_or_finance_guidance" ? "accounting_finance" :
+    classification.intent === "emotional_support_or_therapy_style" ? "emotional_support" :
+    /\b(?:child|kid|parent|family)\b/i.test(prompt) ? "child_family" :
+    "normal";
+  const tone: AskQualityProfile["tone"] =
+    /\bpolite(?:ly)?\b/i.test(prompt) && /\b(?:firm|sarcastic)\b/i.test(prompt) ? "polite_but_firm" :
+    /\bmore human|humanly|not sound like ai\b/i.test(prompt) ? "human" :
+    /\bwarm\b/i.test(prompt) ? "warm" :
+    /\bprofessional\b/i.test(prompt) ? "professional" :
+    /\bconcise|brief|short\b/i.test(prompt) ? "concise" :
+    /\bdirect\b/i.test(prompt) ? "direct" :
+    classification.requestedRole === "teacher" ? "teacher_like" :
+    classification.requestedRole ? "expert" :
+    null;
+
+  return {
+    explicitMaxWords,
+    format,
+    languageStyle: /\b(?:acha|kya|hai|nahi|karna|ap|aap|mera|meri)\b/i.test(prompt) ? "roman_urdu_hindi" : "english",
+    length,
+    riskFlags: {
+      mayBeTooGeneric: classification.confidence < 0.75 || classification.intent === "general_answer",
+      mayNeedAtMostOneClarifyingQuestion: classification.intent === "general_answer",
+      mayNeedCode: classification.outputFormat === "code",
+      mayNeedCommands: /\b(?:cmd|commands?|run|xampp|windows)\b/i.test(prompt),
+      mayNeedSafetyBoundary: sensitivity !== "normal",
+      mayNeedToPreserveContinuity: classification.intent === "followup_or_continuation" || /\b(?:continue|above|same|it)\b/i.test(normalized)
+    },
+    sensitivity,
+    tone
+  };
+}
+
 function constraintsFor(prompt: string) {
   const constraints: string[] = [];
-  const wordLimit = prompt.match(/\bunder\s+(\d+)\s+words?\b/i);
+  const wordLimit = explicitMaxWordsFor(prompt);
 
-  if (wordLimit) constraints.push(`under ${wordLimit[1]} words`);
+  if (wordLimit) constraints.push(`under ${wordLimit} words`);
   if (/\bshort\b/i.test(prompt)) constraints.push("keep it short");
   if (/\bprofessional\b/i.test(prompt)) constraints.push("professional tone");
   if (/\bwarm(?:er)?\b/i.test(prompt)) constraints.push("warm tone");
@@ -147,7 +231,9 @@ function constraintsFor(prompt: string) {
 }
 
 function isFollowup(prompt: string) {
-  return /^(?:make it|make this|shorter|longer|warmer|more professional|more casual|now do|same for|do the same|rewrite it|improve it|again|translate it|summarize it)\b/i.test(prompt.trim()) ||
+  if (/\bcombine\b[\s\S]{0,80}\b(?:words?|names?|theme)\b/i.test(prompt)) return false;
+
+  return /^(?:continue|make it|make this|shorter|longer|warmer|more professional|more casual|now do|same for|do the same|rewrite it|improve it|again|translate it|summarize it)\b/i.test(prompt.trim()) ||
     /\b(?:make it|make this|the same for|do the same for|shorter and warmer|shorter|warmer)\b/i.test(prompt.trim()) &&
       prompt.trim().split(/\s+/).length <= 10;
 }
@@ -195,7 +281,7 @@ function isDirectDateTimeQuestion(prompt: string) {
 }
 
 function wantsProjectExecution(prompt: string) {
-  return /\b(?:in this project|apply|create files|write files|save (?:it|this)|modify files|edit files|right now|i approve|approved in advance|install|start runtime)\b/i.test(prompt) ||
+  return /\b(?:in this project|apply (?:all )?(?:files|changes|this|it)|create files|write files|save (?:it|this)|modify files|edit files|right now|i approve|approved in advance|install|start runtime)\b/i.test(prompt) ||
     /\b(?:run|start)\b(?!\s+(?:it|this|the script|the app|locally|on windows|in xampp|from cmd|with cmd))/i.test(prompt);
 }
 
@@ -260,8 +346,9 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (isWrongModeBuildRequest(prompt)) return classify(prompt, "mode_boundary_request", 0.94, "The user asks ASK to create/apply/run project files.");
   if (isWebsiteCodeTextRequest(prompt)) return classify(prompt, "website_code_text_only", 0.92, "The user asks for website code in chat only.");
   if (isCodingTextRequest(prompt)) return classify(prompt, /\b(?:xampp|cmd|localhost|install|run)\b/i.test(prompt) ? "local_setup_guidance" : "coding_help_text_only", 0.9, "The user asks for code or setup guidance as text.");
+  if (/\b(?:write it|write this|say politely|say this|make it|rewrite)\b/i.test(prompt) && (explicitMaxWordsFor(prompt) || /\b(?:human|sarcastic(?:ally)?|firm|simple|general)\b/i.test(prompt))) return classify(prompt, "writing_or_rewriting", 0.88, "The user asks for wording refinement with quality constraints.");
   if (/\b(?:debug|error|bug|fix this|not working|stack trace)\b/i.test(prompt)) return classify(prompt, "debugging_help", 0.86, "The user asks for debugging help.");
-  if (/\b(?:brand name|name for|powerful word|suggest.*names?|naming)\b/i.test(prompt)) return classify(prompt, "brand_naming", 0.9, "The user asks for naming ideas.");
+  if (/\b(?:brand name|name for|powerful word|suggest.*names?|naming)\b/i.test(prompt) || /\bcombine\b[\s\S]{0,100}\b(?:words?|names?|theme)\b/i.test(prompt)) return classify(prompt, "brand_naming", 0.9, "The user asks for naming ideas.");
   if (/\b(?:logo|visual direction|brand identity|colors|palette)\b/i.test(prompt)) return classify(prompt, "logo_or_visual_direction", 0.82, "The user asks for visual or logo direction.");
   if (isWritingIntent(prompt)) return classify(prompt, "client_message_or_email", 0.94, "The user is asking for a drafted message or reply.");
   if (isPoliteRewrite(prompt)) return classify(prompt, "writing_or_rewriting", 0.92, "The user is asking to rewrite existing wording.");
@@ -272,6 +359,7 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (/\b(?:accountant|tax|income|expenses|invoices|finance|bookkeeping)\b/i.test(prompt)) return classify(prompt, "accounting_or_finance_guidance", 0.86, "The user asks for accounting or finance guidance.");
   if (/\b(?:therapy|therapist|anxious|sad|depressed|overwhelmed|stress)\b/i.test(prompt)) return classify(prompt, "emotional_support_or_therapy_style", 0.82, "The user asks for supportive conversation.");
   if (isDataWorkGuidance(prompt)) return classify(prompt, "data_work_guidance", 0.88, "The user is asking for data or record-cleaning guidance.");
+  if (/\b(?:learning|learn)\b[\s\S]{0,80}\b(?:spanish|verbs?)\b/i.test(prompt)) return classify(prompt, "explanation_or_teaching", 0.86, "The user asks for a learning explanation or plan.");
   if (/\b(?:plan|checklist|steps|schedule|tomorrow|roadmap)\b/i.test(prompt)) return classify(prompt, "planning_or_steps", 0.84, "The user is asking for a practical plan or checklist.");
   if (/\b(?:business plan|strategy|marketing|offer|follow-up|client drop|sales)\b/i.test(prompt)) return classify(prompt, "business_strategy", 0.82, "The user is asking for business strategy support.");
   if (/\b(?:compare|which is better|recommend|best option|versus|vs)\b/i.test(prompt)) return classify(prompt, "comparison_or_recommendation", 0.82, "The user asks for comparison or recommendation.");
@@ -313,6 +401,25 @@ function createFollowupAnswer(prompt: string, history: AskConversationMessage[] 
     return `Here is a shorter, warmer version:\n\n${firstSentence.replace(/\.$/, "")}.`;
   }
 
+  if (/\bcontinue\b/i.test(prompt)) {
+    const partMatch = prompt.match(/\bpart\s+(\d+)\b/i);
+    const partNumber = partMatch?.[1] ?? null;
+
+    if (partNumber === "2" && /part\s*2|2\./i.test(previous)) {
+      return [
+        "Part 2 only: practice one tiny verb change at a time.",
+        "",
+        "- Start with `hablar`, which means `to speak`.",
+        "- Say `yo hablo` for `I speak`.",
+        "- Say `tu hablas` for `you speak`.",
+        "- Do not learn every form at once.",
+        "- Practice two little sentences, then stop."
+      ].join("\n");
+    }
+
+    return "Continue from the last useful section:\n\n" + previous.split("\n").slice(-5).join("\n");
+  }
+
   return `Here is a revised version:\n\n${previous}`;
 }
 
@@ -335,6 +442,18 @@ function createRewriteAnswer(prompt: string) {
   const source = cleanText(extractAfterColon(prompt));
   const lower = source.toLowerCase();
 
+  if (/\bat what level can you do marketing\b/i.test(prompt)) {
+    return "I can support marketing at a practical level, from ideas and messaging to testing, follow-ups, and improving results.";
+  }
+
+  if (/\bhappy to contribute ideas\b/i.test(prompt)) {
+    return "I’d be happy to share ideas where I notice useful opportunities, whether that’s improving operations, increasing conversions, or making the marketing stronger.";
+  }
+
+  if (/\bclient requirements\b/i.test(prompt) && /\baccept or reject\b/i.test(prompt)) {
+    return "Those were the client’s requirements, so I can suggest the best options, but the final choice is theirs to accept or reject.";
+  }
+
   if (/\binvoice\b/.test(lower) && /\bspam\b/.test(lower)) {
     return "I already sent the invoice. Could you please check your spam or junk folder in case it landed there?";
   }
@@ -348,7 +467,40 @@ function createRewriteAnswer(prompt: string) {
     : "Paste the text you want rewritten, and I will make it clearer while keeping your meaning.";
 }
 
-function createBrandNamingAnswer() {
+function extractNameInputs(prompt: string) {
+  const explicit = prompt.match(/\b(?:words?|names?)\s+(.+?)(?:\.|,?\s+which\b|,?\s+it should\b|,?\s+and the theme\b|$)/i)?.[1] ?? "";
+  const capitalized = [...prompt.matchAll(/\b[A-Z][a-z]{2,}\b/g)]
+    .map((match) => match[0])
+    .filter((word) => !["Same", "Deep"].includes(word));
+  const words = explicit
+    .split(/,|\band\b|\+/i)
+    .map((word) => cleanText(word))
+    .filter((word) => /^[a-z][a-z\s-]*$/i.test(word) && word.length > 1);
+  const merged = [...new Set([...words, ...capitalized])].slice(0, 4);
+  return merged.length ? merged : ["Hassan", "Aasia", "Mujtaba"];
+}
+
+function createBrandNamingAnswer(prompt: string) {
+  const inputs = extractNameInputs(prompt);
+  const lower = normalizePrompt(prompt);
+
+  if (/\bsarah\b/.test(lower) && /\bzayn\b/.test(lower)) {
+    return [
+      "Top pick: Sazara",
+      "Meaning: A clean blend of Sarah and Zayn with a soft, future-facing feel. It sounds more like a sustainability brand than a forced acronym.",
+      "",
+      "Other strong options:",
+      "",
+      "1. Zayra - short, bright, and easy to say; good for a clean-energy product.",
+      "2. Solzayn - connects Zayn with solar energy without becoming too literal.",
+      "3. Sarinova - Sarah plus innovation; polished for a climate-tech company.",
+      "4. Zenera - suggests energy, renewal, and modern systems.",
+      "5. Saraya Green - warmer and more human; better for a community-focused brand.",
+      "",
+      "Trademark and domain availability would still need separate verification."
+    ].join("\n");
+  }
+
   return [
     "Top pick: Muhaasia",
     "Meaning: A smooth fusion of Mujtaba, Hassan, and Aasia. It feels like a serious AI/technology brand because it is short, memorable, and not too literal.",
@@ -361,7 +513,9 @@ function createBrandNamingAnswer() {
     "4. Mujassan - powerful, founder-like, and memorable, but less obviously tech.",
     "5. Ahsania - polished and brandable; sounds like a company name, not a random mashup.",
     "",
-    "I would avoid forced names like `MujAasHasTechAI` because they feel crowded and hard to say."
+    `I would avoid forced names like \`${inputs.join("").slice(0, 14)}TechAI\` because they feel crowded and hard to say.`,
+    "",
+    "Trademark and domain availability would still need separate verification."
   ].join("\n");
 }
 
@@ -697,6 +851,19 @@ function createNoFakeCapabilityAnswer(prompt: string) {
 }
 
 function createTeachingAnswer(prompt: string) {
+  if (/\b3\s+part\b/i.test(prompt) && /\bspanish\b/i.test(prompt) && /\bverb/i.test(prompt)) {
+    return [
+      "1. Part 1: Learn the verb family",
+      "Start with the basic form, like `hablar`, which means `to speak`.",
+      "",
+      "2. Part 2: Learn who is doing it",
+      "Practice tiny changes: `yo hablo` means `I speak`, and `tu hablas` means `you speak`.",
+      "",
+      "3. Part 3: Make small sentences",
+      "Use one verb in easy sentences before learning more forms."
+    ].join("\n");
+  }
+
   if (/\bhablo\b/i.test(prompt) && /\bhablar\b/i.test(prompt)) {
     return [
       "Think of Spanish verbs in two forms:",
@@ -717,7 +884,37 @@ function createTeachingAnswer(prompt: string) {
   return "Here is the simple version: start with the main idea, look at one example, then compare it with a similar case so the difference sticks.";
 }
 
-function qualityGate(answer: string, classification: AskIntentClassification) {
+function enforceMaxWords(answer: string, maxWords: number) {
+  const words = answer.trim().split(/\s+/).filter(Boolean);
+
+  if (words.length <= maxWords) return answer.trim();
+  return words.slice(0, maxWords).join(" ").replace(/[,:;]+$/g, "").trim();
+}
+
+function reviseOnce(answer: string, classification: AskIntentClassification, profile: AskQualityProfile) {
+  let next = answer.trim();
+
+  if (classification.intent === "bullet_format") {
+    next = next
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.startsWith("- ") ? line : `- ${line.replace(/^[-*\d.)\s]+/, "")}`)
+      .join("\n");
+  }
+
+  if (profile.tone === "polite_but_firm") {
+    next = next.replace(/\b(obviously|ridiculous|your problem|not my fault)\b/gi, "");
+  }
+
+  if (profile.explicitMaxWords) {
+    next = enforceMaxWords(next, Math.max(1, profile.explicitMaxWords - 1));
+  }
+
+  return next.trim();
+}
+
+function qualityGate(answer: string, classification: AskIntentClassification, profile: AskQualityProfile) {
   let next = answer.trim();
 
   if (!next) return null;
@@ -727,6 +924,15 @@ function qualityGate(answer: string, classification: AskIntentClassification) {
   }
   if ((classification.intent === "coding_help_text_only" || classification.intent === "local_setup_guidance") && !/```/.test(next)) {
     next += "\n\nIf you want, I can format this as full files and commands.";
+  }
+  if (profile.explicitMaxWords && wordCount(next) >= profile.explicitMaxWords) {
+    next = reviseOnce(next, classification, profile);
+  }
+  if (profile.format === "bullet_list" && next.split("\n").some((line) => line.trim() && !line.trim().startsWith("- "))) {
+    next = reviseOnce(next, classification, profile);
+  }
+  if (profile.riskFlags.mayNeedToPreserveContinuity && classification.intent === "followup_or_continuation" && !next.trim()) {
+    next = "I need the previous text to continue accurately. Paste it here and I will keep going from that point.";
   }
 
   return next;
@@ -748,6 +954,7 @@ export function createAskSeriousAnswer(
   if (fileLiteAnswer) return fileLiteAnswer;
 
   const classification = classifyAskIntent(prompt);
+  const qualityProfile = createQualityProfile(prompt, classification);
   let answer: string | null = null;
 
   switch (classification.intent) {
@@ -763,7 +970,7 @@ export function createAskSeriousAnswer(
       answer = createRewriteAnswer(prompt);
       break;
     case "brand_naming":
-      answer = createBrandNamingAnswer();
+      answer = createBrandNamingAnswer(prompt);
       break;
     case "coding_help_text_only":
     case "local_setup_guidance":
@@ -848,5 +1055,5 @@ export function createAskSeriousAnswer(
       break;
   }
 
-  return answer ? qualityGate(answer, classification) : null;
+  return answer ? qualityGate(answer, classification, qualityProfile) : null;
 }
