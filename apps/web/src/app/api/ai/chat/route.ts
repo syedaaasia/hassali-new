@@ -5,11 +5,14 @@ import {
 } from "@hassali/database";
 import { auth } from "@clerk/nextjs/server";
 import {
-  createAskDirectAnswer,
   buildAskRuntimeContext,
   detectAskLiveIntent,
   formatAskRuntimeContext
 } from "@/lib/server/ai/ask-context";
+import {
+  createAskBrainDebugHeaders,
+  runAskBrain
+} from "@/lib/server/ai/ask-brain-orchestrator";
 import {
   applyApprovalDecision,
   buildApprovalDecision,
@@ -2689,7 +2692,7 @@ function createResponseHeaders(sessionId?: string | null) {
   return headers;
 }
 
-function createTextStream(content: string, sessionId?: string | null) {
+function createTextStream(content: string, sessionId?: string | null, extraHeaders?: Record<string, string>) {
   const encoder = new TextEncoder();
 
   return new Response(
@@ -2700,7 +2703,10 @@ function createTextStream(content: string, sessionId?: string | null) {
       }
     }),
     {
-      headers: createResponseHeaders(sessionId)
+      headers: {
+        ...createResponseHeaders(sessionId),
+        ...(extraHeaders ?? {})
+      }
     }
   );
 }
@@ -5123,26 +5129,32 @@ export async function POST(request: Request) {
       return createTextStream(identityAnswer, persistence?.sessionId);
     }
 
-    const directAskAnswer = await createAskDirectAnswer(
-      effectiveUserPrompt,
+    const askBrain = await runAskBrain({
       askRuntimeContext,
-      messages
-    );
+      messages,
+      model,
+      productMode,
+      prompt: effectiveUserPrompt,
+      projectName: workspace.projectName ?? null,
+      workspace
+    });
 
-    if (directAskAnswer) {
+    if (askBrain.answer) {
       const selfReview = runSelfReviewForAskAnswer({
-        answer: directAskAnswer,
-        generator: "ask_direct_answer",
+        answer: askBrain.answer,
+        generator: "ask_brain_orchestrator",
         projectId: requestedProjectId,
         prompt: effectiveUserPrompt
       });
 
       persistence = await persistChatMessage(persistence, {
-        content: directAskAnswer,
+        content: askBrain.answer,
         metadata: {
           askLiveIntent,
           askRuntimeContext,
-          deterministic: askLiveIntent !== "weather",
+          askBrain: askBrain.decision,
+          askBrainIntent: askBrain.classification.intent,
+          deterministic: askBrain.decision.path === "deterministic_required" || askBrain.decision.path === "deterministic_preferred",
           model,
           projectContract: summarizeProjectContract(projectContract),
           selfReview: compactSelfReview(selfReview)
@@ -5150,7 +5162,7 @@ export async function POST(request: Request) {
         role: "assistant"
       });
 
-      return createTextStream(directAskAnswer, persistence?.sessionId);
+      return createTextStream(askBrain.answer, persistence?.sessionId, createAskBrainDebugHeaders(askBrain.decision));
     }
 
     const liveKnowledgeAnswer = routeLiveKnowledgeQuestion(effectiveUserPrompt);
@@ -5214,21 +5226,19 @@ export async function POST(request: Request) {
   }
 
   if (productMode === "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
-    const directAskAnswer = await createAskDirectAnswer(
-      effectiveUserPrompt,
+    const askBrain = await runAskBrain({
       askRuntimeContext,
-      messages
-    );
-    const answerOnlyContent =
-      directAskAnswer ??
-      (
-        "I can answer this without changing files. " +
-        `${kernel.routingDecision.routingExplanation} ` +
-        "No proposal was created and no project files were touched."
-      );
+      messages,
+      model,
+      productMode,
+      prompt: effectiveUserPrompt,
+      projectName: workspace.projectName ?? null,
+      workspace
+    });
+    const answerOnlyContent = askBrain.answer;
     const selfReview = runSelfReviewForAskAnswer({
       answer: answerOnlyContent,
-      generator: directAskAnswer ? "ask_direct_answer" : "ask_answer_only_fallback",
+      generator: "ask_brain_orchestrator",
       projectId: requestedProjectId,
       prompt: effectiveUserPrompt
     });
@@ -5238,7 +5248,9 @@ export async function POST(request: Request) {
       metadata: {
         askLiveIntent,
         askRuntimeContext,
-        deterministic: Boolean(directAskAnswer),
+        askBrain: askBrain.decision,
+        askBrainIntent: askBrain.classification.intent,
+        deterministic: askBrain.decision.path === "deterministic_required" || askBrain.decision.path === "deterministic_preferred",
         intelligenceKernel: compactIntelligenceKernel(kernel),
         kernelRoutingDecision: kernel.routingDecision,
         model,
@@ -5249,7 +5261,7 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return createTextStream(answerOnlyContent, persistence?.sessionId);
+    return createTextStream(answerOnlyContent, persistence?.sessionId, createAskBrainDebugHeaders(askBrain.decision));
   }
 
   if (
