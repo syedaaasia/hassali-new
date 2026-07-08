@@ -130,6 +130,11 @@ import {
 } from "@/lib/server/ai/prompt-sovereignty";
 import { buildWebsiteEditContext } from "@/lib/server/ai/website-edit-context";
 import {
+  buildWorkspaceContext,
+  extractCodeAppIdentityFromWorkspace,
+  hasWorkspaceWebsiteFiles
+} from "@/lib/server/ai/workspace-context-engine";
+import {
   classifyWebsiteEditIntent,
   hasWebsiteEditSignal,
   type WebsiteEditIntent
@@ -188,12 +193,7 @@ type GeneratedSourceFile = {
 };
 
 function workspaceHasWebsiteFiles(workspace: WorkspaceContext) {
-  const paths = new Set([
-    ...workspace.fileList,
-    ...Object.keys(workspace.fileContents ?? {})
-  ]);
-
-  return paths.has("index.html") && (paths.has("styles.css") || paths.has("main.js"));
+  return hasWorkspaceWebsiteFiles(workspace);
 }
 
 function isolateCodeContractForMixedWorkspace(files: GeneratedSourceFile[], workspace: WorkspaceContext) {
@@ -212,7 +212,13 @@ function isolateCodeContractForMixedWorkspace(files: GeneratedSourceFile[], work
 }
 
 function codeContractPathForWorkspace(workspace: WorkspaceContext) {
-  return workspaceHasWebsiteFiles(workspace) ? "HASSALI.code.md" : projectContractPath;
+  const context = buildWorkspaceContext({
+    mode: "CODE",
+    projectName: workspace.projectName,
+    workspace
+  });
+
+  return context.selectedContractPath === "HASSALI.code.md" ? "HASSALI.code.md" : projectContractPath;
 }
 
 function isolateProposalContextForMixedCodeWorkspace(context: ProposalContext, workspace: WorkspaceContext): ProposalContext {
@@ -256,56 +262,18 @@ type RequestedCodeAppIdentity = {
   requestKind: "create_new_app" | "edit_existing_app" | "replace_current_app";
 };
 
-function workspaceText(workspace: WorkspaceContext, path: string) {
-  return workspace.fileContents?.[path] ?? (workspace.activePath === path ? workspace.activeFileContent : "");
-}
-
-function firstMatch(value: string, patterns: RegExp[]) {
-  for (const pattern of patterns) {
-    const match = value.match(pattern);
-    if (match?.[1]?.trim()) return cleanRenameValue(match[1]);
-  }
-
-  return null;
-}
-
 function extractExistingCodeAppIdentity(workspace: WorkspaceContext): ExistingCodeAppIdentity | null {
-  const codeContract = workspaceText(workspace, "HASSALI.code.md");
-  const rootContract = workspaceText(workspace, "HASSALI.md");
-  const rootContractIsCode = /\b(?:mode|Project Type):\s*CODE\b/i.test(rootContract);
-  const contractPath = codeContract ? "HASSALI.code.md" : rootContractIsCode ? "HASSALI.md" : null;
-  const contract = contractPath === "HASSALI.code.md" ? codeContract : contractPath === "HASSALI.md" ? rootContract : "";
-  const appSource = workspaceText(workspace, "src/App.tsx") || workspaceText(workspace, "src/App.jsx");
-  const packageJson = workspaceText(workspace, "package.json");
-  const appName =
-    firstMatch(contract, [
-      /Product identity:\s*([^\n\r]+)/i,
-      /appName:\s*([^\n\r]+)/i,
-      /Name:\s*([^\n\r]+)/i
-    ]) ??
-    firstMatch(appSource, [
-      /"appName"\s*:\s*"([^"]+)"/,
-      /appName:\s*["'`]([^"'`]+)["'`]/
-    ]) ??
-    firstMatch(packageJson, [
-      /"name"\s*:\s*"([^"]+)"/
-    ]);
+  const identity = extractCodeAppIdentityFromWorkspace(workspace);
 
-  const hasCodeEvidence =
-    Boolean(contractPath) ||
-    /"appName"\s*:/.test(appSource) ||
-    (workspace.fileList.includes("src/App.tsx") && workspace.fileList.includes("vite.config.ts")) ||
-    workspace.fileList.includes("app.py");
-
-  if (!hasCodeEvidence || !appName) return null;
+  if (!identity?.appName) return null;
 
   return {
-    appName,
-    appType: firstMatch(contract, [/appType:\s*([^\n\r]+)/i]),
-    contractPath,
-    entryPoint: firstMatch(contract, [/entryPoint:\s*([^\n\r]+)/i]),
-    framework: firstMatch(contract, [/framework:\s*([^\n\r]+)/i]),
-    previewType: firstMatch(contract, [/previewType:\s*([^\n\r]+)/i])
+    appName: identity.appName,
+    appType: identity.appType ?? null,
+    contractPath: identity.contractPath ?? null,
+    entryPoint: identity.entryPoint ?? null,
+    framework: identity.framework ?? null,
+    previewType: identity.previewType ?? null
   };
 }
 
@@ -1704,7 +1672,7 @@ function createLocalProposal(
 
   if (decision.requestType === "code_system_generation" || (proposalContext?.mode === "CODE" && proposalContext.codeGenerationBrief)) {
     const promptText = prompt.toLowerCase();
-    const appPreview = createCodeAppPreview(prompt);
+    const rawAppPreview = createCodeAppPreview(prompt);
     const systemName = promptText.includes("crm")
       ? "CRM"
       : promptText.includes("inventory")
@@ -1738,11 +1706,22 @@ function createLocalProposal(
     const isPythonPreview = isMobilePhoneInventory || usePythonStack || (!promptRequestsReactApp && codeBrief?.preferredFramework === "streamlit");
     const existingCodeApp = extractExistingCodeAppIdentity(workspace);
     const requestedCodeApp = requestedCodeAppIdentity({
-      appPreviewName: appPreview.appName,
+      appPreviewName: rawAppPreview.appName,
       existingAppName: existingCodeApp?.appName,
       isPythonPreview,
       prompt
     });
+    const isEditExistingCodeApp = requestedCodeApp.requestKind === "edit_existing_app" && Boolean(existingCodeApp?.appName);
+    const effectiveAppName = isEditExistingCodeApp ? existingCodeApp?.appName ?? rawAppPreview.appName : rawAppPreview.appName;
+    const effectiveGenerationPrompt = isEditExistingCodeApp
+      ? `${prompt}\n\nExisting CODE app context: appName=${existingCodeApp?.appName}; appType=${existingCodeApp?.appType ?? "unknown"}; framework=${existingCodeApp?.framework ?? "unknown"}; previewType=${existingCodeApp?.previewType ?? "unknown"}. Preserve this app identity and add the requested capability without replacing it with a new unrelated app.`
+      : prompt;
+    const appPreview: CodeAppPreview = isEditExistingCodeApp
+      ? {
+          ...rawAppPreview,
+          appName: effectiveAppName
+        }
+      : rawAppPreview;
     const isDifferentNewCodeApp =
       existingCodeApp &&
       requestedCodeApp.requestKind === "create_new_app" &&
@@ -1759,26 +1738,26 @@ function createLocalProposal(
 
     const sourceFiles = isolateCodeContractForMixedWorkspace(isMobilePhoneInventory
       ? generateMobilePhoneInventoryStreamlitSource({
-          appName: appPreview.appName,
+          appName: effectiveAppName,
           brief: codeBrief,
-          prompt
+          prompt: effectiveGenerationPrompt
         })
       : usePythonStack || (!promptRequestsReactApp && codeBrief?.preferredFramework === "streamlit")
       ? generateCrmPythonStreamlitSource({
-          appName: appPreview.appName,
+          appName: effectiveAppName,
           brief: codeBrief,
-          prompt
+          prompt: effectiveGenerationPrompt
         })
       : generateCrmViteSource({
-          appName: appPreview.appName,
+          appName: effectiveAppName,
           brief: codeBrief,
-          prompt
+          prompt: effectiveGenerationPrompt
         }), workspace);
     const reactProductPreview = isPythonPreview
       ? null
       : createReactProductPreviewMetadata({
-          appName: appPreview.appName,
-          prompt
+          appName: effectiveAppName,
+          prompt: effectiveGenerationPrompt
         });
 
     return {

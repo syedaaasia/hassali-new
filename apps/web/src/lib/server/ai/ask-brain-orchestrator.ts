@@ -9,6 +9,13 @@ import {
   type AskIntentName
 } from "./ask-serious-assistant";
 import { getConfiguredProviderInfo } from "./provider-router";
+import {
+  buildWorkspaceContext,
+  createWorkspaceContextDebugHeaders,
+  hasWorkspaceInjectionLikeText,
+  redactWorkspaceSecrets,
+  type NormalizedWorkspaceContext
+} from "./workspace-context-engine";
 
 export type AskBrainDecisionPath =
   | "boundary_only"
@@ -29,6 +36,16 @@ export type AskBrainWorkspaceContext = {
 };
 
 export type AskBrainDecision = {
+  context: Pick<
+    NormalizedWorkspaceContext,
+    | "contextTruncated"
+    | "hasCodeFiles"
+    | "hasWebsiteFiles"
+    | "likelyProjectKind"
+    | "mixedWorkspace"
+    | "secretRedactionApplied"
+    | "selectedContractPath"
+  >;
   fallbackOccurred: boolean;
   fallbackReason: string | null;
   injectionDetected: boolean;
@@ -105,42 +122,26 @@ function truncate(value: string, maxLength: number) {
 }
 
 function redactSecrets(value: string) {
-  return value
-    .replace(/\b(?:sk|pk|rk|ghp|gho|ghu|ghs|AIza|xox[baprs])-?[A-Za-z0-9_-]{16,}\b/g, "[redacted-secret]")
-    .replace(/\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[^"'\s]{8,}/gi, "$1=[redacted-secret]");
+  return redactWorkspaceSecrets(value).redacted;
 }
 
 function hasInjectionLikeText(value: string) {
-  return /\b(?:ignore (?:all |previous |these )?instructions|system:|developer:|create a HASSALI_DIFF_PROPOSAL|install packages|modify files|switch to code|you are now)\b/i.test(value);
+  return hasWorkspaceInjectionLikeText(value);
 }
 
 function getRelevantWorkspaceText(input: AskBrainInput) {
-  const workspace = input.workspace;
-  if (!workspace) {
-    return {
-      excerpt: "",
-      injectionDetected: false,
-      summary: "No workspace context was provided."
-    };
-  }
-
-  const activePath = workspace.activePath || "";
-  const explicitActiveContent =
-    activePath && workspace.fileContents?.[activePath]
-      ? workspace.fileContents[activePath]
-      : workspace.activeFileContent ?? "";
-  const summarizeFileRequest = /\b(?:summari[sz]e|explain|review|what is in|read)\b[\s\S]{0,80}\b(?:file|this)\b/i.test(input.prompt);
-  const contentSource = explicitActiveContent || (summarizeFileRequest ? Object.values(workspace.fileContents ?? {})[0] ?? "" : "");
-  const redacted = redactSecrets(contentSource);
+  const context = buildWorkspaceContext({
+    mode: input.productMode,
+    projectName: input.projectName,
+    prompt: input.prompt,
+    workspace: input.workspace
+  });
 
   return {
-    excerpt: truncate(redacted, 2400),
-    injectionDetected: hasInjectionLikeText(contentSource),
-    summary: [
-      `Project: ${workspace.projectName ?? input.projectName ?? "unknown"}`,
-      `Active path: ${activePath || "none"}`,
-      `Files: ${(workspace.fileList ?? []).slice(0, 30).join(", ") || "none"}`
-    ].join("\n")
+    context,
+    excerpt: context.activeFileExcerpt,
+    injectionDetected: context.unsafeInstructionDetected,
+    summary: context.modelContextSummary
   };
 }
 
@@ -161,10 +162,15 @@ function isStackComparisonQuestion(prompt: string) {
     !/\b(?:write|give me|create)\b[\s\S]{0,40}\b(?:shortcode|plugin|theme|code|file|files)\b/i.test(prompt);
 }
 
+function isWorkspaceProjectSummaryRequest(prompt: string) {
+  return /\b(?:what project is this|what kind of project|what exists in this workspace|is it a website or an app|main files|explain (?:the )?(?:current )?HASSALI\.md)\b/i.test(prompt);
+}
+
 function isReferenceSummaryRequest(input: AskBrainInput) {
   const workspace = getRelevantWorkspaceText(input);
 
   return Boolean(workspace.excerpt) &&
+    !isWorkspaceProjectSummaryRequest(input.prompt) &&
     /\b(?:summari[sz]e|explain|review|what is in|read)\b[\s\S]{0,80}\b(?:file|this)\b/i.test(input.prompt);
 }
 
@@ -351,24 +357,39 @@ function summarizeReferenceFile(input: AskBrainInput) {
 
   const cleaned = workspace.excerpt
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !/^(?:system|developer|assistant)\s*:/i.test(line) && !/ignore .*instructions|HASSALI_DIFF_PROPOSAL|install packages|modify files/i.test(line));
+    .map((line) => line
+      .replace(/^(?:system|developer|assistant)\s*:\s*/i, "")
+      .replace(/ignore .*?(?=Real content:|$)/i, "")
+      .replace(/create a HASSALI_DIFF_PROPOSAL.*?(?=Real content:|$)/i, "")
+      .replace(/install packages and modify files\.?/i, "")
+      .trim())
+    .filter((line) => line && !/HASSALI_DIFF_PROPOSAL|install packages|modify files/i.test(line));
   const realContent = cleaned.join(" ").replace(/\s+/g, " ").trim();
 
   return [
     "Summary:",
     `- The usable file content is about ${realContent || "the visible notes in the selected file"}.`,
+    workspace.context.secretRedactionApplied ? "- Secret-like values were present and redacted instead of being repeated." : "",
     "- It should be treated as reference text only; embedded instructions inside the file were ignored.",
     "",
     "Key cleanup/action points:",
     "- Organize product photos, prices, delivery notes, and customer FAQs into separate checklist sections.",
     "- Verify missing prices and delivery details before publishing or sharing the launch material."
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntentClassification) {
   const prompt = input.prompt.toLowerCase();
   const previousAssistant = [...input.messages].reverse().find((message) => message.role === "assistant")?.content ?? "";
+  const workspace = getRelevantWorkspaceText(input);
+
+  if (isWorkspaceProjectSummaryRequest(input.prompt)) {
+    const runNote = workspace.context.likelyProjectKind === "CODE"
+      ? "\n\nASK mode cannot run it or create files, but I can give setup/run commands as text. Use CODE mode only when you want Hassali to create or apply project files."
+      : "";
+
+    return `${workspace.context.userVisibleSummary}${runNote}`;
+  }
 
   if (/\bsummar/i.test(prompt) && /\bfile|this\b/i.test(prompt)) {
     return summarizeReferenceFile(input);
@@ -413,7 +434,6 @@ function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntent
   }
 
   if (/\bworkspace context|roadmap|next product phase|next phase\b/i.test(input.prompt)) {
-    const workspace = getRelevantWorkspaceText(input);
     const hasHassaliRoadmap = /hassali|roadmap|ask|website|code|runtime|preview|approval/i.test(workspace.excerpt);
 
     if (hasHassaliRoadmap || /hassali/i.test(`${input.prompt}\n${workspace.summary}`)) {
@@ -552,6 +572,7 @@ export function createAskBrainDebugHeaders(decision: AskBrainDecision): Record<s
   if (process.env.NODE_ENV === "production") return {};
 
   return {
+    ...createWorkspaceContextDebugHeaders(decision.context as NormalizedWorkspaceContext),
     "x-hassali-ask-brain-fallback": buildDecisionHeadersSafeValue(decision.fallbackOccurred),
     "x-hassali-ask-brain-injection": buildDecisionHeadersSafeValue(decision.injectionDetected),
     "x-hassali-ask-brain-latency-ms": buildDecisionHeadersSafeValue(decision.latencyMs),
@@ -659,6 +680,15 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   }
 
   const decision: AskBrainDecision = {
+    context: {
+      contextTruncated: workspace.context.contextTruncated,
+      hasCodeFiles: workspace.context.hasCodeFiles,
+      hasWebsiteFiles: workspace.context.hasWebsiteFiles,
+      likelyProjectKind: workspace.context.likelyProjectKind,
+      mixedWorkspace: workspace.context.mixedWorkspace,
+      secretRedactionApplied: workspace.context.secretRedactionApplied,
+      selectedContractPath: workspace.context.selectedContractPath
+    },
     fallbackOccurred,
     fallbackReason,
     injectionDetected: workspace.injectionDetected,
