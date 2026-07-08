@@ -5123,6 +5123,36 @@ export async function POST(request: Request) {
       return createTextStream(identityAnswer, persistence?.sessionId);
     }
 
+    const directAskAnswer = await createAskDirectAnswer(
+      effectiveUserPrompt,
+      askRuntimeContext,
+      messages
+    );
+
+    if (directAskAnswer) {
+      const selfReview = runSelfReviewForAskAnswer({
+        answer: directAskAnswer,
+        generator: "ask_direct_answer",
+        projectId: requestedProjectId,
+        prompt: effectiveUserPrompt
+      });
+
+      persistence = await persistChatMessage(persistence, {
+        content: directAskAnswer,
+        metadata: {
+          askLiveIntent,
+          askRuntimeContext,
+          deterministic: askLiveIntent !== "weather",
+          model,
+          projectContract: summarizeProjectContract(projectContract),
+          selfReview: compactSelfReview(selfReview)
+        },
+        role: "assistant"
+      });
+
+      return createTextStream(directAskAnswer, persistence?.sessionId);
+    }
+
     const liveKnowledgeAnswer = routeLiveKnowledgeQuestion(effectiveUserPrompt);
 
     if (liveKnowledgeAnswer.answer) {
@@ -5181,40 +5211,13 @@ export async function POST(request: Request) {
       return createTextStream(hassaliPromptAnswer, persistence?.sessionId);
     }
 
-    const directAskAnswer = await createAskDirectAnswer(
-      effectiveUserPrompt,
-      askRuntimeContext
-    );
-
-    if (directAskAnswer) {
-      const selfReview = runSelfReviewForAskAnswer({
-        answer: directAskAnswer,
-        generator: "ask_direct_answer",
-        projectId: requestedProjectId,
-        prompt: effectiveUserPrompt
-      });
-
-      persistence = await persistChatMessage(persistence, {
-        content: directAskAnswer,
-        metadata: {
-          askLiveIntent,
-          askRuntimeContext,
-          deterministic: askLiveIntent !== "weather",
-          model,
-          projectContract: summarizeProjectContract(projectContract),
-          selfReview: compactSelfReview(selfReview)
-        },
-        role: "assistant"
-      });
-
-      return createTextStream(directAskAnswer, persistence?.sessionId);
-    }
   }
 
   if (productMode === "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
     const directAskAnswer = await createAskDirectAnswer(
       effectiveUserPrompt,
-      askRuntimeContext
+      askRuntimeContext,
+      messages
     );
     const answerOnlyContent =
       directAskAnswer ??

@@ -1,4 +1,8 @@
-import { classifyAskIntent, createAskSeriousAnswer } from "./ask-serious-assistant";
+import {
+  classifyAskIntent,
+  createAskSeriousAnswer,
+  type AskConversationMessage
+} from "./ask-serious-assistant";
 
 export type AskCapability = "calculator" | "current_time" | "file_context" | "weather" | "web_search";
 
@@ -657,9 +661,10 @@ function titleCaseLocation(value: string) {
 
 export function createDeterministicAskAnswer(
   prompt: string,
-  context: AskRuntimeContext
+  context: AskRuntimeContext,
+  history?: AskConversationMessage[]
 ): string | null {
-  const seriousAnswer = createAskSeriousAnswer(prompt, context);
+  const seriousAnswer = createAskSeriousAnswer(prompt, context, history);
 
   if (seriousAnswer) {
     return seriousAnswer;
@@ -735,7 +740,8 @@ export function createDeterministicAskAnswer(
 
 export async function createAskDirectAnswer(
   prompt: string,
-  context: AskRuntimeContext
+  context: AskRuntimeContext,
+  history?: AskConversationMessage[]
 ): Promise<string | null> {
   const intent = detectAskLiveIntent(prompt);
 
@@ -743,7 +749,7 @@ export async function createAskDirectAnswer(
     return createWeatherAnswer(prompt);
   }
 
-  return createDeterministicAskAnswer(prompt, context);
+  return createDeterministicAskAnswer(prompt, context, history);
 }
 
 export function formatAskRuntimeContext(context: AskRuntimeContext, intent: AskLiveIntent) {

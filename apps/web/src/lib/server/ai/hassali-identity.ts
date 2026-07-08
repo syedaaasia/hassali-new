@@ -40,7 +40,9 @@ export function createHassaliIdentityAnswer(input: {
       : "Live search: not connected in this environment.";
 
     return [
-      "I am Hassali.ai, an AI engineering workspace built to help plan, generate, preview, review, and safely apply software and website changes.",
+      "I am Hassali.ai, a calm AI software creation workspace. In ASK mode, I help you think, write, plan, explain, debug, compare options, and write code as text without touching your files.",
+      "",
+      "WEBSITE and CODE are the executor modes: they create approval-first proposals for websites or app/code projects when you want Hassali to make real project file changes.",
       "",
       providerLine,
       requiredEnvLine,
@@ -69,8 +71,8 @@ export function createHassaliIdentityAnswer(input: {
   }
 
   return [
-    "I am Hassali.ai, an AI engineering workspace built to help plan, generate, preview, review, and safely apply software and website changes.",
+    "I am Hassali.ai, a calm AI software creation workspace.",
     "",
-    "I can route tasks through configured AI providers, project context, validators, repair checks, preview systems, and approval-first runtime tools. I am not just a raw model chat surface; Hassali is the workspace and orchestration layer around the intelligence."
+    "In ASK mode, I help you think, write, plan, explain, debug, compare options, and write code as text without changing files. WEBSITE and CODE are the executor modes: they can create approval-first proposals when you want Hassali to build or modify actual project files."
   ].join("\n");
 }
