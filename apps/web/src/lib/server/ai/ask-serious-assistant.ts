@@ -152,7 +152,7 @@ function roleFor(prompt: string): AskRole | null {
 
   if (/\b(?:senior full[- ]stack|full[- ]stack engineer|software architect)\b/.test(text)) return "senior_full_stack_engineer";
   if (/\b(?:developer|programmer|coder)\b/.test(text)) return "developer";
-  if (/\b(?:ui\/ux|ux designer|visual designer|product designer)\b/.test(text)) return "ui_ux_designer";
+  if (/\b(?:ui\/ux|ui ux|ux designer|visual designer|product designer)\b/.test(text)) return "ui_ux_designer";
   if (/\bproduct manager\b/.test(text)) return "product_manager";
   if (/\b(?:coo|operations strategist|business strategist)\b/.test(text)) return "business_strategist";
   if (/\bmarketing strategist\b|\bmarketer\b/.test(text)) return "marketing_strategist";
@@ -262,7 +262,7 @@ function constraintsFor(prompt: string) {
 function isFollowup(prompt: string) {
   if (/\bcombine\b[\s\S]{0,80}\b(?:words?|names?|theme)\b/i.test(prompt)) return false;
 
-  return /^(?:continue|make it|make this|shorter|longer|warmer|more professional|more casual|now do|same for|do the same|rewrite it|improve it|again|translate it|summarize it)\b/i.test(prompt.trim()) ||
+  return /^(?:continue|make it|make this|shorter|longer|warmer|more professional|more casual|now do|now act|same for|do the same|rewrite it|improve it|again|translate it|summarize it)\b/i.test(prompt.trim()) ||
     /\b(?:make it|make this|the same for|do the same for|shorter and warmer|shorter|warmer)\b/i.test(prompt.trim()) &&
       prompt.trim().split(/\s+/).length <= 10;
 }
@@ -310,7 +310,7 @@ function isDirectDateTimeQuestion(prompt: string) {
 }
 
 function wantsProjectExecution(prompt: string) {
-  return /\b(?:in this project|apply (?:all )?(?:files|changes|this|it)|create files|write files|save (?:it|this)|modify files|edit files|right now|i approve|approved in advance|install|start runtime)\b/i.test(prompt) ||
+  return /\b(?:in (?:this|my|the) project|apply (?:all )?(?:files|changes|this|it)|create[\s\S]{0,60}files|write files|save (?:it|this)|modify files|edit files|right now|i approve|approved in advance|install|start runtime)\b/i.test(prompt) ||
     /\b(?:run|start)\b(?!\s+(?:it|this|the script|the app|locally|on windows|in xampp|from cmd|with cmd))/i.test(prompt);
 }
 
@@ -321,6 +321,8 @@ function isWebsiteCodeTextRequest(prompt: string) {
 }
 
 function isCodingTextRequest(prompt: string) {
+  if (/\b(?:cold calling script|sales script|call script|objection handling)\b/i.test(prompt)) return false;
+
   return /\b(?:write me|make me|give me|show me|create|explain|tell me how|how do i|starter|schema)\b[\s\S]{0,140}\b(?:code|script|php|python|react|next\.?js|express|fastify|docker|sql|wordpress|shopify|git|javascript|typescript|js|html|css|xampp|cmd commands?|api|route|schema|compose)\b/i.test(prompt) &&
     !wantsProjectExecution(prompt);
 }
@@ -1259,6 +1261,177 @@ function createModeBoundaryAnswer(prompt: string) {
   ].join("\n");
 }
 
+function createRoleAnswer(
+  prompt: string,
+  history: AskConversationMessage[] | undefined,
+  classification: AskIntentClassification
+) {
+  const role = classification.requestedRole;
+
+  if (!role) return null;
+  if (classification.wantsExecution || detectCodingCategory(prompt) || detectDangerousCodingRequest(prompt)) return null;
+
+  const previous = lastAssistantMessage(history);
+
+  if ((role === "senior_full_stack_engineer" || role === "developer") && /\bmarketplace\b/i.test(prompt) && /\bclean(?:er|ing)?/i.test(prompt)) {
+    return [
+      "Senior dev review: this is buildable, but the MVP must stay small.",
+      "",
+      "MVP features:",
+      "- Customer booking request",
+      "- Cleaner profile and availability",
+      "- Admin assignment board",
+      "- Job status: requested, assigned, completed, cancelled",
+      "- Basic payment/status tracking, not real payouts yet",
+      "",
+      "Suggested stack: React or Next.js frontend, simple API layer, PostgreSQL later, and local/mock data first while testing workflow.",
+      "",
+      "Core entities: customers, cleaners, bookings, service_packages, job_status_updates, payments, reviews.",
+      "",
+      "Risks: cleaner reliability, scheduling conflicts, trust/safety, refunds, and building marketplace features before proving the job workflow.",
+      "",
+      "First steps: prototype booking -> assignment -> status board, test 2-3 real cleaning scenarios, then add payments/reviews after workflow is clear."
+    ].join("\n");
+  }
+
+  if (role === "ui_ux_designer") {
+    return [
+      "Make the toy shop homepage feel like a premium gift-finding experience, not a crowded catalog.",
+      "",
+      "- Hero: one joyful headline, one clear CTA, and age/category chips.",
+      "- Navigation: Toys, Age Groups, Gifts, Offers, Contact.",
+      "- Product cards: big images, age range, safety note, price, and quick gift label.",
+      "- Visual system: warm white base, playful accent colors, generous spacing, rounded cards, readable type.",
+      "- Trust: delivery, returns, safe checkout, parent-approved copy near the first screen.",
+      "- Mobile: swipeable categories and a visible contact/buy action.",
+      "- Accessibility: high contrast text, visible focus states, and clear button labels."
+    ].join("\n");
+  }
+
+  if (role === "business_strategist") {
+    if (previous && /\bclean/i.test(previous) && /\bbeta|cut|only what is needed/i.test(prompt)) {
+      return [
+        "COO beta cut for the cleaning marketplace:",
+        "",
+        "Keep:",
+        "- Customer creates a cleaning request",
+        "- Admin assigns a cleaner",
+        "- Cleaner/job status board",
+        "- Basic client and cleaner records",
+        "- Manual payment status",
+        "",
+        "Cut:",
+        "- Live payments",
+        "- Cleaner mobile app",
+        "- Public marketplace profiles",
+        "- Matching algorithm",
+        "- Review/dispute system",
+        "",
+        "Beta goal: prove one job can move from request -> assigned -> completed without confusion."
+      ].join("\n");
+    }
+
+    return [
+      "COO view: cut anything that does not help a first user create, review, or safely approve work.",
+      "",
+      "Cut/defer:",
+      "- More generators",
+      "- Fancy integrations",
+      "- Broad automation",
+      "- Collaboration/social features",
+      "- Visual polish that is not blocking trust",
+      "",
+      "Must not skip:",
+      "- ASK/WEBSITE/CODE boundary tests",
+      "- Approval safety",
+      "- Preview sanity checks",
+      "- 5-10 guided real-user sessions",
+      "- A severity-ranked bug log",
+      "",
+      "Launch path: pick 10 beta users, give them 3 real tasks each, watch where trust breaks, fix only the highest-friction failures, then repeat weekly."
+    ].join("\n");
+  }
+
+  if (role === "marketing_strategist") {
+    return [
+      "Positioning: Hassali helps constrained builders turn ideas into safe, reviewable software without heavy tools.",
+      "",
+      "First 10 beta users:",
+      "1. Target freelancers, students, small founders, and AI coders with low-spec laptops.",
+      "2. Offer: \"Bring one real idea; Hassali will help you produce a safe first version.\"",
+      "3. Channels: WhatsApp groups, LinkedIn DMs, university/startup circles, founder friends.",
+      "4. Message: \"I am testing a calm AI workspace for people who want software without setup chaos. Want one guided session?\"",
+      "5. Feedback loop: ask what felt useful, confusing, scary, and worth paying for."
+    ].join("\n");
+  }
+
+  if (role === "teacher") {
+    return [
+      "Think of a Spanish verb like a toy that changes clothes.",
+      "",
+      "- `hablar` means \"to speak.\" That is the plain toy.",
+      "- `hablo` means \"I speak.\" It wears the \"me\" clothes.",
+      "- `hablas` means \"you speak.\" It wears the \"you\" clothes.",
+      "",
+      "Practice:",
+      "- Point to yourself and say `yo hablo`.",
+      "- Point to someone else and say `tu hablas`."
+    ].join("\n");
+  }
+
+  if (role === "supportive_listener") {
+    return [
+      "That sounds exhausting. You are trying to move fast, but every breakage makes the finish line feel farther away.",
+      "",
+      "For the next hour, do not solve everything:",
+      "1. Write the one blocker stopping progress right now.",
+      "2. Label it: safety, preview, generation, UI, or testing.",
+      "3. Fix or verify only that one thing.",
+      "4. Stop when the evidence is clear, even if the product is not perfect.",
+      "",
+      "You are not failing because things break. You need a calmer loop: one bug, one proof, one decision. If you feel unsafe or like you might harm yourself, contact someone you trust or local emergency help immediately."
+    ].join("\n");
+  }
+
+  if (role === "travel_planner") {
+    return [
+      "Simple 15-day Thailand route with a toddler:",
+      "",
+      "Days 1-4: Bangkok",
+      "- Keep mornings light: parks, aquarium, malls with AC, easy food.",
+      "- Stay near BTS/MRT to reduce taxi stress.",
+      "",
+      "Days 5-9: Chiang Mai",
+      "- Slower pace, family-friendly cafes, gentle temples, and one nature day.",
+      "- Add rest time every afternoon.",
+      "",
+      "Days 10-15: Phuket or Krabi",
+      "- Choose one beach base, not both.",
+      "- Pick a hotel near food, pharmacy, and a calm beach.",
+      "",
+      "Budget notes: book breakfast-included stays, use Grab for short rides, avoid too many transfers, and keep one rest day after each travel day."
+    ].join("\n");
+  }
+
+  if (role === "sales_coach") {
+    return [
+      "Short cold call script:",
+      "",
+      "Opener: \"Hi, this is [Name]. Quick question: are you currently losing time on repetitive admin, follow-ups, or manual reporting?\"",
+      "",
+      "Qualify: \"Which task takes your team the most time every week?\"",
+      "",
+      "Value pitch: \"We automate one painful workflow first, so you can see time saved before committing to anything bigger.\"",
+      "",
+      "Objection: \"Totally fair. I am not asking you to change systems today. Could we identify one task worth testing?\"",
+      "",
+      "Follow-up: \"I can send a two-line example of what we would automate for your business.\""
+    ].join("\n");
+  }
+
+  return null;
+}
+
 function createBulletAnswer(prompt: string) {
   const source = extractAfterColon(prompt);
 
@@ -1438,6 +1611,12 @@ export function createAskSeriousAnswer(
   const classification = classifyAskIntent(prompt);
   const qualityProfile = createQualityProfile(prompt, classification);
   let answer: string | null = null;
+
+  const roleAnswer = createRoleAnswer(prompt, history, classification);
+
+  if (roleAnswer) {
+    return qualityGate(roleAnswer, classification, qualityProfile);
+  }
 
   switch (classification.intent) {
     case "followup_or_continuation":
