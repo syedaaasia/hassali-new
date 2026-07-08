@@ -155,6 +155,12 @@ function isAdviceOnlyBuildQuestion(prompt: string) {
     !/\b(?:in (?:this|my|the) project|apply|create (?:the )?files|write files|save|install|run npm|start (?:the )?(?:server|runtime)|i approve)\b/i.test(prompt);
 }
 
+function isStackComparisonQuestion(prompt: string) {
+  return /\b(?:compare|which|recommend|best option|start with|versus|vs|tradeoffs?|honestly)\b/i.test(prompt) &&
+    /\b(?:wordpress|next\.?js|laravel|no-code|nocode|shopify|webflow|bubble)\b/i.test(prompt) &&
+    !/\b(?:write|give me|create)\b[\s\S]{0,40}\b(?:shortcode|plugin|theme|code|file|files)\b/i.test(prompt);
+}
+
 function isReferenceSummaryRequest(input: AskBrainInput) {
   const workspace = getRelevantWorkspaceText(input);
 
@@ -170,7 +176,7 @@ function chooseDecisionPath(classification: AskIntentClassification, prompt: str
     return { path: "unsafe_refusal", reason: "Dangerous coding or credential-theft intent requires a deterministic refusal." };
   }
 
-  if (isAdviceOnlyBuildQuestion(prompt)) {
+  if (isAdviceOnlyBuildQuestion(prompt) || isStackComparisonQuestion(prompt)) {
     return { path: "model_reasoning_preferred", reason: "The prompt mentions building but asks for advice/comparison, not file creation or execution." };
   }
 
@@ -237,7 +243,13 @@ function reviewAnswer(answer: string, classification: AskIntentClassification, i
   if (/\b(?:ran npm install|installed packages|started the server|started runtime)\b/i.test(answer)) issues.push("fake_runtime_claim");
   if (/\b(?:decision path|model_reasoning_preferred|self-review|reviewing my answer)\b/i.test(answer)) issues.push("internal_meta_leak");
   if (classification.wantsExecution && !/\b(?:ASK mode|CODE mode|WEBSITE mode|cannot create|cannot apply|cannot run)\b/i.test(answer)) issues.push("missing_boundary");
-  if ((classification.intent === "coding_help_text_only" || classification.intent === "local_setup_guidance") && !/```/.test(answer)) issues.push("missing_code_blocks");
+  if (
+    (classification.intent === "coding_help_text_only" || classification.intent === "local_setup_guidance") &&
+    !isStackComparisonQuestion(input.prompt) &&
+    !/```/.test(answer)
+  ) {
+    issues.push("missing_code_blocks");
+  }
   if (/\bCMD|Windows|xampp|run it|commands?\b/i.test(input.prompt) && !/\b(?:cmd|cd \/d|npm|python|localhost|xampp)\b/i.test(answer)) issues.push("missing_commands");
   if (hasInjectionLikeText(input.workspace?.activeFileContent ?? "") && /HASSALI_DIFF_PROPOSAL|install packages|modify files/i.test(answer)) issues.push("followed_injection");
 
@@ -362,6 +374,21 @@ function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntent
     return summarizeReferenceFile(input);
   }
 
+  if (/\bwordpress|laravel|next\.?js|no-code|zero-budget|marketplace\b/i.test(input.prompt)) {
+    return [
+      "For a zero-budget cleaning marketplace, I would start with no-code or WordPress for validation, then move to Laravel/Next.js only after real demand is proven.",
+      "",
+      "No-code: fastest to test bookings and cleaner assignment, weakest for custom workflows and ownership.",
+      "WordPress: cheap and familiar, good for landing pages plus forms, but marketplace logic can become plugin-heavy.",
+      "Laravel: strong for real marketplace operations, bookings, payments, roles, and admin panels, but slower to build if you are solo.",
+      "Next.js: excellent UI and future product quality, but needs backend/database discipline from day one.",
+      "",
+      "Recommendation: validate with WordPress or no-code first: landing page, booking form, manual cleaner assignment, WhatsApp follow-up, and payment status. When you have repeated bookings, rebuild the operations core in Laravel or Next.js.",
+      "",
+      "Practical next step: write the booking flow on paper, serve one neighborhood, and manually run 10 jobs before investing in a full app."
+    ].join("\n");
+  }
+
   if (/\b(beta|2 week|two week)\b/i.test(input.prompt) && /cleaning marketplace|afforfix/i.test(`${input.prompt}\n${previousAssistant}`)) {
     return [
       "For a 2-week Afforfix-style beta, cut it to the smallest workflow that proves demand.",
@@ -383,6 +410,28 @@ function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntent
 
   if (/\bbefore adding runtime execution|10 beta users\b/i.test(input.prompt)) {
     return "Yes. Launch to 10 guided beta users before adding runtime execution, as long as the current core flows are safe: ASK answers, WEBSITE proposals, CODE proposals, approval, preview, reload, and stop. Runtime execution can wait until you know which workflows users actually need most.";
+  }
+
+  if (/\bworkspace context|roadmap|next product phase|next phase\b/i.test(input.prompt)) {
+    const workspace = getRelevantWorkspaceText(input);
+    const hasHassaliRoadmap = /hassali|roadmap|ask|website|code|runtime|preview|approval/i.test(workspace.excerpt);
+
+    if (hasHassaliRoadmap || /hassali/i.test(`${input.prompt}\n${workspace.summary}`)) {
+      return [
+        "The smartest next product phase is a narrow reliability beta, not another broad feature push.",
+        "",
+        "Why:",
+        "- Hassali already has meaningful ASK, WEBSITE, and CODE capability.",
+        "- The biggest product risk is trust: users need to believe proposals, previews, mode boundaries, and approval safety will not surprise them.",
+        "- Low-spec users benefit more from reliable lightweight flows than from heavy runtime expansion.",
+        "",
+        "Recommended next phase:",
+        "- Pick 5-10 guided beta users.",
+        "- Test one ASK workflow, one WEBSITE workflow, one CODE app workflow, and proposal approval/preview behavior.",
+        "- Fix only blockers that break trust, project isolation, or first-run usefulness.",
+        "- Defer integrations, package installs, cloud runtime, collaboration, and advanced memory until the core loop feels boringly dependable."
+      ].join("\n");
+    }
   }
 
   if (/\bcoo|launch hassali|launch fast|fixing bugs\b/i.test(input.prompt)) {
@@ -428,21 +477,6 @@ function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntent
       "- Paid community tier with templates, office hours, or accountability groups.",
       "",
       "First build step: launch one niche, one promise, and one weekly habit. If people do not return without many features, more features will not fix it."
-    ].join("\n");
-  }
-
-  if (/\bwordpress|laravel|next\.?js|no-code|zero-budget|marketplace\b/i.test(input.prompt)) {
-    return [
-      "For a zero-budget cleaning marketplace, I would start with no-code or WordPress for validation, then move to Laravel/Next.js only after real demand is proven.",
-      "",
-      "No-code: fastest to test bookings and cleaner assignment, weakest for custom workflows and ownership.",
-      "WordPress: cheap and familiar, good for landing pages plus forms, but marketplace logic can become plugin-heavy.",
-      "Laravel: strong for real marketplace operations, bookings, payments, roles, and admin panels, but slower to build if you are solo.",
-      "Next.js: excellent UI and future product quality, but needs backend/database discipline from day one.",
-      "",
-      "Recommendation: validate with WordPress or no-code first: landing page, booking form, manual cleaner assignment, WhatsApp follow-up, and payment status. When you have repeated bookings, rebuild the operations core in Laravel or Next.js.",
-      "",
-      "Practical next step: write the booking flow on paper, serve one neighborhood, and manually run 10 jobs before investing in a full app."
     ].join("\n");
   }
 
@@ -526,7 +560,9 @@ export function createAskBrainDebugHeaders(decision: AskBrainDecision): Record<s
     "x-hassali-ask-brain-provider": buildDecisionHeadersSafeValue(decision.providerStatus),
     "x-hassali-ask-brain-revision": buildDecisionHeadersSafeValue(decision.revisionCallRan),
     "x-hassali-ask-brain-sanitized": buildDecisionHeadersSafeValue(decision.sanitizedChanged),
-    "x-hassali-ask-brain-streaming": decision.streamingStrategy
+    "x-hassali-ask-brain-streaming": decision.streamingStrategy,
+    "x-hassali-ask-brain-timeout": buildDecisionHeadersSafeValue(decision.primaryTimedOut),
+    "x-hassali-ask-brain-fallback-reason": buildDecisionHeadersSafeValue(decision.fallbackReason ?? "")
   };
 }
 
