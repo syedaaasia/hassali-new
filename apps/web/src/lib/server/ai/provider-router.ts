@@ -38,6 +38,24 @@ export type ConfiguredProviderInfo = {
   source: "environment" | "request" | "unavailable";
 };
 
+export type AskProviderFailureCategory =
+  | "model_unknown"
+  | "provider_not_configured"
+  | "provider_unsupported"
+  | "test_model_blocked";
+
+export type ResolvedAskProvider = {
+  configured: boolean;
+  credentialSource: "credential_inherited_from_parent_process" | "credential_loaded_from_application_environment" | "credential_missing";
+  executionModelId: string | null;
+  executionProvider: string | null;
+  failureCategory: AskProviderFailureCategory | null;
+  modelPublisher: string | null;
+  requestedModelId: string;
+  resolvedModelId: string | null;
+  pricingClass: "credit_required" | "free" | null;
+};
+
 const capabilityDefaults: Record<string, HassaliProviderCapability[]> = {
   anthropic: ["ASK", "CODE", "WEBSITE", "REASONING", "VALIDATION", "REPAIR", "VISION"],
   "custom-openai-compatible": ["ASK", "CODE", "WEBSITE", "REASONING", "VALIDATION"],
@@ -167,7 +185,14 @@ function customModelMetadata(modelName: string | null): HassaliModelMetadata | n
     isOpenAICompatible: providerMetadata.isOpenAICompatible,
     requiresApiKey: Boolean(providerMetadata.apiKeyEnv),
     baseUrlEnv: providerMetadata.baseUrlEnv,
-    apiKeyEnv: providerMetadata.apiKeyEnv
+    apiKeyEnv: providerMetadata.apiKeyEnv,
+    executionModelId: modelName,
+    executionProviderId: provider.id,
+    isTestOnly: false,
+    isUserSelectable: false,
+    pricingClass: "credit_required",
+    availability: "credit_required",
+    expirationDate: null
   };
 }
 
@@ -214,6 +239,73 @@ export function getConfiguredProviderInfo(input?: {
     providerName: configuredProvider?.name ?? null,
     requiredEnv: modelMetadata ? requiredEnvForModel(modelMetadata) : [],
     source: configuredProvider ? "environment" : "unavailable"
+  };
+}
+
+export function resolveAskProvider(requestedModelId: string): ResolvedAskProvider {
+  const requested = requestedModelId.trim();
+  const credentialSource = process.env.HASSALI_OPENROUTER_ENV_SOURCE === "credential_inherited_from_parent_process"
+    ? "credential_inherited_from_parent_process"
+    : process.env.HASSALI_OPENROUTER_ENV_SOURCE === "credential_loaded_from_application_environment"
+      ? "credential_loaded_from_application_environment"
+      : "credential_missing";
+
+  if (/^no-provider\//i.test(requested)) {
+    const allowed = process.env.NODE_ENV !== "production" && process.env.HASSALI_ALLOW_TEST_MODELS === "1";
+    return {
+      configured: false,
+      credentialSource,
+      executionModelId: null,
+      executionProvider: null,
+      failureCategory: allowed ? "provider_not_configured" : "test_model_blocked",
+      modelPublisher: null,
+      requestedModelId: requested,
+      resolvedModelId: null,
+      pricingClass: null
+    };
+  }
+
+  const model = findHassaliModel(requested);
+  if (!model || model.isTestOnly) {
+    return {
+      configured: false,
+      credentialSource,
+      executionModelId: null,
+      executionProvider: null,
+      failureCategory: "model_unknown",
+      modelPublisher: null,
+      requestedModelId: requested,
+      resolvedModelId: null,
+      pricingClass: null
+    };
+  }
+
+  const executionProvider = findHassaliProvider(model.executionProviderId);
+  if (!executionProvider || model.executionProviderId !== "openrouter") {
+    return {
+      configured: false,
+      credentialSource,
+      executionModelId: model.executionModelId,
+      executionProvider: model.executionProviderId,
+      failureCategory: "provider_unsupported",
+      modelPublisher: model.providerId,
+      requestedModelId: requested,
+      resolvedModelId: model.modelId,
+      pricingClass: model.pricingClass
+    };
+  }
+
+  const configured = Boolean(executionProvider.apiKeyEnv && process.env[executionProvider.apiKeyEnv]);
+  return {
+    configured,
+    credentialSource,
+    executionModelId: model.executionModelId,
+    executionProvider: executionProvider.providerId,
+    failureCategory: configured ? null : "provider_not_configured",
+    modelPublisher: model.providerId,
+    requestedModelId: requested,
+    resolvedModelId: model.modelId,
+    pricingClass: model.pricingClass
   };
 }
 

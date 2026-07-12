@@ -173,6 +173,8 @@ const openRouterChatCompletionsUrl = "https://openrouter.ai/api/v1/chat/completi
 type ChatRequestMessage = {
   role: "user" | "assistant" | "system";
   content: string;
+  providerFailureCategory?: string | null;
+  responseKind?: "deterministic_answer" | "identity_response" | "mode_boundary" | "provider_failure" | "safety_response" | "substantive_answer";
 };
 
 type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
@@ -4861,9 +4863,11 @@ export async function POST(request: Request) {
   } | null;
 
   const messages = Array.isArray(body?.messages)
-    ? body.messages.filter(isChatMessage).map<ChatRequestMessage>((message) => ({
+      ? body.messages.filter(isChatMessage).map<ChatRequestMessage>((message) => ({
         role: message.role,
-        content: message.content
+        content: message.content,
+        providerFailureCategory: typeof message.providerFailureCategory === "string" ? message.providerFailureCategory : null,
+        responseKind: typeof message.responseKind === "string" ? message.responseKind as ChatRequestMessage["responseKind"] : undefined
       }))
     : [];
 
@@ -5105,7 +5109,10 @@ export async function POST(request: Request) {
         role: "assistant"
       });
 
-      return createTextStream(identityAnswer, persistence?.sessionId);
+      return createTextStream(identityAnswer, persistence?.sessionId, {
+        "x-hassali-ask-response-kind": "identity_response",
+        "x-hassali-ask-provider-failure": "none"
+      });
     }
 
     const askBrain = await runAskBrain({

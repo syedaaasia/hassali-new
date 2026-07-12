@@ -36,6 +36,8 @@ export type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
+  providerFailureCategory?: string | null;
+  responseKind?: "deterministic_answer" | "identity_response" | "mode_boundary" | "provider_failure" | "safety_response" | "substantive_answer";
 };
 
 export type WorkspaceContext = {
@@ -726,7 +728,9 @@ function normalizeHydratedMessages(
     .map((message) => ({
       content: message.content,
       id: message.id,
-      role: message.role
+      role: message.role,
+      providerFailureCategory: "providerFailureCategory" in message && typeof message.providerFailureCategory === "string" ? message.providerFailureCategory : null,
+      responseKind: "responseKind" in message && typeof message.responseKind === "string" ? message.responseKind as ChatMessage["responseKind"] : undefined
     }));
 }
 
@@ -1371,7 +1375,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         body: JSON.stringify({
           messages: nextMessages
             .filter((message) => message.content.trim().length > 0)
-            .map(({ role, content }) => ({ role, content })),
+            .map(({ role, content, providerFailureCategory, responseKind }) => ({ role, content, providerFailureCategory, responseKind })),
           chatSessionId: workspaceContext.chatSessionId,
           mode,
           model: get().model,
@@ -1396,9 +1400,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       const responseSessionId = response.headers.get("x-hassali-chat-session-id");
+      const responseKind = response.headers.get("x-hassali-ask-response-kind") as ChatMessage["responseKind"] | null;
+      const providerFailureCategory = response.headers.get("x-hassali-ask-provider-failure");
 
       if (responseSessionId) {
         set({ chatSessionId: responseSessionId });
+      }
+
+      if (responseKind) {
+        set((state) => ({
+          messages: state.messages.map((message) => message.id === assistantMessage.id
+            ? {
+                ...message,
+                responseKind,
+                providerFailureCategory: providerFailureCategory && providerFailureCategory !== "none" ? providerFailureCategory : null
+              }
+            : message)
+        }));
       }
 
       const reader = response.body.getReader();

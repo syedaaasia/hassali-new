@@ -87,6 +87,14 @@ export type AskIntentClassification = {
 
 export type AskConversationMessage = {
   content: string;
+  providerFailureCategory?: string | null;
+  responseKind?:
+    | "deterministic_answer"
+    | "identity_response"
+    | "mode_boundary"
+    | "provider_failure"
+    | "safety_response"
+    | "substantive_answer";
   role: "assistant" | "system" | "user";
 };
 
@@ -262,7 +270,8 @@ function constraintsFor(prompt: string) {
 function isFollowup(prompt: string) {
   if (/\bcombine\b[\s\S]{0,80}\b(?:words?|names?|theme)\b/i.test(prompt)) return false;
 
-  return /^(?:continue|make it|make this|shorter|longer|warmer|more professional|more casual|now do|now act|same for|do the same|rewrite it|improve it|again|translate it|summarize it)\b/i.test(prompt.trim()) ||
+  return /^(?:hi again[\s\S]{0,40}\bcontinue|(?:he|she|they|it)\b|write[\s\S]{0,60}\babout (?:him|her|them|it)\b|you are (?:still )?replying incorrectly|what do you mean|explain that|can you clarify|tell me more|why\??|what about (?:him|her|it|them)|please answer my original question|continue|make it|make this|shorter|longer|warmer|more emotional|more professional|more casual|now do|now act|same for|do the same|rewrite it|improve it|again|translate it|summarize(?: only)?|summarize it)\b/i.test(prompt.trim()) ||
+    /^(?:what|who|why|how|when|where|does|did|is|was|can)\b[\s\S]{0,100}\b(?:his|her|their|its|him|them)\b/i.test(prompt.trim()) ||
     /\b(?:make it|make this|the same for|do the same for|shorter and warmer|shorter|warmer)\b/i.test(prompt.trim()) &&
       prompt.trim().split(/\s+/).length <= 10;
 }
@@ -310,7 +319,7 @@ function isDirectDateTimeQuestion(prompt: string) {
 }
 
 function wantsProjectExecution(prompt: string) {
-  return /\b(?:in (?:this|my|the) project|apply (?:all )?(?:files|changes|this|it)|create[\s\S]{0,60}files|write files|save (?:it|this)|modify files|edit files|right now|i approve|approved in advance|install|start runtime)\b/i.test(prompt) ||
+  return /\b(?:in (?:this|my|the) project|apply (?:all )?(?:files|changes|this|it)|create[\s\S]{0,60}files|write files|save (?:it|this)|modify files|edit files|replace (?:all )?(?:project )?files|rewrite (?:my|this|the) [\w.-]+ app|right now|i approve|approved in advance|install|start runtime)\b/i.test(prompt) ||
     /\b(?:run|start)\b(?!\s+(?:it|this|the script|the app|locally|on windows|in xampp|from cmd|with cmd))/i.test(prompt);
 }
 
@@ -453,7 +462,11 @@ function cleanText(value: string) {
 }
 
 function lastAssistantMessage(history: AskConversationMessage[] | undefined) {
-  return [...(history ?? [])].reverse().find((message) => message.role === "assistant" && message.content.trim().length > 0)?.content.trim() ?? null;
+  return [...(history ?? [])].reverse().find((message) =>
+    message.role === "assistant" &&
+    message.responseKind !== "provider_failure" &&
+    message.content.trim().length > 0
+  )?.content.trim() ?? null;
 }
 
 function createFollowupAnswer(prompt: string, history: AskConversationMessage[] | undefined) {
