@@ -63,13 +63,6 @@ type BuildProposalRepairInput = {
   translatedIntent: TranslatedIntentSpec;
 };
 
-const unknownRepairDomains = new Set([
-  "generic local service website",
-  "generic_local_service",
-  "local service",
-  "unknown"
-]);
-
 const genericReplacementMap: Array<[RegExp, string]> = [
   [/\bClear Services Studio\b/gi, ""],
   [/\bLocal Service\b/gi, ""],
@@ -118,22 +111,6 @@ function dominantPhrase(contract: GeneratorContract) {
     contract.requiredCopySignals.find((signal) => signal.length > 4) ??
     contract.authoritativeDomain ??
     "domain-specific offer";
-}
-
-function repairDomain(input: BuildProposalRepairInput) {
-  return input.generatorContract.authoritativeBusinessType ??
-    input.generatorContract.authoritativeDomain ??
-    input.proposalContext?.domain ??
-    input.compositionPlan.authoritativeDomain ??
-    input.translatedIntent.businessType ??
-    input.translatedIntent.domain ??
-    "unknown";
-}
-
-function cannotRepairDomain(domain: string) {
-  const normalized = normalize(domain);
-
-  return !normalized || unknownRepairDomains.has(normalized);
 }
 
 function domainSentence(contract: GeneratorContract) {
@@ -696,32 +673,28 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
     };
   }
 
-  const domain = repairDomain(input);
-  if (input.generatorContract.generatorMode === "website_generation") {
-    const domainBlocked = cannotRepairDomain(domain);
-
+  if (
+    input.generatorContract.generatorMode === "website_generation" &&
+    Object.keys(input.proposedFiles).length === 0
+  ) {
     return {
-      originalBlockReasons: reasons,
+      originalBlockReasons: ["GEN001 Website Generation Returned No Files"],
       repairActions: [],
       repairApplied: false,
       repairAttempted: true,
-      repairConfidence: domainBlocked ? 0.82 : 0.78,
-      repairId: `${input.generatorContract.contractId}_${domainBlocked ? "repair_domain_blocked" : "website_repair_blocked"}`,
+      repairConfidence: 0.98,
+      repairId: `${input.generatorContract.contractId}_generation_empty`,
       repairedFiles: input.proposedFiles,
       repairedSummary: input.proposalSummary,
       repairSeverity: "high",
       repairStatus: "keep_blocked",
       repairStrategy: "none",
-      repairWarnings: domainBlocked
-        ? ["Cannot generate missing files: domain not detected from prompt. Please rephrase your request with more specific domain details."]
-        : ["Website repair did not create fallback placeholder files. Regenerate with the deterministic website generator or fix the request."],
+      repairWarnings: ["The WEBSITE generator returned zero file changes before validation; repair did not invent replacement files."],
       revalidationPassed: false,
       revalidationRequired: false,
       shouldKeepBlocked: true,
       shouldPresentRepairedProposal: false,
-      unresolvedIssues: reasons.length
-        ? reasons
-        : ["Website proposal failed validation and cannot be safely repaired with placeholder files."]
+      unresolvedIssues: ["GEN001 Website Generation Returned No Files"]
     };
   }
 

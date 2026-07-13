@@ -47,7 +47,7 @@ export type PromptOwnershipDecision = {
 export type ValidationSeverity = "critical" | "major" | "minor";
 
 const newBuildPattern = /\b(?:create|build|generate|make|design|start|new)\b[\s\S]{0,120}\b(?:website|site|app|crm|saas|dashboard|system|tool|landing page)\b/i;
-const refinementPattern = /\b(?:update|improve|continue|modify|edit|change|redesign|refine|fix)\b/i;
+const refinementPattern = /\b(?:update|improve|continue|modify|edit|change|redesign|refine|fix|rewrite|rebuild|replace|recreate|redo|overhaul)\b/i;
 
 function promptRequestsPython(prompt: string) {
   return /\b(?:python|py|streamlit|flask|fastapi|django|tkinter|pyside|pyqt)\b/i.test(prompt);
@@ -84,8 +84,11 @@ export function buildProposalContext(input: {
   });
   const intentContract = input.mode === "WEBSITE"
     ? buildWebsiteIntentContract({
+        existingDomain: ownership.useContractMemory ? input.contract?.domain : null,
         prompt: input.prompt,
-        requestedPagesFallback: input.translatedIntent.pages.names
+        requestedPagesFallback: ownership.useContractMemory && input.contract?.websitePages?.length
+          ? input.contract.websitePages
+          : input.translatedIntent.pages.names
       })
     : input.mode === "CODE"
       ? buildCodeIntentContract({ prompt: input.prompt })
@@ -178,7 +181,10 @@ export function enforceGeneratorContractWithProposalContext(
   }
 
   if (context.mode === "WEBSITE") {
-    const contractBlocks = contract.contractBlocks;
+    const hasResolvedDomain = Boolean(context.domain && context.domain !== "unknown");
+    const contractBlocks = hasResolvedDomain
+      ? contract.contractBlocks.filter((block) => !block.startsWith("ambiguous domain classification:"))
+      : contract.contractBlocks;
 
     return {
       ...contract,

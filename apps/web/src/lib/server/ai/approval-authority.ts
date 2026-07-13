@@ -40,6 +40,7 @@ type ProposalLike = {
   staleTermScanStatus?: string;
   summary?: string;
   visualValidationStatus?: string;
+  validationFilePaths?: string[];
 };
 
 const allowedRuntimeActions = new Set(["reload_preview", "restart_runtime", "stop_runtime"]);
@@ -123,6 +124,9 @@ export function buildApprovalDecision(input: {
   const criticalIssues: string[] = [];
   const files = generatedFileMap(input.proposal);
   const fileNames = Object.keys(files);
+  const validationFileNames = input.proposal.validationFilePaths?.length
+    ? input.proposal.validationFilePaths
+    : fileNames;
 
   if (input.proposal.approvalDisabled) {
     criticalIssues.push(input.proposal.blockedReason ?? "proposal approval is disabled");
@@ -171,6 +175,15 @@ export function buildApprovalDecision(input: {
   }
 
   for (const change of input.proposal.changes) {
+    if (change.action === "delete_file") {
+      if (input.proposalContext.mode !== "WEBSITE") {
+        criticalIssues.push("delete_file is restricted to WEBSITE replacement proposals");
+      } else if (!change.path || isUnsafePath(change.path)) {
+        criticalIssues.push(`unsafe delete path ${change.path ?? "unknown"}`);
+      }
+      continue;
+    }
+
     if (isFileAction(change.action)) {
       if (!change.path) {
         criticalIssues.push("file mutation is missing a path");
@@ -189,7 +202,7 @@ export function buildApprovalDecision(input: {
   }
 
   for (const requiredFile of input.proposalContext.requiredFiles) {
-    if (!fileNames.includes(requiredFile)) {
+    if (!validationFileNames.includes(requiredFile)) {
       criticalIssues.push(`missing required file ${requiredFile}`);
     }
   }

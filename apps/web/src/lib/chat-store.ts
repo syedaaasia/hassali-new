@@ -51,8 +51,9 @@ export type WorkspaceContext = {
 };
 
 type FileProposalAction = "create" | "modify" | "update" | "write_file";
+type DeleteProposalAction = "delete_file";
 type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "run_dev_server" | "start_runtime" | "stop_runtime";
-type ProposalAction = FileProposalAction | RuntimeProposalAction;
+type ProposalAction = DeleteProposalAction | FileProposalAction | RuntimeProposalAction;
 type ProposalRoutingMode = "blocked" | "normal" | "review_required";
 type UnifiedPreviewType = "application" | "architecture" | "component" | "dashboard" | "mobile" | "none" | "website";
 type LegacyPreviewType = "code_app_preview" | "code_plan_preview" | "docs_preview" | "none" | "website_static_preview";
@@ -580,6 +581,10 @@ function isRuntimeProposalAction(action: unknown): action is RuntimeProposalActi
 
 function isFileProposalAction(action: unknown): action is FileProposalAction {
   return action === "create" || action === "modify" || action === "update" || action === "write_file";
+}
+
+function isDeleteProposalAction(action: unknown): action is DeleteProposalAction {
+  return action === "delete_file";
 }
 
 function isProposalRoutingMode(value: unknown): value is ProposalRoutingMode {
@@ -1153,6 +1158,10 @@ function isDiffProposal(value: unknown): value is DiffProposal {
           return true;
         }
 
+        if (isDeleteProposalAction(change.action)) {
+          return typeof change.path === "string";
+        }
+
         return (
           isFileProposalAction(change.action) &&
           typeof change.path === "string" &&
@@ -1169,6 +1178,12 @@ function normalizeProposalFiles(proposal: DiffProposal): DiffProposal {
   const nextChanges: DiffProposal["changes"] = [];
 
   for (const change of proposal.changes) {
+    if (isDeleteProposalAction(change.action)) {
+      const path = normalizeSafeProjectPath(change.path);
+      if (path) nextChanges.push({ ...change, path });
+      continue;
+    }
+
     if (!isFileProposalAction(change.action)) {
       nextChanges.push(change);
       continue;

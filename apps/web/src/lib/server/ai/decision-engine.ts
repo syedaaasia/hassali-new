@@ -2,6 +2,7 @@ import { buildDomainBlueprint, isTechnicalBlueprint } from "@/lib/server/ai/capa
 import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
+import { isFullWebsiteReplacementRequest } from "@/lib/server/ai/website-edit-intent";
 
 export type DecisionRequestType =
   | "ask"
@@ -245,7 +246,7 @@ function requestTypeForPrompt(promptText: string, diagnostic: DiagnosticContext)
     return "data_tool_generation";
   }
 
-  if (isWebsiteCreationRequest(promptText)) {
+  if (isFullWebsiteReplacementRequest(promptText) || isWebsiteCreationRequest(promptText)) {
     return requestedPageCount(promptText) > 1 ? "multi_page_generation" : "website_generation";
   }
 

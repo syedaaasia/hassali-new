@@ -127,6 +127,7 @@ export type RuntimeApprovalResponse = {
   workspaceWarnings?: string[];
   verificationOk?: boolean | null;
   writtenFiles?: string[];
+  deletedFiles?: string[];
 };
 
 export type RuntimeSyncedFile = {
@@ -180,6 +181,7 @@ export type RuntimeResultSyncInput = {
 };
 
 export type RuntimeResultSyncOutput = {
+  deletedFiles: string[];
   errors: string[];
   fileUpdates: RuntimeSyncedFile[];
   proposalApplied: boolean;
@@ -205,6 +207,13 @@ function writtenFilesFromEvents(runtimeResult: RuntimeApprovalResponse | null) {
     .filter((path): path is string => Boolean(path));
 }
 
+function deletedFilesFromEvents(runtimeResult: RuntimeApprovalResponse | null) {
+  return (runtimeResult?.events ?? [])
+    .filter((event) => event.type === "file_deleted")
+    .map((event) => normalizePath(event.metadata?.path))
+    .filter((path): path is string => Boolean(path));
+}
+
 export function syncRuntimeApprovalResult(
   input: RuntimeResultSyncInput
 ): RuntimeResultSyncOutput {
@@ -217,6 +226,10 @@ export function syncRuntimeApprovalResult(
     .map(normalizePath)
     .filter((path): path is string => Boolean(path));
   const uniqueRuntimeWrittenFiles = Array.from(new Set(runtimeWrittenFiles));
+  const deletedFiles = Array.from(new Set([
+    ...(input.runtimeResult?.deletedFiles ?? []),
+    ...deletedFilesFromEvents(input.runtimeResult)
+  ].map(normalizePath).filter((path): path is string => Boolean(path))));
   const fileChanges = input.proposalChanges
     .filter((change) => fileActions.has(change.action))
     .map((change) => ({
@@ -264,7 +277,7 @@ export function syncRuntimeApprovalResult(
   const syncStatus: RuntimeSyncStatus =
     errors.length > 0
       ? "failed"
-      : fileChanges.length === 0
+      : fileChanges.length === 0 && deletedFiles.length === 0
         ? "skipped"
         : syncedFiles.length === fileChanges.length
           ? "synced"
@@ -307,10 +320,11 @@ export function syncRuntimeApprovalResult(
   };
 
   return {
+    deletedFiles,
     errors,
     fileUpdates,
     proposalApplied: syncStatus === "synced" || syncStatus === "skipped",
-    refreshedPreview: fileUpdates.some((update) => previewFilePattern.test(update.path)),
+    refreshedPreview: fileUpdates.some((update) => previewFilePattern.test(update.path)) || deletedFiles.some((path) => previewFilePattern.test(path)),
     runtimeMetadata,
     selectedFileUpdated: Boolean(
       input.activePath && syncedFiles.includes(normalizePath(input.activePath) ?? "")

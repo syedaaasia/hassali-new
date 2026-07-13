@@ -9,6 +9,7 @@ import type {
 
 export const safeRuntimeTools: RuntimeToolName[] = [
   "apply_patch",
+  "delete_file",
   "list_files",
   "read_file",
   "restart_preview",

@@ -22,6 +22,9 @@ export type ProjectContract = {
   lastKnownSafeFacts: string[];
   previewType: ProjectContractPreviewType;
   projectType: ProjectContractMode;
+  websiteExactPageCount?: number | null;
+  websiteOwnedFiles?: string[];
+  websitePages?: string[];
 };
 
 type WorkspaceLike = {
@@ -56,6 +59,25 @@ function parseValue(markdown: string, label: string) {
   return value && value !== "unknown" && value !== "none" ? value : null;
 }
 
+function parseLooseValue(markdown: string, labels: string[]) {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = markdown.match(new RegExp(`^${escaped}:\\s*(.+)$`, "im"));
+    const value = match?.[1]?.trim();
+
+    if (value && value !== "unknown" && value !== "none") return value;
+  }
+
+  return null;
+}
+
+function parseLooseList(markdown: string, label: string) {
+  return (parseLooseValue(markdown, [label]) ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 function normalizePreviewType(value: string | null): ProjectContractPreviewType {
   if (
     value === "answer_only" ||
@@ -82,16 +104,28 @@ export function readProjectContractFromWorkspace(workspace: WorkspaceLike): Proj
     return null;
   }
 
+  const projectType = normalizeMode(
+    parseValue(content, "Project Type") ?? parseLooseValue(content, ["mode", "projectType"])
+  );
+  const previewValue = parseValue(content, "Preview Type") ?? parseLooseValue(content, ["previewType"]);
+
   return {
     acceptedConstraints: parseList(content, "Accepted Constraints"),
-    brandName: parseValue(content, "Brand/App/Site Name"),
+    brandName: parseValue(content, "Brand/App/Site Name") ?? parseLooseValue(content, ["brand/app/site name", "brandName"]),
     designRules: parseList(content, "Design Rules"),
     doNotRules: parseList(content, "Do-Not Rules"),
-    domain: parseValue(content, "Domain/Business"),
+    domain: parseValue(content, "Domain/Business") ?? parseLooseValue(content, ["domainId", "current domain/business", "domain"]),
     fileStrategy: parseList(content, "File Strategy"),
     lastKnownSafeFacts: parseList(content, "Last Known Safe Project Facts"),
-    previewType: normalizePreviewType(parseValue(content, "Preview Type")),
-    projectType: normalizeMode(parseValue(content, "Project Type"))
+    previewType: previewValue
+      ? normalizePreviewType(previewValue)
+      : projectType === "WEBSITE"
+        ? "website_static_preview"
+        : "answer_only",
+    projectType,
+    websiteExactPageCount: Number.parseInt(parseLooseValue(content, ["exactPageCount"]) ?? "", 10) || null,
+    websiteOwnedFiles: parseLooseList(content, "requiredFiles"),
+    websitePages: parseLooseList(content, "requestedPages")
   };
 }
 
@@ -232,7 +266,10 @@ export function buildUpdatedProjectContract(input: {
           : [])
     ]).slice(0, 10),
     previewType,
-    projectType: mode
+    projectType: mode,
+    websiteExactPageCount: input.generatorContract?.requiredPageCount ?? input.contract?.websiteExactPageCount ?? null,
+    websiteOwnedFiles: input.generatorContract?.requiredFileStrategy ?? input.contract?.websiteOwnedFiles ?? [],
+    websitePages: input.generatorContract?.requiredPages ?? input.contract?.websitePages ?? []
   };
 }
 
@@ -251,6 +288,9 @@ Current user prompts always outrank this file. If this contract conflicts with t
 - **Domain/Business:** ${value(contract.domain)}
 - **Brand/App/Site Name:** ${value(contract.brandName)}
 - **Preview Type:** ${contract.previewType}
+${contract.projectType === "WEBSITE" ? `requestedPages: ${(contract.websitePages ?? []).join(", ")}
+exactPageCount: ${contract.websiteExactPageCount ?? (contract.websitePages ?? []).length}
+requiredFiles: ${(contract.websiteOwnedFiles ?? []).join(", ")}` : ""}
 
 ## Accepted Constraints
 ${list(contract.acceptedConstraints, "No accepted constraints recorded yet.")}

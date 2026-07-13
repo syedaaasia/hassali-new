@@ -21,7 +21,11 @@ function unique(values: string[]) {
 }
 
 function htmlFiles(context: WebsiteEditContext) {
-  return Object.keys(context.files).filter((path) => path.endsWith(".html"));
+  return context.canonicalPagePaths.filter((path) => typeof context.files[path] === "string");
+}
+
+function pageToPath(page: string) {
+  return page === "home" || page === "index" || page === "homepage" ? "index.html" : `${page}.html`;
 }
 
 function escapeRegExp(value: string) {
@@ -329,6 +333,50 @@ function change(path: string, content: string, summary: string): WebsiteEditPlan
   return { content, path, summary };
 }
 
+function titleCase(value: string) {
+  return value.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function refreshPage(content: string, context: WebsiteEditContext, page: string, replacement: boolean) {
+  const brand = context.brandName ?? context.displayName ?? "This business";
+  const domain = titleCase((context.domainId ?? "business").replace(/_/g, " "));
+  const heading = page === "home" ? brand : `${titleCase(page)} at ${brand}`;
+  const lede = page === "about"
+    ? `Learn about ${brand}, its ${domain.toLowerCase()} focus, and the standards behind its work.`
+    : page === "home"
+      ? `${brand} offers clear, practical ${domain.toLowerCase()} information for customers.`
+      : `Explore ${titleCase(page).toLowerCase()} information from ${brand}.`;
+  let next = content;
+
+  next = /<main\b/i.test(next)
+    ? next.replace(/<main\b([^>]*)>/i, `<main$1 data-hassali-scope="${replacement ? "page-replacement" : "page-edit"}">`)
+    : next;
+  next = /<h1\b[^>]*>[\s\S]*?<\/h1>/i.test(next)
+    ? next.replace(/<h1\b([^>]*)>[\s\S]*?<\/h1>/i, `<h1$1>${heading}</h1>`)
+    : next;
+  next = /<h1\b[^>]*>[\s\S]*?<\/h1>\s*<p\b[^>]*>[\s\S]*?<\/p>/i.test(next)
+    ? next.replace(/(<h1\b[^>]*>[\s\S]*?<\/h1>)\s*<p\b([^>]*)>[\s\S]*?<\/p>/i, `$1\n<p$2>${lede}</p>`)
+    : next;
+
+  return next;
+}
+
+function refreshSection(content: string, context: WebsiteEditContext, section: string) {
+  const brand = context.brandName ?? context.displayName ?? "This business";
+  const domain = titleCase((context.domainId ?? "business").replace(/_/g, " "));
+
+  if (section === "footer") {
+    let next = content.replace(/<footer\b([^>]*)>/i, '<footer$1 data-hassali-scope="section-edit" aria-label="Site footer">');
+    const line = `<p class="footer-summary">${brand} · ${domain}</p>`;
+    if (!next.includes("footer-summary")) next = next.replace(/<\/footer>/i, `${line}\n</footer>`);
+    return next;
+  }
+
+  const className = section === "navigation" || section === "navbar" ? "nav" : section.replace(/_/g, "-");
+  const pattern = new RegExp(`<([a-z][a-z0-9]*)\\b([^>]*class=["'][^"']*\\b${escapeRegExp(className)}\\b[^"']*["'][^>]*)>`, "i");
+  return content.replace(pattern, `<$1$2 data-hassali-scope="section-edit">`);
+}
+
 export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEditIntent): WebsiteEditPlan {
   if (!context.hasWebsiteFiles) {
     return {
@@ -341,7 +389,7 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
     };
   }
 
-  if (intent.shouldClarify || intent.editType === "unknown") {
+  if (intent.shouldClarify) {
     return {
       blockedReason: intent.clarificationQuestion ?? "The website edit request needs clarification.",
       changes: [],
@@ -349,6 +397,17 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
       preserved: [],
       summary: "Website edit blocked: edit intent was unclear.",
       targetFiles: []
+    };
+  }
+
+  if (intent.editType === "unknown") {
+    return {
+      blockedReason: `Hassali recognized this as a ${intent.requestScope.replace(/_/g, " ")}, but that scoped transformation is not safely supported by the deterministic website edit planner yet.`,
+      changes: [],
+      mode: "blocked",
+      preserved: [],
+      summary: `Website ${intent.requestScope.replace(/_/g, " ")} recognized without treating it as an ambiguous edit.`,
+      targetFiles: intent.targetFiles
     };
   }
 
@@ -443,6 +502,35 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
       changes.push(change(contractPath, updateHassali(hassali, {
         expectedVocabulary: services.join(", ")
       }), contractSummary));
+    }
+  }
+
+  if ((intent.editType === "page_edit" || intent.editType === "page_replacement") && intent.extractedValues.pageTarget) {
+    const page = intent.extractedValues.pageTarget;
+    const path = pageToPath(page);
+    if (!context.canonicalPagePaths.includes(path)) {
+      return {
+        blockedReason: `${path} is not an active page in the current website contract. Ask to add a new ${page} page or choose one of: ${context.canonicalPagePaths.join(", ")}.`,
+        changes: [],
+        mode: "blocked",
+        preserved: [`domainId=${context.domainId ?? "unknown"}`, `pages=${context.requestedPages.join("/") || "existing"}`],
+        summary: `Website page edit blocked: ${path} is obsolete or outside the active canonical page set.`,
+        targetFiles: []
+      };
+    }
+    const current = files[path];
+    if (current) {
+      changes.push(change(path, refreshPage(current, context, page, intent.editType === "page_replacement"), `Refreshes only ${path} and preserves all other website files.`));
+    }
+  }
+
+  if (intent.editType === "section_edit" && intent.extractedValues.sectionTarget) {
+    const section = intent.extractedValues.sectionTarget;
+    for (const path of htmlFiles(context)) {
+      const current = files[path] ?? "";
+      if (section !== "footer" && path !== "index.html") continue;
+      const next = refreshSection(current, context, section);
+      if (next !== current) changes.push(change(path, next, `Updates only the ${section.replace(/_/g, " ")} section in ${path}.`));
     }
   }
 

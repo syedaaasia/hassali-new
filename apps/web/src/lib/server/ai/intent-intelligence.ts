@@ -1,5 +1,6 @@
 import { buildDomainBlueprint } from "@/lib/server/ai/capability-domain-blueprint";
 import { classifyDomainIntent, getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
+import { isFullWebsiteReplacementRequest } from "@/lib/server/ai/website-edit-intent";
 
 export type IntentIntelligence = {
   brandName: string | null;
@@ -365,6 +366,7 @@ function inferSiteType(domain: string) {
 
 function inferUserIntent(promptText: string): IntentIntelligence["userIntent"] {
   if (
+    isFullWebsiteReplacementRequest(promptText) ||
     isWebsiteCreationRequest(promptText) ||
     (/\b(?:create|build|generate|design|make)\b/.test(promptText) &&
       /\b(?:system|web app|app|dashboard|inventory|crm|erp|pos|tool)\b/.test(promptText))

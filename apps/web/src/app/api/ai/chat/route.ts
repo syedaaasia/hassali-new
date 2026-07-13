@@ -62,6 +62,7 @@ import {
   generatePlannedWebsiteFiles,
   type SiteDomain
 } from "@/lib/server/ai/domain-site-generator";
+import { assertWebsiteGenerationContract } from "@/lib/server/ai/generation-brief";
 import {
   createReactProductPreviewMetadata,
   generateCrmPythonStreamlitSource,
@@ -128,7 +129,7 @@ import {
   validatePromptSovereignty,
   type PromptAcceptanceResult
 } from "@/lib/server/ai/prompt-sovereignty";
-import { buildWebsiteEditContext } from "@/lib/server/ai/website-edit-context";
+import { buildWebsiteEditContext, isWebsiteOwnedPath } from "@/lib/server/ai/website-edit-context";
 import {
   buildWorkspaceContext,
   extractCodeAppIdentityFromWorkspace,
@@ -137,12 +138,21 @@ import {
 import {
   classifyWebsiteEditIntent,
   hasWebsiteEditSignal,
+  isFullWebsiteReplacementRequest,
   type WebsiteEditIntent
 } from "@/lib/server/ai/website-edit-intent";
+import {
+  buildWebsiteVirtualFilesystem,
+  validationProfileForWebsiteScope,
+  repairWebsiteVirtualReferenceTypos,
+  virtualFilesystemFiles,
+  type WebsiteValidationProfile
+} from "@/lib/server/ai/website-proposal-virtual-filesystem";
 import {
   planWebsiteEdit,
   type WebsiteEditPlan
 } from "@/lib/server/ai/website-edit-planner";
+import { validateWebsitePlanAndFiles } from "@/lib/server/ai/website-validator";
 import {
   runSelfReview,
   type SelfReviewFile,
@@ -407,8 +417,9 @@ type ChatPersistenceContext = {
 };
 
 type FileProposalAction = "create" | "modify" | "update" | "write_file";
+type DeleteProposalAction = "delete_file";
 type RuntimeProposalAction = "restart_runtime" | "reload_preview" | "run_dev_server" | "start_runtime" | "stop_runtime";
-type ProposalAction = FileProposalAction | RuntimeProposalAction;
+type ProposalAction = DeleteProposalAction | FileProposalAction | RuntimeProposalAction;
 
 type ProposalChange = {
   action: ProposalAction;
@@ -583,7 +594,24 @@ type DiffProposal = {
   websiteIndustry?: string;
   websiteLayoutType?: string;
   websiteSectionCount?: number;
+  websiteGeneratedActionCount?: number;
+  websiteGenerationContractStatus?: "blocked" | "passed";
+  websiteNormalizedActionCount?: number;
+  websiteObsoleteOwnedFiles?: string[];
+  websiteUnknownFiles?: string[];
+  validationFilePaths?: string[];
+  validationProfile?: WebsiteValidationProfile;
+  virtualAfterFileCount?: number;
+  virtualBeforeFileCount?: number;
+  virtualBrokenReferenceCount?: number;
+  virtualGraphEdgeCount?: number;
+  virtualInitialBrokenReferenceCount?: number;
+  virtualProtectedFiles?: string[];
+  virtualReferenceRepairCount?: number;
+  websiteRepairInputCount?: number;
+  websiteRequestScope?: WebsiteEditIntent["requestScope"];
   websiteValidationPassed?: boolean;
+  websiteValidatorInputCount?: number;
   websiteVisualStrategy?: string;
 };
 
@@ -1670,7 +1698,7 @@ function createLocalProposal(
   generatorContract?: GeneratorContract,
   proposalContext?: ProposalContext
 ): DiffProposal {
-  const renameRequest = detectRenameRequest(prompt);
+  const renameRequest = isFullWebsiteReplacementRequest(prompt) ? null : detectRenameRequest(prompt);
 
   if (decision.requestType === "code_system_generation" || (proposalContext?.mode === "CODE" && proposalContext.codeGenerationBrief)) {
     const promptText = prompt.toLowerCase();
@@ -2436,90 +2464,6 @@ if ("IntersectionObserver" in window) {
       proposalContext
     });
     const websiteFiles = websiteGeneration.files;
-
-    if (!websiteGeneration.validation.passed) {
-      return {
-        changes: [],
-        id: `proposal-${Date.now()}`,
-        mode,
-        projectId: diagnostic.projectId,
-        proposalRoutingMode: "blocked",
-        proposalRoutingReasons: websiteGeneration.validation.blockedReasons.map((reason) => ({
-          code: "website_validation_block",
-          message: reason,
-          severity: "high"
-        })),
-        requiresExtraReview: true,
-        shouldBlockExecution: true,
-        status: "pending",
-        summary: `Website validator blocked local website generation: ${websiteGeneration.validation.blockedReasons.join("; ")}.`,
-        designTokenCount: websiteGeneration.designTokenCount,
-        designTokenTheme: websiteGeneration.designTokenTheme,
-        designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
-        memoryIgnoredForNewProject: true,
-        plannerGeneratorAligned: websiteGeneration.plannerGeneratorAligned,
-        sourceOfTruthDomain: websiteGeneration.sourceOfTruthDomain,
-        sourceOfTruthPages: websiteGeneration.sourceOfTruthPages,
-        sourceOfTruthPrompt: prompt,
-        tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
-        validatorPlanAligned: websiteGeneration.validatorPlanAligned,
-        websiteAudience: websiteGeneration.plan.audience,
-        websiteGoal: websiteGeneration.plan.goal,
-        websiteIndustry: websiteGeneration.plan.industry,
-        websiteLayoutType: websiteGeneration.plan.layoutType,
-        websiteSectionCount: websiteGeneration.plan.requiredSections.length,
-        websiteValidationPassed: false,
-        websiteVisualStrategy: websiteGeneration.plan.visualStrategy
-      };
-    }
-
-    const publicWebsiteFiles = Object.entries(websiteFiles)
-      .filter(([path]) => path.toLowerCase().endsWith(".html"))
-      .map(([, content]) => content.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<script[\s\S]*?<\/script>/gi, ""));
-    const forbiddenHits = generatorContract
-      ? generatorContract.forbiddenTerms.filter((term) =>
-          !proposalContext?.requiredFiles.some((path) => path.toLowerCase().includes(term.toLowerCase())) &&
-          !proposalContext?.pages.some((page) => page.toLowerCase() === term.toLowerCase()) &&
-          !proposalContext?.websiteGenerationBrief?.ctaPatterns.some((cta) => cta.toLowerCase().includes(term.toLowerCase())) &&
-          publicWebsiteFiles.some((content) => content.toLowerCase().includes(term.toLowerCase()))
-        )
-      : [];
-
-    if (forbiddenHits.length > 0) {
-      return {
-        changes: [],
-        id: `proposal-${Date.now()}`,
-        mode,
-        projectId: diagnostic.projectId,
-        proposalRoutingMode: "blocked",
-        proposalRoutingReasons: [{
-          code: "generator_contract_block",
-          message: `Generated content still contained forbidden terms: ${forbiddenHits.slice(0, 8).join(", ")}.`,
-          severity: "high"
-        }],
-        requiresExtraReview: true,
-        shouldBlockExecution: true,
-        status: "pending",
-        summary: `Generator contract blocked local website generation because forbidden terms remained in the proposed output: ${forbiddenHits.slice(0, 8).join(", ")}.`,
-        designTokenCount: websiteGeneration.designTokenCount,
-        designTokenTheme: websiteGeneration.designTokenTheme,
-        designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
-        memoryIgnoredForNewProject: true,
-        plannerGeneratorAligned: websiteGeneration.plannerGeneratorAligned,
-        sourceOfTruthDomain: websiteGeneration.sourceOfTruthDomain,
-        sourceOfTruthPages: websiteGeneration.sourceOfTruthPages,
-        sourceOfTruthPrompt: prompt,
-        tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
-        validatorPlanAligned: websiteGeneration.validatorPlanAligned,
-        websiteAudience: websiteGeneration.plan.audience,
-        websiteGoal: websiteGeneration.plan.goal,
-        websiteIndustry: websiteGeneration.plan.industry,
-        websiteLayoutType: websiteGeneration.plan.layoutType,
-        websiteSectionCount: websiteGeneration.plan.requiredSections.length,
-        websiteValidationPassed: false,
-        websiteVisualStrategy: websiteGeneration.plan.visualStrategy
-      };
-    }
     const generatedFileNames = Object.keys(websiteFiles);
     const websiteBriefName = proposalContext?.websiteGenerationBrief?.displayName ?? websiteComposition.businessType;
     const standardFiles = Object.entries(websiteFiles).map(([path, content]) => ({
@@ -2540,8 +2484,160 @@ if ("IntersectionObserver" in window) {
         summary: file.summary
       }))
     ];
+    const normalizedChanges = changes.map((change) => ({
+      ...change,
+      diffPreview: createDiffPreview(change.action, change.path, change.proposedContent)
+    }));
+    const websiteBrief = proposalContext?.websiteGenerationBrief;
+    const existingWebsiteState = buildWebsiteEditContext(workspace);
+    const newCanonicalFiles = new Set(Object.keys(websiteFiles));
+    const obsoleteOwnedFiles = websiteBrief?.requestScope === "full_replacement"
+      ? existingWebsiteState.websiteOwnedFiles.filter((path) =>
+          diagnostic.fileList.includes(path) &&
+          isWebsiteOwnedPath(path) &&
+          !newCanonicalFiles.has(path)
+        )
+      : [];
+    const deleteChanges: ProposalChange[] = obsoleteOwnedFiles.map((path) => ({
+      action: "delete_file",
+      path,
+      summary: `Deletes obsolete WEBSITE-owned file ${path} only after this replacement proposal is approved.`
+    }));
+    const generationVirtualFilesystem = buildWebsiteVirtualFilesystem({
+      actions: [...normalizedChanges, ...deleteChanges],
+      canonicalDomain: websiteBrief?.domainId ?? websiteGeneration.sourceOfTruthDomain,
+      canonicalOwnedFiles: Object.keys(websiteFiles),
+      canonicalPageFiles: (websiteBrief?.requestedPages ?? websiteGeneration.sourceOfTruthPages).map((page) =>
+        page === "home" ? "index.html" : `${page}.html`
+      ),
+      currentFiles: existingWebsiteState.files,
+      projectId: diagnostic.projectId,
+      requestScope: websiteBrief?.requestScope ?? "full_generation"
+    });
+    const generationProjectedFiles = virtualFilesystemFiles(generationVirtualFilesystem);
+    const normalizedFiles = proposedFilesFromChanges(normalizedChanges);
+    const contractAssertion = websiteBrief
+      ? assertWebsiteGenerationContract({
+          brief: websiteBrief,
+          generatedFiles: websiteFiles,
+          generatorContract,
+          normalizedFiles
+        })
+      : {
+          generatedFileCount: generatedFileNames.length,
+          issues: [{
+            code: "GEN002" as const,
+            message: "The canonical WEBSITE generation brief was unavailable."
+          }],
+          normalizedActionCount: Object.keys(normalizedFiles).length,
+          passed: false,
+          repairInputCount: Object.keys(normalizedFiles).length,
+          requiredFiles: proposalContext?.requiredFiles ?? [],
+          validatorInputCount: Object.keys(normalizedFiles).length
+        };
+    const normalizedValidation = validateWebsitePlanAndFiles({
+      files: normalizedFiles,
+      plan: websiteGeneration.plan
+    });
+    const publicWebsiteFiles = Object.entries(normalizedFiles)
+      .filter(([path]) => path.toLowerCase().endsWith(".html"))
+      .map(([, content]) => content.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<script[\s\S]*?<\/script>/gi, ""));
+    const forbiddenHits = generatorContract
+      ? generatorContract.forbiddenTerms.filter((term) =>
+          !proposalContext?.requiredFiles.some((path) => path.toLowerCase().includes(term.toLowerCase())) &&
+          !proposalContext?.pages.some((page) => page.toLowerCase() === term.toLowerCase()) &&
+          !proposalContext?.websiteGenerationBrief?.ctaPatterns.some((cta) => cta.toLowerCase().includes(term.toLowerCase())) &&
+          publicWebsiteFiles.some((content) => content.toLowerCase().includes(term.toLowerCase()))
+        )
+      : [];
+    const websiteMetadata = {
+      designTokenCount: websiteGeneration.designTokenCount,
+      designTokenTheme: websiteGeneration.designTokenTheme,
+      designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
+      memoryIgnoredForNewProject: websiteBrief?.requestScope !== "full_replacement",
+      plannerGeneratorAligned: websiteGeneration.plannerGeneratorAligned,
+      sourceOfTruthDomain: websiteGeneration.sourceOfTruthDomain,
+      sourceOfTruthPages: websiteGeneration.sourceOfTruthPages,
+      sourceOfTruthPrompt: prompt,
+      tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
+      validatorPlanAligned: normalizedValidation.passed || normalizedValidation.blockedReasons.every((reason) => !reason.includes("planner page")),
+      websiteAudience: websiteGeneration.plan.audience,
+      websiteGeneratedActionCount: contractAssertion.generatedFileCount,
+      websiteGenerationContractStatus: contractAssertion.passed ? ("passed" as const) : ("blocked" as const),
+      websiteGoal: websiteGeneration.plan.goal,
+      websiteIndustry: websiteGeneration.plan.industry,
+      websiteLayoutType: websiteGeneration.plan.layoutType,
+      websiteNormalizedActionCount: contractAssertion.normalizedActionCount,
+      websiteRepairInputCount: contractAssertion.repairInputCount,
+      websiteRequestScope: websiteBrief?.requestScope ?? ("full_generation" as const),
+      websiteObsoleteOwnedFiles: obsoleteOwnedFiles,
+      websiteUnknownFiles: existingWebsiteState.unknownFiles,
+      websiteSectionCount: websiteGeneration.plan.requiredSections.length,
+      websiteValidationPassed: normalizedValidation.passed,
+      websiteValidatorInputCount: contractAssertion.validatorInputCount,
+      websiteVisualStrategy: websiteGeneration.plan.visualStrategy,
+      validationProfile: generationVirtualFilesystem.profile,
+      validationFilePaths: generationProjectedFiles.map((file) => file.path),
+      virtualAfterFileCount: generationVirtualFilesystem.after.size,
+      virtualBeforeFileCount: generationVirtualFilesystem.before.size,
+      virtualBrokenReferenceCount: generationVirtualFilesystem.graph.issues.length,
+      virtualGraphEdgeCount: generationVirtualFilesystem.graph.edges.length,
+      virtualProtectedFiles: generationVirtualFilesystem.protected
+    };
+
+    if (!contractAssertion.passed) {
+      return {
+        ...websiteMetadata,
+        changes: [...normalizedChanges, ...deleteChanges],
+        id: `proposal-${Date.now()}`,
+        mode,
+        projectId: diagnostic.projectId,
+        proposalRoutingMode: "blocked",
+        proposalRoutingReasons: contractAssertion.issues.map((issue) => ({
+          code: issue.code === "GEN001"
+            ? "website_generation_empty"
+            : issue.code === "GEN002"
+              ? "website_generation_contract"
+              : "website_structure_block",
+          message: `${issue.code} ${issue.message}`,
+          severity: "high"
+        })),
+        requiresExtraReview: true,
+        shouldBlockExecution: true,
+        status: "pending",
+        summary: `WEBSITE generation contract blocked this proposal: ${contractAssertion.issues.map((issue) => `${issue.code} ${issue.message}`).join("; ")}`
+      };
+    }
+
+    if (!normalizedValidation.passed || forbiddenHits.length > 0) {
+      const blockedReasons = [
+        ...normalizedValidation.blockedReasons,
+        ...(forbiddenHits.length
+          ? [`Generated content still contained forbidden terms: ${forbiddenHits.slice(0, 8).join(", ")}.`]
+          : [])
+      ];
+
+      return {
+        ...websiteMetadata,
+        changes: [...normalizedChanges, ...deleteChanges],
+        id: `proposal-${Date.now()}`,
+        mode,
+        projectId: diagnostic.projectId,
+        proposalRoutingMode: "blocked",
+        proposalRoutingReasons: blockedReasons.map((reason) => ({
+          code: "website_validation_block",
+          message: reason,
+          severity: "high"
+        })),
+        requiresExtraReview: true,
+        shouldBlockExecution: true,
+        status: "pending",
+        summary: `Website validation blocked approval while preserving ${normalizedChanges.length} generated file changes for repair: ${blockedReasons.join("; ")}.`
+      };
+    }
 
     return {
+      ...websiteMetadata,
       id: `proposal-${Date.now()}`,
       mode,
       projectId: diagnostic.projectId,
@@ -2554,28 +2650,9 @@ if ("IntersectionObserver" in window) {
           : hasStandardWebFiles(diagnostic.fileList)
             ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")}.`
             : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")}.`,
-      websiteAudience: websiteGeneration.plan.audience,
-      designTokenCount: websiteGeneration.designTokenCount,
-      designTokenTheme: websiteGeneration.designTokenTheme,
-      designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
-      memoryIgnoredForNewProject: true,
-      plannerGeneratorAligned: websiteGeneration.plannerGeneratorAligned,
-      sourceOfTruthDomain: websiteGeneration.sourceOfTruthDomain,
-      sourceOfTruthPages: websiteGeneration.sourceOfTruthPages,
-      sourceOfTruthPrompt: prompt,
-      tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
-      validatorPlanAligned: websiteGeneration.validatorPlanAligned,
-      websiteGoal: websiteGeneration.plan.goal,
-      websiteIndustry: websiteGeneration.plan.industry,
-      websiteLayoutType: websiteGeneration.plan.layoutType,
-      websiteSectionCount: websiteGeneration.plan.requiredSections.length,
-      websiteValidationPassed: websiteGeneration.validation.passed,
-      websiteVisualStrategy: websiteGeneration.plan.visualStrategy,
       changes: [
-        ...changes.map((change) => ({
-          ...change,
-          diffPreview: createDiffPreview(change.action, change.path, change.proposedContent)
-        })),
+        ...normalizedChanges,
+        ...deleteChanges,
         ...(mode === "EXECUTE" || shouldRestartPreview(prompt)
           ? [
               {
@@ -3413,7 +3490,9 @@ function attachProposalRoutingMetadata(
     blueprintName: blueprint?.blueprintName,
     blueprintPreviewType: blueprint?.previewType,
     blueprintStatus: blueprint?.blueprintStatus,
-    authoritativeDomain: contextPriority?.authoritativeDomain,
+    authoritativeDomain: proposalContext?.mode === "WEBSITE"
+      ? proposalContext.domain
+      : contextPriority?.authoritativeDomain,
     authoritativeIntentFamily: contextPriority?.authoritativeIntentFamily,
     authoritativeMode: contextPriority?.authoritativeMode,
     authoritativePreviewType: contextPriority?.authoritativePreviewType,
@@ -4199,19 +4278,49 @@ function createWebsiteEditProposal(input: {
   prompt: string;
   proposalContext: ProposalContext;
 }): DiffProposal {
-  const finalFiles = { ...input.context.files };
+  const validationProfile = input.plan.mode === "blocked"
+    ? "clarification_only"
+    : validationProfileForWebsiteScope(input.intent.requestScope);
+  const initialProposalChanges: ProposalChange[] = input.plan.changes.map((change) => ({
+    action: input.context.files[change.path] ? ("update" as const) : ("create" as const),
+    diffPreview: createDiffPreview(input.context.files[change.path] ? "update" : "create", change.path, change.content),
+    path: change.path,
+    proposedContent: change.content,
+    summary: change.summary
+  }));
+  const initialVirtualFilesystem = buildWebsiteVirtualFilesystem({
+    actions: initialProposalChanges,
+    canonicalDomain: input.context.domainId,
+    canonicalOwnedFiles: input.context.requiredFiles,
+    canonicalPageFiles: input.context.canonicalPagePaths,
+    currentFiles: input.context.files,
+    profile: validationProfile,
+    projectId: input.projectId,
+    requestScope: input.intent.requestScope
+  });
+  const referenceRepair = repairWebsiteVirtualReferenceTypos(initialVirtualFilesystem);
+  const proposalChanges = referenceRepair.actions.map((action) => {
+    const original = initialProposalChanges.find((change) => change.path === action.path);
+    if (!original || typeof action.proposedContent !== "string") return original ?? action as ProposalChange;
+    return {
+      ...original,
+      diffPreview: createDiffPreview(original.action as FileProposalAction, original.path ?? "", action.proposedContent),
+      proposedContent: action.proposedContent
+    };
+  });
+  const virtualFilesystem = buildWebsiteVirtualFilesystem({
+    actions: proposalChanges,
+    canonicalDomain: input.context.domainId,
+    canonicalOwnedFiles: input.context.requiredFiles,
+    canonicalPageFiles: input.context.canonicalPagePaths,
+    currentFiles: input.context.files,
+    profile: validationProfile,
+    projectId: input.projectId,
+    requestScope: input.intent.requestScope
+  });
+  const projectedFiles = virtualFilesystemFiles(virtualFilesystem);
   const baseProposal: DiffProposal = {
-    changes: input.plan.changes.map((change) => {
-      finalFiles[change.path] = change.content;
-
-      return {
-        action: input.context.files[change.path] ? ("update" as const) : ("create" as const),
-        diffPreview: createDiffPreview(input.context.files[change.path] ? "update" : "create", change.path, change.content),
-        path: change.path,
-        proposedContent: change.content,
-        summary: change.summary
-      };
-    }),
+    changes: proposalChanges,
     detectedDomain: input.context.domainId,
     domainSource: "existing_project",
     id: `proposal-${Date.now()}`,
@@ -4223,7 +4332,18 @@ function createWebsiteEditProposal(input: {
       framework: "static_html",
       ignoredContractReason: input.context.ignoredContractReason ?? null,
       previewType: "static_website",
-      source: input.context.mixedModeConflict ? "website_files_over_code_contract" : "website_contract"
+      source: input.context.mixedModeConflict ? "website_files_over_code_contract" : "website_contract",
+      validationProfile,
+      canonicalPagePaths: input.context.canonicalPagePaths,
+      obsoleteOwnedFiles: input.context.obsoleteOwnedFiles,
+      physicalHtmlCount: input.context.physicalHtmlFiles.length,
+      unknownFiles: input.context.unknownFiles,
+      virtualAfterFileCount: virtualFilesystem.after.size,
+      virtualBeforeFileCount: virtualFilesystem.before.size,
+      virtualBrokenReferenceCount: virtualFilesystem.graph.issues.length,
+      virtualGraphEdgeCount: virtualFilesystem.graph.edges.length,
+      virtualInitialBrokenReferenceCount: initialVirtualFilesystem.graph.issues.length,
+      virtualReferenceRepairCount: referenceRepair.repairs.length
     },
     previewType: "website_static_preview",
     projectId: input.projectId,
@@ -4239,7 +4359,7 @@ function createWebsiteEditProposal(input: {
           message: input.plan.summary,
           severity: "info"
         }],
-    requiredPageCount: input.context.exactPageCount ?? (input.context.requestedPages.length || null),
+    requiredPageCount: null,
     requiresExtraReview: input.plan.mode === "blocked",
     shouldBlockExecution: input.plan.mode === "blocked",
     sourceOfTruthDomain: input.context.domainId,
@@ -4247,11 +4367,37 @@ function createWebsiteEditProposal(input: {
     sourceOfTruthPrompt: input.prompt,
     status: "pending",
     summary: input.plan.summary,
+    validationFilePaths: projectedFiles.map((file) => file.path),
+    validationProfile,
+    virtualAfterFileCount: virtualFilesystem.after.size,
+    virtualBeforeFileCount: virtualFilesystem.before.size,
+    virtualBrokenReferenceCount: virtualFilesystem.graph.issues.length,
+    virtualGraphEdgeCount: virtualFilesystem.graph.edges.length,
+    virtualInitialBrokenReferenceCount: initialVirtualFilesystem.graph.issues.length,
+    virtualProtectedFiles: virtualFilesystem.protected,
+    virtualReferenceRepairCount: referenceRepair.repairs.length,
+    websiteRequestScope: input.intent.requestScope,
     websiteValidationPassed: input.plan.mode !== "blocked"
+  };
+  if (input.plan.mode === "blocked") {
+    const editApprovalContext: ProposalContext = {
+      ...input.proposalContext,
+      domain: input.context.domainId ?? input.proposalContext.domain,
+      pages: [],
+      requiredFiles: []
+    };
+
+    return applyFinalApprovalAuthority(baseProposal, editApprovalContext);
+  }
+  const editApprovalContext: ProposalContext = {
+    ...input.proposalContext,
+    domain: input.context.domainId ?? input.proposalContext.domain,
+    pages: input.context.requestedPages.length ? input.context.requestedPages : input.proposalContext.pages,
+    requiredFiles: input.context.requiredFiles
   };
   const selfReview = runSelfReview({
     domain: input.context.domainId ?? input.proposalContext.domain,
-    files: Object.entries(finalFiles).map(([path, content]) => ({ content, path })),
+    files: projectedFiles,
     generator: `${input.generatorContract.contractId}_website_edit`,
     manifest: {
       framework: "static_html",
@@ -4267,27 +4413,19 @@ function createWebsiteEditProposal(input: {
     systemRisks: selfReviewSystemRisksFromWebsiteEdit(input.plan)
   });
   const proposalWithSelfReview = applySelfReviewMetadata(baseProposal, selfReview);
-  const editApprovalContext: ProposalContext = {
-    ...input.proposalContext,
-    domain: input.context.domainId ?? input.proposalContext.domain,
-    pages: input.context.requestedPages.length ? input.context.requestedPages : input.proposalContext.pages,
-    requiredFiles: input.plan.mode === "blocked"
-      ? []
-      : baseProposal.changes
-          .filter((change) => isFileProposalAction(change.action) && change.path)
-          .map((change) => change.path as string)
-  };
-
   return applyFinalApprovalAuthority(proposalWithSelfReview, editApprovalContext);
 }
 
 function evaluateAndRepairProposal(input: {
   blueprint: BusinessBlueprint;
+  composition: CompositionStrategy;
   compositionPlan: CompositionPlan;
   contextPriority: ContextPriorityResult;
+  decision: DecisionPlan;
   decomposition: TaskDecomposition;
   executionPlan: ExecutionPlan;
   generatorContract: GeneratorContract;
+  intent: IntentIntelligence;
   productMode: "ASK" | "CODE" | "WEBSITE";
   proposalContext: ProposalContext;
   projectContract: ProjectContract | null;
@@ -4407,7 +4545,31 @@ function evaluateAndRepairProposal(input: {
     };
   }
 
-  const repairedProposal = applyRepairedFilesToProposal(input.proposal, repair);
+  const criticalReasons = (input.proposal.proposalRoutingReasons ?? []).filter((reason) =>
+    reason.code === "code_app_collision" ||
+    reason.code === "generator_contract_block" ||
+    reason.code === "website_generation_empty" ||
+    reason.code === "website_generation_contract" ||
+    reason.message.toLowerCase().includes("project isolation") ||
+    reason.message.toLowerCase().includes("cross-project")
+  );
+  const repairableProposal: DiffProposal = {
+    ...input.proposal,
+    approvalDisabled: undefined,
+    blockedReason: criticalReasons.length ? input.proposal.blockedReason : undefined,
+    proposalRoutingMode: criticalReasons.length ? "blocked" : "review_required",
+    proposalRoutingReasons: criticalReasons,
+    requiresExtraReview: criticalReasons.length > 0,
+    shouldBlockExecution: criticalReasons.length > 0
+  };
+  const repairedProposal = enforcePromptSovereignty({
+    composition: input.composition,
+    decision: input.decision,
+    intent: input.intent,
+    prompt: input.prompt,
+    proposalContext: input.proposalContext,
+    proposal: applyRepairedFilesToProposal(repairableProposal, repair)
+  });
   const repairedDomainValidation = validateProposalContent({
     ...input,
     proposal: repairedProposal
@@ -4685,10 +4847,13 @@ async function createFallbackProposalResponse(input: {
   });
   const evaluatedProposal = evaluateAndRepairProposal({
     blueprint: input.blueprint,
+    composition: proposalComposition,
     compositionPlan: input.compositionPlan,
     contextPriority: input.contextPriority,
+    decision: proposalDecision,
     decomposition: input.decomposition,
     executionPlan: input.executionPlan,
+    intent: input.intent,
     productMode: input.contextPriority.authoritativeMode,
     generatorContract: input.generatorContract,
     proposalContext: input.proposalContext,
@@ -5253,7 +5418,8 @@ export async function POST(request: Request) {
   if (
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     productMode === "WEBSITE" &&
-    hasWebsiteEditSignal(effectiveUserPrompt)
+    hasWebsiteEditSignal(effectiveUserPrompt) &&
+    !isFullWebsiteReplacementRequest(effectiveUserPrompt)
   ) {
     const websiteEditContext = buildWebsiteEditContext(workspace);
 
@@ -5382,6 +5548,7 @@ export async function POST(request: Request) {
   const shouldUseDeterministicProposal =
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (shouldUseDeterministicDecision(decision) ||
+      (productMode === "WEBSITE" && isFullWebsiteReplacementRequest(effectiveUserPrompt)) ||
       isEnhancementRequest(effectiveUserPrompt) ||
       Boolean(detectRenameRequest(effectiveUserPrompt)) ||
       (mode === "EXECUTE" && isInvoiceRequest(effectiveUserPrompt)));
@@ -5445,10 +5612,13 @@ export async function POST(request: Request) {
     });
     const evaluatedProposal = evaluateAndRepairProposal({
       blueprint,
+      composition: proposalComposition,
       compositionPlan,
       contextPriority,
+      decision: proposalDecision,
       decomposition,
       executionPlan,
+      intent,
       productMode,
       generatorContract,
       proposalContext,
@@ -5696,6 +5866,14 @@ export async function POST(request: Request) {
               };
             }
 
+            if (change.action === "delete_file") {
+              return {
+                action: change.action,
+                path: change.path,
+                summary: change.summary
+              };
+            }
+
             return {
               action: change.action,
               diffPreview:
@@ -5731,10 +5909,13 @@ export async function POST(request: Request) {
     });
     const evaluatedProposal = evaluateAndRepairProposal({
       blueprint,
+      composition: proposalComposition,
       compositionPlan,
       contextPriority,
+      decision: proposalDecision,
       decomposition,
       executionPlan,
+      intent,
       productMode,
       generatorContract,
       proposalContext,

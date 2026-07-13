@@ -208,9 +208,12 @@ function profileFor(domain: string | null) {
   if (domain && profiles[domain]) return profiles[domain];
   const taxonomyProfile = getTaxonomyProfile(domain);
   if (taxonomyProfile) {
+    const ownVocabulary = new Set(taxonomyProfile.websiteVocabulary.map((term) => normalize(term)));
     return {
       forbidden: [
-        ...taxonomyProfile.conflicts.flatMap((conflict) => getTaxonomyProfile(conflict)?.websiteVocabulary ?? [conflict.replace(/_/g, " ")]),
+        ...taxonomyProfile.conflicts
+          .flatMap((conflict) => getTaxonomyProfile(conflict)?.websiteVocabulary ?? [conflict.replace(/_/g, " ")])
+          .filter((term) => !ownVocabulary.has(normalize(term))),
         ...taxonomyProfile.conflicts.map((conflict) => conflict.replace(/_/g, " "))
       ],
       required: taxonomyProfile.websiteVocabulary

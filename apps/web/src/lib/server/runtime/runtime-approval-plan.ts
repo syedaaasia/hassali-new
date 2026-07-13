@@ -85,7 +85,8 @@ function normalizeChangePath(value: unknown, workspaceRoot: string) {
 function changeToStep(
   change: RuntimeApprovalChange,
   index: number,
-  workspaceRoot: string
+  workspaceRoot: string,
+  productMode: "ASK" | "CODE" | "WEBSITE"
 ): {
   runtimeWarning: string | null;
   blockedReasons: RuntimeBlockedReason[];
@@ -110,6 +111,38 @@ function changeToStep(
       blockedReasons: [blocked("write_not_allowed", "Delete actions are blocked in this runtime approval phase.")],
       skipped: null,
       step: null
+    };
+  }
+
+  if (action === "delete_file") {
+    const path = normalizeChangePath(change.path, workspaceRoot);
+    if (productMode !== "WEBSITE") {
+      return {
+        runtimeWarning: null,
+        blockedReasons: [blocked("write_not_allowed", "delete_file is restricted to approved WEBSITE replacement proposals.")],
+        skipped: null,
+        step: null
+      };
+    }
+    if (!path) {
+      return {
+        runtimeWarning: null,
+        blockedReasons: [blocked("unsafe_path", "A safe relative delete path is required.")],
+        skipped: null,
+        step: null
+      };
+    }
+    return {
+      blockedReasons: [],
+      runtimeWarning: null,
+      skipped: null,
+      step: {
+        approved: true,
+        id: `proposal-change-${index}`,
+        path,
+        summary,
+        tool: "delete_file"
+      }
     };
   }
 
@@ -170,6 +203,7 @@ function changeToStep(
 
 export function buildApprovedPlanFromProposal(input: {
   changes: RuntimeApprovalChange[];
+  productMode: "ASK" | "CODE" | "WEBSITE";
   projectId: string;
   proposalId: string;
   workspaceRoot: string;
@@ -180,7 +214,7 @@ export function buildApprovedPlanFromProposal(input: {
   const skippedSummaries: string[] = [];
 
   input.changes.forEach((change, index) => {
-    const converted = changeToStep(change, index, input.workspaceRoot);
+    const converted = changeToStep(change, index, input.workspaceRoot, input.productMode);
 
     blockedReasons.push(...converted.blockedReasons);
 
@@ -201,7 +235,7 @@ export function buildApprovedPlanFromProposal(input: {
     approvedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
     id: input.proposalId,
-    mode: "CODE",
+    mode: input.productMode === "WEBSITE" ? "WEBSITE" : "CODE",
     projectId: input.projectId,
     steps: [...new Map(steps.map((step) => [step.path ?? step.id, step])).values()],
     summary: `Approved proposal ${input.proposalId}`,

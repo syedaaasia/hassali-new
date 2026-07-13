@@ -22,6 +22,7 @@ import type {
 
 const runnerAllowedTools: RuntimeToolName[] = [
   "apply_patch",
+  "delete_file",
   "restart_preview",
   "verify_files",
   "write_file"
@@ -46,6 +47,7 @@ export type ApprovedFileRunnerOutput = {
     stepId: string;
   }>;
   errors: string[];
+  deletedFiles: string[];
   events: RuntimeEvent[];
   runnerId: string;
   runnerStatus: "blocked" | "completed" | "failed" | "partial";
@@ -125,6 +127,10 @@ function validateRunnerStep(
     reasons.push(blocked("unsafe_path", `Step '${step.id}' needs a target path.`));
   }
 
+  if (step.tool === "delete_file" && (!stepFilePath(step) || plan.mode !== "WEBSITE")) {
+    reasons.push(blocked("write_not_allowed", "delete_file requires an approved WEBSITE plan and a safe target path."));
+  }
+
   if (step.path && !resolveInsideWorkspace(workspaceRoot, step.path)) {
     reasons.push(blocked("external_path_blocked", `Step '${step.id}' targets a path outside the workspace root.`));
   }
@@ -175,6 +181,21 @@ async function verifyWrittenFiles(writtenFiles: Array<{ content: string; path: s
   };
 }
 
+async function verifyDeletedFiles(deletedFiles: Array<{ path: string; target: string }>) {
+  const details: string[] = [];
+  let ok = true;
+  for (const file of deletedFiles) {
+    try {
+      await stat(file.target);
+      ok = false;
+      details.push(`${file.path}: still exists after delete`);
+    } catch {
+      details.push(`${file.path}: deleted`);
+    }
+  }
+  return { details, ok };
+}
+
 async function captureFileBeforeWrite(target: string) {
   try {
     return {
@@ -215,7 +236,9 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
   const skippedSteps: string[] = [];
   const blockedSteps: ApprovedFileRunnerOutput["blockedSteps"] = [];
   const writtenFiles: string[] = [];
+  const deletedFiles: string[] = [];
   const writtenTargets: Array<{ content: string; path: string; target: string }> = [];
+  const deletedTargets: Array<{ path: string; target: string }> = [];
   const backups: Array<{ content: string; existed: boolean; target: string }> = [];
   const errors: string[] = [];
   const snapshotBefore = await createGitSnapshotSafety({
@@ -275,6 +298,11 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
       continue;
     }
 
+    if (step.tool === "delete_file") {
+      runnableSteps.push(step);
+      continue;
+    }
+
     const targetContent = contentForStep(step, input.files);
 
     if (targetContent === null || targetContent.length === 0) {
@@ -292,16 +320,32 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
   if (blockedSteps.length === 0) {
     for (const step of runnableSteps) {
       try {
+        const target = resolveInsideWorkspace(input.workspaceRoot, stepFilePath(step));
+
+        if (!target) {
+          throw new Error(`Refusing to mutate outside workspace root: ${stepFilePath(step)}`);
+        }
+
+        if (step.tool === "delete_file") {
+          backups.push({ ...(await captureFileBeforeWrite(target)), target });
+          await rm(target, { force: true });
+          deletedFiles.push(stepFilePath(step));
+          deletedTargets.push({ path: stepFilePath(step), target });
+          appliedSteps.push(step.id);
+          events.push(event({
+            message: `Deleted approved WEBSITE file '${step.path}'.`,
+            metadata: { path: step.path ?? null, tool: step.tool },
+            runnerId,
+            stepId: step.id,
+            type: "file_deleted"
+          }));
+          continue;
+        }
+
         const targetContent = contentForStep(step, input.files);
 
         if (targetContent === null || targetContent.length === 0) {
           throw new Error(`Step '${step.id}' has no approved content to write.`);
-        }
-
-        const target = resolveInsideWorkspace(input.workspaceRoot, stepFilePath(step));
-
-        if (!target) {
-          throw new Error(`Refusing to write outside workspace root: ${stepFilePath(step)}`);
         }
 
         backups.push({ ...(await captureFileBeforeWrite(target)), target });
@@ -326,12 +370,18 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
   }
 
   let verification = await verifyWrittenFiles(writtenTargets);
+  const deleteVerification = await verifyDeletedFiles(deletedTargets);
+  verification = {
+    ...verification,
+    details: [...verification.details, ...deleteVerification.details],
+    ok: verification.ok && deleteVerification.ok
+  };
 
   if (!verification.ok && errors.length === 0) {
     errors.push("Approved file runner verification failed.");
   }
 
-  if ((errors.length > 0 || !verification.ok) && writtenTargets.length > 0) {
+  if ((errors.length > 0 || !verification.ok) && backups.length > 0) {
     await rollbackWrites(backups).catch((error) => {
       errors.push(error instanceof Error ? error.message : "Rollback failed.");
     });
@@ -342,6 +392,7 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
       type: "rollback_applied"
     }));
     writtenFiles.length = 0;
+    deletedFiles.length = 0;
     appliedSteps.length = 0;
     verification = await verifyWrittenFiles([]);
   }
@@ -375,6 +426,7 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
     appliedSteps,
     blockedSteps,
     errors,
+    deletedFiles,
     events,
     runnerId,
     runnerStatus,

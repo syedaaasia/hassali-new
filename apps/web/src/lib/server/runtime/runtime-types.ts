@@ -1,5 +1,6 @@
 export type RuntimeToolName =
   | "apply_patch"
+  | "delete_file"
   | "list_files"
   | "read_file"
   | "restart_preview"
@@ -90,6 +91,7 @@ export type RuntimeEvent = {
     | "aider_worker_timeout"
     | "aider_worker_unavailable"
     | "file_written"
+    | "file_deleted"
     | "goose_delegation_blocked"
     | "goose_delegation_failed"
     | "goose_delegation_planned"

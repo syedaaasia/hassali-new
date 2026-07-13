@@ -321,7 +321,7 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   stubProfile({ aliases: ["hotel", "guesthouse", "guest house", "boutique hotel"], conflicts: ["restaurant", "car_rental"], displayName: "Hotel / Guesthouse", id: "hotel_guesthouse", typoVariants: [], websiteVocabulary: ["rooms", "booking", "amenities", "location", "guests", "breakfast", "hospitality"] }),
   stubProfile({ aliases: ["travel agency", "tour agency", "trip planner", "travel company"], conflicts: ["car_rental", "restaurant"], displayName: "Travel Agency", id: "travel_agency", typoVariants: [], websiteVocabulary: ["travel", "tours", "packages", "destinations", "itinerary", "booking", "support"] }),
   stubProfile({ aliases: ["car repair", "auto repair", "mechanic shop", "vehicle service"], conflicts: ["car_rental", "bicycle_shop"], displayName: "Car Repair", id: "car_repair", typoVariants: [], websiteVocabulary: ["car repair", "mechanic", "diagnostics", "oil change", "brakes", "service booking", "warranty"] }),
-  stubProfile({ aliases: ["electronics store", "electronics shop", "tv shop", "tv store", "television shop", "television store", "smart tv shop", "smart tv store"], conflicts: ["mobile_phone_shop", "dental_clinic"], displayName: "Electronics Store", id: "electronics_store", typoVariants: [], websiteVocabulary: ["electronics", "TV", "OLED", "QLED", "warranty", "installation", "delivery"] }),
+  stubProfile({ aliases: ["electronics store", "electronics shop", "tv business", "tv shop", "tv store", "television business", "television shop", "television store", "smart tv shop", "smart tv store"], conflicts: ["mobile_phone_shop", "dental_clinic"], displayName: "Electronics Store", id: "electronics_store", typoVariants: [], websiteVocabulary: ["electronics", "TV", "OLED", "QLED", "warranty", "installation", "delivery"] }),
   stubProfile({ aliases: ["clothing brand", "fashion brand", "apparel store", "clothing store"], conflicts: ["crm_software", "restaurant"], displayName: "Clothing Brand", id: "clothing_brand", typoVariants: [], websiteVocabulary: ["clothing", "fashion", "collection", "lookbook", "sizes", "fabric", "shipping"] }),
   stubProfile({ aliases: ["interior design", "interior designer", "home interiors"], conflicts: ["upholstery", "construction_company"], displayName: "Interior Design", id: "interior_design", typoVariants: [], websiteVocabulary: ["interior design", "space planning", "materials", "moodboard", "consultation", "home styling"] }),
   stubProfile({ aliases: ["furniture store", "furniture shop", "sofa store", "chair store"], conflicts: ["upholstery", "mobile_phone_shop"], displayName: "Furniture Store", id: "furniture_store", typoVariants: [], websiteVocabulary: ["furniture", "sofa", "chair", "table", "showroom", "delivery", "collections"] }),
@@ -452,9 +452,10 @@ function extractExplicitPageList(prompt: string) {
   const patterns = [
     /\binclude\s+([\s\S]{0,180}?)\s+pages?\b/i,
     /\bwith\s+(?:exactly\s+)?(?:\d+|one|two|three|four|five|six|seven)\s+pages?\s*:?\s*([\s\S]{0,180})/i,
-    /\bpages?\s*:?\s*([\s\S]{0,180})/i
+    /\bpages?\s*:?\s*([\s\S]{0,180})/i,
+    /\bwith\s+((?:home|homepage|about|services?|products?|televisions?|brands?|doctors?|contact|gallery|pricing|blog)[\s\S]{0,180})/i
   ];
-  const pageWordPattern = /about us|our story|about|services?|blogs?|blog|contact|story|products?|menu|pricing|gallery|shop|fleet|booking|home|homepage/gi;
+  const pageWordPattern = /about us|our story|about|services?|blogs?|blog|contact|story|products?|televisions?|brands?|doctors?|menu|pricing|gallery|shop|fleet|booking|home|homepage/gi;
 
   for (const pattern of patterns) {
     const match = prompt.match(pattern);
@@ -486,7 +487,11 @@ export function extractRequestedPages(prompt: string, fallback: string[] = []) {
       : Number(countMatch[1])
     : null;
   const listed = extractExplicitPageList(prompt);
-  const requestedPages = unique(listed.length ? listed : fallback).slice(0, exactPageCount ?? undefined);
+  const genericPages = ["home", "products", "services", "about", "gallery", "contact", "blog"];
+  const candidates = unique([...(listed.length ? listed : fallback), ...genericPages]);
+  const requestedPages = exactPageCount
+    ? candidates.slice(0, exactPageCount)
+    : unique(listed.length ? listed : fallback);
 
   return {
     exactPageCount,
@@ -524,12 +529,28 @@ function contractForbiddenVocabulary(profile: IndustryTaxonomyProfile | null) {
 }
 
 export function buildWebsiteIntentContract(input: {
+  existingDomain?: string | null;
   prompt: string;
   requestedPagesFallback?: string[];
 }): WebsiteIntentContract {
-  const classification = classifyDomainIntent(input.prompt);
+  const promptClassification = classifyDomainIntent(input.prompt);
+  const existingClassification = !promptClassification.profile && input.existingDomain
+    ? classifyDomainIntent(input.existingDomain)
+    : null;
+  const classification = existingClassification?.profile ? existingClassification : promptClassification;
   const profile = classification.profile;
-  const pageInfo = extractRequestedPages(input.prompt, input.requestedPagesFallback?.length ? input.requestedPagesFallback : profile?.commonPages ?? ["home", "about", "contact"]);
+  const explicitPageList = extractExplicitPageList(input.prompt);
+  const landingPageOnly = /\blanding\s+page\b/i.test(input.prompt) && explicitPageList.length === 0;
+  const fallbackPages = landingPageOnly
+    ? ["home"]
+    : !promptClassification.profile && input.existingDomain && input.requestedPagesFallback?.length
+      ? input.requestedPagesFallback
+      : profile?.commonPages?.length
+      ? profile.commonPages
+      : input.requestedPagesFallback?.length
+        ? input.requestedPagesFallback
+        : ["home", "about", "contact"];
+  const pageInfo = extractRequestedPages(input.prompt, fallbackPages);
   const requestedPages = pageInfo.requestedPages.length ? pageInfo.requestedPages : profile?.commonPages ?? ["home", "about", "contact"];
 
   return {

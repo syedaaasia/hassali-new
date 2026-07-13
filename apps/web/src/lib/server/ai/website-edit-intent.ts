@@ -5,9 +5,23 @@ export type WebsiteEditType =
   | "contact_info"
   | "cta_text"
   | "hero_style"
+  | "page_edit"
+  | "page_replacement"
   | "remove_page"
+  | "section_edit"
   | "service_copy"
   | "unknown";
+
+export type WebsiteRequestScope =
+  | "ambiguous_edit"
+  | "content_edit"
+  | "full_generation"
+  | "full_replacement"
+  | "large_partial_replacement"
+  | "page_edit"
+  | "section_edit"
+  | "style_theme_edit"
+  | "targeted_edit";
 
 export type WebsiteEditIntent = {
   clarificationQuestion?: string;
@@ -19,21 +33,68 @@ export type WebsiteEditIntent = {
     colorIntent?: string;
     email?: string;
     pageToRemove?: string;
+    pageTarget?: string;
     phone?: string;
     prices?: string[];
     primaryCta?: string;
     services?: string[];
     styleIntent?: string;
+    sectionTarget?: string;
   };
   mode: "WEBSITE_EDIT";
   originalPrompt: string;
+  requestScope: WebsiteRequestScope;
   risks: string[];
   shouldClarify: boolean;
   targetFiles: string[];
   targetPages: string[];
 };
 
-const editVerbPattern = /\b(?:change|update|make|add|remove|rename|replace|edit|darken|lighten)\b/i;
+const editVerbPattern = /\b(?:change|update|make|add|remove|rename|replace|rewrite|rebuild|redesign|improve|polish|edit|darken|lighten)\b/i;
+
+const pagePattern = /\b(?:homepage|home|about(?: us)?|services?|products?|pricing|contact|blog|checkout|cart|gallery)(?:\s+page)?\b/i;
+const sectionPattern = /\b(?:hero|footer|navigation|navbar|header|testimonials?|faq|cta|call to action|product grid|service grid)\b/i;
+
+export function isFullWebsiteReplacementRequest(prompt: string) {
+  const text = prompt.toLowerCase().replace(/\s+/g, " ").trim();
+
+  return (
+    /\b(?:replace|rewrite|rebuild|recreate|redo|overhaul)\b[\s\S]{0,100}\b(?:entire|whole|all)\b[\s\S]{0,40}\b(?:website|site|project|project files|files)\b/.test(text) ||
+    /\b(?:replace|rewrite|rebuild|recreate|redo|overhaul)\s+(?:(?:my|our|the|this|current|existing)\s+)?(?:(?:entire|whole|complete)\s+)?(?:website|site)\b/.test(text) ||
+    /\b(?:website|site)\s+(?:completely\s+)?(?:replace|rewrite|rebuild|recreate|redo|overhaul)(?:d|n)?\b/.test(text) ||
+    /\breplace\s+(?:all|every)\s+(?:project\s+)?files\b/.test(text) ||
+    /\b(?:start over|start from scratch|rebuild from scratch)\b/.test(text) ||
+    /\b(?:create|make|generate)\s+(?:a\s+)?completely new version\b/.test(text) ||
+    /\bturn\s+(?:this|the website|the site|my website|my site)\s+into\b/.test(text) ||
+    /\boverride\s+(?:the\s+)?previous\s+(?:website|site|project)\b/.test(text)
+  );
+}
+
+function isFullWebsiteGenerationRequest(prompt: string) {
+  return (
+    /\b(?:build|create|design|generate)\b[\s\S]{0,80}\b(?:website|site|landing page|web page|store|shop)\b/i.test(prompt) ||
+    /\bmake\s+(?:me\s+)?(?:a|an|new)\b[\s\S]{0,80}\b(?:website|site|landing page|web page|store|shop)\b/i.test(prompt)
+  );
+}
+
+export function classifyWebsiteRequestScope(prompt: string): WebsiteRequestScope {
+  const text = prompt.trim();
+
+  if (isFullWebsiteReplacementRequest(text)) return "full_replacement";
+  if (isFullWebsiteGenerationRequest(text)) return "full_generation";
+  if (/\b(?:replace|rebuild|recreate|redo)\b[\s\S]{0,60}\b(?:only\s+)?(?:the\s+)?(?:home(?:page| page)?|about(?: us)?|services?|products?|pricing|contact|blog|checkout|cart|gallery)(?:\s+page)?\b/i.test(text)) {
+    return "large_partial_replacement";
+  }
+  if (pagePattern.test(text)) return "page_edit";
+  if (sectionPattern.test(text)) return "section_edit";
+  if (/\b(?:theme|palette|color|colour|dark mode|glassmorphism|luxury|premium|apple style)\b/i.test(text)) return "style_theme_edit";
+  if (/\b(?:rewrite|replace|update|fix|add)\b[\s\S]{0,60}\b(?:copy|text|grammar|faq|description|content)\b/i.test(text)) return "content_edit";
+  if (/^(?:fix|improve|update|change|make better|make it better)(?:\s+(?:my|the|this))?\s*(?:website|site|it|this)?[.!?]*$/i.test(text)) {
+    return "ambiguous_edit";
+  }
+
+  return hasWebsiteEditSignal(text) ? "targeted_edit" : "ambiguous_edit";
+}
 
 function normalizePageName(value: string) {
   const normalized = value.toLowerCase().trim();
@@ -75,6 +136,11 @@ export function hasWebsiteEditSignal(prompt: string) {
 
 export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const lowerPrompt = prompt.toLowerCase();
+  const requestScope = classifyWebsiteRequestScope(prompt);
+  const pageTargetMatch = prompt.match(pagePattern);
+  const pageTarget = pageTargetMatch?.[0] ? normalizePageName(pageTargetMatch[0].replace(/\s+page$/i, "")) : undefined;
+  const sectionTargetMatch = prompt.match(sectionPattern);
+  const sectionTarget = sectionTargetMatch?.[0]?.toLowerCase().replace(/\s+/g, "_");
   const phone = extractQuotedOrTrailingValue(prompt, /\b(?:phone|phone number|number)\s+(?:to|as|with)\s+(.+)$/i);
   const email = extractQuotedOrTrailingValue(prompt, /\b(?:email|email address)\s+(?:to|as|with)\s+([^\s]+@[^\s]+)$/i);
   const address = extractQuotedOrTrailingValue(prompt, /\b(?:address|location)\s+(?:to|as|with)\s+(.+)$/i);
@@ -84,7 +150,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const services = extractServices(prompt);
   const wantsTestimonials = /\b(?:add|include)\b[\s\S]{0,60}\b(?:testimonials|reviews|customer feedback)\b/i.test(prompt);
   const wantsHeroStyle = /\bhero\b[\s\S]{0,80}\b(?:darker|lighter|luxury|premium|warmer|cleaner)\b/i.test(prompt) ||
-    /\bmake\s+(?:it|the website)\s+(?:more\s+)?(?:luxury|premium|warmer|cleaner)\b/i.test(prompt);
+    /\bmake\s+(?:it|my website|my site|the website|the site)\s+(?:look\s+)?(?:more\s+)?(?:luxury|premium|warmer|cleaner)\b/i.test(prompt);
   const wantsColor = /\b(?:color|colors|palette|accent|blue|white|gold|darker|warmer)\b/i.test(prompt) &&
     !phone &&
     !email &&
@@ -103,17 +169,23 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   else if (services.length || /\b(?:add prices|prices to the services|service names)\b/i.test(prompt)) editType = "service_copy";
   else if (wantsHeroStyle) editType = "hero_style";
   else if (wantsColor) editType = "color_palette";
+  else if (requestScope === "large_partial_replacement" && pageTarget) editType = "page_replacement";
+  else if (requestScope === "page_edit" && pageTarget) editType = "page_edit";
+  else if (requestScope === "section_edit" && sectionTarget) editType = "section_edit";
 
   const targetPages =
     editType === "remove_page" && pageToRemove ? [normalizePageName(pageToRemove)] :
     editType === "service_copy" ? ["services", "home"] :
     editType === "add_testimonials" || editType === "hero_style" || editType === "cta_text" ? ["home"] :
+    editType === "page_edit" || editType === "page_replacement" ? [pageTarget ?? "home"] :
     [];
   const targetFiles =
     editType === "hero_style" || editType === "color_palette" ? ["styles.css", "HASSALI.md"] :
     editType === "remove_page" && pageToRemove ? [pageToPath(pageToRemove), "HASSALI.md"] :
     editType === "service_copy" ? ["services.html", "index.html", "HASSALI.md"] :
     editType === "add_testimonials" ? ["index.html", "styles.css", "HASSALI.md"] :
+    editType === "page_edit" || editType === "page_replacement" ? [pageToPath(pageTarget ?? "home")] :
+    editType === "section_edit" ? [sectionTarget === "footer" ? "index.html" : "index.html"] :
     editType === "unknown" ? [] :
     ["index.html", "contact.html", "HASSALI.md"];
 
@@ -126,17 +198,20 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
       colorIntent: editType === "color_palette" ? prompt : undefined,
       email,
       pageToRemove: pageToRemove ? normalizePageName(pageToRemove) : undefined,
+      pageTarget,
       phone,
       prices: /\bprices?\b/i.test(prompt) ? [prompt] : undefined,
       primaryCta,
       services,
+      sectionTarget,
       styleIntent: editType === "hero_style" ? lowerPrompt : undefined
     },
     mode: "WEBSITE_EDIT",
     originalPrompt: prompt,
-    risks: editType === "unknown" ? ["Edit intent was not recognized."] : [],
-    shouldClarify: editType === "unknown",
-    clarificationQuestion: editType === "unknown"
+    requestScope,
+    risks: editType === "unknown" ? [`Website request scope was classified as ${requestScope}, but no supported deterministic edit action matched.`] : [],
+    shouldClarify: requestScope === "ambiguous_edit",
+    clarificationQuestion: requestScope === "ambiguous_edit"
       ? "Which part of the existing website should Hassali edit?"
       : undefined,
     targetFiles,

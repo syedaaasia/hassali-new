@@ -80,7 +80,7 @@ type WorkspaceState = {
   loadWorkspace: (projectId?: string | null) => Promise<WorkspaceLoadResult | null>;
   renamePath: (path: string, newPath: string, kind: "file" | "folder") => Promise<void>;
   setError: (error: string | null) => void;
-  syncRuntimeFiles: (updates: RuntimeSyncedFile[]) => void;
+  syncRuntimeFiles: (updates: RuntimeSyncedFile[], deletedPaths?: string[]) => void;
   switchProject: (projectId: string) => Promise<WorkspaceLoadResult | null>;
   updateActiveFile: (content: string) => void;
   saveActiveFile: () => Promise<void>;
@@ -658,8 +658,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
   setError: (error) => set({ error }),
-  syncRuntimeFiles: (updates) => {
-    if (updates.length === 0) {
+  syncRuntimeFiles: (updates, deletedPaths = []) => {
+    if (updates.length === 0 && deletedPaths.length === 0) {
       return;
     }
 
@@ -667,6 +667,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       const files = { ...state.files };
       const openedPaths = new Set(state.openTabs);
       let preferredActivePath = state.activePath;
+
+      for (const deletedPath of deletedPaths) {
+        const normalizedPath = normalizeProjectFilePath(deletedPath);
+        if (!normalizedPath) continue;
+        delete files[normalizedPath];
+        openedPaths.delete(normalizedPath);
+        if (preferredActivePath === normalizedPath) preferredActivePath = "";
+      }
 
       for (const update of updates) {
         const normalizedPath = normalizeProjectFilePath(update.path);
@@ -690,6 +698,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         if (!preferredActivePath || state.activePath === normalizedPath) {
           preferredActivePath = normalizedPath;
         }
+      }
+
+      if (!preferredActivePath || !files[preferredActivePath]) {
+        preferredActivePath = Array.from(openedPaths).find((path) => files[path]) ?? visibleFilePaths(files)[0] ?? "";
       }
 
       return {

@@ -2,6 +2,25 @@ import {
   type CodeIntentContract,
   type WebsiteIntentContract
 } from "@/lib/server/ai/industry-taxonomy";
+import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
+import { classifyWebsiteRequestScope } from "@/lib/server/ai/website-edit-intent";
+
+export type WebsiteGenerationRequestScope = "full_generation" | "full_replacement";
+
+export type WebsiteGenerationContractIssue = {
+  code: "GEN001" | "GEN002" | "STRUCT001";
+  message: string;
+};
+
+export type WebsiteGenerationContractAssertion = {
+  generatedFileCount: number;
+  issues: WebsiteGenerationContractIssue[];
+  normalizedActionCount: number;
+  passed: boolean;
+  repairInputCount: number;
+  requiredFiles: string[];
+  validatorInputCount: number;
+};
 
 export type WebsiteGenerationBrief = WebsiteIntentContract & {
   contentTone: string;
@@ -32,6 +51,7 @@ export type WebsiteGenerationBrief = WebsiteIntentContract & {
     page: string;
   }>;
   proofElements: string[];
+  requestScope: WebsiteGenerationRequestScope;
   ctaPatterns: string[];
 };
 
@@ -116,6 +136,10 @@ export function buildWebsiteGenerationBrief(contract: WebsiteIntentContract): We
     page: page === "blogs" ? "blog" : page
   }));
   const conversionGoal = conversionGoalFor(contract);
+  const classifiedScope = classifyWebsiteRequestScope(contract.originalPrompt);
+  const requestScope: WebsiteGenerationRequestScope = classifiedScope === "full_replacement"
+    ? "full_replacement"
+    : "full_generation";
 
   return {
     ...contract,
@@ -148,8 +172,71 @@ export function buildWebsiteGenerationBrief(contract: WebsiteIntentContract): We
     },
     navigationContract,
     proofElements,
+    requestScope,
     requestedPages,
     requiredFiles
+  };
+}
+
+function samePaths(left: string[], right: string[]) {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+
+  return leftSet.size === rightSet.size && [...leftSet].every((path) => rightSet.has(path));
+}
+
+export function assertWebsiteGenerationContract(input: {
+  brief: WebsiteGenerationBrief;
+  generatedFiles: Record<string, string>;
+  generatorContract?: GeneratorContract;
+  normalizedFiles: Record<string, string>;
+}): WebsiteGenerationContractAssertion {
+  const generatedPaths = Object.keys(input.generatedFiles);
+  const normalizedPaths = Object.keys(input.normalizedFiles);
+  const requiredFiles = input.brief.requiredFiles;
+
+  if (generatedPaths.length === 0 || normalizedPaths.length === 0) {
+    return {
+      generatedFileCount: generatedPaths.length,
+      issues: [{
+        code: "GEN001",
+        message: "The WEBSITE generator returned zero file changes before validation."
+      }],
+      normalizedActionCount: normalizedPaths.length,
+      passed: false,
+      repairInputCount: normalizedPaths.length,
+      requiredFiles,
+      validatorInputCount: normalizedPaths.length
+    };
+  }
+
+  const issues: WebsiteGenerationContractIssue[] = [];
+  const contractFiles = input.generatorContract?.requiredFileStrategy ?? requiredFiles;
+
+  if (!samePaths(requiredFiles, contractFiles)) {
+    issues.push({
+      code: "GEN002",
+      message: "The canonical WEBSITE required-file list diverged from the generator contract."
+    });
+  }
+
+  for (const path of requiredFiles) {
+    if (!(path in input.normalizedFiles)) {
+      issues.push({
+        code: "STRUCT001",
+        message: `Missing prompt-required file: ${path}.`
+      });
+    }
+  }
+
+  return {
+    generatedFileCount: generatedPaths.length,
+    issues,
+    normalizedActionCount: normalizedPaths.length,
+    passed: issues.length === 0,
+    repairInputCount: normalizedPaths.length,
+    requiredFiles,
+    validatorInputCount: normalizedPaths.length
   };
 }
 

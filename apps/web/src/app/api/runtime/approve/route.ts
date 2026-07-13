@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import {
+  deleteUserProjectPath,
   listUserProjectFiles,
   saveUserProjectFileContent
 } from "@hassali/database";
@@ -349,6 +350,7 @@ export async function POST(request: Request) {
   ];
   const { blockedReasons, plan, runtimeWarnings, skippedSummaries } = buildApprovedPlanFromProposal({
     changes: parsed.changes,
+    productMode: productModeFromBody(body.productMode),
     projectId: parsed.projectId,
     proposalId: parsed.proposalId,
     workspaceRoot: workspaceBinding.workspaceRoot
@@ -433,10 +435,27 @@ export async function POST(request: Request) {
     .filter((event) => event.type === "file_written")
     .map((event) => String(event.metadata?.path ?? ""))
     .filter(Boolean);
+  const deletedFiles = result.events
+    .filter((event) => event.type === "file_deleted")
+    .map((event) => String(event.metadata?.path ?? ""))
+    .filter(Boolean);
 
   if (result.ok) {
     try {
       for (const step of plan.steps) {
+        if (step.tool === "delete_file" && step.path) {
+          const remaining = await deleteUserProjectPath({
+            externalUserId: userId,
+            kind: "file",
+            path: step.path,
+            projectId: parsed.projectId
+          });
+          if (!remaining) {
+            throw new Error(`Persistence verification failed for deleted file: ${step.path}`);
+          }
+          continue;
+        }
+
         if (step.tool !== "write_file" || !step.path || typeof step.content !== "string") {
           continue;
         }
@@ -483,6 +502,7 @@ export async function POST(request: Request) {
         workspaceRoot: workspaceBinding.workspaceRoot
       });
       await recordBestEffortEvent(workspaceBinding.workspaceRoot, "PROPOSAL_APPROVED", {
+        filesDeleted: deletedFiles,
         filesWritten: writtenFiles,
         projectId: parsed.projectId,
         proposalId: parsed.proposalId
@@ -505,11 +525,12 @@ export async function POST(request: Request) {
       return Response.json({
         applied: false,
         appliedSteps: result.events
-          .filter((event) => event.type === "file_written" && event.stepId)
+          .filter((event) => (event.type === "file_written" || event.type === "file_deleted") && event.stepId)
           .map((event) => event.stepId),
         blockedSteps: [],
         errors: [`${message} Event PERSIST_FAILURE recorded; proposal remains pending.`],
         events: result.events,
+        deletedFiles,
         ok: false,
         persistenceWarning: "File write completed but canonical persistence failed. Hassali did not mark the proposal successful.",
         runnerId: session.id,
@@ -579,7 +600,7 @@ export async function POST(request: Request) {
   return Response.json({
     applied: fileApprovalSucceeded,
     appliedSteps: result.events
-      .filter((event) => event.type === "file_written" && event.stepId)
+      .filter((event) => (event.type === "file_written" || event.type === "file_deleted") && event.stepId)
       .map((event) => event.stepId),
     blockedSteps: result.blockedReasons.map((reason, index) => ({
       reasons: [reason],
@@ -587,6 +608,7 @@ export async function POST(request: Request) {
     })),
     errors: result.blockedReasons.map((reason) => reason.message),
     events: result.events,
+    deletedFiles,
     rejectedWorkers: workerRouter.rejectedWorkers,
     runnerId: session.id,
     runnerStatus: fileApprovalSucceeded ? "completed" : "failed",

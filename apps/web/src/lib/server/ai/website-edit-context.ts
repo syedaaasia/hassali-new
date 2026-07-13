@@ -27,8 +27,13 @@ export type WebsiteEditContext = {
   ignoredContractReason?: string;
   mixedModeConflict: boolean;
   navLinks: Array<{ href: string; label: string }>;
+  canonicalPagePaths: string[];
+  obsoleteOwnedFiles: string[];
+  physicalHtmlFiles: string[];
   requestedPages: string[];
   requiredFiles: string[];
+  unknownFiles: string[];
+  websiteOwnedFiles: string[];
 };
 
 type WorkspaceLike = {
@@ -38,7 +43,8 @@ type WorkspaceLike = {
   fileList?: string[];
 };
 
-const websiteFilePattern = /^(?:index|about|services|service|contact|blog|blogs|menu|gallery|products|pricing|features|story|team)\.html$|^(?:styles\.css|main\.js|HASSALI\.md|HASSALI\.website\.md)$/i;
+const ownedWebsitePagePattern = /^(?:index|about|services|service|contact|blog|blogs|menu|gallery|products|pricing|features|story|team|televisions|brands|doctors|booking|shop|fleet)\.html$/i;
+const websiteFilePattern = /\.html$|^(?:styles\.css|main\.js|HASSALI\.md|HASSALI\.website\.md)$/i;
 
 function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
@@ -54,7 +60,10 @@ function parseCsvLine(content: string, key: string) {
 }
 
 function parseLine(content: string, key: string) {
-  return content.match(new RegExp(`^${key}:\\s*(.+)$`, "im"))?.[1]?.trim();
+  const loose = content.match(new RegExp(`^${key}:\\s*(.+)$`, "im"))?.[1]?.trim();
+  if (loose) return loose;
+
+  return content.match(new RegExp(`^-\\s*\\*\\*${key}:\\*\\*\\s*(.+)$`, "im"))?.[1]?.trim();
 }
 
 function parseContractMode(content: string) {
@@ -163,19 +172,11 @@ function deriveDomainFromWebsiteFiles(files: Record<string, string>) {
   return classified.confidence >= 0.55 ? classified.domainId ?? undefined : undefined;
 }
 
-function requiredFilesFromWebsiteFiles(files: Record<string, string>, contractRequiredFiles: string[]) {
-  const htmlFiles = Object.keys(files).filter((path) => path.endsWith(".html")).sort((a, b) => {
-    if (a === "index.html") return -1;
-    if (b === "index.html") return 1;
-    return a.localeCompare(b);
-  });
-
-  return unique([
-    ...htmlFiles,
-    files["styles.css"] ? "styles.css" : "",
-    files["main.js"] ? "main.js" : "",
-    ...contractRequiredFiles
-  ]);
+function pageToPath(page: string) {
+  const normalized = page.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return normalized === "home" || normalized === "index" || normalized === "homepage"
+    ? "index.html"
+    : `${normalized}.html`;
 }
 
 export function buildWebsiteEditContext(workspace: WorkspaceLike): WebsiteEditContext {
@@ -212,13 +213,29 @@ export function buildWebsiteEditContext(workspace: WorkspaceLike): WebsiteEditCo
     delete websiteOnlyFiles["HASSALI.md"];
   }
 
-  const requestedPages = parseCsvLine(contract, "requestedPages");
-  const htmlPages = Object.keys(websiteOnlyFiles)
+  const contractPages = parseCsvLine(contract, "requestedPages");
+  const physicalHtmlFiles = Object.keys(websiteOnlyFiles)
     .filter((path) => path.endsWith(".html"))
-    .map(htmlPageName);
-  const requiredFiles = requiredFilesFromWebsiteFiles(websiteOnlyFiles, parseCsvLine(contract, "requiredFiles"));
+    .sort((a, b) => a === "index.html" ? -1 : b === "index.html" ? 1 : a.localeCompare(b));
+  const fallbackPages = physicalHtmlFiles.filter((path) => ownedWebsitePagePattern.test(path)).map(htmlPageName);
+  const requestedPages = unique(contractPages.length ? contractPages : fallbackPages);
+  const canonicalPagePaths = requestedPages.map(pageToPath);
+  const contractRequiredFiles = parseCsvLine(contract, "requiredFiles");
+  const canonicalSupportFiles = ["styles.css", "main.js", contractPath].filter((path) => path === contractPath || Boolean(websiteOnlyFiles[path]) || contractRequiredFiles.includes(path));
+  const requiredFiles = unique([...canonicalPagePaths, ...canonicalSupportFiles]);
+  const contractOwnedFiles = unique([...canonicalPagePaths, ...contractRequiredFiles, contractPath]);
+  const websiteOwnedFiles = unique([
+    ...contractOwnedFiles,
+    ...physicalHtmlFiles.filter((path) => ownedWebsitePagePattern.test(path)),
+    ...["styles.css", "main.js"].filter((path) => Boolean(websiteOnlyFiles[path]))
+  ]);
+  const obsoleteOwnedFiles = websiteOwnedFiles.filter((path) => path.endsWith(".html") && !canonicalPagePaths.includes(path));
+  const unknownFiles = physicalHtmlFiles.filter((path) => !websiteOwnedFiles.includes(path));
   const exactPageCount = Number.parseInt(parseLine(contract, "exactPageCount") ?? "", 10);
-  const derivedDomainId = deriveDomainFromWebsiteFiles(websiteOnlyFiles);
+  const canonicalFiles = Object.fromEntries(
+    Object.entries(websiteOnlyFiles).filter(([path]) => requiredFiles.includes(path))
+  );
+  const derivedDomainId = deriveDomainFromWebsiteFiles(canonicalFiles);
 
   return {
     activeMode: "WEBSITE",
@@ -227,15 +244,24 @@ export function buildWebsiteEditContext(workspace: WorkspaceLike): WebsiteEditCo
     creativeDirection: parseCreativeDirection(contract),
     displayName: parseLine(contract, "displayName"),
     domainId: parseLine(contract, "domainId") ?? derivedDomainId,
-    exactPageCount: Number.isFinite(exactPageCount) ? exactPageCount : requestedPages.length || htmlPages.length || undefined,
-    existingContact: extractContact(websiteOnlyFiles),
-    existingCtas: extractCtas(websiteOnlyFiles),
+    exactPageCount: Number.isFinite(exactPageCount) ? exactPageCount : requestedPages.length || undefined,
+    existingContact: extractContact(canonicalFiles),
+    existingCtas: extractCtas(canonicalFiles),
     files: websiteOnlyFiles,
     hasWebsiteFiles: Boolean(websiteOnlyFiles["index.html"] && websiteOnlyFiles["styles.css"]),
     ignoredContractReason: mixedModeConflict ? "HASSALI.md is CODE while productMode is WEBSITE" : undefined,
     mixedModeConflict,
-    navLinks: extractNavLinks(websiteOnlyFiles),
-    requestedPages: requestedPages.length ? requestedPages : htmlPages,
-    requiredFiles
+    navLinks: extractNavLinks(canonicalFiles),
+    canonicalPagePaths,
+    obsoleteOwnedFiles,
+    physicalHtmlFiles,
+    requestedPages,
+    requiredFiles,
+    unknownFiles,
+    websiteOwnedFiles
   };
+}
+
+export function isWebsiteOwnedPath(path: string) {
+  return ownedWebsitePagePattern.test(path) || /^(?:styles\.css|main\.js|HASSALI\.md|HASSALI\.website\.md)$/i.test(path);
 }

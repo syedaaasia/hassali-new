@@ -85,6 +85,10 @@ function isFileProposalAction(action: string) {
   return action === "create" || action === "modify" || action === "update" || action === "write_file";
 }
 
+function isDeleteProposalAction(action: string) {
+  return action === "delete_file";
+}
+
 function isRuntimeProposalAction(action: string) {
   return action === "restart_runtime" ||
     action === "reload_preview" ||
@@ -127,6 +131,13 @@ function validateProposalForApproval(proposal: DiffProposal, selectedProjectId: 
   }
 
   for (const change of proposal.changes) {
+    if (isDeleteProposalAction(change.action)) {
+      if (!normalizeProposalPath(change.path)) {
+        return "This proposal contains an invalid delete path. Recreate it before approving.";
+      }
+      continue;
+    }
+
     if (isFileProposalAction(change.action)) {
       const normalizedPath = normalizeProposalPath(change.path);
 
@@ -146,7 +157,7 @@ function validateProposalForApproval(proposal: DiffProposal, selectedProjectId: 
 }
 
 function fileProposalChanges(proposal: DiffProposal) {
-  return proposal.changes.filter((change) => isFileProposalAction(change.action));
+  return proposal.changes.filter((change) => isFileProposalAction(change.action) || isDeleteProposalAction(change.action));
 }
 
 function runtimeApprovalMessage(status: number, payload: RuntimeApprovalResponse | null) {
@@ -812,7 +823,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           );
         }
 
-        syncRuntimeFiles(syncResult.fileUpdates);
+        syncRuntimeFiles(syncResult.fileUpdates, syncResult.deletedFiles);
         setRuntimeApprovalResult({
           ...runtimeResult,
           writtenFiles: syncResult.runtimeMetadata.runtimeWrittenFiles

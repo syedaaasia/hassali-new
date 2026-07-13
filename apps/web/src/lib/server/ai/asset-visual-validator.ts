@@ -243,7 +243,11 @@ export function validateAssetVisuals(input: BuildAssetVisualValidationInput): As
   const snippets = visualSnippets(content);
   const profile = profileFor(input.proposalContext?.domain ?? input.contextPriority.authoritativeDomain);
   const expectedVisualSignals = visualIntentSignals(input, profile);
-  const blockedAssetCategories = unique(profile.blocked);
+  const blockedAssetCategories = unique(profile.blocked).filter((blockedSignal) =>
+    !profile.allowed.some((allowedSignal) =>
+      includesSignal(allowedSignal, blockedSignal) || includesSignal(blockedSignal, allowedSignal)
+    )
+  );
   const allowedAssetCategories = unique(profile.allowed);
   const detectedVisualSignals = detectSignals(content, expectedVisualSignals);
   const mismatchedAssets = detectSignals(content, blockedAssetCategories);

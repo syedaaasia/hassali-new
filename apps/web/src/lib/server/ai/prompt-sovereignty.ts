@@ -171,7 +171,7 @@ function contradictoryTermsFor(domain: string, capability: PromptSovereigntyCont
     contradictions.push("scent atelier", "fragrance notes", "perfume bottles", "signature scent");
   }
 
-  if (!domainText.includes("television") && !domainText.includes("tv")) {
+  if (!domainText.includes("television") && !domainText.includes("tv") && !domainText.includes("electronics")) {
     contradictions.push("vision house", "oled", "qled", "home cinema", "wall mounting");
   }
 
