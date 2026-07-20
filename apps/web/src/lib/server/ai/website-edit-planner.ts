@@ -254,7 +254,19 @@ function updateCssForStyle(content: string, intent: WebsiteEditIntent, context: 
             "--color-border": "rgba(231, 189, 120, 0.22)"
           };
 
-  for (const [name, value] of Object.entries(palette)) {
+  const selectedPalette = /--bg\s*:/i.test(next)
+    ? {
+        "--accent": palette["--color-accent"],
+        "--accent-alt": palette["--color-primary"],
+        "--bg": palette["--color-bg"],
+        "--border": palette["--color-border"],
+        "--ink": palette["--color-text"],
+        "--muted": palette["--color-muted"],
+        "--surface": palette["--color-surface"]
+      }
+    : palette;
+
+  for (const [name, value] of Object.entries(selectedPalette)) {
     const pattern = new RegExp(`${escapeRegExp(name)}\\s*:\\s*[^;]+;`, "i");
     next = pattern.test(next)
       ? next.replace(pattern, `${name}: ${value};`)
@@ -337,14 +349,24 @@ function titleCase(value: string) {
   return value.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function refreshPage(content: string, context: WebsiteEditContext, page: string, replacement: boolean) {
+function refreshPage(content: string, context: WebsiteEditContext, intent: WebsiteEditIntent, page: string, replacement: boolean) {
   const brand = context.brandName ?? context.displayName ?? "This business";
   const domain = titleCase((context.domainId ?? "business").replace(/_/g, " "));
-  const heading = page === "home" ? brand : `${titleCase(page)} at ${brand}`;
+  const productFocused = page === "home" && /\bproduct[- ]focused\b/i.test(intent.originalPrompt);
+  const buyingPhilosophy = page === "about" && /\b(?:buying philosophy|installation support|how (?:we|you) choose)\b/i.test(intent.originalPrompt);
+  const heading = productFocused && /electronics|television|tv/i.test(context.domainId ?? "")
+    ? "Find the right screen for your room"
+    : buyingPhilosophy
+      ? "A clearer way to choose home technology"
+      : page === "home" ? brand : `${titleCase(page)} at ${brand}`;
   const lede = page === "about"
-    ? `Learn about ${brand}, its ${domain.toLowerCase()} focus, and the standards behind its work.`
+      ? buyingPhilosophy
+        ? `${brand} starts with the room, viewing habits, and practical tradeoffs, then supports delivery, mounting, setup, and the questions that follow installation.`
+      : `Learn about ${brand}, its ${domain.toLowerCase()} focus, and the standards behind its work.`
     : page === "home"
-      ? `${brand} offers clear, practical ${domain.toLowerCase()} information for customers.`
+      ? productFocused && /electronics|television|tv/i.test(context.domainId ?? "")
+        ? "Compare OLED, Mini-LED, QLED, gaming, and installation options by room, screen size, and viewing priorities."
+        : `${brand} offers clear, practical ${domain.toLowerCase()} information for customers.`
       : `Explore ${titleCase(page).toLowerCase()} information from ${brand}.`;
   let next = content;
 
@@ -366,15 +388,77 @@ function refreshSection(content: string, context: WebsiteEditContext, section: s
   const domain = titleCase((context.domainId ?? "business").replace(/_/g, " "));
 
   if (section === "footer") {
-    let next = content.replace(/<footer\b([^>]*)>/i, '<footer$1 data-hassali-scope="section-edit" aria-label="Site footer">');
-    const line = `<p class="footer-summary">${brand} · ${domain}</p>`;
-    if (!next.includes("footer-summary")) next = next.replace(/<\/footer>/i, `${line}\n</footer>`);
-    return next;
+    const links = context.navLinks
+      .filter((link) => !link.href.startsWith("#") && !link.href.startsWith("mailto:") && !link.href.startsWith("tel:"))
+      .slice(0, 6);
+    const navigation = links.length
+      ? links.map((link) => `<li><a href="${link.href}">${link.label}</a></li>`).join("")
+      : '<li><a href="./index.html">Home</a></li>';
+    const contactLink = links.find((link) => /contact/i.test(`${link.label} ${link.href}`));
+    const footer = `<footer class="site-footer" data-hassali-scope="section-edit" aria-label="Site footer">
+      <div class="footer-brand"><p class="eyebrow">${domain}</p><h2>${brand}</h2><p>Clear product guidance, practical support, and a direct way to continue the conversation.</p></div>
+      <div><h2>Navigation</h2><ul>${navigation}</ul></div>
+      <div><h2>Customer support</h2><ul><li>Buying guidance</li><li>Installation planning</li><li>Delivery questions</li></ul></div>
+      <div><h2>Product categories</h2><ul><li>OLED and premium screens</li><li>Bright-room televisions</li><li>Gaming and audio</li></ul></div>
+      ${contactLink ? `<div><h2>Contact</h2><p><a href="${contactLink.href}">${contactLink.label}</a></p></div>` : ""}
+      <div class="footer-bottom"><span>&copy; <span data-current-year></span> ${brand}</span></div>
+    </footer>`;
+    return /<footer\b[\s\S]*?<\/footer>/i.test(content)
+      ? content.replace(/<footer\b[\s\S]*?<\/footer>/i, footer)
+      : content.replace(/<\/body>/i, `${footer}\n</body>`);
   }
 
   const className = section === "navigation" || section === "navbar" ? "nav" : section.replace(/_/g, "-");
   const pattern = new RegExp(`<([a-z][a-z0-9]*)\\b([^>]*class=["'][^"']*\\b${escapeRegExp(className)}\\b[^"']*["'][^>]*)>`, "i");
   return content.replace(pattern, `<$1$2 data-hassali-scope="section-edit">`);
+}
+
+function addOrRefreshCarousel(content: string, context: WebsiteEditContext) {
+  if (/data-carousel\b/i.test(content)) {
+    return content.replace(/(<div\b[^>]*class=["'][^"']*carousel[^"']*["'][^>]*)(>)/i, '$1 data-hassali-scope="carousel-edit"$2');
+  }
+
+  const domain = titleCase((context.domainId ?? "products").replace(/_/g, " "));
+  const labels = /electronics|television|tv/i.test(context.domainId ?? "")
+    ? ["OLED cinema", "Mini-LED bright room", "Gaming 120Hz", "QLED everyday"]
+    : ["Featured option one", "Featured option two", "Featured option three", "Featured option four"];
+  const section = `<section class="content-section" aria-labelledby="featured-products-title" data-hassali-scope="carousel-edit">
+    <div class="section-heading"><p class="eyebrow">Featured products</p><h2 id="featured-products-title">Explore featured ${domain.toLowerCase()}</h2><p>Use the controls or arrow keys to compare featured options.</p></div>
+    <div class="carousel" data-carousel tabindex="0" aria-label="Featured products carousel"><div class="carousel-track" data-carousel-track>${labels.map((label, index) => `<article class="carousel-slide entity-card" data-carousel-slide aria-label="${index + 1} of ${labels.length}"><div class="entity-art art-${(index % 4) + 1}" aria-hidden="true">${label}</div><h3>${label}</h3><p>Compare the design, fit, and practical differences before choosing.</p></article>`).join("")}</div><div class="carousel-controls"><button class="icon-button" type="button" data-carousel-prev aria-label="Previous item">&#8592;</button><p class="carousel-status" aria-live="polite" data-carousel-status>1 / ${labels.length}</p><button class="icon-button" type="button" data-carousel-next aria-label="Next item">&#8594;</button></div></div>
+  </section>`;
+
+  return content.replace(/<\/main>/i, `${section}\n</main>`);
+}
+
+function addCarouselCss(content: string) {
+  if (/\.carousel\s*\{/i.test(content)) return content;
+  return `${content.trimEnd()}\n\n.carousel { overflow: hidden; }\n.carousel-track { display: flex; gap: 1rem; transition: transform .35s ease; touch-action: pan-y; }\n.carousel-slide { flex: 0 0 min(31rem, 82vw); }\n.carousel-controls { display: flex; justify-content: flex-end; align-items: center; gap: .8rem; margin-top: 1rem; }\n`;
+}
+
+function addCarouselJs(content: string) {
+  if (/data-carousel-prev/i.test(content)) return content;
+  return `${content.trimEnd()}\n\ndocument.querySelectorAll("[data-carousel]").forEach((carousel) => {\n  const track = carousel.querySelector("[data-carousel-track]");\n  const slides = Array.from(carousel.querySelectorAll("[data-carousel-slide]"));\n  const status = carousel.querySelector("[data-carousel-status]");\n  let index = 0;\n  let startX = 0;\n  const update = () => { const width = slides[0]?.getBoundingClientRect().width ?? 0; if (track instanceof HTMLElement) track.style.transform = "translateX(-" + (index * (width + 16)) + "px)"; if (status) status.textContent = (index + 1) + " / " + slides.length; };\n  const move = (step) => { index = (index + step + slides.length) % Math.max(slides.length, 1); update(); };\n  carousel.querySelector("[data-carousel-prev]")?.addEventListener("click", () => move(-1));\n  carousel.querySelector("[data-carousel-next]")?.addEventListener("click", () => move(1));\n  carousel.addEventListener("keydown", (event) => { if (event.key === "ArrowLeft") move(-1); if (event.key === "ArrowRight") move(1); });\n  carousel.addEventListener("pointerdown", (event) => { startX = event.clientX; }, { passive: true });\n  carousel.addEventListener("pointerup", (event) => { const distance = event.clientX - startX; if (Math.abs(distance) > 48) move(distance > 0 ? -1 : 1); }, { passive: true });\n  update();\n});\n`;
+}
+
+function removeWebglHtml(content: string) {
+  return content
+    .replace(/\s*<canvas\b[^>]*data-webgl-canvas[^>]*><\/canvas>/gi, "")
+    .replace(/\s*<canvas\b[^>]*data-webgl-canvas[^>]*\/?>/gi, "")
+    .replace(/data-webgl=["']enabled["']/gi, 'data-webgl="disabled"');
+}
+
+function removeWebglJs(content: string) {
+  const start = content.indexOf('  const stage = document.querySelector("[data-webgl-stage]");');
+  const end = content.lastIndexOf("\n})();");
+  return start >= 0 && end > start ? `${content.slice(0, start).trimEnd()}\n${content.slice(end)}` : content;
+}
+
+function removeWebglCss(content: string) {
+  return content
+    .replace(/\.hero-stage > img,\s*\.hero-stage canvas/g, ".hero-stage > img")
+    .replace(/^\.hero-stage canvas \{[^\n]*\}\s*$/gim, "")
+    .replace(/^\.hero-stage\.is-webgl-ready canvas \{[^\n]*\}\s*$/gim, "")
+    .replace(/^\.hero-stage\.is-webgl-ready > img \{[^\n]*\}\s*$/gim, "");
 }
 
 export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEditIntent): WebsiteEditPlan {
@@ -490,6 +574,36 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
     changes.push(change(contractPath, updateCreativeDirection(hassali, "- Section rhythm: hero -> proof/services -> testimonials -> estimate CTA"), "Updates Creative Direction section rhythm."));
   }
 
+  if (intent.editType === "add_carousel") {
+    const nextHtml = addOrRefreshCarousel(files["index.html"] ?? "", context);
+    if (nextHtml !== files["index.html"]) changes.push(change("index.html", nextHtml, "Adds or refreshes the accessible featured-products carousel on the homepage."));
+    if (files["styles.css"]) {
+      const nextCss = addCarouselCss(files["styles.css"]);
+      if (nextCss !== files["styles.css"]) changes.push(change("styles.css", nextCss, "Adds responsive carousel layout only when missing."));
+    }
+    if (files["main.js"]) {
+      const nextJs = addCarouselJs(files["main.js"]);
+      if (nextJs !== files["main.js"]) changes.push(change("main.js", nextJs, "Adds carousel arrows, keyboard navigation, and swipe support only when missing."));
+    }
+  }
+
+  if (intent.editType === "remove_webgl") {
+    for (const path of htmlFiles(context)) {
+      const next = removeWebglHtml(files[path] ?? "");
+      if (next !== files[path]) changes.push(change(path, next, `Removes the WebGL canvas from ${path} while preserving fallback artwork.`));
+    }
+    if (files["styles.css"]) {
+      const nextCss = removeWebglCss(files["styles.css"]);
+      if (nextCss !== files["styles.css"]) changes.push(change("styles.css", nextCss, "Removes WebGL-only selectors while preserving the static hero visual."));
+    }
+    if (files["main.js"]) {
+      const nextJs = removeWebglJs(files["main.js"]);
+      if (nextJs !== files["main.js"]) changes.push(change("main.js", nextJs, "Removes WebGL initialization and animation lifecycle code."));
+    }
+    const nextContract = updateHassali(hassali, { webglPolicy: "disabled by explicit user edit; static fallback preserved" });
+    if (nextContract !== files[contractPath]) changes.push(change(contractPath, nextContract, contractSummary));
+  }
+
   if (intent.editType === "service_copy") {
     const services = intent.extractedValues.services ?? [];
     if (files["services.html"]) {
@@ -520,7 +634,7 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
     }
     const current = files[path];
     if (current) {
-      changes.push(change(path, refreshPage(current, context, page, intent.editType === "page_replacement"), `Refreshes only ${path} and preserves all other website files.`));
+      changes.push(change(path, refreshPage(current, context, intent, page, intent.editType === "page_replacement"), `Refreshes only ${path} and preserves all other website files.`));
     }
   }
 

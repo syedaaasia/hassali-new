@@ -7,7 +7,6 @@ import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
-import { renderWebsitePlanFiles } from "@/lib/server/ai/website-layout-engine";
 import {
   getWebsiteCreativeDirection,
   summarizeCreativeDirection
@@ -20,6 +19,13 @@ import {
   validateWebsitePlanAndFiles,
   type WebsiteValidationResult
 } from "@/lib/server/ai/website-validator";
+import {
+  buildWebsiteQualityBlueprint,
+  summarizeWebsiteQualityBlueprint,
+  type WebsiteQualityBlueprint
+} from "@/lib/server/ai/website-quality-blueprint";
+import { renderWebsiteQualityFiles } from "@/lib/server/ai/website-quality-renderer";
+import { GSAP_VERSION, THREE_VERSION } from "@/lib/server/ai/website-scene-renderer";
 
 export type SiteDomain =
   | "car rental"
@@ -63,6 +69,7 @@ export type PlannedWebsiteGeneration = {
   files: Record<string, string>;
   plannerGeneratorAligned: boolean;
   plan: WebsitePlan;
+  qualityBlueprint: WebsiteQualityBlueprint;
   sourceOfTruthDomain: string | null;
   sourceOfTruthPages: string[];
   tokensStudioExportAvailable: boolean;
@@ -1457,7 +1464,7 @@ function heroCopyForComposition(input: {
 
   if (!input.isHome) {
     return {
-      body: `Focused information for ${input.composition.audience.slice(0, 2).join(" and ")} with clear next steps and practical details.`,
+      body: `${input.pageTitleText} guidance for ${input.composition.audience.slice(0, 2).join(" and ")}, grounded in the needs of this ${label}.`,
       title: `${input.pageTitleText} for ${input.brandName}`
     };
   }
@@ -1493,7 +1500,7 @@ function heroCopyForComposition(input: {
   const terms = input.blueprint.contentTerms.slice(0, 3).join(", ") || input.blueprint.productCategory;
 
   return {
-    body: `${input.composition.contentStrategy.heroGoal} Visitors can quickly understand ${terms} and choose the next step.`,
+    body: `Explore ${terms} with clear information, practical guidance, and a confident next step.`,
     title: `${input.brandName} presents ${input.blueprint.domainLabel} with clarity and confidence.`
   };
 }
@@ -2190,15 +2197,27 @@ export function generatePlannedWebsiteFiles(input: {
   intent: IntentIntelligence;
   proposalContext?: ProposalContext;
 }): PlannedWebsiteGeneration {
-  const brandName = brandNameForIntent(input.intent, input.composition);
   const plan = planWebsite(input);
   const brief = input.proposalContext?.websiteGenerationBrief ?? null;
   const creativeDirection = getWebsiteCreativeDirection({ brief, plan });
   const creativeSummary = summarizeCreativeDirection(creativeDirection);
-  const plannedFiles = renderWebsitePlanFiles({
-    brandName,
-    plan
+  const qualityBlueprint = buildWebsiteQualityBlueprint({
+    brief,
+    composition: input.composition,
+    direction: creativeDirection,
+    intent: input.intent,
+    plan,
+    prompt: input.proposalContext?.sourcePrompt ?? input.intent.summary
   });
+  const brandName = qualityBlueprint.brand.generatedName;
+  const qualitySummary = summarizeWebsiteQualityBlueprint(qualityBlueprint);
+  const qualityMediaRecords = qualityBlueprint.media.map((asset) =>
+    `${asset.provider}:${asset.id} [${asset.semanticTags.join("/")}] fallback=${asset.fallbackAsset} license=${asset.licenseNote ?? "local generated asset"}`
+  );
+  const sceneDependencies = qualityBlueprint.scene.engine === "three"
+    ? `Three.js ${THREE_VERSION}${qualityBlueprint.scene.motionEngine === "gsap-scrolltrigger" ? `; GSAP/ScrollTrigger ${GSAP_VERSION}` : ""}`
+    : "none";
+  const plannedFiles = renderWebsiteQualityFiles(qualityBlueprint);
   plannedFiles["HASSALI.md"] = brief ? [
     "# HASSALI.md",
     "",
@@ -2236,6 +2255,29 @@ export function generatePlannedWebsiteFiles(input: {
     `- Proof strategy: ${creativeSummary.proofStrategy}`,
     `- Section rhythm: ${creativeSummary.rhythm}`,
     "",
+    "## Website Quality Blueprint",
+    "",
+    `qualityBlueprintVersion: 1`,
+    `businessType: ${qualityBlueprint.business.businessType}`,
+    `audience: ${qualityBlueprint.business.audience.join(", ")}`,
+    `primaryGoal: ${qualityBlueprint.business.primaryGoal}`,
+    `differentiators: ${qualityBlueprint.business.differentiators.join(", ")}`,
+    `qualityPalette: ${qualitySummary.palette.join(", ")}`,
+    `qualityTypography: ${qualityBlueprint.brand.typography.display} / ${qualityBlueprint.brand.typography.body}`,
+    `qualityPages: ${qualitySummary.pages.join(", ")}`,
+    `qualityComponents: ${qualitySummary.components.join(", ")}`,
+    `qualityInteractions: ${qualitySummary.interactions.join(", ")}`,
+    `qualitySemanticHierarchy: ${qualitySummary.semantic}`,
+    `qualitySemanticConsistency: ${qualitySummary.semanticConsistency}`,
+    `webglPolicy: ${qualitySummary.webgl}`,
+    `sceneBlueprint: ${qualitySummary.scene}`,
+    `sceneDependencies: ${sceneDependencies}`,
+    `mediaPolicy: semantic registry with generated local fallback for every remote asset`,
+    `mediaAssets: ${qualityMediaRecords.join(" | ") || "local generated assets only"}`,
+    `seoPolicy: unique page metadata, Open Graph, JSON-LD, robots.txt, sitemap.xml`,
+    `accessibilityPolicy: skip link, landmarks, visible focus, keyboard interactions, reduced motion`,
+    `performancePolicy: progressive enhancement, DPR <= ${qualityBlueprint.performance.maxDevicePixelRatio}, pause when hidden, ${qualityBlueprint.performance.remoteDependencies} declared remote dependencies, static fallbacks included`,
+    "",
     "navigationContract:",
     ...brief.navigationContract.map((item) => `- ${item.label}: ${item.href}`),
     "",
@@ -2257,6 +2299,18 @@ export function generatePlannedWebsiteFiles(input: {
     `previewType: website`,
     `pages: ${plan.pages.join(", ")}`,
     `designTokenTheme: ${plan.designTokenTheme}`,
+    `qualityBlueprintVersion: 1`,
+    `qualityBrand: ${brandName}`,
+    `qualityPalette: ${qualitySummary.palette.join(", ")}`,
+    `qualityComponents: ${qualitySummary.components.join(", ")}`,
+    `qualityInteractions: ${qualitySummary.interactions.join(", ")}`,
+    `qualitySemanticHierarchy: ${qualitySummary.semantic}`,
+    `qualitySemanticConsistency: ${qualitySummary.semanticConsistency}`,
+    `webglPolicy: ${qualitySummary.webgl}`,
+    `sceneBlueprint: ${qualitySummary.scene}`,
+    `sceneDependencies: ${sceneDependencies}`,
+    `mediaPolicy: semantic registry with generated local fallback for every remote asset`,
+    `mediaAssets: ${qualityMediaRecords.join(" | ") || "local generated assets only"}`,
     "",
     "Do-not rules:",
     "- Do not override the current prompt with stale project memory.",
@@ -2279,6 +2333,7 @@ export function generatePlannedWebsiteFiles(input: {
     files: plannedFiles,
     plannerGeneratorAligned,
     plan,
+    qualityBlueprint,
     sourceOfTruthDomain: plan.sourceOfTruthDomain,
     sourceOfTruthPages: plan.sourceOfTruthPages,
     tokensStudioExportAvailable: plan.tokensStudioExportAvailable,

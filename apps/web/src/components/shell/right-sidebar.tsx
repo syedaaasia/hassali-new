@@ -925,11 +925,13 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
             return (
               <button
+                aria-pressed={isActive}
                 className={`rounded-full px-3 py-1 text-center transition ${
                   isActive
                     ? "bg-[#DE7356] text-[#000000] shadow-[0_0_0_1px_rgba(0,0,0,0.12),0_10px_24px_rgba(222,115,86,0.26)]"
                     : "text-[#F4F3EE]/80 hover:bg-white/[0.06] hover:text-[#F4F3EE] [.light_&]:text-[#000000] [.light_&]:hover:bg-white [.light_&]:hover:text-[#000000]"
                 }`}
+                data-mode-option={item.label}
                 key={item.label}
                 onClick={() => {
                   setProductMode(item.label);
@@ -1001,6 +1003,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             <motion.div
               animate={{ opacity: 1, y: 0 }}
               className="mx-auto w-full max-w-4xl rounded-[22px] border border-white/10 bg-white/[0.045] p-4 text-xs shadow-[0_0_0_1px_rgba(255,255,255,0.02)] [.light_&]:border-[#d8d1c6] [.light_&]:bg-white [.light_&]:text-[#000000]"
+              data-website-proposal={productMode === "WEBSITE" ? "true" : undefined}
               initial={{ opacity: 0, y: 6 }}
               transition={{ duration: 0.16, ease: "easeOut" }}
             >
@@ -1087,6 +1090,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                 <button
                   className="rounded-xl border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3 py-1.5 text-xs font-medium text-white shadow-[0_12px_30px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] disabled:cursor-not-allowed disabled:border-red-500/20 disabled:bg-red-500/10 disabled:text-red-200/60 disabled:shadow-none disabled:hover:opacity-100"
                   disabled={isApprovalBlocked || isProposalApplied}
+                  data-website-approval={productMode === "WEBSITE" ? "true" : undefined}
                   onClick={() => {
                     void approveProposal();
                   }}
@@ -1107,6 +1111,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
         <form
           className="shrink-0 border-t border-white/10 bg-[#0b0b0b] px-4 py-3 [.light_&]:border-slate-200 [.light_&]:bg-[#F4F3EE] lg:px-6"
+          data-website-composer={productMode === "WEBSITE" ? "true" : undefined}
           onSubmit={(event) => {
             event.preventDefault();
             void sendWithContext();

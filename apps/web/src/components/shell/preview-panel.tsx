@@ -14,11 +14,16 @@ Phase 31 audit before edits:
 10. Abstract labels entered generated HTML from website-section-registry.ts ecommerce profile and website-layout-engine.ts using section titles, visualIntent, and layoutType text.
 */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "@/components/ui/panel";
 import { useCanonicalFiles, useCanonicalManifest } from "@/lib/canonical-project-state";
 import { useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
+import {
+  compileStaticPreview,
+  resolveStaticPreviewPagePath,
+  type StaticPreviewDiagnostic
+} from "@/lib/static-preview-compiler";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 import type { PreviewManifest, VfsFile } from "@/lib/preview-manifest";
 
@@ -146,15 +151,6 @@ function executablePreviewFrom(value: unknown): ExecutablePreviewResult | null {
 
 function normalizePreviewPath(path: string) {
   return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
-}
-
-function normalizePreviewHref(href: string) {
-  return href
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/^\.?\//, "")
-    .replace(/\/+$/, "")
-    .replace(/\/{2,}/g, "/");
 }
 
 function escapeHtml(value: string) {
@@ -292,75 +288,33 @@ function manifestWithCommittedFallback(
   return manifest;
 }
 
-function missingPreviewDocument(path: string) {
-  return `<!doctype html>
-<html>
-<body style="font-family:sans-serif;padding:2rem;background:#090909;color:#fff">
-  <h2>Missing preview file: ${escapeHtml(path)}</h2>
-  <p>This file was not found in committed VFS.</p>
-</body>
-</html>`;
-}
-
-function buildStaticSrcDoc(committedFiles: Map<string, VfsFile>, pagePath: string) {
-  const normalizedPage = normalizePreviewHref(pagePath || "index.html") || "index.html";
-  const file = committedFiles.get(normalizedPage);
-
-  if (!file) {
-    return missingPreviewDocument(normalizedPage);
-  }
-
-  const css = committedFiles.get("styles.css")?.content ?? "";
-  const js = committedFiles.get("main.js")?.content ?? "";
-  const interceptScript = `<script>
-document.addEventListener("click", function(event) {
-  var target = event.target;
-  var anchor = target && target.closest ? target.closest("a[href]") : null;
-  if (!anchor) return;
-  var href = anchor.getAttribute("href");
-  if (!href) return;
-  if (
-    href.startsWith("http://") ||
-    href.startsWith("https://") ||
-    href.startsWith("mailto:") ||
-    href.startsWith("tel:") ||
-    href.startsWith("#")
-  ) {
-    return;
-  }
-  event.preventDefault();
-  var normalized = href.trim()
-    .replace(/\\\\/g, "/")
-    .replace(/^\\.?\\//, "")
-    .replace(/\\/+$/, "")
-    .replace(/\\/{2,}/g, "/");
-  window.parent.postMessage({
-    type: "HASSALI_STATIC_PREVIEW_NAVIGATE",
-    href: normalized
-  }, "*");
-});
-</script>`;
-  let srcDoc = file.content;
-
-  if (css) {
-    srcDoc = srcDoc.replace(/<link[^>]+rel=["']stylesheet["'][^>]*>/gi, `<style>${css}</style>`);
-  }
-
-  if (js) {
-    srcDoc = srcDoc.replace(/<script[^>]+src=["'][./]*main\.js["'][^>]*><\/script>/gi, `<script>${js}</script>`);
-  }
-
-  return /<\/body>/i.test(srcDoc)
-    ? srcDoc.replace(/<\/body>/i, `${interceptScript}</body>`)
-    : `${srcDoc}${interceptScript}`;
-}
-
-function StaticWebsitePreview({ committedFiles }: { committedFiles: Map<string, VfsFile> }) {
+function StaticWebsitePreview({
+  committedFiles,
+  onDiagnostics,
+  projectId
+}: {
+  committedFiles: Map<string, VfsFile>;
+  onDiagnostics: (diagnostics: StaticPreviewDiagnostic[]) => void;
+  projectId: string | null;
+}) {
   const [currentPage, setCurrentPage] = useState("index.html");
+  const iframeWindowRef = useRef<unknown>(null);
+  const files = useMemo(
+    () => Object.fromEntries([...committedFiles].map(([path, file]) => [path, file.content])),
+    [committedFiles]
+  );
+  const compilation = useMemo(
+    () => compileStaticPreview({ activeHtmlPath: currentPage, files, projectId: projectId ?? "" }),
+    [currentPage, files, projectId]
+  );
 
   useEffect(() => {
     setCurrentPage("index.html");
   }, [committedFiles]);
+
+  useEffect(() => {
+    onDiagnostics(compilation.diagnostics);
+  }, [compilation.diagnostics, onDiagnostics]);
 
   useEffect(() => {
     const messageTarget = globalThis as unknown as {
@@ -369,26 +323,31 @@ function StaticWebsitePreview({ committedFiles }: { committedFiles: Map<string, 
     };
     const handler = (event: MessageEvent) => {
       if (event.data?.type !== "HASSALI_STATIC_PREVIEW_NAVIGATE") return;
+      if (event.source !== iframeWindowRef.current || event.origin !== "null") return;
+      if (String(event.data.projectId ?? "") !== (projectId ?? "")) return;
 
-      const target = normalizePreviewHref(String(event.data.href ?? ""));
-
-      if (!target || target === "/") {
-        setCurrentPage("index.html");
-        return;
-      }
-
-      setCurrentPage(target.endsWith(".html") ? target : `${target}.html`);
+      const target = resolveStaticPreviewPagePath({
+        activeHtmlPath: currentPage,
+        files,
+        href: String(event.data.path ?? "")
+      });
+      if (target) setCurrentPage(target);
     };
 
     messageTarget.addEventListener("message", handler);
     return () => messageTarget.removeEventListener("message", handler);
-  }, []);
+  }, [currentPage, files, projectId]);
 
   return (
     <iframe
       className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"
+      ref={(node) => {
+        iframeWindowRef.current = node
+          ? (node as unknown as { contentWindow: unknown }).contentWindow
+          : null;
+      }}
       sandbox="allow-scripts allow-forms"
-      srcDoc={buildStaticSrcDoc(committedFiles, currentPage)}
+      srcDoc={compilation.srcDoc}
       title="Static srcDoc preview"
     />
   );
@@ -1259,7 +1218,7 @@ export function PreviewPanel() {
   const stopPreview = useRuntimeStore((state) => state.stopPreview);
   const syncPreview = useRuntimeStore((state) => state.syncPreview);
   const [localPreviewVersion, setLocalPreviewVersion] = useState(0);
-  const [staticPreviewStopped, setStaticPreviewStopped] = useState(false);
+  const [staticPreviewDiagnostics, setStaticPreviewDiagnostics] = useState<StaticPreviewDiagnostic[]>([]);
   const committedFileMap = useMemo(
     () => new Map(canonicalFiles.map((file) => [normalizePreviewPath(file.path), { ...file, path: normalizePreviewPath(file.path) }])),
     [canonicalFiles]
@@ -1276,7 +1235,6 @@ export function PreviewPanel() {
     : undefined;
   const realPreview = realPreviewFrom(proposal?.liveRealPreview) ?? realPreviewFrom(proposal?.realPreview);
   const executablePreview = executablePreviewFrom(activePreviewMetadata?.executablePreview);
-  const canStartStaticPreview = effectiveManifest.type === "static_website" && hasIndexHtml;
   const isPythonPreviewType = effectiveManifest.type === "python_app";
   const isRuntimePreviewType = effectiveManifest.type === "react_vite_app" || effectiveManifest.type === "next_app";
   const livePreviewUrl = effectiveManifest.type === "static_website" ? null : runtimePreviewUrl ?? previewUrl;
@@ -1289,12 +1247,8 @@ export function PreviewPanel() {
         ? "Runtime execution requires explicit enablement. Vite cannot start until npm install is approved and runtime is enabled in project settings."
         : isPythonPreviewType
           ? "Python / Streamlit runtime requires explicit approved support. Hassali will not install packages or start Streamlit automatically."
-        : canStartStaticPreview
-          ? "Static srcDoc preview is already available; no local server is started."
-          : !canStartStaticPreview
-          ? "Preview needs index.html in the committed project files."
-          : null;
-  const startButtonLabel = isRuntimePreviewType || isPythonPreviewType ? "Enable Runtime" : "Start";
+        : null;
+  const startButtonLabel = "Enable Runtime";
   const panelPreviewLabel = effectiveManifest.type === "static_website"
     ? "Static srcDoc preview"
     : isPythonPreviewType
@@ -1333,7 +1287,7 @@ export function PreviewPanel() {
     : "Preview needs index.html. Use WEBSITE mode to create a static website.";
 
   useEffect(() => {
-    setStaticPreviewStopped(false);
+    setStaticPreviewDiagnostics([]);
     setLocalPreviewVersion((version) => version + 1);
   }, [effectiveManifest.type, effectiveManifest.framework, productMode, canonicalFiles.length]);
 
@@ -1357,9 +1311,7 @@ export function PreviewPanel() {
     }
 
     if (effectiveManifest.type === "static_website") {
-      setStaticPreviewStopped(false);
       setLocalPreviewVersion((version) => version + 1);
-      markPreviewStopped();
       return;
     }
 
@@ -1383,12 +1335,6 @@ export function PreviewPanel() {
       return;
     }
 
-    if (effectiveManifest.type === "static_website") {
-      setStaticPreviewStopped(true);
-      markPreviewStopped();
-      return;
-    }
-
     if (effectiveManifest.type === "python_app" && runtimeStatus !== "running" && status !== "running") {
       markPreviewStopped();
       return;
@@ -1398,7 +1344,7 @@ export function PreviewPanel() {
   };
 
   useEffect(() => {
-    if (!projectId) {
+    if (!projectId || effectiveManifest.type === "static_website") {
       return;
     }
 
@@ -1409,7 +1355,7 @@ export function PreviewPanel() {
     }, 2500);
 
     return () => clearInterval(interval);
-  }, [projectId, refreshRuntimeStatus]);
+  }, [effectiveManifest.type, projectId, refreshRuntimeStatus]);
 
   return (
     <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 hidden w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.82)] shadow-[0_24px_90px_rgba(0,0,0,0.55)] backdrop-blur-xl lg:flex xl:w-[34rem] 2xl:w-[38rem]">
@@ -1425,14 +1371,22 @@ export function PreviewPanel() {
         <div className="flex shrink-0 items-center gap-2">
           <span
             className={`rounded-full border px-2 py-1 text-[10px] uppercase ${
-              status === "running"
+              effectiveManifest.type === "static_website" && staticPreviewDiagnostics.some((item) => item.severity === "blocking")
+                ? "border-destructive/35 text-destructive"
+                : effectiveManifest.type === "static_website"
+                  ? "border-emerald-400/35 text-emerald-300"
+                  : status === "running"
                 ? "border-emerald-400/35 text-emerald-300"
                 : status === "error"
                   ? "border-destructive/35 text-destructive"
                   : "border-[hsl(var(--royal-border-soft))] text-muted-foreground"
             }`}
           >
-            {isLoading ? "loading" : status}
+            {isLoading
+              ? "loading"
+              : effectiveManifest.type === "static_website"
+                ? staticPreviewDiagnostics.some((item) => item.severity === "blocking") ? "blocked" : "ready"
+                : status}
           </span>
           <button
             className="rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[10px] uppercase text-muted-foreground hover:text-foreground"
@@ -1445,20 +1399,22 @@ export function PreviewPanel() {
       </div>
 
       <div className="flex items-center gap-2 border-b border-[hsl(var(--premium-border))] p-3">
-        <button
-          className="rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={Boolean(startDisabledReason)}
-          onClick={() => {
-            void startPreview(projectId);
-          }}
-          title={startDisabledReason ?? "Start static preview"}
-          type="button"
-        >
-          {startButtonLabel}
-        </button>
+        {effectiveManifest.type !== "static_website" ? (
+          <button
+            className="rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={Boolean(startDisabledReason)}
+            onClick={() => {
+              void startPreview(projectId);
+            }}
+            title={startDisabledReason ?? "Enable preview runtime"}
+            type="button"
+          >
+            {startButtonLabel}
+          </button>
+        ) : null}
         <button
           className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isLoading || !projectId}
+          disabled={isLoading || (effectiveManifest.type !== "static_website" && !projectId)}
           onClick={() => {
             reloadPreview();
           }}
@@ -1467,20 +1423,22 @@ export function PreviewPanel() {
         >
           Reload
         </button>
-        <button
-          className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isLoading || (effectiveManifest.type === "static_website" && staticPreviewStopped)}
-          onClick={() => {
-            stopActivePreview();
-          }}
-          title={effectiveManifest.type === "static_website" ? "Stop static srcDoc preview" : "Stop preview runtime if one is running"}
-          type="button"
-        >
-          Stop
-        </button>
+        {effectiveManifest.type !== "static_website" ? (
+          <button
+            className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isLoading}
+            onClick={() => {
+              stopActivePreview();
+            }}
+            title="Stop preview runtime if one is running"
+            type="button"
+          >
+            Stop
+          </button>
+        ) : null}
       </div>
 
-      {!isPythonPreviewType && (runtimeLogs.length || runtimeErrors.length || runtimePort || livePreviewUrl) ? (
+      {!isPythonPreviewType && effectiveManifest.type !== "static_website" && (runtimeLogs.length || runtimeErrors.length || runtimePort || livePreviewUrl) ? (
         <div className="border-b border-[hsl(var(--premium-border))] px-4 py-3 text-[11px] leading-5 text-muted-foreground">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full border px-2 py-0.5 uppercase ${
@@ -1548,12 +1506,13 @@ export function PreviewPanel() {
       <div className="min-h-0 flex-1 overflow-hidden bg-black/35 p-2">
         {isPythonPreviewType ? (
           <PythonAppSourceSummary committedFiles={committedFileMap} key={`python-${localPreviewVersion}`} />
-        ) : effectiveManifest.type === "static_website" && hasIndexHtml && !staticPreviewStopped ? (
-          <StaticWebsitePreview committedFiles={committedFileMap} key={`static-${localPreviewVersion}`} />
-        ) : effectiveManifest.type === "static_website" && staticPreviewStopped ? (
-          <div className="flex h-full items-center justify-center rounded-2xl border border-[hsl(var(--premium-border))] bg-black/40 p-6 text-center text-sm text-muted-foreground">
-            Static preview stopped. Click Reload to rebuild the srcDoc preview from committed files.
-          </div>
+        ) : effectiveManifest.type === "static_website" && hasIndexHtml ? (
+          <StaticWebsitePreview
+            committedFiles={committedFileMap}
+            key={`static-${localPreviewVersion}`}
+            onDiagnostics={setStaticPreviewDiagnostics}
+            projectId={projectId}
+          />
         ) : isRuntimePreviewType && runtimeStatus === "running" && iframeSource ? (
           <iframe
             className="h-full min-h-0 w-full rounded-2xl border border-[hsl(var(--premium-border))] bg-white"

@@ -1,4 +1,5 @@
 export type WebsiteEditType =
+  | "add_carousel"
   | "add_testimonials"
   | "business_name"
   | "color_palette"
@@ -8,6 +9,7 @@ export type WebsiteEditType =
   | "page_edit"
   | "page_replacement"
   | "remove_page"
+  | "remove_webgl"
   | "section_edit"
   | "service_copy"
   | "unknown";
@@ -85,6 +87,9 @@ export function classifyWebsiteRequestScope(prompt: string): WebsiteRequestScope
   if (/\b(?:replace|rebuild|recreate|redo)\b[\s\S]{0,60}\b(?:only\s+)?(?:the\s+)?(?:home(?:page| page)?|about(?: us)?|services?|products?|pricing|contact|blog|checkout|cart|gallery)(?:\s+page)?\b/i.test(text)) {
     return "large_partial_replacement";
   }
+  if (/\b(?:replace|rewrite|update|change|improve|add|remove)\b[\s\S]{0,40}\b(?:hero|footer|navigation|navbar|header|testimonials?|faq|cta|call to action|product grid|service grid)\b/i.test(text)) {
+    return "section_edit";
+  }
   if (pagePattern.test(text)) return "page_edit";
   if (sectionPattern.test(text)) return "section_edit";
   if (/\b(?:theme|palette|color|colour|dark mode|glassmorphism|luxury|premium|apple style)\b/i.test(text)) return "style_theme_edit";
@@ -137,7 +142,8 @@ export function hasWebsiteEditSignal(prompt: string) {
 export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const lowerPrompt = prompt.toLowerCase();
   const requestScope = classifyWebsiteRequestScope(prompt);
-  const pageTargetMatch = prompt.match(pagePattern);
+  const explicitHomeTarget = prompt.match(/\b(?:home\s+page|homepage)\b/i);
+  const pageTargetMatch = explicitHomeTarget ?? prompt.match(pagePattern);
   const pageTarget = pageTargetMatch?.[0] ? normalizePageName(pageTargetMatch[0].replace(/\s+page$/i, "")) : undefined;
   const sectionTargetMatch = prompt.match(sectionPattern);
   const sectionTarget = sectionTargetMatch?.[0]?.toLowerCase().replace(/\s+/g, "_");
@@ -149,6 +155,8 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const pageToRemove = extractQuotedOrTrailingValue(prompt, /\bremove\s+(?:the\s+)?([a-z0-9 -]+?)\s+page\b/i);
   const services = extractServices(prompt);
   const wantsTestimonials = /\b(?:add|include)\b[\s\S]{0,60}\b(?:testimonials|reviews|customer feedback)\b/i.test(prompt);
+  const wantsCarousel = /\b(?:add|include|create)\b[\s\S]{0,80}\b(?:carousel|slider)\b/i.test(prompt);
+  const wantsWebglRemoval = /\b(?:remove|disable|delete)\b[\s\S]{0,60}\b(?:webgl|3d effects?|3d visuals?)\b/i.test(prompt);
   const wantsHeroStyle = /\bhero\b[\s\S]{0,80}\b(?:darker|lighter|luxury|premium|warmer|cleaner)\b/i.test(prompt) ||
     /\bmake\s+(?:it|my website|my site|the website|the site)\s+(?:look\s+)?(?:more\s+)?(?:luxury|premium|warmer|cleaner)\b/i.test(prompt);
   const wantsColor = /\b(?:color|colors|palette|accent|blue|white|gold|darker|warmer)\b/i.test(prompt) &&
@@ -161,7 +169,9 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
 
   let editType: WebsiteEditType = "unknown";
 
-  if (phone || email || address || /\bcontact details\b/i.test(prompt)) editType = "contact_info";
+  if (wantsWebglRemoval) editType = "remove_webgl";
+  else if (wantsCarousel) editType = "add_carousel";
+  else if (phone || email || address || /\bcontact details\b/i.test(prompt)) editType = "contact_info";
   else if (businessName) editType = "business_name";
   else if (primaryCta) editType = "cta_text";
   else if (wantsTestimonials) editType = "add_testimonials";
@@ -176,10 +186,12 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const targetPages =
     editType === "remove_page" && pageToRemove ? [normalizePageName(pageToRemove)] :
     editType === "service_copy" ? ["services", "home"] :
-    editType === "add_testimonials" || editType === "hero_style" || editType === "cta_text" ? ["home"] :
+    editType === "add_carousel" || editType === "add_testimonials" || editType === "hero_style" || editType === "cta_text" ? ["home"] :
     editType === "page_edit" || editType === "page_replacement" ? [pageTarget ?? "home"] :
     [];
   const targetFiles =
+    editType === "remove_webgl" ? ["index.html", "styles.css", "main.js"] :
+    editType === "add_carousel" ? ["index.html", "styles.css", "main.js"] :
     editType === "hero_style" || editType === "color_palette" ? ["styles.css", "HASSALI.md"] :
     editType === "remove_page" && pageToRemove ? [pageToPath(pageToRemove), "HASSALI.md"] :
     editType === "service_copy" ? ["services.html", "index.html", "HASSALI.md"] :

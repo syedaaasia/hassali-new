@@ -843,7 +843,10 @@ function isEnhancementRequest(prompt: string) {
 }
 
 function isInvoiceRequest(prompt: string) {
-  return /\binvoice\b/i.test(prompt);
+  return (
+    /\b(?:create|generate|make|build|design|write)\b[\s\S]{0,80}\b(?:printable\s+)?(?:professional\s+)?invoice(?:\s+(?:document|template|form))?\b/i.test(prompt) &&
+    !/\b(?:website|site|landing page|homepage|web app)\b/i.test(prompt)
+  );
 }
 
 const colorThemes: Record<
@@ -1699,6 +1702,14 @@ function createLocalProposal(
   proposalContext?: ProposalContext
 ): DiffProposal {
   const renameRequest = isFullWebsiteReplacementRequest(prompt) ? null : detectRenameRequest(prompt);
+  const isFullWebsiteGeneration =
+    decision.requestType === "website_generation" ||
+    decision.requestType === "multi_page_generation" ||
+    (proposalContext?.mode === "WEBSITE" &&
+      Boolean(proposalContext.websiteGenerationBrief) &&
+      ["full_generation", "full_replacement"].includes(
+        proposalContext.websiteGenerationBrief?.requestScope ?? ""
+      ));
 
   if (decision.requestType === "code_system_generation" || (proposalContext?.mode === "CODE" && proposalContext.codeGenerationBrief)) {
     const promptText = prompt.toLowerCase();
@@ -2169,7 +2180,7 @@ No package install is required.
     };
   }
 
-  if (decision.requestType === "image_fix") {
+  if (decision.requestType === "image_fix" && !isFullWebsiteGeneration) {
     const websiteContent = createStaticWebsiteContent(diagnostic.inferredDomain);
     const currentHtml = safeFileContent(workspace, "index.html", websiteContent.indexHtml);
     const imageSources = Array.from(websiteContent.indexHtml.matchAll(/<img\s+src="([^"]+)"/gi)).map(
@@ -2236,7 +2247,7 @@ img {
     };
   }
 
-  if (decision.requestType === "visual_theme_edit") {
+  if (decision.requestType === "visual_theme_edit" && !isFullWebsiteGeneration) {
     const themeEdit = extractThemeEdit(prompt);
     const targetColors = themeEdit.targetColors.length ? themeEdit.targetColors : intent.palette;
     const cssPaths = workspace.fileList.filter((path) => path.endsWith(".css"));
@@ -2285,8 +2296,7 @@ img {
 
   if (
     isEnhancementRequest(prompt) &&
-    decision.requestType !== "website_generation" &&
-    decision.requestType !== "multi_page_generation"
+    !isFullWebsiteGeneration
   ) {
     const changes = createEnhancementChanges(prompt, workspace, diagnostic).map((change) => ({
       ...change,
@@ -2315,7 +2325,7 @@ img {
     };
   }
 
-  if (diagnostic.promptIntent === "animation_or_interaction") {
+  if (diagnostic.promptIntent === "animation_or_interaction" && !isFullWebsiteGeneration) {
     const existingCss = diagnostic.keyFiles.stylesCss ?? "";
     const existingJs = diagnostic.keyFiles.mainJs ?? "";
     const hasMainJs = diagnostic.fileList.includes("main.js") || Boolean(diagnostic.keyFiles.mainJs);
@@ -2645,23 +2655,12 @@ if ("IntersectionObserver" in window) {
       summary:
         mode === "EXECUTE"
           ? hasStandardWebFiles(diagnostic.fileList)
-            ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")} and prepare the preview runtime.`
-            : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")} and prepare the preview runtime.`
+            ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")} and rebuild the static preview.`
+            : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")} and build the static preview.`
           : hasStandardWebFiles(diagnostic.fileList)
             ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")}.`
             : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")}.`,
-      changes: [
-        ...normalizedChanges,
-        ...deleteChanges,
-        ...(mode === "EXECUTE" || shouldRestartPreview(prompt)
-          ? [
-              {
-                action: "restart_runtime" as const,
-                summary: "Restart the local static preview after files are approved."
-              }
-            ]
-          : [])
-      ]
+      changes: [...normalizedChanges, ...deleteChanges]
     };
   }
 
@@ -5545,6 +5544,7 @@ export async function POST(request: Request) {
     return createTextStream(answerOnlyContent, persistence?.sessionId);
   }
 
+  const directInvoiceArtifact = productMode === "WEBSITE" && mode === "EXECUTE" && isInvoiceRequest(effectiveUserPrompt);
   const shouldUseDeterministicProposal =
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (shouldUseDeterministicDecision(decision) ||
@@ -5570,6 +5570,22 @@ export async function POST(request: Request) {
       generatorContract,
       proposalContext
     );
+    if (directInvoiceArtifact) {
+      const visibleSummary = "I prepared an invoice template proposal for review. Nothing changes until you approve it.";
+      persistence = await persistChatMessage(persistence, {
+        content: visibleSummary,
+        metadata: {
+          intelligenceKernel: compactIntelligenceKernel(kernel),
+          intent,
+          intentTranslation: compactTranslatedIntent(translatedIntent),
+          model,
+          productMode,
+          proposal: localProposal
+        },
+        role: "assistant"
+      });
+      return createProposalStream(localProposal, persistence?.sessionId);
+    }
     const proposalWithContract = withProjectContractUpdate({
       composition: proposalComposition,
       contract: activeProjectContract,

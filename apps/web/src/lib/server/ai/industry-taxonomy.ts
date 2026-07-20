@@ -1,9 +1,15 @@
+import {
+  resolveWebsiteNiche,
+  type WebsiteSemanticResolution
+} from "@/lib/server/ai/website-niche-resolver";
+
 export type TaxonomyTier = 1 | 2;
 
 export type DomainId =
   | "accounting_firm"
   | "bakery"
   | "beauty_salon"
+  | "automotive_showroom"
   | "bicycle_shop"
   | "car_rental"
   | "car_repair"
@@ -12,24 +18,31 @@ export type DomainId =
   | "construction_company"
   | "crm_software"
   | "dental_clinic"
+  | "developer_community"
   | "education_training"
   | "electronics_store"
   | "ecommerce_store"
   | "event_planning"
   | "florist"
   | "furniture_store"
+  | "greeting_card_store"
+  | "creative_portfolio"
   | "gym_fitness_studio"
   | "hotel_guesthouse"
+  | "hvac_service"
   | "interior_design"
   | "law_firm"
   | "mobile_phone_shop"
+  | "mechanical_watch"
   | "motorcycle_shop"
   | "photography_studio"
   | "real_estate"
   | "restaurant"
   | "seafood_restaurant"
+  | "skincare_store"
   | "travel_agency"
   | "toy_store"
+  | "technology_consultancy"
   | "upholstery";
 
 export type CorrectedTypo = {
@@ -81,6 +94,7 @@ export type WebsiteIntentContract = {
   correctedTypos: CorrectedTypo[];
   detectedAliases: string[];
   displayName: string;
+  domainCapabilities: string[];
   domainId: DomainId | null;
   exactPageCount: number | null;
   expectedEntities: string[];
@@ -95,6 +109,8 @@ export type WebsiteIntentContract = {
   pageIntentMap: Record<string, string[]>;
   requestedPages: string[];
   requiredFiles: string[];
+  semanticDomain: string;
+  semanticProfile: WebsiteSemanticResolution;
   trustSignals: string[];
   visualStyleHints: string[];
   ctas: string[];
@@ -256,14 +272,14 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
     websiteVocabulary: ["seafood", "fresh catch", "seasonal catch", "oyster", "lobster", "grilled fish", "reservation", "chef", "sourcing", "sustainability", "ocean", "menu"]
   }),
   fullProfile({
-    aliases: ["crm", "crm software", "customer relationship", "customer relationship management", "sales pipeline", "billing dashboard"],
+    aliases: ["crm", "crm software", "customer relationship", "customer relationship management", "sales pipeline", "billing dashboard", "financial workflow saas", "finance workflow saas", "invoice workflow saas", "financial software website"],
     codeHints: {
       commonStackPreferences: ["react_vite", "python_streamlit"],
       entities: ["customer", "deal", "invoice", "activity", "pipeline"],
       possibleApps: ["CRM dashboard", "sales pipeline tracker", "billing dashboard"]
     },
-    commonPages: ["architecture", "data-model", "dashboard"],
-    commonSections: ["dashboard", "customers", "pipeline", "billing", "activity"],
+    commonPages: ["home", "features", "pricing", "contact"],
+    commonSections: ["hero", "workflow", "dashboard", "billing", "proof", "contact"],
     conflicts: ["restaurant", "car_rental", "mobile_phone_shop", "upholstery"],
     ctas: ["Review dashboard", "Open pipeline", "Check billing"],
     displayName: "CRM Software",
@@ -274,6 +290,45 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
     typoVariants: [],
     visualHints: ["dashboard metrics", "tables", "charts", "pipeline board"],
     websiteVocabulary: ["CRM", "dashboard", "contacts", "pipeline", "billing", "reports", "workflow"]
+  }),
+  stubProfile({
+    aliases: ["mechanical watch", "mechanical watchmaker", "watch brand", "watch business", "watch company", "watch shop", "watch website", "watch store", "watchmaker", "luxury watch", "timepiece", "horology"],
+    conflicts: ["electronics_store", "clothing_brand", "restaurant"],
+    commonPages: ["home", "collection", "about", "contact"],
+    commonSections: ["hero", "movement", "materials", "specifications", "collection", "contact"],
+    ctas: ["Explore the movement", "Review specifications", "View the collection"],
+    displayName: "Mechanical Watch",
+    id: "mechanical_watch",
+    trustSignals: ["specifications marked for verification", "movement explanation", "material and finishing detail"],
+    typoVariants: [],
+    visualHints: ["mechanical dial", "movement geometry", "editorial product stage"],
+    websiteVocabulary: ["mechanical watch", "movement", "calibre", "winding", "power reserve", "dial", "case", "finishing", "specifications"]
+  }),
+  stubProfile({
+    aliases: ["automotive showroom", "car showroom", "sports car website", "sports-car website", "vehicle showroom", "car brand"],
+    conflicts: ["car_rental", "car_repair", "motorcycle_shop"],
+    commonPages: ["home", "models", "performance", "contact"],
+    commonSections: ["hero", "models", "body styles", "performance", "safety", "test drive"],
+    ctas: ["Compare models", "Review specifications", "Request a test drive"],
+    displayName: "Automotive Showroom",
+    id: "automotive_showroom",
+    trustSignals: ["specifications marked for verification", "safety context", "test-drive confirmation"],
+    typoVariants: [],
+    visualHints: ["automotive light sweep", "body-style comparison", "vehicle detail"],
+    websiteVocabulary: ["automotive", "sports car", "models", "body style", "performance", "safety", "specifications", "test drive"]
+  }),
+  stubProfile({
+    aliases: ["developer community", "coding community", "software developer community", "developer-community website"],
+    conflicts: ["law_firm", "dental_clinic", "ecommerce_store"],
+    commonPages: ["home", "community", "events", "contact"],
+    commonSections: ["hero", "learning paths", "members", "sessions", "conduct", "contact"],
+    ctas: ["Find a community path", "Join a build session", "Meet sample members"],
+    displayName: "Developer Community",
+    id: "developer_community",
+    trustSignals: ["fictional profiles labeled", "editable conduct policy", "beginner-friendly paths"],
+    typoVariants: [],
+    visualHints: ["developer network", "original UI cards", "deterministic avatar placeholders"],
+    websiteVocabulary: ["developer community", "developers", "build sessions", "code review", "learning paths", "projects", "members"]
   }),
   fullProfile({
     aliases: ["dental clinic", "dentist", "tooth", "teeth", "root canal", "orthodontic", "dental care"],
@@ -294,12 +349,17 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   stubProfile({ aliases: ["motorcycle shop", "motorbike shop", "motor bike shop", "riding gear"], conflicts: ["bicycle_shop", "car_rental"], displayName: "Motorcycle Shop", id: "motorcycle_shop", typoVariants: [], websiteVocabulary: ["motorcycle", "motorbike", "helmets", "rider gear", "spare parts", "engine service", "test rides"] }),
   stubProfile({ aliases: ["bakery", "cake shop", "pastry shop", "bread bakery"], conflicts: ["dental_clinic", "crm_software"], displayName: "Bakery", id: "bakery", typoVariants: [], websiteVocabulary: ["bakery", "cakes", "pastries", "bread", "desserts", "fresh baked", "orders"] }),
   stubProfile({ aliases: ["florist", "flower shop", "bridal flowers", "bouquet"], conflicts: ["crm_software", "mobile_phone_shop"], ctas: ["Order flowers", "Request an arrangement", "Schedule delivery"], displayName: "Florist", id: "florist", trustSignals: ["seasonal collections", "wedding arrangements", "same-day delivery"], typoVariants: [], websiteVocabulary: ["flowers", "bouquet", "wedding", "event", "delivery", "freshness", "arrangements"] }),
-  stubProfile({ aliases: ["cleaning service", "cleaning company", "cleaners", "home cleaning"], conflicts: ["restaurant", "crm_software"], ctas: ["Book a cleaning", "Get a free quote", "Schedule recurring cleaning"], displayName: "Cleaning Service", id: "cleaning_service", trustSignals: ["insured cleaners", "local reviews", "recurring cleaning"], typoVariants: [], websiteVocabulary: ["cleaning", "deep clean", "home cleaning", "office cleaning", "move-in cleaning", "move-out cleaning", "schedule", "trusted cleaners"] }),
+  stubProfile({ aliases: ["cleaning service", "cleaning company", "cleaners", "home cleaning", "carpet cleaning", "carpet cleaner", "rug cleaning", "upholstery and carpet cleaning"], conflicts: ["restaurant", "crm_software"], ctas: ["Book a cleaning", "Get a free quote", "Schedule recurring cleaning"], displayName: "Cleaning Service", id: "cleaning_service", trustSignals: ["insured cleaners", "local reviews", "recurring cleaning"], typoVariants: [], websiteVocabulary: ["cleaning", "deep clean", "home cleaning", "office cleaning", "carpet cleaning", "rug care", "stain treatment", "move-in cleaning", "move-out cleaning", "schedule", "trusted cleaners"] }),
   stubProfile({ aliases: ["gym", "fitness studio", "gym fitness studio", "personal training"], conflicts: ["restaurant", "car_rental"], displayName: "Gym / Fitness Studio", id: "gym_fitness_studio", typoVariants: [], websiteVocabulary: ["gym", "fitness", "training", "classes", "coaches", "membership", "strength"] }),
-  stubProfile({ aliases: ["beauty salon", "salon", "hair salon", "makeup studio"], conflicts: ["dental_clinic", "crm_software"], displayName: "Beauty Salon", id: "beauty_salon", typoVariants: [], websiteVocabulary: ["beauty", "salon", "hair", "makeup", "appointments", "styling", "care"] }),
+  stubProfile({ aliases: ["beauty salon", "salon", "hair salon", "makeup studio"], conflicts: ["dental_clinic", "crm_software", "skincare_store"], displayName: "Beauty Salon", id: "beauty_salon", typoVariants: [], websiteVocabulary: ["beauty salon", "hair styling", "makeup service", "appointments", "stylists", "treatments", "care"] }),
+  stubProfile({ aliases: ["skincare", "skin care", "skincare product", "skincare products", "skincare store", "skin care store", "skincare shop", "cosmetics store", "beauty store", "mascara store", "skin products shop"], conflicts: ["beauty_salon", "dental_clinic", "crm_software"], commonPages: ["home", "products", "about", "contact"], commonSections: ["hero", "skin concerns", "product collections", "ingredients", "routine builder", "delivery", "contact"], ctas: ["Shop skincare", "Build a routine", "Browse skin concerns"], displayName: "Skincare Store", id: "skincare_store", trustSignals: ["clear ingredient information", "skin-type guidance", "delivery and returns"], typoVariants: [], visualHints: ["clinical editorial", "ingredient close-ups", "calm product shelves"], websiteVocabulary: ["skincare", "skin care", "cleanser", "serum", "moisturizer", "SPF", "ingredients", "skin type", "routine", "products", "delivery", "returns"] }),
+  stubProfile({ aliases: ["greeting card store", "greeting card shop", "greeting cards", "card shop", "card store", "birthday card shop", "occasion cards"], conflicts: ["crm_software", "dental_clinic"], commonPages: ["home", "products", "about", "contact"], commonSections: ["hero", "occasions", "featured cards", "personalization", "paper quality", "delivery", "contact"], ctas: ["Browse cards", "Shop by occasion", "Personalize a card"], displayName: "Greeting Card Store", id: "greeting_card_store", trustSignals: ["paper and print details", "personalization guidance", "delivery information"], typoVariants: [], visualHints: ["editorial paper craft", "restrained card grid", "warm handwritten detail"], websiteVocabulary: ["greeting cards", "birthday cards", "anniversary cards", "occasions", "personalized message", "paper stock", "envelopes", "gift notes", "delivery"] }),
   stubProfile({ aliases: ["real estate", "real estate agency", "property agency", "realtor"], conflicts: ["car_rental", "crm_software"], ctas: ["View listings", "Schedule a consultation", "Request a valuation"], displayName: "Real Estate", id: "real_estate", trustSignals: ["local market expertise", "buyer guidance", "seller strategy"], typoVariants: [], websiteVocabulary: ["property", "listings", "buyers", "sellers", "viewings", "neighborhoods", "agents"] }),
   stubProfile({ aliases: ["construction company", "builder", "contractor", "construction"], conflicts: ["software_saas" as DomainId, "restaurant" as DomainId].filter(Boolean) as DomainId[], displayName: "Construction Company", id: "construction_company", typoVariants: [], websiteVocabulary: ["construction", "contractor", "projects", "renovation", "site work", "estimates", "safety"] }),
-  stubProfile({ aliases: ["law firm", "lawyer", "legal office", "attorney"], conflicts: ["restaurant", "ecommerce_store"], displayName: "Law Firm", id: "law_firm", typoVariants: [], websiteVocabulary: ["law firm", "legal", "attorney", "consultation", "cases", "practice areas", "confidential"] }),
+  stubProfile({ aliases: ["law firm", "lawyer", "legal office", "attorney", "legal consultancy", "legal consultant"], conflicts: ["restaurant", "ecommerce_store"], displayName: "Legal Consultancy", id: "law_firm", typoVariants: [], websiteVocabulary: ["law firm", "legal", "consultation", "contracts", "practice areas", "confidential", "general information"] }),
+  stubProfile({ aliases: ["creative director portfolio", "creative portfolio", "art director portfolio", "design portfolio"], conflicts: ["crm_software", "ecommerce_store"], commonPages: ["home", "work", "about", "contact"], commonSections: ["hero", "selected work", "case studies", "process", "contact"], ctas: ["View selected work", "Discuss a project"], displayName: "Creative Portfolio", id: "creative_portfolio", trustSignals: ["clear project roles", "editable case studies", "accessible project navigation"], typoVariants: [], visualHints: ["cinematic typography", "project carousel", "case study rhythm"], websiteVocabulary: ["creative direction", "portfolio", "case study", "selected work", "art direction", "project", "process", "inquiry"] }),
+  stubProfile({ aliases: ["hvac service", "hvac company", "heating and cooling", "air conditioning service", "air conditioner repair"], conflicts: ["restaurant", "crm_software"], commonPages: ["home", "services", "about", "contact"], commonSections: ["hero", "services", "service areas", "process", "booking", "faq"], ctas: ["Request service", "Ask about availability"], displayName: "HVAC Service", id: "hvac_service", trustSignals: ["editable service areas", "availability confirmation", "maintenance guidance"], typoVariants: [], visualHints: ["home comfort", "airflow", "service visit"], websiteVocabulary: ["HVAC", "heating", "cooling", "air conditioning", "maintenance", "repair", "service area", "booking", "home comfort"] }),
+  stubProfile({ aliases: ["technology consultancy", "tech consultancy", "software consultancy", "digital consultancy", "technology consulting", "consulting website"], conflicts: ["restaurant", "ecommerce_store"], commonPages: ["home", "services", "about", "contact"], commonSections: ["hero", "capabilities", "process", "tradeoffs", "contact"], ctas: ["Start a project conversation", "Request discovery"], displayName: "Technology Consultancy", id: "technology_consultancy", trustSignals: ["clear scope", "documented tradeoffs", "handover planning"], typoVariants: [], visualHints: ["technical editorial", "systems diagram", "delivery process"], websiteVocabulary: ["technology", "consulting", "systems", "architecture", "delivery", "automation", "modernization", "discovery"] }),
   stubProfile({ aliases: ["accounting firm", "accountant", "tax firm", "bookkeeping"], conflicts: ["restaurant", "ecommerce_store"], displayName: "Accounting Firm", id: "accounting_firm", typoVariants: [], websiteVocabulary: ["accounting", "tax", "bookkeeping", "payroll", "financial reports", "compliance"] }),
   stubProfile({ aliases: ["ecommerce store", "online store", "shop", "product store"], conflicts: ["crm_software", "car_rental"], displayName: "Ecommerce Store", id: "ecommerce_store", typoVariants: [], websiteVocabulary: ["products", "categories", "cart", "checkout", "delivery", "returns", "support"] }),
   stubProfile({
@@ -322,7 +382,7 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   stubProfile({ aliases: ["travel agency", "tour agency", "trip planner", "travel company"], conflicts: ["car_rental", "restaurant"], displayName: "Travel Agency", id: "travel_agency", typoVariants: [], websiteVocabulary: ["travel", "tours", "packages", "destinations", "itinerary", "booking", "support"] }),
   stubProfile({ aliases: ["car repair", "auto repair", "mechanic shop", "vehicle service"], conflicts: ["car_rental", "bicycle_shop"], displayName: "Car Repair", id: "car_repair", typoVariants: [], websiteVocabulary: ["car repair", "mechanic", "diagnostics", "oil change", "brakes", "service booking", "warranty"] }),
   stubProfile({ aliases: ["electronics store", "electronics shop", "tv business", "tv shop", "tv store", "television business", "television shop", "television store", "smart tv shop", "smart tv store"], conflicts: ["mobile_phone_shop", "dental_clinic"], displayName: "Electronics Store", id: "electronics_store", typoVariants: [], websiteVocabulary: ["electronics", "TV", "OLED", "QLED", "warranty", "installation", "delivery"] }),
-  stubProfile({ aliases: ["clothing brand", "fashion brand", "apparel store", "clothing store"], conflicts: ["crm_software", "restaurant"], displayName: "Clothing Brand", id: "clothing_brand", typoVariants: [], websiteVocabulary: ["clothing", "fashion", "collection", "lookbook", "sizes", "fabric", "shipping"] }),
+  stubProfile({ aliases: ["clothing brand", "fashion brand", "apparel store", "clothing store", "fashion store", "fashion and footwear store", "footwear store", "sneaker store"], conflicts: ["crm_software", "restaurant"], displayName: "Clothing Brand", id: "clothing_brand", typoVariants: [], websiteVocabulary: ["clothing", "fashion", "footwear", "sneakers", "backpacks", "collection", "lookbook", "sizes", "fabric", "shipping"] }),
   stubProfile({ aliases: ["interior design", "interior designer", "home interiors"], conflicts: ["upholstery", "construction_company"], displayName: "Interior Design", id: "interior_design", typoVariants: [], websiteVocabulary: ["interior design", "space planning", "materials", "moodboard", "consultation", "home styling"] }),
   stubProfile({ aliases: ["furniture store", "furniture shop", "sofa store", "chair store"], conflicts: ["upholstery", "mobile_phone_shop"], displayName: "Furniture Store", id: "furniture_store", typoVariants: [], websiteVocabulary: ["furniture", "sofa", "chair", "table", "showroom", "delivery", "collections"] }),
   stubProfile({ aliases: ["photography studio", "photographer", "photo studio"], conflicts: ["crm_software", "restaurant"], displayName: "Photography Studio", id: "photography_studio", typoVariants: [], websiteVocabulary: ["photography", "portfolio", "shoot", "studio", "packages", "gallery", "booking"] }),
@@ -433,6 +493,35 @@ export function classifyDomainIntent(prompt: string): DomainClassification {
   };
 }
 
+export type SemanticDomainEvidence = WebsiteSemanticResolution & {
+  confidence: number;
+  label: string;
+};
+
+export function inferSemanticDomain(
+  prompt: string,
+  classification: DomainClassification = classifyDomainIntent(prompt)
+): SemanticDomainEvidence {
+  const canonical = classification.profile
+    ? {
+        capabilities: unique([
+          classification.profile.id.replace(/_/g, " "),
+          ...classification.profile.websiteVocabulary.slice(0, 8),
+          ...classification.profile.relatedIndustries.slice(0, 4)
+        ]),
+        confidence: classification.confidence,
+        displayName: classification.profile.displayName,
+        domainId: classification.profile.id
+      }
+    : null;
+  const resolution = resolveWebsiteNiche({ canonical, prompt });
+  return {
+    ...resolution,
+    confidence: resolution.semanticConfidence,
+    label: resolution.semanticDomain
+  };
+}
+
 function wordNumber(value: string) {
   const map: Record<string, number> = { five: 5, four: 4, one: 1, seven: 7, six: 6, three: 3, two: 2 };
   return map[value] ?? null;
@@ -452,8 +541,7 @@ function extractExplicitPageList(prompt: string) {
   const patterns = [
     /\binclude\s+([\s\S]{0,180}?)\s+pages?\b/i,
     /\bwith\s+(?:exactly\s+)?(?:\d+|one|two|three|four|five|six|seven)\s+pages?\s*:?\s*([\s\S]{0,180})/i,
-    /\bpages?\s*:?\s*([\s\S]{0,180})/i,
-    /\bwith\s+((?:home|homepage|about|services?|products?|televisions?|brands?|doctors?|contact|gallery|pricing|blog)[\s\S]{0,180})/i
+    /\bpages?\s*:\s*([\s\S]{0,180})/i
   ];
   const pageWordPattern = /about us|our story|about|services?|blogs?|blog|contact|story|products?|televisions?|brands?|doctors?|menu|pricing|gallery|shop|fleet|booking|home|homepage/gi;
 
@@ -480,7 +568,7 @@ function extractExplicitPageList(prompt: string) {
 
 export function extractRequestedPages(prompt: string, fallback: string[] = []) {
   const text = normalizeText(prompt);
-  const countMatch = text.match(/\b(\d+|one|two|three|four|five|six|seven)\s+(?:page|pages)\b/);
+  const countMatch = text.match(/\b(\d+|one|two|three|four|five|six|seven)(?:-|\s+)(?:page|pages)\b/);
   const exactPageCount = countMatch
     ? Number.isNaN(Number(countMatch[1]))
       ? wordNumber(countMatch[1])
@@ -506,15 +594,27 @@ export function pageToHtmlPath(page: string) {
 
 function contractForbiddenVocabulary(profile: IndustryTaxonomyProfile | null) {
   if (!profile) return ["Current Prompt Website", "domain-specific hero", "contact / unknown"];
+  const ownVocabulary = new Set([
+    ...profile.websiteVocabulary,
+    ...profile.commonPages,
+    ...profile.commonSections,
+    ...profile.ctas,
+    ...profile.expectedEntities,
+    ...profile.trustSignals,
+    ...profile.relatedIndustries
+  ].map((term) => normalizeText(term)));
   const commonWords = new Set([
     "accessories",
     "availability",
     "booking",
+    "care",
     "contact",
     "customer support",
     "delivery",
     "dining",
+    "gallery",
     "hours",
+    "menu",
     "pickup",
     "repairs",
     "reservations",
@@ -524,7 +624,7 @@ function contractForbiddenVocabulary(profile: IndustryTaxonomyProfile | null) {
   ]);
   const conflicts = profile.conflicts
     .flatMap((id) => getTaxonomyProfile(id)?.websiteVocabulary ?? [id.replace(/_/g, " ")])
-    .filter((term) => !commonWords.has(normalizeText(term)) && term.length > 3);
+    .filter((term) => !ownVocabulary.has(normalizeText(term)) && !commonWords.has(normalizeText(term)) && term.length > 3);
   return unique(["Current Prompt Website", "domain-specific hero", "contact / unknown", "unknown with clear guidance", ...conflicts]);
 }
 
@@ -539,6 +639,7 @@ export function buildWebsiteIntentContract(input: {
     : null;
   const classification = existingClassification?.profile ? existingClassification : promptClassification;
   const profile = classification.profile;
+  const semanticDomain = inferSemanticDomain(input.prompt, classification);
   const explicitPageList = extractExplicitPageList(input.prompt);
   const landingPageOnly = /\blanding\s+page\b/i.test(input.prompt) && explicitPageList.length === 0;
   const fallbackPages = landingPageOnly
@@ -547,37 +648,42 @@ export function buildWebsiteIntentContract(input: {
       ? input.requestedPagesFallback
       : profile?.commonPages?.length
       ? profile.commonPages
+      : semanticDomain.suggestedPages.length
+        ? semanticDomain.suggestedPages
       : input.requestedPagesFallback?.length
         ? input.requestedPagesFallback
         : ["home", "about", "contact"];
   const pageInfo = extractRequestedPages(input.prompt, fallbackPages);
-  const requestedPages = pageInfo.requestedPages.length ? pageInfo.requestedPages : profile?.commonPages ?? ["home", "about", "contact"];
+  const requestedPages = pageInfo.requestedPages.length ? pageInfo.requestedPages : profile?.commonPages ?? semanticDomain.suggestedPages ?? ["home", "about", "contact"];
 
   return {
     assumptionNotes: classification.ambiguous
       ? [...classification.assumptionNotes, ...classification.ambiguityNotes]
       : classification.assumptionNotes,
-    confidence: classification.confidence,
+    confidence: Math.max(classification.confidence, semanticDomain.semanticConfidence),
     correctedTypos: classification.correctedTypos,
-    ctas: profile?.ctas ?? [],
+    ctas: profile?.ctas ?? semanticDomain.ctas,
     detectedAliases: classification.detectedAliases,
-    displayName: profile?.displayName ?? "Current Prompt Business",
+    displayName: semanticDomain.label,
+    domainCapabilities: semanticDomain.capabilities,
     domainId: classification.domainId,
     exactPageCount: pageInfo.exactPageCount,
-    expectedEntities: profile?.expectedEntities ?? [],
-    expectedSections: profile?.commonSections ?? [],
-    expectedVocabulary: profile?.websiteVocabulary ?? [],
+    expectedEntities: profile?.expectedEntities ?? unique([...semanticDomain.products, ...semanticDomain.services]).slice(0, 10),
+    expectedSections: profile?.commonSections ?? semanticDomain.suggestedSections,
+    expectedVocabulary: profile?.websiteVocabulary ?? unique([...semanticDomain.capabilities, ...semanticDomain.products, ...semanticDomain.services]).slice(0, 14),
     forbiddenDomains: profile?.conflicts ?? [],
     forbiddenVocabulary: contractForbiddenVocabulary(profile),
     generatorStrategy: classification.ambiguous ? "clarify_domain_before_generation" : profile ? "domain_profile_website" : "generic_extracted_business_website",
     mode: "WEBSITE",
     normalizedPrompt: classification.normalizedPrompt,
     originalPrompt: input.prompt,
-    pageIntentMap: Object.fromEntries(requestedPages.map((page) => [page, profile?.commonSections.slice(0, 4) ?? ["hero", "contact"]])),
+    pageIntentMap: Object.fromEntries(requestedPages.map((page) => [page, profile?.commonSections.slice(0, 4) ?? semanticDomain.suggestedSections.slice(0, 5)])),
     requestedPages,
     requiredFiles: unique([...requestedPages.map(pageToHtmlPath), "styles.css", "main.js", "HASSALI.md"]),
-    trustSignals: profile?.trustSignals ?? [],
-    visualStyleHints: profile?.visualHints ?? []
+    semanticDomain: semanticDomain.label,
+    semanticProfile: semanticDomain,
+    trustSignals: profile?.trustSignals ?? semanticDomain.trustSignals,
+    visualStyleHints: profile?.visualHints ?? semanticDomain.visualSubjects
   };
 }
 

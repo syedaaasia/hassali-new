@@ -446,6 +446,61 @@ export function getWebsiteCreativeDirection(input: {
 }): WebsiteCreativeDirection {
   const domainId = domainFrom(input);
 
+  if (domainId === "electronics_store") {
+    const retail = directions.mobile_phone_shop ?? baseDirection(domainId);
+    return {
+      ...retail,
+      domainId,
+      hero: {
+        ...retail.hero,
+        backgroundTreatment: "cinematic product stage with screen-led contrast",
+        eyebrow: "Television and home cinema"
+      },
+      visualArchetype: "Cinematic electronics showroom"
+    };
+  }
+
+  if (domainId === "crm_software") {
+    const crm = baseDirection(domainId);
+    return {
+      ...crm,
+      domainId,
+      hero: { ...crm.hero, eyebrow: "Customer operations, clearly connected", layout: "split-proof" },
+      visualArchetype: "Precise product interface"
+    };
+  }
+
+  if (domainId === "restaurant" || domainId === "seafood_restaurant") {
+    const dining = baseDirection(domainId);
+    return {
+      ...dining,
+      domainId,
+      hero: { ...dining.hero, backgroundTreatment: "editorial dining composition with subtle ambient depth", eyebrow: "Seasonal menu and reservations", layout: "editorial" },
+      proof: { ...dining.proof, sectionTitle: "Menu clarity, reservation guidance, and dietary notes", type: "menu-signature", visualTreatment: "editorial dish and dining-room studies" },
+      visualArchetype: "Editorial dining room"
+    };
+  }
+
+  if (domainId === "creative_portfolio") {
+    const portfolio = baseDirection(domainId);
+    return { ...portfolio, domainId, hero: { ...portfolio.hero, eyebrow: "Creative direction and selected work", layout: "editorial" }, visualArchetype: "Cinematic typographic portfolio" };
+  }
+
+  if (domainId === "hvac_service") {
+    const service = directions.cleaning_service ?? baseDirection(domainId);
+    return { ...service, domainId, hero: { ...service.hero, eyebrow: "Heating, cooling, and home comfort" }, visualArchetype: "Confident local utility" };
+  }
+
+  if (domainId === "law_firm") {
+    const legal = baseDirection(domainId);
+    return { ...legal, domainId, hero: { ...legal.hero, eyebrow: "Measured legal guidance", layout: "editorial" }, visualArchetype: "Restrained professional editorial" };
+  }
+
+  if (domainId === "technology_consultancy") {
+    const technology = baseDirection(domainId);
+    return { ...technology, domainId, hero: { ...technology.hero, eyebrow: "Technology strategy and delivery", layout: "split-proof" }, visualArchetype: "Precise technical editorial" };
+  }
+
   if (isPriorityWebsiteDomain(domainId)) {
     return directions[domainId] ?? baseDirection(domainId);
   }

@@ -130,6 +130,11 @@ export function detectWebsiteIndustry(input: {
     if (briefDomain === "toy_store") return "ecommerce";
     if (briefDomain === "upholstery") return "upholstery";
     if (briefDomain === "bicycle_shop") return "bicycle_shop";
+    if (briefDomain === "electronics_store") return "ecommerce";
+    if (briefDomain === "creative_portfolio") return "portfolio";
+    if (briefDomain === "hvac_service") return "cleaning_service";
+    if (briefDomain === "law_firm") return "saas";
+    if (briefDomain === "technology_consultancy") return "saas";
   }
 
   const text = [

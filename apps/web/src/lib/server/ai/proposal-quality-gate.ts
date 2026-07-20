@@ -160,6 +160,27 @@ function visibleFileContent(files: Record<string, string>) {
     .join("\n");
 }
 
+function visibleWebsiteContent(files: Record<string, string>) {
+  return Object.entries(files)
+    .filter(([path]) => path.toLowerCase().endsWith(".html"))
+    .map(([, content]) => content
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " "))
+    .join("\n");
+}
+
+function hasApplyUnsafeTemplateToken(files: Record<string, string>) {
+  const content = Object.entries(files)
+    .filter(([path]) => path !== "HASSALI.md" && /\.(?:html|css|js|ts|tsx|jsx)$/i.test(path))
+    .map(([, fileContent]) => fileContent)
+    .join("\n");
+  return /\{\{\s*[a-z0-9_.-]+\s*\}\}|\bREPLACE_ME\b|\[\s*insert\s+(?:phone|email|address|content|name)[^\]]*\]|\bTODO\s*:/i.test(content);
+}
+
 function repeatedPageBodies(files: Record<string, string>) {
   const htmlBodies = Object.entries(files)
     .filter(([path]) => path.endsWith(".html"))
@@ -248,8 +269,14 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
   const files = input.proposedFiles ?? {};
   const fileNames = Object.keys(files);
   const content = [input.proposalSummary ?? "", contentFromFiles(files)].join("\n");
-  const visibleContent = visibleFileContent(files);
   const mode = input.contextPriority.authoritativeMode;
+  const visibleContent = mode === "WEBSITE" ? visibleWebsiteContent(files) : visibleFileContent(files);
+  const websiteSource = mode === "WEBSITE"
+    ? Object.entries(files)
+      .filter(([path]) => path.toLowerCase().endsWith(".html"))
+      .map(([, fileContent]) => fileContent)
+      .join("\n")
+    : "";
   const intentFamily = input.contextPriority.authoritativeIntentFamily;
   const requiredChecks = unique([
     ...input.businessBlueprint.acceptanceChecks,
@@ -317,12 +344,15 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
     }));
   }
 
+  const unsafeTemplateTokenDetected = mode === "WEBSITE" && hasApplyUnsafeTemplateToken(files);
   const placeholderDetected = mode === "CODE"
     ? /\b(?:lorem ipsum|fix me|insert content here|placeholder image|image goes here)\b/i.test(content)
-    : includesAny(content, placeholderPatterns);
-  const loremDetected = /\blorem ipsum\b/i.test(content);
-  const todoDetected = /\b(?:TODO|coming soon|TBD)\b/i.test(content);
-  const fakeContentDetected = includesAny(content, fakeContentPatterns);
+    : unsafeTemplateTokenDetected || includesAny(visibleContent, placeholderPatterns) || /\b(?:undefined|null)\b/i.test(visibleContent);
+  const loremDetected = /\blorem ipsum\b/i.test(mode === "WEBSITE" ? visibleContent : content);
+  const todoDetected = mode === "WEBSITE"
+    ? unsafeTemplateTokenDetected
+    : /\b(?:TODO|coming soon|TBD)\b/i.test(content);
+  const fakeContentDetected = includesAny(mode === "WEBSITE" ? visibleContent : content, fakeContentPatterns);
   const repeatedEvidence = repeatedPageBodies(files);
   const repeatedContentDetected = repeatedEvidence.length > 0;
 
@@ -338,24 +368,24 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
   }
 
   if (fakeContentDetected) {
-    failures.push(issue({
+    (mode === "WEBSITE" ? warnings : failures).push(issue({
       category: "trust",
       evidence: "overstated/fake capability claim",
       id: "fake_content_claim",
       message: "Proposal contains vague or overconfident capability claims.",
       repairHint: "Use honest wording and mark mock or placeholder integrations clearly.",
-      severity: "failure"
+      severity: mode === "WEBSITE" ? "warning" : "failure"
     }));
   }
 
   if (repeatedContentDetected) {
-    failures.push(issue({
+    (mode === "WEBSITE" ? warnings : failures).push(issue({
       category: "content",
       evidence: repeatedEvidence.join("; "),
       id: "repeated_page_content",
       message: "Multiple pages appear to reuse identical body content.",
       repairHint: "Give each page a distinct purpose and copy structure.",
-      severity: "failure"
+      severity: mode === "WEBSITE" ? "warning" : "failure"
     }));
   }
 
@@ -364,7 +394,7 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
     mode === "WEBSITE" && intentFamily !== "targeted_text_replacement"
       ? sectionTerms(input.compositionPlan).filter((section) => !includesAny(visibleContent, [section]))
       : [];
-  const missingEntities = entityTerms(input).filter((entity) => !includesAny(content, [entity]));
+  const missingEntities = entityTerms(input).filter((entity) => !includesAny(mode === "WEBSITE" ? visibleContent : content, [entity]));
   const hasRunnableCodeSource = mode === "CODE" && fileNames.some((path) =>
     path === "vite.config.ts" ||
     path === "vite.config.js" ||
@@ -381,11 +411,11 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
     mode === "WEBSITE" && intentFamily !== "targeted_text_replacement"
       ? input.compositionPlan.trustSignals.filter((signal) => !includesAny(visibleContent, [signal]))
       : [];
-  const missingNavigation = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/<nav\b|navigation|navbar/i.test(visibleContent);
-  const missingHero = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/\bhero\b|<h1\b/i.test(visibleContent);
+  const missingNavigation = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/<nav\b|navigation|navbar/i.test(websiteSource);
+  const missingHero = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/\bhero\b|<h1\b/i.test(websiteSource);
   const missingCTA = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/\b(?:book|order|shop|start|get|call|visit|request|schedule)\b/i.test(visibleContent);
   const missingContact = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/\b(?:contact|email|phone|address|location|hours)\b/i.test(visibleContent);
-  const missingFooter = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/<footer\b|\bfooter\b/i.test(visibleContent);
+  const missingFooter = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/<footer\b|\bfooter\b/i.test(websiteSource);
 
   if (missingPages.length > 0) {
     blocks.push(issue({
@@ -440,7 +470,7 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
   ].filter(Boolean).length;
 
   if (criticalStructureCount > 0) {
-    failures.push(issue({
+    warnings.push(issue({
       category: "structure",
       evidence: [
         missingNavigation ? "navigation" : "",
@@ -452,7 +482,7 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
       id: "missing_critical_website_structure",
       message: "Website proposal is missing critical page structure.",
       repairHint: "Add navigation, hero, CTA, contact, and footer where appropriate.",
-      severity: "failure"
+      severity: "warning"
     }));
   }
 

@@ -199,6 +199,55 @@ function contentFor(changes: PromptAcceptanceChange[]) {
   );
 }
 
+function visitorContentFor(changes: PromptAcceptanceChange[]) {
+  return lower(
+    changes
+      .filter((change) => change.path?.toLowerCase().endsWith(".html"))
+      .map((change) => (change.proposedContent ?? "")
+        .replace(/<!--[\s\S]*?-->/g, " ")
+        .replace(/<style[\s\S]*?<\/style>/gi, " ")
+        .replace(/<script[\s\S]*?<\/script>/gi, " ")
+        .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " "))
+      .join("\n")
+  );
+}
+
+function escapedPattern(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+}
+
+function affirmativeTermCount(content: string, term: string) {
+  const pattern = new RegExp(`\\b${escapedPattern(lower(term))}\\b`, "gi");
+  return content
+    .split(/(?<=[.!?;])\s+/)
+    .reduce((count, sentence) => {
+      const matches = [...sentence.matchAll(pattern)];
+      return count + matches.filter((match) => {
+        const prefix = sentence.slice(Math.max(0, (match.index ?? 0) - 70), match.index ?? 0);
+        return !/\b(?:avoid|avoids|avoiding|do not|does not|doesn't|never|no|not|without)\b[^.!?;]{0,60}$/i.test(prefix);
+      }).length;
+    }, 0);
+}
+
+function contradictoryEvidence(content: string, terms: string[]) {
+  const matches = terms
+    .map((term) => ({ count: affirmativeTermCount(content, term), term }))
+    .filter((entry) => entry.count > 0);
+  const artifactSignals = new Set([
+    "csv merger script",
+    "inventory system studio",
+    "merge_csv.py",
+    "operations software",
+    "reduce manual work studio",
+    "request detected"
+  ]);
+  const hard = matches.length >= 2 || matches.some((entry) => artifactSignals.has(lower(entry.term)) || entry.count >= 3);
+
+  return { hard, matches };
+}
+
 function publicCopyLeakIssues(content: string) {
   const patterns: Array<[RegExp, string]> = [
     [/\bexplain\s+[a-z0-9 /-]{2,80}\s+with domain-specific proof/i, "public copy contains internal explain/domain-proof wording"],
@@ -232,6 +281,15 @@ function promptAllowsContradictoryTerm(prompt: string, term: string) {
   }
 
   return promptText.includes(normalizedTerm);
+}
+
+function contentContainsContradictoryTerm(content: string, term: string) {
+  const normalizedTerm = lower(term);
+  if (normalizedTerm === "stock") {
+    const withoutMaterialStock = content.replace(/\b(?:paper|card)\s*stock\b/g, "");
+    return /\bstock\b/.test(withoutMaterialStock);
+  }
+  return content.includes(normalizedTerm);
 }
 
 export function buildPromptSovereigntyContract(input: {
@@ -298,11 +356,12 @@ export function validatePromptSovereignty(input: {
   const issues: string[] = [];
   const warnings: string[] = [];
   const content = contentFor(input.changes);
+  const visitorContent = visitorContentFor(input.changes);
   const paths = new Set(input.changes.map((change) => change.path).filter(Boolean) as string[]);
   const fileChanges = input.changes.filter((change) => change.path);
-  const copyLeakIssues = publicCopyLeakIssues(content);
+  const copyLeakIssues = publicCopyLeakIssues(visitorContent);
 
-  issues.push(...copyLeakIssues);
+  warnings.push(...copyLeakIssues);
 
   if (input.contract.expectedCapability === "rename") {
     if (fileChanges.length === 0) {
@@ -368,22 +427,26 @@ export function validatePromptSovereignty(input: {
   }
 
   if (input.contract.isExplicitNewBuild) {
-    const matchedTerms = input.contract.expectedTerms.filter((term) => content.includes(lower(term)));
+    const matchedTerms = input.contract.expectedTerms.filter((term) => visitorContent.includes(lower(term)));
     const minimumMatches = Math.min(3, Math.max(1, input.contract.expectedTerms.length));
 
     if (matchedTerms.length < minimumMatches) {
-      issues.push(`generated output does not contain enough ${input.contract.expectedDomain} vocabulary`);
+      warnings.push(`generated output may need stronger ${input.contract.expectedDomain} vocabulary`);
     }
   }
 
-  const leakedTerms = input.contract.contradictoryTerms.filter((term) => {
+  const possibleContradictions = input.contract.contradictoryTerms.filter((term) => {
     const normalized = lower(term);
 
-    return !promptAllowsContradictoryTerm(input.contract.prompt, normalized) && content.includes(normalized);
+    return !promptAllowsContradictoryTerm(input.contract.prompt, normalized) && contentContainsContradictoryTerm(visitorContent, normalized);
   });
+  const contradiction = contradictoryEvidence(visitorContent, possibleContradictions);
+  const leakedTerms = contradiction.matches.map((entry) => entry.term);
 
-  if (leakedTerms.length > 0) {
+  if (contradiction.hard) {
     issues.push(`generated output contains contradictory or stale-domain terms: ${leakedTerms.slice(0, 5).join(", ")}`);
+  } else if (leakedTerms.length > 0) {
+    warnings.push(`isolated ambiguous vocabulary needs review but does not prove stale-domain drift: ${leakedTerms.join(", ")}`);
   }
 
   if (

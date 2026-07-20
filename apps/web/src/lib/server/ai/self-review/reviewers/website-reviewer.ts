@@ -18,7 +18,6 @@ type HtmlPage = SelfReviewFile & {
 
 const placeholderPatterns = [
   /\blorem ipsum\b/i,
-  /\bplaceholder\b/i,
   /\btodo\b/i,
   /\bcoming soon\b/i,
   /\bproduct-led storefront\b/i,
@@ -37,6 +36,14 @@ const placeholderPatterns = [
   /\bunknown with clear guidance\b/i,
   /\bSupport, warranty, shipping, and contact details for Current Prompt Website\b/i,
   /\bdocument dataset domain\s*=\s*Current Prompt Website\b/i
+];
+
+const unsafeTemplatePatterns = [
+  /\{\{\s*[a-z0-9_.-]+\s*\}\}/i,
+  /\bREPLACE_ME\b/i,
+  /\[\s*insert\s+(?:phone|email|address|content|name)[^\]]*\]/i,
+  /\bTODO\s*:/i,
+  /\blorem ipsum\b/i
 ];
 
 function normalizePath(path: string) {
@@ -222,7 +229,8 @@ export const websiteReviewer: SelfReviewReviewer = {
 
     if (websiteContract) {
       if (websiteContract.confidence < 0.58 || websiteContract.generatorStrategy === "clarify_domain_before_generation") {
-        addIssue(failures, {
+        const requiresClarification = websiteContract.generatorStrategy === "clarify_domain_before_generation";
+        addIssue(requiresClarification ? failures : warnings, {
           category: "taxonomy",
           confidence: Math.max(0.55, websiteContract.confidence),
           description: websiteContract.assumptionNotes.join(" ") || "Domain classification confidence is too low for safe generation.",
@@ -237,10 +245,12 @@ export const websiteReviewer: SelfReviewReviewer = {
           generator: input.generator,
           id: "website_taxonomy_low_confidence",
           mode: input.mode,
-          recommendedFix: "Ask a clarifying question or regenerate after the user confirms the intended industry.",
-          repairStrategy: "clarify_domain_before_generation",
+          recommendedFix: requiresClarification
+            ? "Ask one clarifying question because the prompt does not identify a usable business or website purpose."
+            : "Use the semantic domain evidence from the current prompt and keep taxonomy confidence as a review note.",
+          repairStrategy: requiresClarification ? "clarify_domain_before_generation" : "preserve_semantic_domain_evidence",
           ruleId: websiteContract.generatorStrategy === "clarify_domain_before_generation" ? "TAXONOMY002" : "TAXONOMY001",
-          severity: "high",
+          severity: requiresClarification ? "high" : "medium",
           timestamp,
           title: websiteContract.generatorStrategy === "clarify_domain_before_generation" ? "Ambiguous Domain" : "Low-Confidence Domain Classification"
         });
@@ -277,7 +287,7 @@ export const websiteReviewer: SelfReviewReviewer = {
       const requiredVocabularyCount = Math.min(3, websiteContract.expectedVocabulary.length);
 
       if (requiredVocabularyCount > 0 && expectedVocabularyFound.length < requiredVocabularyCount) {
-        addIssue(failures, {
+        addIssue(warnings, {
           category: "domain_consistency",
           confidence: 0.9,
           description: `Generated copy includes ${expectedVocabularyFound.length} taxonomy vocabulary term(s), expected at least ${requiredVocabularyCount}.`,
@@ -295,7 +305,7 @@ export const websiteReviewer: SelfReviewReviewer = {
           recommendedFix: "Regenerate public copy using the taxonomy contract expectedVocabulary terms.",
           repairStrategy: "regenerate_domain_specific_public_copy",
           ruleId: "WEBSITE_DOMAIN001",
-          severity: "high",
+          severity: "medium",
           timestamp,
           title: "Taxonomy Vocabulary Missing"
         });
@@ -306,9 +316,11 @@ export const websiteReviewer: SelfReviewReviewer = {
       );
 
       if (forbiddenFound.length > 0) {
-        addIssue(failures, {
+        const repeatedForbiddenTerm = forbiddenFound.some((term) => countTextOccurrences(generatedPublicText, term) >= 3);
+        const strongContradiction = forbiddenFound.length >= 2 || repeatedForbiddenTerm;
+        addIssue(strongContradiction ? failures : warnings, {
           category: "domain_consistency",
-          confidence: 0.94,
+          confidence: strongContradiction ? 0.94 : 0.58,
           description: `Generated output contains conflicting domain vocabulary: ${forbiddenFound.slice(0, 5).join(", ")}.`,
           domain: input.domain,
           evidence: [
@@ -321,10 +333,12 @@ export const websiteReviewer: SelfReviewReviewer = {
           generator: input.generator,
           id: "website_taxonomy_forbidden_vocabulary",
           mode: input.mode,
-          recommendedFix: "Remove conflicting-domain language and regenerate from the current domain contract.",
+          recommendedFix: strongContradiction
+            ? "Remove the corroborating conflicting-domain language and regenerate from the current domain contract."
+            : "Review the isolated ambiguous term in sentence context before treating it as domain drift.",
           repairStrategy: "remove_conflicting_domain_vocabulary",
           ruleId: "DOMAIN_CONFLICT001",
-          severity: "high",
+          severity: strongContradiction ? "high" : "medium",
           timestamp,
           title: "Conflicting Domain Vocabulary"
         });
@@ -789,7 +803,7 @@ export const websiteReviewer: SelfReviewReviewer = {
       }
 
       if (!/<h1\b/i.test(page.content)) {
-        addIssue(failures, {
+        addIssue(warnings, {
           category: "document_structure",
           description: `${page.path} is missing an h1 heading.`,
           domain: input.domain,
@@ -833,9 +847,26 @@ export const websiteReviewer: SelfReviewReviewer = {
         });
       }
 
+      const unsafeTemplatePattern = unsafeTemplatePatterns.find((pattern) => pattern.test(text));
+      if (unsafeTemplatePattern) {
+        addIssue(failures, {
+          category: "public_copy_quality",
+          description: `${page.path} contains an unresolved template token or unfinished public copy.`,
+          domain: input.domain,
+          generator: input.generator,
+          id: `website_unresolved_template_${page.path}_${failures.length + 1}`,
+          location: { path: page.path },
+          mode: input.mode,
+          recommendedFix: "Replace the unresolved template token with finished visitor-facing content.",
+          ruleId: "PLACEHOLDER001",
+          severity: "high",
+          timestamp
+        });
+      }
+
       for (const pattern of placeholderPatterns) {
         if (pattern.test(text)) {
-          addIssue(failures, {
+          addIssue(warnings, {
             category: "public_copy_quality",
             description: `${page.path} contains placeholder, internal, or generic public copy.`,
             domain: input.domain,
@@ -845,7 +876,7 @@ export const websiteReviewer: SelfReviewReviewer = {
             mode: input.mode,
             recommendedFix: "Replace internal layout labels and placeholders with domain-specific public copy.",
             ruleId: "PLACEHOLDER001",
-            severity: "high",
+            severity: "medium",
             timestamp
           });
           break;
@@ -993,7 +1024,13 @@ export const websiteReviewer: SelfReviewReviewer = {
       },
       mode: input.mode,
       recommendations: failures.length || warnings.length
-        ? [{ id: "website_fix_before_approval", priority: failures.length ? "high" : "medium", description: "Use this review report as input for future repair before approval." }]
+        ? [{
+            id: failures.length ? "website_fix_before_approval" : "website_quality_review",
+            priority: failures.length ? "high" : "medium",
+            description: failures.length
+              ? "Repair the blocking website failures before approval."
+              : "Keep these non-blocking quality notes available for editing and launch review."
+          }]
         : [],
       reviewer: "WebsiteReviewer",
       timestamp,

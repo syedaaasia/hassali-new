@@ -84,6 +84,10 @@ function generatedFileMap(proposal: ProposalLike) {
 function forbiddenSignalsFor(context: ProposalContext) {
   const domain = normalize(context.domain);
 
+  if (/\b(?:hvac|cleaning|repair|local service)\b/.test(domain)) {
+    return ["clear services studio"];
+  }
+
   if (domain.includes("seafood") || domain.includes("restaurant")) {
     return ["television", "electronics", "oled", "qled", "crm", "local service", "smart tv showroom"];
   }
@@ -217,6 +221,7 @@ export function buildApprovalDecision(input: {
   }
 
   const generatedText = Object.entries(files)
+    .filter(([path]) => path.toLowerCase().endsWith(".html"))
     .map(([path, content]) => `FILE:${path}\n${content}`)
     .join("\n")
     .toLowerCase();

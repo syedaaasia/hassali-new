@@ -190,6 +190,13 @@ function isWebsiteRequest(decision: DecisionPlan) {
   );
 }
 
+function isEffectiveWebsiteRequest(input: IntelligenceKernelInput) {
+  return isWebsiteRequest(input.decision) || (
+    input.mode === "WEBSITE" &&
+    input.contextPriority?.authoritativeIntentFamily === "full_generation"
+  );
+}
+
 function promptText(input: IntelligenceKernelInput) {
   return [
     input.translatedIntent?.domain,
@@ -557,7 +564,7 @@ export function buildReasoningTrace(
   contextDiagnosis: ContextDiagnosis,
   input: IntelligenceKernelInput
 ): ReasoningTrace {
-  const websiteRequest = isWebsiteRequest(input.decision);
+  const websiteRequest = isEffectiveWebsiteRequest(input);
 
   return {
     assumptions: [
@@ -626,9 +633,7 @@ export function buildPlanCandidates(
   const runtimeActions: RuntimeAction[] =
       input.mode !== "ASK" && input.decision.requestType === "runtime_action"
       ? ["restart_runtime", "reload_preview", "stop_runtime"]
-      : input.mode === "WEBSITE" && isWebsiteRequest(input.decision)
-        ? ["reload_preview"]
-        : [];
+      : [];
   const baseConfidence = average([input.intent.confidence, input.decision.confidence]);
   const primaryRisk =
     input.mode !== "ASK" || runtimeActions.length > 0
@@ -671,7 +676,7 @@ export function assessRisk(
   selectedPlan: PlanCandidate,
   input: IntelligenceKernelInput
 ): RiskAssessment {
-  const websiteRequest = isWebsiteRequest(input.decision);
+  const websiteRequest = isEffectiveWebsiteRequest(input);
   const technicalBusiness = isTechnicalBusiness(input.composition);
   const projectIsolationRisk = contextDiagnosis.hasProject ? 0.1 : 0.75;
   const fileMutationRisk =
@@ -745,19 +750,24 @@ export function critiquePlan(
     "kernel performs no mutation",
     "selected-project context is explicit"
   ];
-  const websiteRequest = isWebsiteRequest(input.decision);
+  const websiteRequest = isEffectiveWebsiteRequest(input);
+  const effectiveWebsiteRequest = websiteRequest || (
+    input.mode === "WEBSITE" &&
+    taskUnderstanding.userIntent === "new_site" &&
+    selectedPlan.expectedFiles.includes("index.html")
+  );
   const technicalBusiness = isTechnicalBusiness(input.composition);
 
   if (!contextDiagnosis.hasProject && input.mode !== "ASK") {
     issues.push("selected project is missing for a mutation-capable mode");
   }
 
-  if (websiteRequest && selectedPlan.expectedFiles.includes("welcome.ts")) {
+  if (effectiveWebsiteRequest && selectedPlan.expectedFiles.includes("welcome.ts")) {
     issues.push("website generation plan must not target welcome.ts");
   }
 
   if (
-    websiteRequest &&
+    effectiveWebsiteRequest &&
     input.composition.siteArchitecture.pageCount > 1 &&
     selectedPlan.expectedFiles.filter((path) => path.endsWith(".html")).length <
       input.composition.siteArchitecture.pageCount
@@ -768,7 +778,7 @@ export function critiquePlan(
   if (
     !technicalBusiness &&
     contextDiagnosis.inferredDomain === "code/tooling project" &&
-    websiteRequest &&
+    effectiveWebsiteRequest &&
     taskUnderstanding.userIntent !== "new_site"
   ) {
     issues.push("wrong-domain risk: non-technical website could fall back to developer aesthetics");
@@ -778,7 +788,7 @@ export function critiquePlan(
     issues.push("rename intent was not routed to text replacement");
   }
 
-  if (input.mode === "WEBSITE" && taskUnderstanding.userIntent === "new_site" && !websiteRequest) {
+  if (input.mode === "WEBSITE" && taskUnderstanding.userIntent === "new_site" && !effectiveWebsiteRequest) {
     issues.push("new website intent was not routed to website generation");
   }
 
@@ -812,7 +822,7 @@ export function buildVerificationPlan(
 ): VerificationPlan {
   const touchedSourceCode = selectedPlan.expectedFiles.some((path) => /\.(ts|tsx|js|jsx)$/i.test(path));
   const touchedWebFiles = selectedPlan.expectedFiles.some((path) => /\.(html|css|js)$/i.test(path));
-  const websiteRequest = isWebsiteRequest(input.decision);
+  const websiteRequest = isEffectiveWebsiteRequest(input);
   const checks = [
     "confirm proposal projectId matches current selected project before approval",
     "confirm proposed file contents are not blank",

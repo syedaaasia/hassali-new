@@ -52,7 +52,10 @@ export function AppShell() {
   };
 
   return (
-    <div className="relative flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-[hsl(var(--premium-void))] text-[13px] text-foreground">
+    <div
+      className="relative flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-[hsl(var(--premium-void))] text-[13px] text-foreground"
+      data-product-mode={productMode}
+    >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_28%_0%,hsl(var(--premium-accent)/0.12),transparent_28rem),radial-gradient(circle_at_92%_20%,hsl(var(--premium-teal)/0.07),transparent_26rem)]" />
       <WorkspaceHydrator />
       <TopBar />

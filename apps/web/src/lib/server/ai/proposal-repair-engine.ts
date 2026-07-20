@@ -644,6 +644,7 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
   const actions: string[] = [];
   const strategies: ProposalRepairStrategy[] = [];
   const contractPath = activeCodeContractPath(input);
+  const hasQualityBlueprint = /qualityBlueprintVersion:\s*1/i.test(repairedFiles["HASSALI.md"] ?? "");
 
   if (contractPath === "HASSALI.code.md" && typeof repairedFiles["HASSALI.md"] === "string") {
     repairedFiles["HASSALI.code.md"] = repairedFiles["HASSALI.code.md"] ??
@@ -698,6 +699,33 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
     };
   }
 
+  const websiteArtifactPaths = Object.keys(input.proposedFiles);
+  if (
+    input.generatorContract.generatorMode === "website_generation" &&
+    !websiteArtifactPaths.includes("index.html") &&
+    websiteArtifactPaths.some((path) => /^(?:invoice|receipt|quote|report)\.(?:html|css|js)$/i.test(path))
+  ) {
+    return {
+      originalBlockReasons: ["GEN002 Website Generation Returned Wrong Artifact Family"],
+      repairActions: [],
+      repairApplied: false,
+      repairAttempted: true,
+      repairConfidence: 0.98,
+      repairId: `${input.generatorContract.contractId}_wrong_artifact_family`,
+      repairedFiles: input.proposedFiles,
+      repairedSummary: input.proposalSummary,
+      repairSeverity: "high",
+      repairStatus: "keep_blocked",
+      repairStrategy: "none",
+      repairWarnings: ["Repair preserved the blocked document artifact instead of inventing website files around the wrong generator output."],
+      revalidationPassed: false,
+      revalidationRequired: false,
+      shouldKeepBlocked: true,
+      shouldPresentRepairedProposal: false,
+      unresolvedIssues: ["GEN002 Website Generation Returned Wrong Artifact Family"]
+    };
+  }
+
   const hasRunnableAppSource = Object.keys(repairedFiles).some((path) =>
     path === "app.py" ||
     path === "requirements.txt" ||
@@ -731,7 +759,7 @@ export function repairProposal(input: BuildProposalRepairInput): ProposalRepairR
 
   for (const [path, content] of Object.entries(repairedFiles)) {
     let nextContent = content;
-    if (canRewritePublicCopy(path)) {
+    if (canRewritePublicCopy(path) && !hasQualityBlueprint) {
       const forbidden = repairForbiddenTerms(nextContent, input.generatorContract);
       if (forbidden.changed) {
         strategies.push("forbidden_term_rewrite");

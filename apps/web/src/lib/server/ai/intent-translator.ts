@@ -285,25 +285,20 @@ function normalizePageName(value: string) {
 }
 
 function extractPages(text: string): IntentPages {
-  const countMatch = text.match(/\b(\d+|one|two|three|four|five|six)\s+(?:page|pages)\b/);
+  const countMatch = text.match(/\b(\d+|one|two|three|four|five|six)[\s-]+(?:page|pages)\b/);
   const count = countMatch
     ? Number.isNaN(Number(countMatch[1]))
       ? wordNumber(countMatch[1])
       : Number(countMatch[1])
-    : text.includes("single page")
+    : /\bsingle[\s-]+page\b/.test(text)
       ? 1
       : null;
-  const listedPagesMatch = text.match(/\b(?:pages?|with)\s*:?\s*,?\s+((?:home|about us|about|services?|blogs?|blog|contact|story|our story|products?|menu|pricing|gallery|shop)(?:\s*,?\s*(?:and\s+)?(?:home|about us|about|services?|blogs?|blog|contact|story|our story|products?|menu|pricing|gallery|shop))*)/);
+  const listedPagesMatch = text.match(/\b(?:pages?(?:\s+(?:are|include|including))?|include(?:\s+pages?)?|with\s+pages?)\s*:?\s*,?\s+((?:home|about us|about|services?|blogs?|blog|contact|story|our story|products?|menu|pricing|gallery|shop)(?:\s*,?\s*(?:and\s+)?(?:home|about us|about|services?|blogs?|blog|contact|story|our story|products?|menu|pricing|gallery|shop))*)/);
   const names = listedPagesMatch?.[1]
     ?.split(/\s*,\s*|\s+and\s+/)
     .map(normalizePageName)
     .filter(Boolean) ?? [];
-  const directNames = listedPagesMatch ? [] : unique(
-    ["home", "menu", "about", "gallery", "contact", "services", "pricing", "products", "blog"]
-      .filter((page) => new RegExp(`\\b${page}\\b`).test(text))
-      .map(normalizePageName)
-  );
-  const mergedNames = unique([...names, ...directNames]);
+  const mergedNames = unique(names);
 
   return {
     count: mergedNames.length || count ? Math.max(count ?? 0, mergedNames.length) || null : null,

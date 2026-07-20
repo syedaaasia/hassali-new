@@ -103,6 +103,7 @@ export function buildProposalContext(input: {
   const generatorBusiness = input.generatorContract?.authoritativeBusinessType ?? null;
   const domain =
     intentContract?.domainId ||
+    (intentContract?.mode === "WEBSITE" ? intentContract.semanticDomain : null) ||
     input.translatedIntent.domain ||
     input.translatedIntent.businessType ||
     generatorDomain ||
@@ -127,7 +128,11 @@ export function buildProposalContext(input: {
   });
 
   return {
-    businessName: input.translatedIntent.businessType ?? generatorBusiness ?? undefined,
+    businessName:
+      (intentContract?.mode === "WEBSITE" ? intentContract.displayName : null) ??
+      input.translatedIntent.businessType ??
+      generatorBusiness ??
+      undefined,
     codeGenerationBrief,
     designTheme: input.translatedIntent.theme ?? input.translatedIntent.visualLanguage ?? undefined,
     domain,
@@ -181,7 +186,12 @@ export function enforceGeneratorContractWithProposalContext(
   }
 
   if (context.mode === "WEBSITE") {
-    const hasResolvedDomain = Boolean(context.domain && context.domain !== "unknown");
+    const websiteIntent = context.intentContract?.mode === "WEBSITE" ? context.intentContract : null;
+    const hasResolvedDomain = Boolean(
+      context.domain &&
+      context.domain !== "unknown" &&
+      websiteIntent?.generatorStrategy !== "clarify_domain_before_generation"
+    );
     const contractBlocks = hasResolvedDomain
       ? contract.contractBlocks.filter((block) => !block.startsWith("ambiguous domain classification:"))
       : contract.contractBlocks;

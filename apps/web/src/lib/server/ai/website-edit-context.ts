@@ -44,7 +44,7 @@ type WorkspaceLike = {
 };
 
 const ownedWebsitePagePattern = /^(?:index|about|services|service|contact|blog|blogs|menu|gallery|products|pricing|features|story|team|televisions|brands|doctors|booking|shop|fleet)\.html$/i;
-const websiteFilePattern = /\.html$|^(?:styles\.css|main\.js|HASSALI\.md|HASSALI\.website\.md)$/i;
+const websiteFilePattern = /\.html$|^(?:styles\.css|main\.js|scene\.js|media\.js|robots\.txt|sitemap\.xml|HASSALI\.md|HASSALI\.website\.md|assets\/[a-z0-9._/-]+)$/i;
 
 function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
@@ -221,9 +221,18 @@ export function buildWebsiteEditContext(workspace: WorkspaceLike): WebsiteEditCo
   const requestedPages = unique(contractPages.length ? contractPages : fallbackPages);
   const canonicalPagePaths = requestedPages.map(pageToPath);
   const contractRequiredFiles = parseCsvLine(contract, "requiredFiles");
-  const canonicalSupportFiles = ["styles.css", "main.js", contractPath].filter((path) => path === contractPath || Boolean(websiteOnlyFiles[path]) || contractRequiredFiles.includes(path));
+  const hasQualityBlueprint = /(?:^|\n)qualityBlueprintVersion:\s*1\b/i.test(contract);
+  const qualityOwnedFiles = hasQualityBlueprint
+    ? Object.keys(websiteOnlyFiles).filter((path) =>
+        /^(?:scene\.js|media\.js|robots\.txt|sitemap\.xml|assets\/[a-z0-9._/-]+)$/i.test(path)
+      )
+    : [];
+  const canonicalSupportFiles = unique([
+    ...["styles.css", "main.js", contractPath].filter((path) => path === contractPath || Boolean(websiteOnlyFiles[path]) || contractRequiredFiles.includes(path)),
+    ...qualityOwnedFiles
+  ]);
   const requiredFiles = unique([...canonicalPagePaths, ...canonicalSupportFiles]);
-  const contractOwnedFiles = unique([...canonicalPagePaths, ...contractRequiredFiles, contractPath]);
+  const contractOwnedFiles = unique([...canonicalPagePaths, ...contractRequiredFiles, ...qualityOwnedFiles, contractPath]);
   const websiteOwnedFiles = unique([
     ...contractOwnedFiles,
     ...physicalHtmlFiles.filter((path) => ownedWebsitePagePattern.test(path)),

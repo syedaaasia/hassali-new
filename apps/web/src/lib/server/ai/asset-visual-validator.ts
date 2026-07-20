@@ -120,7 +120,15 @@ function unique(values: string[]) {
 }
 
 function includesSignal(text: string, signal: string) {
-  return normalize(text).includes(normalize(signal));
+  const normalizedText = normalize(text);
+  const normalizedSignal = normalize(signal);
+
+  if (normalizedSignal.length <= 3) {
+    const escaped = normalizedSignal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i").test(normalizedText);
+  }
+
+  return normalizedText.includes(normalizedSignal);
 }
 
 function contentFromFiles(files?: Record<string, string>) {

@@ -9,7 +9,7 @@ import type {
 } from "@/lib/server/ai/proposal-context";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
-import { getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
+import { classifyDomainIntent, getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
 
 export type DomainValidationMode = "pre_proposal_context" | "proposal_content";
 export type DomainValidationSeverity = ValidationSeverity;
@@ -140,6 +140,22 @@ function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
+const sharedWebsiteVocabulary = new Set([
+  "availability",
+  "booking",
+  "contact",
+  "customer support",
+  "delivery",
+  "gallery",
+  "hours",
+  "menu",
+  "pickup",
+  "repairs",
+  "reservations",
+  "support",
+  "warranty"
+]);
+
 function includesSignal(text: string, signal: string) {
   return normalize(text).includes(normalize(signal));
 }
@@ -246,6 +262,28 @@ function detectForbidden(text: string, forbiddenSignals: string[]) {
   return forbiddenSignals.filter((signal) => includesSignal(text, signal));
 }
 
+function signalOccurrenceCount(text: string, signal: string) {
+  const normalizedText = normalize(text);
+  const normalizedSignal = normalize(signal);
+  if (!normalizedSignal) return 0;
+
+  return normalizedText.split(normalizedSignal).length - 1;
+}
+
+function hasStrongDomainContradiction(text: string, signals: string[]) {
+  const highSignalArtifacts = new Set([
+    "csv merger script",
+    "inventory system studio",
+    "merge_csv.py",
+    "operations software",
+    "reduce manual work studio"
+  ]);
+
+  return signals.length >= 2 || signals.some((signal) =>
+    highSignalArtifacts.has(normalize(signal)) || signalOccurrenceCount(text, signal) >= 3
+  );
+}
+
 function detectMissing(text: string, requiredSignals: string[], mode: DomainValidationMode) {
   if (mode === "pre_proposal_context") return [];
 
@@ -259,6 +297,7 @@ function fileStrategyIssues(input: ValidateDomainInput) {
   const explicitCodeAppReplace = input.contextPriority.authoritativeMode === "CODE" &&
     /\b(?:replace current app|replace this app|replace the current app|start over with|overwrite this project|overwrite current app|replace current project)\b/i.test(input.currentPrompt);
   const issues: string[] = [];
+  const promptDomain = classifyDomainIntent(input.currentPrompt);
 
   if (input.contextPriority.authoritativeMode === "CODE" && hasStaticTrio && !hasRunnableAppSource && !input.currentPrompt.toLowerCase().includes("landing page")) {
     issues.push("CODE request produced static website trio.");
@@ -275,6 +314,24 @@ function fileStrategyIssues(input: ValidateDomainInput) {
 
   if (input.contextPriority.authoritativeMode === "ASK" && fileNames.length > 0) {
     issues.push("ASK request produced file mutation proposal.");
+  }
+
+  if (
+    input.contextPriority.authoritativeMode === "WEBSITE" &&
+    promptDomain.domainId &&
+    promptDomain.confidence >= 0.68 &&
+    !input.proposalContext?.websiteGenerationBrief?.domainId
+  ) {
+    issues.push(`recognized WEBSITE domain ${promptDomain.domainId} was lost before canonical generation`);
+  }
+
+  if (
+    input.contextPriority.authoritativeMode === "WEBSITE" &&
+    input.proposalContext?.websiteGenerationBrief &&
+    !fileNames.includes("index.html") &&
+    fileNames.some((path) => /^(?:invoice|receipt|quote|report)\.(?:html|css|js)$/i.test(path))
+  ) {
+    issues.push("WEBSITE generation returned a document artifact family instead of a website entry point.");
   }
 
   if (input.validationMode === "proposal_content" && input.proposalContext?.requiredFiles.length) {
@@ -366,13 +423,17 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
     ...(isCodeProposal ? [] : profile.forbidden),
     ...(isCodeProposal ? [] : input.compositionPlan.forbiddenSections),
     ...(isCodeProposal ? [] : input.businessBlueprint.mustAvoid)
-  ]).filter((term) => !isRequiredContractTerm(term, input.proposalContext));
+  ]).filter((term) =>
+    !isRequiredContractTerm(term, input.proposalContext) &&
+    !sharedWebsiteVocabulary.has(normalize(term))
+  );
   const combinedContent = input.validationMode === "proposal_content"
     ? input.contextPriority.authoritativeMode === "WEBSITE"
       ? visibleWebsiteContentFromFiles(input.proposedFiles)
       : contentFromFiles(input.proposedFiles)
     : input.currentPrompt;
   const detectedForbiddenSignals = detectForbidden(combinedContent, forbiddenSignals);
+  const strongDomainContradiction = hasStrongDomainContradiction(combinedContent, detectedForbiddenSignals);
   const detectedGenericCopy = detectGenericCopy(combinedContent);
   const missingSignals = detectMissing(combinedContent, requiredSignals, input.validationMode);
   const strategyIssues = fileStrategyIssues(input);
@@ -410,7 +471,7 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
     strategy: strategyIssues.length
   });
   const criticalIssueCount = input.validationMode === "proposal_content"
-    ? pageIssues.length + strategyIssues.length + detectedModeDrift.length + detectedForbiddenSignals.length
+    ? pageIssues.length + strategyIssues.length + detectedModeDrift.length + (strongDomainContradiction ? 1 : 0)
     : 0;
   const severity: DomainValidationSeverity = criticalIssueCount
     ? "critical"

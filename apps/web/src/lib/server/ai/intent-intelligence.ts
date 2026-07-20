@@ -1,5 +1,10 @@
 import { buildDomainBlueprint } from "@/lib/server/ai/capability-domain-blueprint";
-import { classifyDomainIntent, getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
+import {
+  classifyDomainIntent,
+  extractRequestedPages as extractContractRequestedPages,
+  getTaxonomyProfile,
+  inferSemanticDomain
+} from "@/lib/server/ai/industry-taxonomy";
 import { isFullWebsiteReplacementRequest } from "@/lib/server/ai/website-edit-intent";
 
 export type IntentIntelligence = {
@@ -66,11 +71,13 @@ function includesAny(text: string, terms: string[]) {
 }
 
 function isWebsiteCreationRequest(promptText: string) {
+  const hasPageDescriptor = /\b(?:one|two|three|four|five|six|seven|eight|\d+)[-\s]+pages?\b/.test(promptText);
   return (
     (includesAny(promptText, ["create", "build", "design", "generate"]) ||
       /\bmake\s+(?:me|a|an|new)\b/.test(promptText)) &&
     (includesAny(promptText, ["website", "site", "landing page", "web page", "pages"]) ||
-      /\b(?:ecommerce|e-commerce|online store|storefront)\b/.test(promptText))
+      hasPageDescriptor ||
+      /\b(?:ecommerce|e-commerce|online store|storefront|creative director portfolio|creative portfolio|design portfolio)\b/.test(promptText))
   );
 }
 
@@ -136,7 +143,7 @@ function extractPageCount(promptText: string) {
   }
 
   for (const [word, value] of Object.entries(wordNumbers)) {
-    if (new RegExp(`\\b${word}\\s+(?:page|pages|page website)\\b`).test(promptText)) {
+    if (new RegExp(`\\b${word}[-\\s]+(?:page|pages|page website)\\b`).test(promptText)) {
       return value;
     }
   }
@@ -158,6 +165,11 @@ function inferDomain(promptText: string, projectText: string) {
 
   if (taxonomy.ambiguous) {
     return "bike shop";
+  }
+
+  const semanticDomain = inferSemanticDomain(promptText, taxonomy);
+  if (semanticDomain.source === "named_business" || semanticDomain.source === "dynamic_niche") {
+    return semanticDomain.label;
   }
 
   const blueprint = buildDomainBlueprint({ prompt: promptText });
@@ -406,30 +418,7 @@ function inferUserIntent(promptText: string): IntentIntelligence["userIntent"] {
 }
 
 function extractRequestedPages(promptText: string, domain: string, pageCount: number | null) {
-  const pages: string[] = [];
-  const pageTerms: Record<string, string[]> = {
-    about: ["about"],
-    blog: ["blog"],
-    bikes: ["bikes", "motorcycles", "motorbike", "motorbikes"],
-    contact: ["contact"],
-    distributors: ["distributor", "distributors", "retailer", "retailers"],
-    episodes: ["episode", "episodes"],
-    gallery: ["gallery"],
-    home: ["home", "landing"],
-    menu: ["menu"],
-    portfolio: ["portfolio", "work"],
-    pricing: ["pricing"],
-    products: ["product", "products", "lineup"],
-    services: ["services", "service"],
-    shop: ["shop page", "store page"],
-    story: ["story", "our story"]
-  };
-
-  for (const [page, terms] of Object.entries(pageTerms)) {
-    if (includesAny(promptText, terms)) {
-      pages.push(page);
-    }
-  }
+  const pages = extractContractRequestedPages(promptText, []).requestedPages;
 
   if (domain === "youtube podcast" || domain === "podcast") {
     pages.push("home", "episodes", "about", "services", "contact");
