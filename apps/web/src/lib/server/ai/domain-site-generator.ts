@@ -2273,11 +2273,16 @@ export function generatePlannedWebsiteFiles(input: {
     `qualityInteractions: ${qualitySummary.interactions.join(", ")}`,
     `qualitySemanticHierarchy: ${qualitySummary.semantic}`,
     `qualitySemanticConsistency: ${qualitySummary.semanticConsistency}`,
+    `experiencePlan: ${qualitySummary.experience.join(" | ")}`,
+    `experienceQuality: ${qualitySummary.experienceQuality}`,
+    `experienceBudget: canvases=${qualityBlueprint.experience.budget.maxActiveCanvases}, highCost=${qualityBlueprint.experience.budget.maxHighCostSections}, mobileSequenceCache=${qualityBlueprint.experience.budget.maxSequenceCacheMobile}`,
     `webglPolicy: ${qualitySummary.webgl}`,
     `sceneBlueprint: ${qualitySummary.scene}`,
     `sceneDependencies: ${sceneDependencies}`,
     `cinematicPolicy: ${qualitySummary.cinematic}`,
     `cinematicSourceAssets: ${qualityBlueprint.cinematic.sequences.flatMap((sequence) => sequence.sourceFrames).join(", ") || "none"}`,
+    `assetIntelligence: ${qualitySummary.assets}`,
+    `archiveStatus: ${qualityBlueprint.assets.archiveStatus}`,
     `cinematicCachePolicy: ${qualityBlueprint.cinematic.sequences.map((sequence) => `${sequence.id}:${sequence.cache.desktopLimit}/${sequence.cache.mobileLimit}`).join(", ") || "none"}`,
     `mediaPolicy: semantic registry with generated local fallback for every remote asset`,
     `mediaAssets: ${qualityMediaRecords.join(" | ") || "local generated assets only"}`,
@@ -2328,8 +2333,11 @@ export function generatePlannedWebsiteFiles(input: {
     "- Keep static preview files local and approval-first."
   ].join("\n");
   const validation = validateWebsitePlanAndFiles({
+    assets: qualityBlueprint.assets,
     availableAssetPaths: input.workspaceAssets?.map((asset) => asset.path),
     cinematic: qualityBlueprint.cinematic,
+    experience: qualityBlueprint.experience,
+    experienceQuality: qualityBlueprint.experienceQuality,
     files: plannedFiles,
     plan
   });

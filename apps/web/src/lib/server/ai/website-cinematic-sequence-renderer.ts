@@ -1,6 +1,16 @@
-import type { WebsiteQualityBlueprint } from "@/lib/server/ai/website-quality-blueprint";
+import type { WebsiteCinematicExperience } from "@/lib/server/ai/website-cinematic-sequence-spec";
 
 const sequenceAssetMarker = "__HASSALI_SEQUENCE_ASSET__";
+
+type WebsiteCinematicRenderContext = {
+  brand: {
+    tagline: string;
+  };
+  business: {
+    businessType: string;
+  };
+  cinematic: WebsiteCinematicExperience;
+};
 
 function escapeHtml(value: string) {
   return value
@@ -15,9 +25,13 @@ function markedAsset(path: string) {
   return `${sequenceAssetMarker}./${path.replace(/^\.\//, "")}`;
 }
 
-export function renderWebsiteCinematicSection(blueprint: WebsiteQualityBlueprint) {
+export function renderWebsiteCinematicSection(blueprint: WebsiteCinematicRenderContext, sequenceId?: string | null) {
   if (!blueprint.cinematic.enabled) return "";
-  return blueprint.cinematic.sequences.map((sequence, index) => {
+  const sequences = sequenceId
+    ? blueprint.cinematic.sequences.filter((sequence) => sequence.id === sequenceId)
+    : blueprint.cinematic.sequences;
+  return sequences.map((sequence) => {
+    const index = blueprint.cinematic.sequences.findIndex((candidate) => candidate.id === sequence.id);
     const firstChapter = sequence.chapters[0];
     return `      <section class="cinematic-sequence" id="${escapeHtml(sequence.id)}" data-cinematic-sequence="${escapeHtml(sequence.id)}" data-cinematic-frame="pending" data-cinematic-cache-size="0" style="--cinematic-scroll-length:${sequence.scrollLengthVh}vh" aria-labelledby="${escapeHtml(sequence.id)}-title">
         <div class="cinematic-sticky">
@@ -38,7 +52,7 @@ export function renderWebsiteCinematicSection(blueprint: WebsiteQualityBlueprint
   }).join("\n");
 }
 
-export function renderWebsiteCinematicScriptTags(blueprint: WebsiteQualityBlueprint) {
+export function renderWebsiteCinematicScriptTags(blueprint: WebsiteCinematicRenderContext) {
   if (!blueprint.cinematic.enabled) return "";
   return '    <script src="./sequence-manifest.js" defer></script>\n    <script src="./sequence.js" defer></script>';
 }
@@ -78,7 +92,7 @@ export function renderWebsiteCinematicCss() {
 `;
 }
 
-function renderManifest(blueprint: WebsiteQualityBlueprint) {
+function renderManifest(blueprint: WebsiteCinematicRenderContext) {
   const manifest = {
     engine: "frame_sequence",
     version: 1,
@@ -292,7 +306,7 @@ function renderRuntime() {
 `;
 }
 
-export function renderWebsiteCinematicFiles(blueprint: WebsiteQualityBlueprint) {
+export function renderWebsiteCinematicFiles(blueprint: WebsiteCinematicRenderContext) {
   if (!blueprint.cinematic.enabled) return {};
   return {
     "sequence-manifest.js": renderManifest(blueprint),

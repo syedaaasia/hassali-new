@@ -15,6 +15,7 @@ import {
   renderWebsiteCinematicScriptTags,
   renderWebsiteCinematicSection
 } from "@/lib/server/ai/website-cinematic-sequence-renderer";
+import { experienceForSection } from "@/lib/server/ai/website-experience-composer";
 
 function escapeHtml(value: string) {
   return value
@@ -165,7 +166,7 @@ ${section.items.slice(0, 6).map((item, index) => {
         </div>`;
 }
 
-function renderSection(blueprint: WebsiteQualityBlueprint, section: WebsiteSectionBlueprint, index: number) {
+function renderSection(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlueprint, section: WebsiteSectionBlueprint, index: number) {
   let content: string;
   if (section.kind === "carousel") content = renderCarousel(blueprint, section);
   else if (section.kind === "comparison") content = renderComparison(section);
@@ -176,7 +177,8 @@ function renderSection(blueprint: WebsiteQualityBlueprint, section: WebsiteSecti
   else if (section.kind === "process") content = renderProcess(section);
   else content = renderCards(blueprint, section, section.kind === "trust" ? "trust-grid" : "entity-grid");
 
-  return `      <section class="content-section section-${escapeHtml(section.kind)}" id="${escapeHtml(section.id)}">
+  const experience = experienceForSection(blueprint.experience, page.path, section.id);
+  return `      <section class="content-section section-${escapeHtml(section.kind)}" id="${escapeHtml(section.id)}" data-experience-engine="${escapeHtml(experience?.engine ?? "standard_html")}">
         <div class="section-heading reveal">
           <p class="eyebrow">${escapeVisitorText(section.eyebrow)}</p>
           <h2>${escapeVisitorText(section.title)}</h2>
@@ -200,7 +202,8 @@ function schemaFor(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlueprin
 function renderHero(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlueprint) {
   const nextPage = blueprint.pages.find((candidate) => candidate.name !== page.name);
   const heroMedia = page.name === "home" ? mediaFor(blueprint, "hero") : null;
-  return `      <section class="hero" aria-labelledby="page-title">
+  const experience = experienceForSection(blueprint.experience, page.path, page.name === "home" ? "hero" : `${page.name}-hero`);
+  return `      <section class="hero" aria-labelledby="page-title" data-experience-engine="${escapeHtml(experience?.engine ?? "standard_html")}">
         <div class="hero-copy reveal">
           <p class="eyebrow">${escapeVisitorText(page.visitorCopy.eyebrow)}</p>
           <h1 id="page-title">${escapeVisitorText(page.visitorCopy.heading)}</h1>
@@ -232,6 +235,18 @@ function renderFooter(blueprint: WebsiteQualityBlueprint) {
 }
 
 function renderPage(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlueprint) {
+  const experienceAfter = (sectionId: string) => {
+    const experience = experienceForSection(blueprint.experience, page.path, sectionId);
+    if (!experience) return "";
+    if (experience.engine === "frame_sequence") {
+      return renderWebsiteCinematicSection(blueprint, experience.sequenceId);
+    }
+    if (experience.engine === "procedural_webgl") {
+      return renderWebsiteSceneSection(blueprint);
+    }
+    return "";
+  };
+  const heroId = page.name === "home" ? "hero" : `${page.name}-hero`;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -252,7 +267,7 @@ function renderPage(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
     <link rel="stylesheet" href="./styles.css" />
     <script type="application/ld+json">${schemaFor(blueprint, page)}</script>
   </head>
-  <body data-page="${escapeHtml(page.name)}" data-webgl="${page.name === "home" && blueprint.webgl.enabled ? "enabled" : "disabled"}" data-3d-requirement="${page.name === "home" ? escapeHtml(blueprint.scene.requirement) : "not_requested"}" data-scene-recipe="${page.name === "home" ? escapeHtml(blueprint.scene.recipe) : "none"}" data-scene-spec-version="1" data-cinematic="${page.name === "home" && blueprint.cinematic.enabled ? "enabled" : "disabled"}" data-cinematic-requirement="${page.name === "home" ? escapeHtml(blueprint.cinematic.requirement) : "not_requested"}" data-cinematic-spec-version="1">
+  <body data-page="${escapeHtml(page.name)}" data-webgl="${page.name === "home" && blueprint.webgl.enabled ? "enabled" : "disabled"}" data-3d-requirement="${page.name === "home" ? escapeHtml(blueprint.scene.requirement) : "not_requested"}" data-scene-recipe="${page.name === "home" ? escapeHtml(blueprint.scene.recipe) : "none"}" data-scene-spec-version="1" data-cinematic="${page.name === "home" && blueprint.cinematic.enabled ? "enabled" : "disabled"}" data-cinematic-requirement="${page.name === "home" ? escapeHtml(blueprint.cinematic.requirement) : "not_requested"}" data-cinematic-spec-version="1" data-experience-density="${blueprint.experience.advancedDensity}">
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" data-site-header>
       <a class="brand" href="./index.html">${renderInlineLogo(blueprint, 38)}<span>${escapeHtml(blueprint.brand.generatedName)}</span></a>
@@ -264,9 +279,8 @@ ${nav(blueprint, page.name)}
     </header>
     <main id="main-content">
 ${renderHero(blueprint, page)}
-${page.name === "home" ? renderWebsiteCinematicSection(blueprint) : ""}
-${page.name === "home" ? renderWebsiteSceneSection(blueprint) : ""}
-${page.sections.map((section, index) => renderSection(blueprint, section, index)).join("\n")}
+${experienceAfter(heroId)}
+${page.sections.map((section, index) => `${renderSection(blueprint, page, section, index)}\n${experienceAfter(section.id)}`).join("\n")}
     </main>
 ${renderFooter(blueprint)}
     <script src="./main.js" defer></script>

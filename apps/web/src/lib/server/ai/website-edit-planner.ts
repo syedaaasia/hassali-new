@@ -1,8 +1,25 @@
 import type { WebsiteEditContext } from "@/lib/server/ai/website-edit-context";
 import type { WebsiteEditIntent } from "@/lib/server/ai/website-edit-intent";
+import { inferSemanticDomain } from "@/lib/server/ai/industry-taxonomy";
+import {
+  buildWebsiteSceneBlueprint,
+  type WebsitePalette
+} from "@/lib/server/ai/website-quality-blueprint";
+import {
+  renderWebsiteSceneFiles,
+  renderWebsiteSceneScriptTags,
+  renderWebsiteSceneSection
+} from "@/lib/server/ai/website-scene-renderer";
+import { buildWebsiteCinematicExperience } from "@/lib/server/ai/website-cinematic-sequence-spec";
+import {
+  renderWebsiteCinematicFiles,
+  renderWebsiteCinematicScriptTags,
+  renderWebsiteCinematicSection
+} from "@/lib/server/ai/website-cinematic-sequence-renderer";
 
 export type WebsiteEditPlanChange = {
-  content: string;
+  action?: "delete_file" | "write_file";
+  content?: string;
   path: string;
   summary: string;
 };
@@ -342,7 +359,11 @@ function updateServiceCopy(content: string, services: string[]) {
 }
 
 function change(path: string, content: string, summary: string): WebsiteEditPlanChange {
-  return { content, path, summary };
+  return { action: "write_file", content, path, summary };
+}
+
+function deleteChange(path: string, summary: string): WebsiteEditPlanChange {
+  return { action: "delete_file", path, summary };
 }
 
 function titleCase(value: string) {
@@ -442,9 +463,14 @@ function addCarouselJs(content: string) {
 
 function removeWebglHtml(content: string) {
   return content
+    .replace(/\s*<section\b[^>]*class=["'][^"']*\bscene-section\b[^"']*["'][^>]*>[\s\S]*?<\/section>/gi, "")
+    .replace(/\s*<script\b[^>]*src=["']\.\/scene\.js["'][^>]*><\/script>/gi, "")
     .replace(/\s*<canvas\b[^>]*data-webgl-canvas[^>]*><\/canvas>/gi, "")
     .replace(/\s*<canvas\b[^>]*data-webgl-canvas[^>]*\/?>/gi, "")
-    .replace(/data-webgl=["']enabled["']/gi, 'data-webgl="disabled"');
+    .replace(/data-experience-engine=["']procedural_webgl["']/gi, 'data-experience-engine="standard_html"')
+    .replace(/data-webgl=["']enabled["']/gi, 'data-webgl="disabled"')
+    .replace(/data-3d-requirement=["'](?:allowed|required)["']/gi, 'data-3d-requirement="forbidden"')
+    .replace(/data-scene-recipe=["'][^"']+["']/gi, 'data-scene-recipe="none"');
 }
 
 function removeWebglJs(content: string) {
@@ -459,6 +485,72 @@ function removeWebglCss(content: string) {
     .replace(/^\.hero-stage canvas \{[^\n]*\}\s*$/gim, "")
     .replace(/^\.hero-stage\.is-webgl-ready canvas \{[^\n]*\}\s*$/gim, "")
     .replace(/^\.hero-stage\.is-webgl-ready > img \{[^\n]*\}\s*$/gim, "");
+}
+
+function removeCinematicHtml(content: string) {
+  return content
+    .replace(/\s*<section\b[^>]*class=["'][^"']*\bcinematic-sequence\b[^"']*["'][^>]*>[\s\S]*?<\/section>/gi, "")
+    .replace(/\s*<script\b[^>]*src=["']\.\/sequence(?:-manifest)?\.js["'][^>]*><\/script>/gi, "")
+    .replace(/data-experience-engine=["']frame_sequence["']/gi, 'data-experience-engine="standard_html"')
+    .replace(/data-cinematic=["']enabled["']/gi, 'data-cinematic="disabled"')
+    .replace(/data-cinematic-requirement=["'](?:allowed|required)["']/gi, 'data-cinematic-requirement="forbidden"');
+}
+
+function cssVariable(content: string, name: string, fallback: string) {
+  return content.match(new RegExp(`${escapeRegExp(name)}\\s*:\\s*([^;]+);`, "i"))?.[1]?.trim() ?? fallback;
+}
+
+function existingPalette(files: Record<string, string>): WebsitePalette {
+  const styles = files["styles.css"] ?? "";
+  return {
+    accent: cssVariable(styles, "--accent", "#5f7a61"),
+    accentAlt: cssVariable(styles, "--accent-alt", "#334f44"),
+    background: cssVariable(styles, "--bg", "#f7f7f4"),
+    border: cssVariable(styles, "--border", "rgba(31, 41, 36, 0.14)"),
+    ink: cssVariable(styles, "--ink", "#17201c"),
+    muted: cssVariable(styles, "--muted", "#647068"),
+    surface: cssVariable(styles, "--surface", "#ffffff")
+  };
+}
+
+function setBodyData(content: string, name: string, value: string) {
+  const pattern = new RegExp(`\\b${escapeRegExp(name)}=["'][^"']*["']`, "i");
+  if (pattern.test(content)) return content.replace(pattern, `${name}="${value}"`);
+  return content.replace(/<body\b([^>]*)>/i, `<body$1 ${name}="${value}">`);
+}
+
+function ensureScriptTag(content: string, tags: string) {
+  const missing = tags
+    .split("\n")
+    .filter((tag) => {
+      const source = tag.match(/src=["']([^"']+)["']/i)?.[1];
+      return source && !content.includes(`src="${source}"`) && !content.includes(`src='${source}'`);
+    })
+    .join("\n");
+  return missing ? content.replace(/<\/body>/i, `${missing}\n</body>`) : content;
+}
+
+function insertExperienceSection(content: string, markup: string, target: string | undefined) {
+  const sections = Array.from(content.matchAll(/<section\b[\s\S]*?<\/section>/gi));
+  if (sections.length === 0) return content.replace(/<\/main>/i, `${markup}\n</main>`);
+  const keyword = target?.replace(/_explainer$/, "").replace(/_/g, " ");
+  const selected =
+    target === "second_section" ? sections[1] :
+    target === "hero" ? sections[0] :
+    keyword ? sections.find((match) => match[0].toLowerCase().includes(keyword)) :
+    sections[0];
+  if (!selected || selected.index === undefined) return content.replace(/<\/main>/i, `${markup}\n</main>`);
+  const insertAt = selected.index + selected[0].length;
+  return `${content.slice(0, insertAt)}\n${markup}${content.slice(insertAt)}`;
+}
+
+function markExperienceEngine(markup: string, engine: "frame_sequence" | "procedural_webgl") {
+  return markup.replace("<section ", `<section data-experience-engine="${engine}" `);
+}
+
+function requiredFilesWith(context: WebsiteEditContext, additions: string[], removals: string[] = []) {
+  const removed = new Set(removals);
+  return unique([...context.requiredFiles.filter((path) => !removed.has(path)), ...additions]).join(", ");
 }
 
 export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEditIntent): WebsiteEditPlan {
@@ -587,6 +679,135 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
     }
   }
 
+  if (intent.editType === "set_webgl") {
+    const semantic = inferSemanticDomain(`${context.domainId ?? ""} ${intent.originalPrompt}`);
+    const palette = existingPalette(files);
+    const scene = buildWebsiteSceneBlueprint({
+      cinematicSequenceRequired: Boolean(files["sequence.js"]),
+      domainId: context.domainId ?? semantic.canonicalDomain,
+      palette,
+      profile: { businessType: semantic.label },
+      projectName: context.brandName ?? context.displayName ?? semantic.label,
+      prompt: intent.originalPrompt,
+      semantic
+    });
+    if (!scene.spec.enabled) {
+      return {
+        blockedReason: "The WebGL edit was explicit, but a valid semantic scene specification could not be produced.",
+        changes: [],
+        mode: "blocked",
+        preserved: [`domainId=${context.domainId ?? "unknown"}`, `pages=${context.requestedPages.join("/") || "existing"}`],
+        summary: "Website WebGL transition blocked before changing project files.",
+        targetFiles: intent.targetFiles
+      };
+    }
+    const renderContext = {
+      brand: { generatedName: context.brandName ?? context.displayName ?? semantic.label, palette },
+      scene
+    };
+    const transitioningFromCinematic = /\b(?:replace|turn|convert)\b[^.!?;]{0,80}\b(?:cinematic|frame sequence)\b[^.!?;]{0,80}\b(?:webgl|3d)\b/i.test(intent.originalPrompt);
+    let nextHtml = removeWebglHtml(files["index.html"] ?? "");
+    if (transitioningFromCinematic) nextHtml = removeCinematicHtml(nextHtml);
+    nextHtml = setBodyData(nextHtml, "data-webgl", "enabled");
+    nextHtml = setBodyData(nextHtml, "data-3d-requirement", "required");
+    nextHtml = setBodyData(nextHtml, "data-scene-recipe", scene.recipe);
+    nextHtml = insertExperienceSection(
+      nextHtml,
+      markExperienceEngine(renderWebsiteSceneSection(renderContext), "procedural_webgl"),
+      intent.extractedValues.experienceSectionTarget
+    );
+    nextHtml = ensureScriptTag(nextHtml, renderWebsiteSceneScriptTags(renderContext));
+    changes.push(change("index.html", nextHtml, "Adds the semantic WebGL explainer at the requested section while preserving the remaining page."));
+    for (const [path, content] of Object.entries(renderWebsiteSceneFiles(renderContext))) {
+      changes.push(change(path, content, `Creates the ${path === "scene.js" ? "procedural WebGL runtime" : "designed static scene fallback"} for the requested edit.`));
+    }
+    if (transitioningFromCinematic) {
+      for (const path of ["sequence.js", "sequence-manifest.js"]) {
+        if (files[path]) changes.push(deleteChange(path, `Deletes obsolete cinematic runtime file ${path} after the engine transition.`));
+      }
+    }
+    const nextContract = updateHassali(hassali, {
+      requiredFiles: requiredFilesWith(
+        context,
+        ["scene.js", scene.fallback.asset],
+        transitioningFromCinematic ? ["sequence.js", "sequence-manifest.js"] : []
+      ),
+      sceneDependencies: "Three.js ES module loaded by scene.js",
+      webglPolicy: `enabled by explicit edit with ${scene.recipe} and a designed fallback`,
+      ...(transitioningFromCinematic
+        ? { cinematicPolicy: "replaced by explicit WebGL edit", cinematicSourceAssets: "none" }
+        : {})
+    });
+    if (nextContract !== files[contractPath]) changes.push(change(contractPath, nextContract, contractSummary));
+  }
+
+  if (intent.editType === "set_cinematic") {
+    const semantic = inferSemanticDomain(`${context.domainId ?? ""} ${intent.originalPrompt}`);
+    const cinematic = buildWebsiteCinematicExperience({
+      assets: Object.entries(files)
+        .filter(([path]) => /\.(?:avif|jpe?g|png|webp)$/i.test(path))
+        .map(([path, content]) => ({ content, path })),
+      businessType: semantic.label,
+      capabilities: semantic.capabilities,
+      prompt: `${intent.originalPrompt} Use the selected image sequence as cinematic playback.`
+    });
+    const existingSection = (files["index.html"] ?? "").match(/<section\b[^>]*class=["'][^"']*\bcinematic-sequence\b[^"']*["'][^>]*>[\s\S]*?<\/section>/i)?.[0];
+    if (!cinematic.enabled && !existingSection) {
+      return {
+        blockedReason: "The cinematic edit requires a usable numbered image sequence, but no sequence frames were available in this website workspace.",
+        changes: [],
+        mode: "blocked",
+        preserved: [`domainId=${context.domainId ?? "unknown"}`, `pages=${context.requestedPages.join("/") || "existing"}`],
+        summary: "Website cinematic transition blocked before changing project files.",
+        targetFiles: intent.targetFiles
+      };
+    }
+    const renderContext = {
+      brand: { tagline: context.creativeDirection?.visualArchetype ?? semantic.label },
+      business: { businessType: semantic.label },
+      cinematic
+    };
+    const transitioningFromWebgl = /\b(?:replace|turn|convert)\b[^.!?;]{0,80}\b(?:webgl|3d)\b[^.!?;]{0,80}\b(?:cinematic|frame sequence)\b/i.test(intent.originalPrompt);
+    let nextHtml = removeCinematicHtml(files["index.html"] ?? "");
+    if (transitioningFromWebgl) nextHtml = removeWebglHtml(nextHtml);
+    nextHtml = setBodyData(nextHtml, "data-cinematic", "enabled");
+    nextHtml = setBodyData(nextHtml, "data-cinematic-requirement", "required");
+    const section = cinematic.enabled
+      ? renderWebsiteCinematicSection(renderContext, cinematic.sequences[0]?.id)
+      : existingSection ?? "";
+    nextHtml = insertExperienceSection(
+      nextHtml,
+      markExperienceEngine(section, "frame_sequence"),
+      intent.extractedValues.experienceSectionTarget
+    );
+    if (cinematic.enabled) nextHtml = ensureScriptTag(nextHtml, renderWebsiteCinematicScriptTags(renderContext));
+    else nextHtml = ensureScriptTag(nextHtml, '    <script src="./sequence-manifest.js" defer></script>\n    <script src="./sequence.js" defer></script>');
+    changes.push(change("index.html", nextHtml, "Places the cinematic sequence at the requested section while preserving unrelated website content."));
+    if (cinematic.enabled) {
+      for (const [path, content] of Object.entries(renderWebsiteCinematicFiles(renderContext))) {
+        changes.push(change(path, content, `Creates the bounded cinematic ${path === "sequence.js" ? "runtime" : "manifest"} for the requested edit.`));
+      }
+    }
+    if (transitioningFromWebgl && files["scene.js"]) {
+      changes.push(deleteChange("scene.js", "Deletes the obsolete WebGL runtime after the cinematic transition."));
+    }
+    const nextContract = updateHassali(hassali, {
+      cinematicPolicy: "enabled by explicit section edit with reduced-motion and static-frame fallback",
+      cinematicSourceAssets: cinematic.enabled
+        ? cinematic.sequences.flatMap((sequence) => sequence.sourceFrames).join(", ")
+        : "existing sequence manifest",
+      requiredFiles: requiredFilesWith(
+        context,
+        ["sequence.js", "sequence-manifest.js"],
+        transitioningFromWebgl ? ["scene.js"] : []
+      ),
+      ...(transitioningFromWebgl
+        ? { sceneDependencies: "none", webglPolicy: "replaced by explicit cinematic edit" }
+        : {})
+    });
+    if (nextContract !== files[contractPath]) changes.push(change(contractPath, nextContract, contractSummary));
+  }
+
   if (intent.editType === "remove_webgl") {
     for (const path of htmlFiles(context)) {
       const next = removeWebglHtml(files[path] ?? "");
@@ -600,7 +821,37 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
       const nextJs = removeWebglJs(files["main.js"]);
       if (nextJs !== files["main.js"]) changes.push(change("main.js", nextJs, "Removes WebGL initialization and animation lifecycle code."));
     }
-    const nextContract = updateHassali(hassali, { webglPolicy: "disabled by explicit user edit; static fallback preserved" });
+    if (files["scene.js"]) changes.push(deleteChange("scene.js", "Deletes the obsolete procedural WebGL runtime after approval."));
+    const nextContract = updateHassali(hassali, {
+      requiredFiles: context.requiredFiles.filter((path) => path !== "scene.js").join(", "),
+      sceneDependencies: "none",
+      webglPolicy: "disabled by explicit user edit; static fallback preserved"
+    });
+    if (nextContract !== files[contractPath]) changes.push(change(contractPath, nextContract, contractSummary));
+  }
+
+  if (intent.editType === "remove_cinematic" || intent.editType === "remove_motion") {
+    for (const path of htmlFiles(context)) {
+      let next = removeCinematicHtml(files[path] ?? "");
+      if (intent.editType === "remove_motion") next = removeWebglHtml(next);
+      if (next !== files[path]) changes.push(change(path, next, `Removes obsolete ${intent.editType === "remove_motion" ? "cinematic and WebGL" : "cinematic"} mounts and script references from ${path}.`));
+    }
+    for (const path of ["sequence.js", "sequence-manifest.js"]) {
+      if (files[path]) changes.push(deleteChange(path, `Deletes obsolete cinematic runtime file ${path} after approval.`));
+    }
+    if (intent.editType === "remove_motion" && files["scene.js"]) {
+      changes.push(deleteChange("scene.js", "Deletes the obsolete procedural WebGL runtime after approval."));
+    }
+    const nextContract = updateHassali(hassali, {
+      cinematicPolicy: "disabled by explicit user edit; representative static content preserved",
+      cinematicSourceAssets: "none",
+      requiredFiles: context.requiredFiles.filter((path) =>
+        !["sequence.js", "sequence-manifest.js", ...(intent.editType === "remove_motion" ? ["scene.js"] : [])].includes(path)
+      ).join(", "),
+      ...(intent.editType === "remove_motion"
+        ? { sceneDependencies: "none", webglPolicy: "disabled by explicit user edit; static fallback preserved" }
+        : {})
+    });
     if (nextContract !== files[contractPath]) changes.push(change(contractPath, nextContract, contractSummary));
   }
 
@@ -649,7 +900,11 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
   }
 
   const deduped = new Map(changes.map((item) => [item.path, item]));
-  const finalChanges = [...deduped.values()].filter((item) => item.content.trim().length > 0 && item.content !== context.files[item.path]);
+  const finalChanges = [...deduped.values()].filter((item) =>
+    item.action === "delete_file"
+      ? typeof context.files[item.path] === "string"
+      : Boolean(item.content?.trim().length) && item.content !== context.files[item.path]
+  );
 
   if (!finalChanges.length) {
     return {

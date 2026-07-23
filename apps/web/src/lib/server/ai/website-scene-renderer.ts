@@ -1,8 +1,19 @@
-import type { WebsiteQualityBlueprint, WebsiteSceneBlueprint } from "@/lib/server/ai/website-quality-blueprint";
+import type {
+  WebsitePalette,
+  WebsiteSceneBlueprint
+} from "@/lib/server/ai/website-quality-blueprint";
 
 export const THREE_VERSION = "0.185.0";
 export const GSAP_VERSION = "3.15.0";
 export const THREE_MODULE_URL = `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.js`;
+
+type WebsiteSceneRenderContext = {
+  brand: {
+    generatedName: string;
+    palette: WebsitePalette;
+  };
+  scene: WebsiteSceneBlueprint;
+};
 
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -40,7 +51,7 @@ ${cards.map(([title, detail, value]) => `            <article><span>${escapeHtml
           </div>`;
 }
 
-export function renderWebsiteSceneSection(blueprint: WebsiteQualityBlueprint) {
+export function renderWebsiteSceneSection(blueprint: WebsiteSceneRenderContext) {
   const scene = blueprint.scene;
   if (scene.engine === "none" || scene.engine === "css_svg") return "";
   const copy = sceneCopy(scene);
@@ -62,7 +73,7 @@ ${copy.steps.map((step, index) => `            <li data-scene-step="${index + 1}
       </section>`;
 }
 
-function renderSceneFallback(blueprint: WebsiteQualityBlueprint) {
+function renderSceneFallback(blueprint: WebsiteSceneRenderContext) {
   const p = blueprint.brand.palette;
   const recipe = blueprint.scene.recipe;
   const motifs: Record<WebsiteSceneBlueprint["recipe"], string> = {
@@ -84,7 +95,7 @@ function threeColor(value: string) {
   return rgba ? `rgb(${rgba[1]}, ${rgba[2]}, ${rgba[3]})` : value;
 }
 
-function threeSceneScript(blueprint: WebsiteQualityBlueprint) {
+function threeSceneScript(blueprint: WebsiteSceneRenderContext) {
   const scene = blueprint.scene;
   const p = blueprint.brand.palette;
   const runtimeConfig = {
@@ -98,6 +109,7 @@ function threeSceneScript(blueprint: WebsiteQualityBlueprint) {
     recipe: scene.recipe,
     scrollDriven: scene.spec.interaction.scrollDriven,
     scrollStages: scene.spec.scrollStages,
+    subject: scene.spec.subject,
     seed: Number.parseInt(scene.spec.seed.slice(-8), 16) || 1,
     variation: scene.spec.variation
   };
@@ -178,9 +190,22 @@ function threeSceneScript(blueprint: WebsiteQualityBlueprint) {
       positions.slice(0, Math.min(5, layers)).forEach((position, index) => meshes.push(addMesh(group, new THREE.BoxGeometry(2.35, 1.28, .12), material(THREE, index % 2 ? surface : accent, "glass"), position, [.04 * index, -.1 * index, -.035 * index], [scale, scale, scale])));
       meshes.push(addMesh(group, new THREE.TorusGeometry(2.25, .025, 8, 64, Math.PI * 1.35), material(THREE, accentAlt, "emissive"), [0, -.1, -1.25], [Math.PI / 2, 0, -.35]));
     } else if (recipe === "product_pedestal" || recipe === "material_orbit") {
-      meshes.push(addMesh(group, new THREE.CylinderGeometry(.75, .92, 2.7, 40), material(THREE, surface, "glass"), [0, .25, 0], [0, 0, 0], [scale, scale, scale]));
-      meshes.push(addMesh(group, new THREE.CylinderGeometry(.42, .52, .55, 36), material(THREE, accent, "metal"), [0, 1.85, 0]));
-      meshes.push(addMesh(group, new THREE.CylinderGeometry(1.8, 2.15, .32, 48), material(THREE, ink, "matte"), [0, -1.55, 0]));
+      const subject = String(config.subject || "").toLowerCase();
+      const hardwareSubject = /computer|hardware|chassis|graphics|gpu|cooling|processor|component/.test(subject);
+      if (hardwareSubject && recipe === "product_pedestal") {
+        meshes.push(addMesh(group, new THREE.BoxGeometry(2.25, 3.25, 1.65), material(THREE, ink, "metal"), [0, .05, 0], [0, -.12, 0], [scale, scale, scale]));
+        meshes.push(addMesh(group, new THREE.BoxGeometry(1.9, 2.75, .045), material(THREE, surface, "glass"), [0, .08, .86], [0, -.12, 0]));
+        meshes.push(addMesh(group, new THREE.BoxGeometry(1.55, .42, .18), material(THREE, accent, "emissive"), [.05, .32, 1.02], [0, -.12, 0]));
+        meshes.push(addMesh(group, new THREE.BoxGeometry(1.35, .08, .72), material(THREE, accentAlt, "metal"), [0, -.68, .45], [0, -.12, 0]));
+        for (let index = 0; index < 3; index += 1) {
+          meshes.push(addMesh(group, new THREE.TorusGeometry(.32, .055, 10, 36), material(THREE, index % 2 ? accent : accentAlt, "emissive"), [0, .82 - index * .82, .96], [Math.PI / 2, 0, -.12]));
+        }
+        meshes.push(addMesh(group, new THREE.BoxGeometry(2.85, .18, 2.15), material(THREE, surface, "matte"), [0, -1.72, 0]));
+      } else {
+        meshes.push(addMesh(group, new THREE.CylinderGeometry(.75, .92, 2.7, 40), material(THREE, surface, "glass"), [0, .25, 0], [0, 0, 0], [scale, scale, scale]));
+        meshes.push(addMesh(group, new THREE.CylinderGeometry(.42, .52, .55, 36), material(THREE, accent, "metal"), [0, 1.85, 0]));
+        meshes.push(addMesh(group, new THREE.CylinderGeometry(1.8, 2.15, .32, 48), material(THREE, ink, "matte"), [0, -1.55, 0]));
+      }
       if (recipe === "material_orbit") {
         for (let index = 0; index < Math.min(5, layers); index += 1) {
           const angle = index / Math.min(5, layers) * Math.PI * 2 + config.variation.rotationOffset;
@@ -331,7 +356,7 @@ function threeSceneScript(blueprint: WebsiteQualityBlueprint) {
 })();\n`;
 }
 
-export function renderWebsiteSceneFiles(blueprint: WebsiteQualityBlueprint) {
+export function renderWebsiteSceneFiles(blueprint: WebsiteSceneRenderContext) {
   if (blueprint.scene.engine === "none" || blueprint.scene.engine === "css_svg") return {};
   return {
     [blueprint.scene.fallback.asset]: renderSceneFallback(blueprint),
@@ -339,7 +364,7 @@ export function renderWebsiteSceneFiles(blueprint: WebsiteQualityBlueprint) {
   };
 }
 
-export function renderWebsiteSceneScriptTags(blueprint: WebsiteQualityBlueprint) {
+export function renderWebsiteSceneScriptTags(blueprint: WebsiteSceneRenderContext) {
   if (blueprint.scene.engine === "none" || blueprint.scene.engine === "css_svg") return "";
   return `    <script src="./scene.js" defer></script>`;
 }

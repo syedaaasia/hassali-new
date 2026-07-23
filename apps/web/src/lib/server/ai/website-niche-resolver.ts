@@ -215,7 +215,11 @@ function semanticDomainLabel(phrase: string | null, canonical: CanonicalEvidence
   if (/\b(?:agency|bakery|brokerage|business|company|consultancy|clinic|firm|laboratory|manufacturer|platform|practice|provider|restaurant|roastery|salon|school|shop|software|store|studio|workshop)\b/i.test(cleaned)) return cleaned;
   const words = cleaned.split(/\s+/);
   const last = words.at(-1) ?? "";
-  if (/s$/i.test(last) && !/(?:analytics|gas|saas|services)$/i.test(last)) words[words.length - 1] = last.slice(0, -1);
+  if (/(?:ches|shes|xes|zes|ses)$/i.test(last) && !/services$/i.test(last)) {
+    words[words.length - 1] = last.slice(0, -2);
+  } else if (/s$/i.test(last) && !/(?:analytics|gas|saas|services)$/i.test(last)) {
+    words[words.length - 1] = last.slice(0, -1);
+  }
   return `${words.join(" ")} Business`;
 }
 

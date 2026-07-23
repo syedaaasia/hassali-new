@@ -9,7 +9,11 @@ export type WebsiteEditType =
   | "page_edit"
   | "page_replacement"
   | "remove_page"
+  | "remove_cinematic"
+  | "remove_motion"
   | "remove_webgl"
+  | "set_cinematic"
+  | "set_webgl"
   | "section_edit"
   | "service_copy"
   | "unknown";
@@ -34,6 +38,7 @@ export type WebsiteEditIntent = {
     businessName?: string;
     colorIntent?: string;
     email?: string;
+    experienceSectionTarget?: string;
     pageToRemove?: string;
     pageTarget?: string;
     phone?: string;
@@ -52,7 +57,7 @@ export type WebsiteEditIntent = {
   targetPages: string[];
 };
 
-const editVerbPattern = /\b(?:change|update|make|add|remove|rename|replace|rewrite|rebuild|redesign|improve|polish|edit|darken|lighten)\b/i;
+const editVerbPattern = /\b(?:change|update|make|use|turn|enable|convert|add|remove|rename|replace|rewrite|rebuild|redesign|improve|polish|edit|darken|lighten)\b/i;
 
 const pagePattern = /\b(?:homepage|home|about(?: us)?|services?|products?|pricing|contact|blog|checkout|cart|gallery)(?:\s+page)?\b/i;
 const sectionPattern = /\b(?:hero|footer|navigation|navbar|header|testimonials?|faq|cta|call to action|product grid|service grid)\b/i;
@@ -156,7 +161,31 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const services = extractServices(prompt);
   const wantsTestimonials = /\b(?:add|include)\b[\s\S]{0,60}\b(?:testimonials|reviews|customer feedback)\b/i.test(prompt);
   const wantsCarousel = /\b(?:add|include|create)\b[\s\S]{0,80}\b(?:carousel|slider)\b/i.test(prompt);
-  const wantsWebglRemoval = /\b(?:remove|disable|delete)\b[\s\S]{0,60}\b(?:webgl|3d effects?|3d visuals?)\b/i.test(prompt);
+  const removalText = Array.from(
+    prompt.matchAll(/\b(?:remove|disable|delete)\b[^.!?;]*/gi),
+    (match) => {
+      const directive = match[0];
+      const preserveIndex = directive.search(/\b(?:(?:but|while|and)\s+)?(?:keep|preserve|retain)\b/i);
+      return preserveIndex >= 0 ? directive.slice(0, preserveIndex) : directive;
+    }
+  ).join(" ");
+  const wantsWebglRemoval = /\b(?:webgl|3d(?: effects?| visuals?)?)\b/i.test(removalText);
+  const wantsCinematicStatic = /\bmake\b[^.!?;]{0,70}\b(?:cinematic|frame sequence|sequence animation|cinematic hero)\b[^.!?;]{0,35}\b(?:static|off)\b/i.test(prompt);
+  const wantsCinematicRemoval = /\b(?:cinematic|frame sequence|sequence animation|cinematic hero)\b/i.test(removalText) ||
+    wantsCinematicStatic;
+  const wantsMotionRemoval = /\b(?:all animation|all motion|all visual effects)\b/i.test(removalText) ||
+    (/\ball\b/i.test(removalText) && wantsWebglRemoval && wantsCinematicRemoval);
+  const activationText = prompt.replace(/\b(?:(?:and|but|while)\s+)?(?:keep|preserve|retain)\b[^.!?;]*/gi, "");
+  const wantsWebgl = /\b(?:use|add|enable|turn|make|replace|convert)\b[^.!?;]{0,90}\b(?:webgl|interactive 3d|3d explainer|3d section)\b/i.test(activationText) ||
+    /\b(?:webgl|interactive 3d)\b[^.!?;]{0,70}\b(?:for|in|on)\b/i.test(activationText);
+  const wantsCinematic = /\b(?:use|add|enable|turn|make|replace|convert)\b[^.!?;]{0,90}\b(?:cinematic|frame sequence|image sequence|sequence animation|sequence)\b/i.test(activationText);
+  const transitionToWebgl = /\b(?:replace|turn|convert)\b[^.!?;]{0,80}\b(?:cinematic|frame sequence)\b[^.!?;]{0,40}\b(?:with|to|into)\b[^.!?;]{0,40}\b(?:webgl|3d)\b/i.test(prompt);
+  const transitionToCinematic = /\b(?:replace|turn|convert)\b[^.!?;]{0,80}\b(?:webgl|3d)\b[^.!?;]{0,40}\b(?:with|to|into)\b[^.!?;]{0,40}\b(?:cinematic|frame sequence)\b/i.test(prompt);
+  const experienceSectionTarget =
+    /\bsecond section\b/i.test(prompt) ? "second_section" :
+    prompt.match(/\b(?:hero|hardware explainer|product explainer|workflow explainer|architecture explainer|material explainer)\b/i)?.[0]
+      ?.toLowerCase()
+      .replace(/\s+/g, "_");
   const wantsHeroStyle = /\bhero\b[\s\S]{0,80}\b(?:darker|lighter|luxury|premium|warmer|cleaner)\b/i.test(prompt) ||
     /\bmake\s+(?:it|my website|my site|the website|the site)\s+(?:look\s+)?(?:more\s+)?(?:luxury|premium|warmer|cleaner)\b/i.test(prompt);
   const wantsColor = /\b(?:color|colors|palette|accent|blue|white|gold|darker|warmer)\b/i.test(prompt) &&
@@ -169,7 +198,13 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
 
   let editType: WebsiteEditType = "unknown";
 
-  if (wantsWebglRemoval) editType = "remove_webgl";
+  if (wantsMotionRemoval) editType = "remove_motion";
+  else if (wantsCinematicRemoval) editType = "remove_cinematic";
+  else if (wantsWebglRemoval) editType = "remove_webgl";
+  else if (transitionToWebgl) editType = "set_webgl";
+  else if (transitionToCinematic) editType = "set_cinematic";
+  else if (wantsCinematic) editType = "set_cinematic";
+  else if (wantsWebgl) editType = "set_webgl";
   else if (wantsCarousel) editType = "add_carousel";
   else if (phone || email || address || /\bcontact details\b/i.test(prompt)) editType = "contact_info";
   else if (businessName) editType = "business_name";
@@ -186,11 +221,16 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const targetPages =
     editType === "remove_page" && pageToRemove ? [normalizePageName(pageToRemove)] :
     editType === "service_copy" ? ["services", "home"] :
+    editType === "set_webgl" || editType === "set_cinematic" ? ["home"] :
     editType === "add_carousel" || editType === "add_testimonials" || editType === "hero_style" || editType === "cta_text" ? ["home"] :
     editType === "page_edit" || editType === "page_replacement" ? [pageTarget ?? "home"] :
     [];
   const targetFiles =
-    editType === "remove_webgl" ? ["index.html", "styles.css", "main.js"] :
+    editType === "remove_webgl" ? ["index.html", "scene.js", "HASSALI.md"] :
+    editType === "remove_cinematic" ? ["index.html", "sequence.js", "sequence-manifest.js", "HASSALI.md"] :
+    editType === "remove_motion" ? ["index.html", "scene.js", "sequence.js", "sequence-manifest.js", "HASSALI.md"] :
+    editType === "set_webgl" ? ["index.html", "scene.js", "HASSALI.md"] :
+    editType === "set_cinematic" ? ["index.html", "sequence.js", "sequence-manifest.js", "HASSALI.md"] :
     editType === "add_carousel" ? ["index.html", "styles.css", "main.js"] :
     editType === "hero_style" || editType === "color_palette" ? ["styles.css", "HASSALI.md"] :
     editType === "remove_page" && pageToRemove ? [pageToPath(pageToRemove), "HASSALI.md"] :
@@ -209,6 +249,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
       businessName,
       colorIntent: editType === "color_palette" ? prompt : undefined,
       email,
+      experienceSectionTarget,
       pageToRemove: pageToRemove ? normalizePageName(pageToRemove) : undefined,
       pageTarget,
       phone,

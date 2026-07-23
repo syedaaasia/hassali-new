@@ -1,7 +1,10 @@
 import type { WebsitePlan } from "@/lib/server/ai/website-planner";
 import { getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
+import type { WebsiteAssetIntelligence } from "@/lib/server/ai/website-asset-intelligence";
 import type { WebsiteCinematicExperience } from "@/lib/server/ai/website-cinematic-sequence-spec";
 import { validateWebsiteCinematicOutput } from "@/lib/server/ai/website-cinematic-validator";
+import type { WebsiteExperiencePlan } from "@/lib/server/ai/website-experience-composer";
+import type { WebsiteExperienceQualityReview } from "@/lib/server/ai/website-experience-quality";
 
 export type WebsiteValidationResult = {
   blockedReasons: string[];
@@ -65,7 +68,8 @@ const knownMediaProviders = new Set([
   "picsum",
   "robohash",
   "ui_avatars",
-  "unsplash"
+  "unsplash",
+  "workspace"
 ]);
 
 const mojibakeSequences = [
@@ -134,8 +138,11 @@ function pageToPath(page: string) {
 }
 
 export function validateWebsitePlanAndFiles(input: {
+  assets?: WebsiteAssetIntelligence;
   availableAssetPaths?: string[];
   cinematic?: WebsiteCinematicExperience;
+  experience?: WebsiteExperiencePlan;
+  experienceQuality?: WebsiteExperienceQualityReview;
   files: Record<string, string>;
   plan: WebsitePlan;
 }): WebsiteValidationResult {
@@ -175,6 +182,8 @@ export function validateWebsitePlanAndFiles(input: {
   const nonHomeCanvasFiles = expectedPageFiles.filter((path) => path !== "index.html" && /data-scene-canvas|src=["']\.\/scene\.js/i.test(input.files[path] ?? ""));
   const indexHtml = input.files["index.html"] ?? "";
   const sceneMountCount = (indexHtml.match(/data-scene-canvas/gi) ?? []).length;
+  const cinematicMountCount = (indexHtml.match(/data-cinematic-canvas/gi) ?? []).length;
+  const totalCanvasCount = sceneMountCount + cinematicMountCount;
   const sceneIds = Array.from(indexHtml.matchAll(/data-scene-id=["']([^"']+)["']/gi), (match) => match[1] ?? "").filter(Boolean);
   const duplicateSceneIds = duplicateValues(sceneIds);
   const sceneRecipe = indexHtml.match(/data-scene-recipe=["']([^"']+)["']/i)?.[1] ?? null;
@@ -253,6 +262,33 @@ export function validateWebsitePlanAndFiles(input: {
         files: input.files
       })
     : { hardBlockers: [], passed: true, repairableFindings: [], warnings: [] };
+  const plannedWebglSections = input.experience?.sections.filter((section) => section.engine === "procedural_webgl") ?? [];
+  const plannedCinematicSections = input.experience?.sections.filter((section) => section.engine === "frame_sequence") ?? [];
+  const plannedHighCostSections = input.experience?.sections.filter((section) => section.performanceCost === "HIGH") ?? [];
+  const experienceBudget = input.experience?.budget;
+  const sequenceRuntimePresent = /src=["']\.\/sequence\.js/i.test(indexHtml) && "sequence.js" in input.files;
+  const sceneRuntimePresent = /src=["']\.\/scene\.js/i.test(indexHtml) && "scene.js" in input.files;
+  const mixedRuntimeIndependent = !sceneRuntimePresent || !sequenceRuntimePresent || (
+    /__hassaliSceneTeardowns/.test(input.files["scene.js"] ?? "") &&
+    /__HASSALI_CINEMATIC_TEARDOWNS__/.test(input.files["sequence.js"] ?? "")
+  );
+  const mixedReducedMotionComplete = !sceneRuntimePresent || !sequenceRuntimePresent || (
+    /prefers-reduced-motion:\s*reduce/i.test(input.files["scene.js"] ?? "") &&
+    /prefers-reduced-motion:\s*reduce/i.test(input.files["sequence.js"] ?? "")
+  );
+  const experienceMountsMatch = !input.experience || (
+    sceneMountCount === plannedWebglSections.length &&
+    cinematicMountCount === plannedCinematicSections.length
+  );
+  const explicitAnimationConstraintSatisfied = !input.experience?.explicitConstraints.animationForbidden ||
+    (!sequenceRuntimePresent && cinematicMountCount === 0);
+  const explicitWebglConstraintSatisfied = !input.experience?.explicitConstraints.webglForbidden ||
+    (!sceneRuntimePresent && sceneMountCount === 0);
+  const advancedDensityExceeded = Boolean(input.experience && (
+    input.experience.advancedDensity > 0.4 ||
+    plannedHighCostSections.length > input.experience.budget.maxHighCostSections
+  ));
+  const canvasBudgetExceeded = Boolean(experienceBudget && totalCanvasCount > experienceBudget.maxActiveCanvases);
   const repairableReasons = [
     duplicateSections.length ? `Duplicate sections detected: ${duplicateSections.join(", ")}.` : "",
     genericLayoutDetected ? "Generic template language or layout detected." : "",
@@ -276,6 +312,10 @@ export function validateWebsitePlanAndFiles(input: {
     duplicateValues(descriptionValues).length ? "Generated pages contain duplicate meta descriptions." : "",
     unexpectedHtmlFiles.length ? `Generated pages not present in planner page list: ${unexpectedHtmlFiles.join(", ")}.` : "",
     ...cinematicValidation.repairableFindings,
+    advancedDensityExceeded ? "Advanced visual density exceeds the section-level performance budget." : "",
+    ...((input.experienceQuality?.findings ?? [])
+      .filter((finding) => finding.severity === "repairable")
+      .map((finding) => `${finding.message} Repair: ${finding.repair}`)),
     input.plan.requiredSections.length < 4 ? "Website plan has too few industry-specific sections." : "",
     !input.plan.designTokenValidationPassed
       ? `Design token validation failed: ${input.plan.designTokens.validation.issues.map((issue) => issue.message).join("; ")}.`
@@ -305,6 +345,13 @@ export function validateWebsitePlanAndFiles(input: {
     emptyFiles.length ? `Empty generated files: ${emptyFiles.join(", ")}.` : "",
     missingPageFiles.length ? `Missing planner page files: ${missingPageFiles.join(", ")}.` : "",
     ...cinematicValidation.hardBlockers
+    ,
+    !experienceMountsMatch ? "The final project does not match its section-level experience mount plan." : "",
+    !mixedRuntimeIndependent ? "Mixed visual engines do not own independent teardown lifecycles." : "",
+    !mixedReducedMotionComplete ? "Mixed visual engines do not both honor reduced-motion preferences." : "",
+    !explicitAnimationConstraintSatisfied ? "The request forbids animation, but a cinematic runtime or mount remains." : "",
+    !explicitWebglConstraintSatisfied ? "The request forbids WebGL, but a scene runtime or mount remains." : "",
+    canvasBudgetExceeded ? "The generated page exceeds its active canvas budget." : ""
   ].filter(Boolean);
 
   return {
@@ -320,6 +367,12 @@ export function validateWebsitePlanAndFiles(input: {
       ...(remoteImageTags.length > 0 ? [`Website uses ${remoteImageTags.length} declared remote media asset(s) with local fallbacks.`] : []),
       ...(/data-media-reliability=["']prototype["']/i.test(publicHtml) ? ["Prototype product media must be replaced or verified before production launch."] : []),
       ...cinematicValidation.warnings
+      ,
+      ...(input.assets?.warnings ?? []),
+      ...(input.experience?.warnings ?? []),
+      ...((input.experienceQuality?.findings ?? [])
+        .filter((finding) => finding.severity === "warning")
+        .map((finding) => finding.message))
     ]
   };
 }

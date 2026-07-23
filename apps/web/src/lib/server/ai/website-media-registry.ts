@@ -6,7 +6,8 @@ export type WebsiteMediaProvider =
   | "picsum"
   | "robohash"
   | "ui_avatars"
-  | "unsplash";
+  | "unsplash"
+  | "workspace";
 
 export type WebsiteMediaAttributionPolicy = {
   creatorName?: string;
@@ -91,6 +92,12 @@ export const WEBSITE_MEDIA_PROVIDER_POLICIES: Record<WebsiteMediaProvider, Websi
     allowedUses: ["fixed semantically curated editorial photography"],
     forbiddenUses: ["random image selection", "cross-domain product substitution", "unattributed production launch"],
     licenseNote: "Keep Unsplash attribution and replace or confirm photographer credit before production launch.",
+    reliability: "curated"
+  },
+  workspace: {
+    allowedUses: ["user-supplied website media", "product imagery", "brand and editorial artwork"],
+    forbiddenUses: ["unrelated uploads", "sequence-frame duplication", "unsupported ownership claims"],
+    licenseNote: "Supplied through the selected project workspace; the project owner remains responsible for usage rights.",
     reliability: "curated"
   }
 };

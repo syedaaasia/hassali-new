@@ -15,6 +15,20 @@ import {
   buildWebsiteMediaRegistry,
   type WebsiteMediaAsset
 } from "@/lib/server/ai/website-media-registry";
+import {
+  analyzeWebsiteAssets,
+  workspaceMediaFromAssetIntelligence,
+  type WebsiteAssetIntelligence
+} from "@/lib/server/ai/website-asset-intelligence";
+import {
+  composeWebsiteExperience,
+  type WebsiteExperiencePlan
+} from "@/lib/server/ai/website-experience-composer";
+import {
+  applyExperienceQualityRepair,
+  reviewWebsiteExperienceQuality,
+  type WebsiteExperienceQualityReview
+} from "@/lib/server/ai/website-experience-quality";
 import type { WebsiteCinematicAssetInput } from "@/lib/server/ai/website-cinematic-asset-analyzer";
 import {
   buildWebsiteCinematicExperience,
@@ -149,6 +163,7 @@ export type WebsiteQualityBlueprint = {
     skipLink: boolean;
     visibleFocus: boolean;
   };
+  assets: WebsiteAssetIntelligence;
   brand: {
     generatedName: string;
     logo: WebsiteLogoBlueprint;
@@ -182,6 +197,8 @@ export type WebsiteQualityBlueprint = {
   contentEntities: Array<{ description: string; label: string; meta: string }>;
   interactions: WebsiteInteractionBlueprint[];
   media: WebsiteMediaAsset[];
+  experience: WebsiteExperiencePlan;
+  experienceQuality: WebsiteExperienceQualityReview;
   pages: WebsitePageBlueprint[];
   performance: {
     maxDevicePixelRatio: number;
@@ -621,7 +638,7 @@ function cleanBrand(value: string | null | undefined) {
 
 function generatedBrand(profileValue: DomainProfile, seed: string) {
   const number = hash(seed);
-  return `${profileValue.brandStems[number % profileValue.brandStems.length]}${profileValue.brandSuffixes[(number >>> 3) % profileValue.brandSuffixes.length]}`;
+  return `${profileValue.brandStems[number % profileValue.brandStems.length]} ${profileValue.brandSuffixes[(number >>> 3) % profileValue.brandSuffixes.length]}`;
 }
 
 function logoBlueprint(brandName: string, profileValue: DomainProfile, domainId: string | null): WebsiteLogoBlueprint {
@@ -769,13 +786,43 @@ function createSection(input: {
 
 function pageSections(input: { page: string; profile: DomainProfile }) {
   const entities = itemList(input.profile);
+  const processItems = [
+    {
+      detail: `Start with the visitor's priorities and the ${input.profile.businessType} outcome they need.`,
+      title: "Define the need"
+    },
+    {
+      detail: `Compare the relevant options using clear scope, material, performance, or service details.`,
+      title: "Compare the fit"
+    },
+    {
+      detail: "Confirm current availability, timing, specifications, and terms directly before deciding.",
+      title: "Confirm current information"
+    },
+    {
+      detail: "Continue through the primary inquiry or purchase path without losing the context gathered so far.",
+      title: "Take the next step"
+    }
+  ];
+  const trustItems = input.profile.trustSignals.map((signal) => ({
+    detail: `Ask how ${signal.toLowerCase()} applies to the option, service, or project you are considering.`,
+    title: signal
+  }));
   const core = input.profile.sectionIdeas.map(([title, body, kind], index) => createSection({
     body,
     eyebrow: titleCase(input.profile.businessType),
     id: `${input.page}-${kind}-${index + 1}`,
     items: kind === "faq"
       ? input.profile.faq.map(([question, answer]) => ({ detail: answer, title: question }))
-      : entities,
+      : kind === "process"
+        ? processItems
+        : kind === "trust"
+          ? trustItems
+          : kind === "comparison"
+            ? entities.slice(0, 4)
+            : kind === "gallery"
+              ? entities.slice(index % Math.max(1, entities.length), index % Math.max(1, entities.length) + 6)
+              : entities,
     kind,
     title
   }));
@@ -824,7 +871,7 @@ function domainCtas(profileValue: DomainProfile) {
   return { primary: `Explore ${profileValue.businessType}`, secondary: "Review the details" };
 }
 
-function buildSceneBlueprint(input: { cinematicSequenceRequired: boolean; domainId: string | null; palette: WebsitePalette; profile: DomainProfile; projectName: string; prompt: string; semantic: SemanticDomainEvidence }): WebsiteSceneBlueprint {
+export function buildWebsiteSceneBlueprint(input: { cinematicSequenceRequired: boolean; domainId: string | null; palette: WebsitePalette; profile: Pick<DomainProfile, "businessType">; projectName: string; prompt: string; semantic: SemanticDomainEvidence }): WebsiteSceneBlueprint {
   const spec = buildWebsite3DSceneSpec({
     businessType: input.profile.businessType,
     cinematicSequenceRequired: input.cinematicSequenceRequired,
@@ -963,7 +1010,12 @@ export function buildWebsiteQualityBlueprint(input: {
     }
   });
   const brandPalette = paletteFrom({ direction: input.direction, intent: input.intent, prompt: input.prompt });
-  const cinematic = buildWebsiteCinematicExperience({
+  const assets = analyzeWebsiteAssets({
+    assets: input.workspaceAssets ?? [],
+    capabilities: semantic.capabilities,
+    visualSubjects: semantic.visualSubjects
+  });
+  let cinematic = buildWebsiteCinematicExperience({
     assets: input.workspaceAssets ?? [],
     businessType: selectedProfile.businessType,
     capabilities: semantic.capabilities,
@@ -976,7 +1028,7 @@ export function buildWebsiteQualityBlueprint(input: {
       reason: "Maps normal page scrolling to a bounded frame sequence with static mobile and reduced-motion fallbacks."
     });
   }
-  const scene = buildSceneBlueprint({
+  const scene = buildWebsiteSceneBlueprint({
     cinematicSequenceRequired: cinematic.enabled && cinematic.requirement === "required",
     domainId,
     palette: brandPalette,
@@ -986,7 +1038,54 @@ export function buildWebsiteQualityBlueprint(input: {
     semantic
   });
   const webgl = webglPolicy(scene);
-  const media = buildWebsiteMediaRegistry({ brandName, businessType: selectedProfile.businessType, domainId, prompt: input.prompt });
+  const sequenceBudget = webgl.enabled ? 1 : 2;
+  if (cinematic.sequences.length > sequenceBudget) {
+    cinematic = {
+      ...cinematic,
+      sequences: cinematic.sequences.slice(0, sequenceBudget),
+      warnings: [
+        ...cinematic.warnings,
+        `Experience budget selected ${sequenceBudget} of ${cinematic.sequences.length} usable cinematic sequences.`
+      ]
+    };
+  }
+  const workspaceMedia = workspaceMediaFromAssetIntelligence(assets, selectedProfile.businessType);
+  const registryMedia = buildWebsiteMediaRegistry({ brandName, businessType: selectedProfile.businessType, domainId, prompt: input.prompt });
+  const media = workspaceMedia.length
+    ? [...workspaceMedia, ...registryMedia.filter((asset) => !workspaceMedia.some((workspaceAsset) => workspaceAsset.role === asset.role))]
+    : registryMedia;
+  const initialExperience = composeWebsiteExperience({
+    assets,
+    businessCapabilities: semantic.capabilities,
+    cinematic,
+    pages,
+    prompt: input.prompt,
+    scene: {
+      enabled: webgl.enabled,
+      mountSectionId: scene.mountSectionId,
+      pagePath: scene.pagePath,
+      requirement: scene.requirement
+    }
+  });
+  const experienceQuality = reviewWebsiteExperienceQuality({
+    businessValues: [
+      selectedProfile.businessType,
+      ...semantic.capabilities,
+      ...semantic.products,
+      ...semantic.services,
+      ...semantic.visualSubjects
+    ],
+    copy: pages.flatMap((page) => [
+      page.visitorCopy.heading,
+      page.visitorCopy.body,
+      ...page.sections.flatMap((section) => [section.title, section.body])
+    ]),
+    experience: initialExperience,
+    sections: pages.find((page) => page.name === "home")?.sections ?? pages.flatMap((page) => page.sections)
+  });
+  const experience = experienceQuality.repaired
+    ? applyExperienceQualityRepair(initialExperience)
+    : initialExperience;
   const externalSceneDependencies = scene.engine === "three" ? 1 + (scene.motionEngine === "gsap-scrolltrigger" ? 2 : 0) : 0;
   const semanticConsistency = evaluateWebsiteSemanticConsistency({
     businessType: selectedProfile.businessType,
@@ -999,6 +1098,7 @@ export function buildWebsiteQualityBlueprint(input: {
 
   return {
     accessibility: { landmarks: true, reducedMotion: true, skipLink: true, visibleFocus: true },
+    assets,
     brand: {
       generatedName: brandName,
       logo: logoBlueprint(brandName, selectedProfile, domainId),
@@ -1032,8 +1132,10 @@ export function buildWebsiteQualityBlueprint(input: {
     contentEntities: selectedProfile.entities.map(([label, description, meta]) => ({ description, label, meta })),
     interactions,
     media,
+    experience,
+    experienceQuality,
     pages,
-    performance: { maxDevicePixelRatio: scene.performanceBudget.maxPixelRatio, pauseWhenHidden: true, progressiveEnhancement: true, remoteDependencies: media.filter((item) => item.provider !== "local_svg").length + externalSceneDependencies },
+    performance: { maxDevicePixelRatio: scene.performanceBudget.maxPixelRatio, pauseWhenHidden: true, progressiveEnhancement: true, remoteDependencies: media.filter((item) => item.provider !== "local_svg" && item.provider !== "workspace").length + externalSceneDependencies },
     seo: { canonicalPolicy: "project-relative", includeOpenGraph: true, includeRobots: true, includeSitemap: true, structuredData: true },
     scene,
     semanticConsistency: { ...semanticConsistency, repairApplied: semanticRepairApplied },
@@ -1044,10 +1146,13 @@ export function buildWebsiteQualityBlueprint(input: {
 
 export function summarizeWebsiteQualityBlueprint(blueprint: WebsiteQualityBlueprint) {
   return {
+    assets: `${blueprint.assets.records.length} asset(s), ${blueprint.assets.cinematicSequences.length} sequence(s)`,
     brand: blueprint.brand.generatedName,
     cinematic: blueprint.cinematic.enabled ? `${blueprint.cinematic.sequences.length} sequence(s)` : blueprint.cinematic.requirement,
     components: blueprint.sharedComponents,
     interactions: blueprint.interactions.map((interaction) => interaction.id),
+    experience: blueprint.experience.sections.map((section) => `${section.sectionId}:${section.engine}`),
+    experienceQuality: `${blueprint.experienceQuality.score}:${blueprint.experienceQuality.findings.length} finding(s)`,
     media: blueprint.media.map((item) => `${item.provider}:${item.id}`),
     palette: Object.values(blueprint.brand.palette),
     pages: blueprint.pages.map((page) => page.path),

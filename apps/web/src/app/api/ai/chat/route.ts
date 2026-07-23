@@ -137,6 +137,7 @@ import {
 } from "@/lib/server/ai/workspace-context-engine";
 import {
   classifyWebsiteEditIntent,
+  classifyWebsiteRequestScope,
   hasWebsiteEditSignal,
   isFullWebsiteReplacementRequest,
   type WebsiteEditIntent
@@ -2504,7 +2505,10 @@ if ("IntersectionObserver" in window) {
     }));
     const websiteBrief = proposalContext?.websiteGenerationBrief;
     const existingWebsiteState = buildWebsiteEditContext(workspace);
-    const newCanonicalFiles = new Set(Object.keys(websiteFiles));
+    const retainedWorkspaceAssets = websiteGeneration.qualityBlueprint.assets.records
+      .filter((asset) => asset.role !== "archive" && asset.role !== "unrelated")
+      .map((asset) => asset.path);
+    const newCanonicalFiles = new Set([...Object.keys(websiteFiles), ...retainedWorkspaceAssets]);
     const obsoleteOwnedFiles = websiteBrief?.requestScope === "full_replacement"
       ? existingWebsiteState.websiteOwnedFiles.filter((path) =>
           diagnostic.fileList.includes(path) &&
@@ -2520,7 +2524,7 @@ if ("IntersectionObserver" in window) {
     const generationVirtualFilesystem = buildWebsiteVirtualFilesystem({
       actions: [...normalizedChanges, ...deleteChanges],
       canonicalDomain: websiteBrief?.domainId ?? websiteGeneration.sourceOfTruthDomain,
-      canonicalOwnedFiles: Object.keys(websiteFiles),
+      canonicalOwnedFiles: [...Object.keys(websiteFiles), ...retainedWorkspaceAssets],
       canonicalPageFiles: (websiteBrief?.requestedPages ?? websiteGeneration.sourceOfTruthPages).map((page) =>
         page === "home" ? "index.html" : `${page}.html`
       ),
@@ -2550,8 +2554,11 @@ if ("IntersectionObserver" in window) {
           validatorInputCount: Object.keys(normalizedFiles).length
         };
     const normalizedValidation = validateWebsitePlanAndFiles({
+      assets: websiteGeneration.qualityBlueprint.assets,
       availableAssetPaths: workspace.fileList,
       cinematic: websiteGeneration.qualityBlueprint.cinematic,
+      experience: websiteGeneration.qualityBlueprint.experience,
+      experienceQuality: websiteGeneration.qualityBlueprint.experienceQuality,
       files: normalizedFiles,
       plan: websiteGeneration.plan
     });
@@ -2584,6 +2591,19 @@ if ("IntersectionObserver" in window) {
       websiteCinematicRequirement: websiteGeneration.qualityBlueprint.cinematic.requirement,
       websiteCinematicSequenceIds: websiteGeneration.qualityBlueprint.cinematic.sequences.map((sequence) => sequence.id),
       websiteCinematicWarnings: websiteGeneration.qualityBlueprint.cinematic.warnings,
+      websiteExperienceAdvancedDensity: websiteGeneration.qualityBlueprint.experience.advancedDensity,
+      websiteExperienceEngines: websiteGeneration.qualityBlueprint.experience.sections.map((section) => ({
+        engine: section.engine,
+        pagePath: section.pagePath,
+        sectionId: section.sectionId
+      })),
+      websiteExperienceQualityScore: websiteGeneration.qualityBlueprint.experienceQuality.score,
+      websiteExperienceWarnings: [
+        ...websiteGeneration.qualityBlueprint.experience.warnings,
+        ...websiteGeneration.qualityBlueprint.experienceQuality.warnings
+      ],
+      websiteAssetArchiveStatus: websiteGeneration.qualityBlueprint.assets.archiveStatus,
+      websiteAssetCount: websiteGeneration.qualityBlueprint.assets.records.length,
       websiteGeneratedActionCount: contractAssertion.generatedFileCount,
       websiteGenerationContractStatus: contractAssertion.passed ? ("passed" as const) : ("blocked" as const),
       websiteGoal: websiteGeneration.plan.goal,
@@ -4309,17 +4329,39 @@ function createWebsiteEditProposal(input: {
   const validationProfile = input.plan.mode === "blocked"
     ? "clarification_only"
     : validationProfileForWebsiteScope(input.intent.requestScope);
-  const initialProposalChanges: ProposalChange[] = input.plan.changes.map((change) => ({
-    action: input.context.files[change.path] ? ("update" as const) : ("create" as const),
-    diffPreview: createDiffPreview(input.context.files[change.path] ? "update" : "create", change.path, change.content),
-    path: change.path,
-    proposedContent: change.content,
-    summary: change.summary
-  }));
+  const deletedPaths = new Set(
+    input.plan.changes
+      .filter((change) => change.action === "delete_file")
+      .map((change) => change.path)
+  );
+  const postEditRequiredFiles = Array.from(new Set([
+    ...input.context.requiredFiles.filter((path) => !deletedPaths.has(path)),
+    ...input.plan.changes
+      .filter((change) => change.action !== "delete_file")
+      .map((change) => change.path)
+  ]));
+  const initialProposalChanges: ProposalChange[] = input.plan.changes.map((change) => {
+    if (change.action === "delete_file") {
+      return {
+        action: "delete_file" as const,
+        path: change.path,
+        summary: change.summary
+      };
+    }
+    const action = input.context.files[change.path] ? ("update" as const) : ("create" as const);
+    const proposedContent = change.content ?? "";
+    return {
+      action,
+      diffPreview: createDiffPreview(action, change.path, proposedContent),
+      path: change.path,
+      proposedContent,
+      summary: change.summary
+    };
+  });
   const initialVirtualFilesystem = buildWebsiteVirtualFilesystem({
     actions: initialProposalChanges,
     canonicalDomain: input.context.domainId,
-    canonicalOwnedFiles: input.context.requiredFiles,
+    canonicalOwnedFiles: postEditRequiredFiles,
     canonicalPageFiles: input.context.canonicalPagePaths,
     currentFiles: input.context.files,
     profile: validationProfile,
@@ -4339,7 +4381,7 @@ function createWebsiteEditProposal(input: {
   const virtualFilesystem = buildWebsiteVirtualFilesystem({
     actions: proposalChanges,
     canonicalDomain: input.context.domainId,
-    canonicalOwnedFiles: input.context.requiredFiles,
+    canonicalOwnedFiles: postEditRequiredFiles,
     canonicalPageFiles: input.context.canonicalPagePaths,
     currentFiles: input.context.files,
     profile: validationProfile,
@@ -4421,7 +4463,7 @@ function createWebsiteEditProposal(input: {
     ...input.proposalContext,
     domain: input.context.domainId ?? input.proposalContext.domain,
     pages: input.context.requestedPages.length ? input.context.requestedPages : input.proposalContext.pages,
-    requiredFiles: input.context.requiredFiles
+    requiredFiles: postEditRequiredFiles
   };
   const selfReview = runSelfReview({
     domain: input.context.domainId ?? input.proposalContext.domain,
@@ -4429,7 +4471,7 @@ function createWebsiteEditProposal(input: {
     generator: `${input.generatorContract.contractId}_website_edit`,
     manifest: {
       framework: "static_html",
-      requiredFiles: input.context.requiredFiles,
+      requiredFiles: postEditRequiredFiles,
       type: "static_website"
     },
     intentContract: null,
@@ -4437,7 +4479,7 @@ function createWebsiteEditProposal(input: {
     projectId: input.projectId,
     prompt: input.prompt,
     requestedPages: input.context.requestedPages,
-    requiredFiles: input.context.requiredFiles,
+    requiredFiles: postEditRequiredFiles,
     systemRisks: selfReviewSystemRisksFromWebsiteEdit(input.plan)
   });
   const proposalWithSelfReview = applySelfReviewMetadata(baseProposal, selfReview);
@@ -5449,6 +5491,7 @@ export async function POST(request: Request) {
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     productMode === "WEBSITE" &&
     hasWebsiteEditSignal(effectiveUserPrompt) &&
+    classifyWebsiteRequestScope(effectiveUserPrompt) !== "full_generation" &&
     !isFullWebsiteReplacementRequest(effectiveUserPrompt)
   ) {
     const websiteEditContext = buildWebsiteEditContext(workspace);
