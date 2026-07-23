@@ -153,12 +153,17 @@ function mimeFor(path: string) {
   if (extension === "js" || extension === "mjs") return "text/javascript";
   if (extension === "json" || extension === "webmanifest") return "application/json";
   if (extension === "svg") return "image/svg+xml";
+  if (extension === "avif") return "image/avif";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "png") return "image/png";
+  if (extension === "webp") return "image/webp";
   if (extension === "xml") return "application/xml";
   if (extension === "txt") return "text/plain";
   return "application/octet-stream";
 }
 
 function dataUrl(path: string, content: string) {
+  if (/^data:image\/[a-z0-9.+-]+(?:;[^,]*)?,/i.test(content.trim())) return content.trim();
   return `data:${mimeFor(path)};charset=utf-8,${encodeURIComponent(content)}`;
 }
 
@@ -250,9 +255,20 @@ export function compileStaticPreview(input: StaticPreviewCompilationInput): Stat
     }
   );
 
+  const rewriteSequenceManifest = (content: string, manifestPath: string) => content.replace(
+    /(["'])__HASSALI_SEQUENCE_ASSET__(\.\/?[^"']+)\1/g,
+    (match, _quote: string, reference: string) => {
+      const resolved = resolveLocal(manifestPath, reference, true);
+      if (typeof resolved === "string") return match;
+      const assetContent = rewriteAsset(index.files[resolved.path], resolved.path, new Set());
+      return JSON.stringify(`${dataUrl(resolved.path, assetContent)}${resolved.fragment}`);
+    }
+  );
+
   function rewriteAsset(content: string, path: string, stack: Set<string>): string {
     if (/\.css$/i.test(path)) return rewriteCss(content, path, stack);
     if (/\.svg$/i.test(path)) return rewriteSvg(content, path, stack);
+    if (/(?:^|\/)sequence-manifest\.js$/i.test(path)) return rewriteSequenceManifest(content, path);
     return content;
   }
 
@@ -285,7 +301,8 @@ export function compileStaticPreview(input: StaticPreviewCompilationInput): Stat
   srcDoc = srcDoc.replace(/<script\b([^>]*?)\bsrc\s*=\s*(["'])([^"']+)\2([^>]*)><\/script>/gi, (tag, before: string, _quote: string, reference: string, after: string) => {
     const resolved = resolveLocal(activeHtmlPath, reference, true);
     if (typeof resolved === "string") return resolved === reference ? tag : "";
-    return `<script${before}${after} data-preview-source="${escapeAttribute(resolved.path)}">${escapeInlineScript(index.files[resolved.path])}</script>`;
+    const content = rewriteAsset(index.files[resolved.path], resolved.path, new Set());
+    return `<script${before}${after} data-preview-source="${escapeAttribute(resolved.path)}">${escapeInlineScript(content)}</script>`;
   });
 
   srcDoc = srcDoc.replace(/<a\b[^>]*>/gi, (tag) => {

@@ -1,5 +1,7 @@
 import type { WebsitePlan } from "@/lib/server/ai/website-planner";
 import { getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
+import type { WebsiteCinematicExperience } from "@/lib/server/ai/website-cinematic-sequence-spec";
+import { validateWebsiteCinematicOutput } from "@/lib/server/ai/website-cinematic-validator";
 
 export type WebsiteValidationResult = {
   blockedReasons: string[];
@@ -132,6 +134,8 @@ function pageToPath(page: string) {
 }
 
 export function validateWebsitePlanAndFiles(input: {
+  availableAssetPaths?: string[];
+  cinematic?: WebsiteCinematicExperience;
   files: Record<string, string>;
   plan: WebsitePlan;
 }): WebsiteValidationResult {
@@ -242,6 +246,13 @@ export function validateWebsitePlanAndFiles(input: {
   const missingPageFiles = expectedPageFiles.filter((path) => !(path in input.files));
   const unexpectedHtmlFiles = Object.keys(input.files)
     .filter((path) => path.endsWith(".html") && !expectedPageFiles.includes(path));
+  const cinematicValidation = input.cinematic
+    ? validateWebsiteCinematicOutput({
+        availableAssetPaths: input.availableAssetPaths,
+        cinematic: input.cinematic,
+        files: input.files
+      })
+    : { hardBlockers: [], passed: true, repairableFindings: [], warnings: [] };
   const repairableReasons = [
     duplicateSections.length ? `Duplicate sections detected: ${duplicateSections.join(", ")}.` : "",
     genericLayoutDetected ? "Generic template language or layout detected." : "",
@@ -264,6 +275,7 @@ export function validateWebsitePlanAndFiles(input: {
     duplicateValues(titleValues).length ? "Generated pages contain duplicate title metadata." : "",
     duplicateValues(descriptionValues).length ? "Generated pages contain duplicate meta descriptions." : "",
     unexpectedHtmlFiles.length ? `Generated pages not present in planner page list: ${unexpectedHtmlFiles.join(", ")}.` : "",
+    ...cinematicValidation.repairableFindings,
     input.plan.requiredSections.length < 4 ? "Website plan has too few industry-specific sections." : "",
     !input.plan.designTokenValidationPassed
       ? `Design token validation failed: ${input.plan.designTokens.validation.issues.map((issue) => issue.message).join("; ")}.`
@@ -291,7 +303,8 @@ export function validateWebsitePlanAndFiles(input: {
     !noWebglDependenciesWhenDisabled ? "A no-WebGL website still includes scene canvas or WebGL dependencies." : "",
     mediaMismatches.length ? `Media relevance failed: ${mediaMismatches.join("; ")}.` : "",
     emptyFiles.length ? `Empty generated files: ${emptyFiles.join(", ")}.` : "",
-    missingPageFiles.length ? `Missing planner page files: ${missingPageFiles.join(", ")}.` : ""
+    missingPageFiles.length ? `Missing planner page files: ${missingPageFiles.join(", ")}.` : "",
+    ...cinematicValidation.hardBlockers
   ].filter(Boolean);
 
   return {
@@ -305,7 +318,8 @@ export function validateWebsitePlanAndFiles(input: {
       ...repairableReasons,
       ...(input.plan.optionalSections.length === 0 ? ["No optional sections were available for expansion."] : []),
       ...(remoteImageTags.length > 0 ? [`Website uses ${remoteImageTags.length} declared remote media asset(s) with local fallbacks.`] : []),
-      ...(/data-media-reliability=["']prototype["']/i.test(publicHtml) ? ["Prototype product media must be replaced or verified before production launch."] : [])
+      ...(/data-media-reliability=["']prototype["']/i.test(publicHtml) ? ["Prototype product media must be replaced or verified before production launch."] : []),
+      ...cinematicValidation.warnings
     ]
   };
 }

@@ -96,6 +96,7 @@ export type Website3DSceneSpec = {
 
 type SceneBuildInput = {
   businessType: string;
+  cinematicSequenceRequired?: boolean;
   domainId: string | null;
   palette: string[];
   page?: string;
@@ -196,9 +197,10 @@ function specializeProfile(profileValue: RecipeProfile, semantic: WebsiteSemanti
   };
 }
 
-export function interpretWebsite3DRequirement(input: Pick<SceneBuildInput, "businessType" | "domainId" | "prompt">): Website3DRequirement {
+export function interpretWebsite3DRequirement(input: Pick<SceneBuildInput, "businessType" | "cinematicSequenceRequired" | "domainId" | "prompt">): Website3DRequirement {
   if (forbiddenPattern.test(input.prompt)) return "forbidden";
   if (requiredPattern.test(input.prompt)) return "required";
+  if (input.cinematicSequenceRequired) return "not_requested";
   const text = normalize(`${input.prompt} ${input.businessType} ${input.domainId ?? ""}`);
   if (immersivePattern.test(input.prompt) && sceneRecipe(text) !== "none") return "allowed";
   return "not_requested";

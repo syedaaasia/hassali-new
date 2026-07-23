@@ -2471,7 +2471,11 @@ if ("IntersectionObserver" in window) {
       composition: websiteComposition,
       generatorContract,
       intent,
-      proposalContext
+      proposalContext,
+      workspaceAssets: workspace.fileList.map((path) => ({
+        content: contentForPath(workspace, path),
+        path
+      }))
     });
     const websiteFiles = websiteGeneration.files;
     const generatedFileNames = Object.keys(websiteFiles);
@@ -2546,6 +2550,8 @@ if ("IntersectionObserver" in window) {
           validatorInputCount: Object.keys(normalizedFiles).length
         };
     const normalizedValidation = validateWebsitePlanAndFiles({
+      availableAssetPaths: workspace.fileList,
+      cinematic: websiteGeneration.qualityBlueprint.cinematic,
       files: normalizedFiles,
       plan: websiteGeneration.plan
     });
@@ -2572,6 +2578,12 @@ if ("IntersectionObserver" in window) {
       tokensStudioExportAvailable: websiteGeneration.tokensStudioExportAvailable,
       validatorPlanAligned: normalizedValidation.passed || normalizedValidation.blockedReasons.every((reason) => !reason.includes("planner page")),
       websiteAudience: websiteGeneration.plan.audience,
+      websiteCinematicEnabled: websiteGeneration.qualityBlueprint.cinematic.enabled,
+      websiteCinematicEngine: websiteGeneration.qualityBlueprint.cinematic.engine,
+      websiteCinematicFrameCount: websiteGeneration.qualityBlueprint.cinematic.sequences.reduce((total, sequence) => total + sequence.frameCount, 0),
+      websiteCinematicRequirement: websiteGeneration.qualityBlueprint.cinematic.requirement,
+      websiteCinematicSequenceIds: websiteGeneration.qualityBlueprint.cinematic.sequences.map((sequence) => sequence.id),
+      websiteCinematicWarnings: websiteGeneration.qualityBlueprint.cinematic.warnings,
       websiteGeneratedActionCount: contractAssertion.generatedFileCount,
       websiteGenerationContractStatus: contractAssertion.passed ? ("passed" as const) : ("blocked" as const),
       websiteGoal: websiteGeneration.plan.goal,
@@ -3470,6 +3482,15 @@ function attachProposalRoutingMetadata(
       ? "review_required"
       : routing.mode;
   const routingShouldBlock = criticalRoutingReasons.length > 0;
+  const preservedWebsiteBlockReasons = proposalContext?.mode === "WEBSITE"
+    ? (proposal.proposalRoutingReasons ?? []).filter((reason) =>
+        reason.code === "website_generation_empty" ||
+        reason.code === "website_generation_contract" ||
+        reason.code === "website_structure_block" ||
+        reason.code === "website_validation_block"
+      )
+    : [];
+  const preservesWebsiteBlock = proposal.shouldBlockExecution === true && preservedWebsiteBlockReasons.length > 0;
 
   return {
     ...proposal,
@@ -3550,6 +3571,9 @@ function attachProposalRoutingMetadata(
       : previewRuntime.classification.previewType,
     previewWarnings: previewRuntime.warnings,
     realPreview: previewRuntime.realPreview,
+    proposalRoutingReasons: preservesWebsiteBlock
+      ? [...preservedWebsiteBlockReasons, ...criticalRoutingReasons]
+      : routing.reasons,
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
     previewDriftDetected: domainValidation ? domainValidation.detectedPreviewDrift.length > 0 : undefined,
     requiredPageCount: generatorContract?.requiredPageCount,
@@ -3558,9 +3582,14 @@ function attachProposalRoutingMetadata(
     sourceOfTruthPages: proposalContext?.pages.length ? proposalContext.pages : proposal.sourceOfTruthPages,
     sourceOfTruthPrompt: proposalContext?.sourcePrompt ?? proposal.sourceOfTruthPrompt,
     publicCopyCleanStatus: "clean",
-    proposalRoutingMode:
-      extraWarnings.length > 0 && routing.mode === "normal" ? "review_required" : routing.mode,
-    requiresExtraReview: routing.shouldRequireExtraReview || extraWarnings.length > 0,
+    proposalRoutingMode: preservesWebsiteBlock
+      ? "blocked"
+      : extraWarnings.length > 0 && routingMode === "normal"
+        ? "review_required"
+        : routingMode,
+    requiresExtraReview:
+      preservesWebsiteBlock || routing.shouldRequireExtraReview || extraWarnings.length > 0,
+    shouldBlockExecution: preservesWebsiteBlock || routingShouldBlock,
     sectionCopyQualityStatus: "clean",
     staleTermScanStatus: "clean",
     suppressedContextCount: contextPriority?.suppressedContext.length,
@@ -4549,6 +4578,8 @@ function evaluateAndRepairProposal(input: {
     reason.code === "generator_contract_block" ||
     reason.code === "website_generation_empty" ||
     reason.code === "website_generation_contract" ||
+    reason.code === "website_structure_block" ||
+    reason.code === "website_validation_block" ||
     reason.message.toLowerCase().includes("project isolation") ||
     reason.message.toLowerCase().includes("cross-project")
   );

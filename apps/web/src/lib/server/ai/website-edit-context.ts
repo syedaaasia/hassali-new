@@ -44,7 +44,7 @@ type WorkspaceLike = {
 };
 
 const ownedWebsitePagePattern = /^(?:index|about|services|service|contact|blog|blogs|menu|gallery|products|pricing|features|story|team|televisions|brands|doctors|booking|shop|fleet)\.html$/i;
-const websiteFilePattern = /\.html$|^(?:styles\.css|main\.js|scene\.js|media\.js|robots\.txt|sitemap\.xml|HASSALI\.md|HASSALI\.website\.md|assets\/[a-z0-9._/-]+)$/i;
+const websiteFilePattern = /\.html$|^(?:styles\.css|main\.js|scene\.js|sequence\.js|sequence-manifest\.js|media\.js|robots\.txt|sitemap\.xml|HASSALI\.md|HASSALI\.website\.md|assets\/[a-z0-9._/-]+)$/i;
 
 function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
@@ -224,7 +224,7 @@ export function buildWebsiteEditContext(workspace: WorkspaceLike): WebsiteEditCo
   const hasQualityBlueprint = /(?:^|\n)qualityBlueprintVersion:\s*1\b/i.test(contract);
   const qualityOwnedFiles = hasQualityBlueprint
     ? Object.keys(websiteOnlyFiles).filter((path) =>
-        /^(?:scene\.js|media\.js|robots\.txt|sitemap\.xml|assets\/[a-z0-9._/-]+)$/i.test(path)
+        /^(?:scene\.js|sequence\.js|sequence-manifest\.js|media\.js|robots\.txt|sitemap\.xml|assets\/[a-z0-9._/-]+)$/i.test(path)
       )
     : [];
   const canonicalSupportFiles = unique([

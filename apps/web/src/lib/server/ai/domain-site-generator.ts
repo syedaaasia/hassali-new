@@ -26,6 +26,7 @@ import {
 } from "@/lib/server/ai/website-quality-blueprint";
 import { renderWebsiteQualityFiles } from "@/lib/server/ai/website-quality-renderer";
 import { GSAP_VERSION, THREE_VERSION } from "@/lib/server/ai/website-scene-renderer";
+import type { WebsiteCinematicAssetInput } from "@/lib/server/ai/website-cinematic-asset-analyzer";
 
 export type SiteDomain =
   | "car rental"
@@ -2187,6 +2188,7 @@ export function generateComposedSiteFiles(input: {
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
   proposalContext?: ProposalContext;
+  workspaceAssets?: WebsiteCinematicAssetInput[];
 }): Record<string, string> {
   return generatePlannedWebsiteFiles(input).files;
 }
@@ -2196,6 +2198,7 @@ export function generatePlannedWebsiteFiles(input: {
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
   proposalContext?: ProposalContext;
+  workspaceAssets?: WebsiteCinematicAssetInput[];
 }): PlannedWebsiteGeneration {
   const plan = planWebsite(input);
   const brief = input.proposalContext?.websiteGenerationBrief ?? null;
@@ -2207,7 +2210,8 @@ export function generatePlannedWebsiteFiles(input: {
     direction: creativeDirection,
     intent: input.intent,
     plan,
-    prompt: input.proposalContext?.sourcePrompt ?? input.intent.summary
+    prompt: input.proposalContext?.sourcePrompt ?? input.intent.summary,
+    workspaceAssets: input.workspaceAssets
   });
   const brandName = qualityBlueprint.brand.generatedName;
   const qualitySummary = summarizeWebsiteQualityBlueprint(qualityBlueprint);
@@ -2272,6 +2276,9 @@ export function generatePlannedWebsiteFiles(input: {
     `webglPolicy: ${qualitySummary.webgl}`,
     `sceneBlueprint: ${qualitySummary.scene}`,
     `sceneDependencies: ${sceneDependencies}`,
+    `cinematicPolicy: ${qualitySummary.cinematic}`,
+    `cinematicSourceAssets: ${qualityBlueprint.cinematic.sequences.flatMap((sequence) => sequence.sourceFrames).join(", ") || "none"}`,
+    `cinematicCachePolicy: ${qualityBlueprint.cinematic.sequences.map((sequence) => `${sequence.id}:${sequence.cache.desktopLimit}/${sequence.cache.mobileLimit}`).join(", ") || "none"}`,
     `mediaPolicy: semantic registry with generated local fallback for every remote asset`,
     `mediaAssets: ${qualityMediaRecords.join(" | ") || "local generated assets only"}`,
     `seoPolicy: unique page metadata, Open Graph, JSON-LD, robots.txt, sitemap.xml`,
@@ -2309,6 +2316,8 @@ export function generatePlannedWebsiteFiles(input: {
     `webglPolicy: ${qualitySummary.webgl}`,
     `sceneBlueprint: ${qualitySummary.scene}`,
     `sceneDependencies: ${sceneDependencies}`,
+    `cinematicPolicy: ${qualitySummary.cinematic}`,
+    `cinematicSourceAssets: ${qualityBlueprint.cinematic.sequences.flatMap((sequence) => sequence.sourceFrames).join(", ") || "none"}`,
     `mediaPolicy: semantic registry with generated local fallback for every remote asset`,
     `mediaAssets: ${qualityMediaRecords.join(" | ") || "local generated assets only"}`,
     "",
@@ -2319,6 +2328,8 @@ export function generatePlannedWebsiteFiles(input: {
     "- Keep static preview files local and approval-first."
   ].join("\n");
   const validation = validateWebsitePlanAndFiles({
+    availableAssetPaths: input.workspaceAssets?.map((asset) => asset.path),
+    cinematic: qualityBlueprint.cinematic,
     files: plannedFiles,
     plan
   });

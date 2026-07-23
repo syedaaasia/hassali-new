@@ -9,6 +9,12 @@ import {
   renderWebsiteSceneScriptTags,
   renderWebsiteSceneSection
 } from "@/lib/server/ai/website-scene-renderer";
+import {
+  renderWebsiteCinematicCss,
+  renderWebsiteCinematicFiles,
+  renderWebsiteCinematicScriptTags,
+  renderWebsiteCinematicSection
+} from "@/lib/server/ai/website-cinematic-sequence-renderer";
 
 function escapeHtml(value: string) {
   return value
@@ -246,7 +252,7 @@ function renderPage(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
     <link rel="stylesheet" href="./styles.css" />
     <script type="application/ld+json">${schemaFor(blueprint, page)}</script>
   </head>
-  <body data-page="${escapeHtml(page.name)}" data-webgl="${page.name === "home" && blueprint.webgl.enabled ? "enabled" : "disabled"}" data-3d-requirement="${page.name === "home" ? escapeHtml(blueprint.scene.requirement) : "not_requested"}" data-scene-recipe="${page.name === "home" ? escapeHtml(blueprint.scene.recipe) : "none"}" data-scene-spec-version="1">
+  <body data-page="${escapeHtml(page.name)}" data-webgl="${page.name === "home" && blueprint.webgl.enabled ? "enabled" : "disabled"}" data-3d-requirement="${page.name === "home" ? escapeHtml(blueprint.scene.requirement) : "not_requested"}" data-scene-recipe="${page.name === "home" ? escapeHtml(blueprint.scene.recipe) : "none"}" data-scene-spec-version="1" data-cinematic="${page.name === "home" && blueprint.cinematic.enabled ? "enabled" : "disabled"}" data-cinematic-requirement="${page.name === "home" ? escapeHtml(blueprint.cinematic.requirement) : "not_requested"}" data-cinematic-spec-version="1">
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" data-site-header>
       <a class="brand" href="./index.html">${renderInlineLogo(blueprint, 38)}<span>${escapeHtml(blueprint.brand.generatedName)}</span></a>
@@ -258,6 +264,7 @@ ${nav(blueprint, page.name)}
     </header>
     <main id="main-content">
 ${renderHero(blueprint, page)}
+${page.name === "home" ? renderWebsiteCinematicSection(blueprint) : ""}
 ${page.name === "home" ? renderWebsiteSceneSection(blueprint) : ""}
 ${page.sections.map((section, index) => renderSection(blueprint, section, index)).join("\n")}
     </main>
@@ -265,6 +272,7 @@ ${renderFooter(blueprint)}
     <script src="./main.js" defer></script>
     ${blueprint.media.length > 0 ? '<script src="./media.js" defer></script>' : ""}
 ${page.name === "home" ? renderWebsiteSceneScriptTags(blueprint) : ""}
+${page.name === "home" ? renderWebsiteCinematicScriptTags(blueprint) : ""}
   </body>
 </html>
 `;
@@ -581,6 +589,7 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
   .scene-viewport canvas { display: none !important; }
   .scene-fallback { opacity: 1 !important; }
 }
+${renderWebsiteCinematicCss()}
 `;
 }
 
@@ -687,6 +696,7 @@ export function renderWebsiteQualityFiles(blueprint: WebsiteQualityBlueprint) {
     "styles.css": renderCss(blueprint)
   };
   Object.assign(files, renderWebsiteSceneFiles(blueprint));
+  Object.assign(files, renderWebsiteCinematicFiles(blueprint));
   if (blueprint.media.length > 0) files["media.js"] = renderMediaJs();
   blueprint.media.forEach((asset) => { files[asset.fallbackAsset] = renderMediaFallback(blueprint, asset); });
   blueprint.pages.forEach((page) => { files[page.path] = renderPage(blueprint, page); });
