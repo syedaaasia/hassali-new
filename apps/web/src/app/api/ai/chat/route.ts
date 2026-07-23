@@ -175,6 +175,11 @@ import type {
   SelfReviewStatus
 } from "@/lib/self-review-types";
 import { getRuntimeStatus } from "@/lib/server/runtime-manager";
+import {
+  compactIntelligencePreflight,
+  runIntelligencePreflight,
+  withIntelligenceResponseHeaders
+} from "@/lib/server/intelligence/intelligence-preflight";
 
 export const runtime = "nodejs";
 
@@ -5130,9 +5135,17 @@ export async function POST(request: Request) {
         fileList: [],
         projectName: null
       };
-  const projectContract = readProjectContractFromWorkspace(workspace);
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const effectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
+  const intelligencePreflight = await runIntelligencePreflight({
+    messages,
+    mode: productMode,
+    model,
+    prompt: effectiveUserPrompt,
+    workspace
+  });
+  const respond = (response: Response) => withIntelligenceResponseHeaders(response, intelligencePreflight);
+  const projectContract = readProjectContractFromWorkspace(workspace);
   const promptOwnership = decidePromptOwnership({
     mode: productMode,
     prompt: effectiveUserPrompt
@@ -5292,6 +5305,7 @@ export async function POST(request: Request) {
       model,
       askRuntimeContext: mode === "ASK" ? askRuntimeContext : undefined,
       askLiveIntent: mode === "ASK" ? askLiveIntent : undefined,
+      intelligencePreflight: compactIntelligencePreflight(intelligencePreflight),
       workspace: {
         activePath: workspace.activePath,
         blueprint: compactBusinessBlueprint(blueprint),
@@ -5346,14 +5360,15 @@ export async function POST(request: Request) {
         role: "assistant"
       });
 
-      return createTextStream(identityAnswer, persistence?.sessionId, {
+      return respond(createTextStream(identityAnswer, persistence?.sessionId, {
         "x-hassali-ask-response-kind": "identity_response",
         "x-hassali-ask-provider-failure": "none"
-      });
+      }));
     }
 
     const askBrain = await runAskBrain({
       askRuntimeContext,
+      intelligenceContext: intelligencePreflight.providerContext,
       messages,
       model,
       productMode,
@@ -5385,7 +5400,7 @@ export async function POST(request: Request) {
         role: "assistant"
       });
 
-      return createTextStream(askBrain.answer, persistence?.sessionId, createAskBrainDebugHeaders(askBrain.decision));
+      return respond(createTextStream(askBrain.answer, persistence?.sessionId, createAskBrainDebugHeaders(askBrain.decision)));
     }
 
     const liveKnowledgeAnswer = routeLiveKnowledgeQuestion(effectiveUserPrompt);
@@ -5414,7 +5429,7 @@ export async function POST(request: Request) {
         role: "assistant"
       });
 
-      return createTextStream(liveKnowledgeAnswer.answer, persistence?.sessionId);
+      return respond(createTextStream(liveKnowledgeAnswer.answer, persistence?.sessionId));
     }
 
     const hassaliPromptAnswer = createHassaliReadyPromptAnswer({
@@ -5443,7 +5458,7 @@ export async function POST(request: Request) {
         role: "assistant"
       });
 
-      return createTextStream(hassaliPromptAnswer, persistence?.sessionId);
+      return respond(createTextStream(hassaliPromptAnswer, persistence?.sessionId));
     }
 
   }
@@ -5451,6 +5466,7 @@ export async function POST(request: Request) {
   if (productMode === "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
     const askBrain = await runAskBrain({
       askRuntimeContext,
+      intelligenceContext: intelligencePreflight.providerContext,
       messages,
       model,
       productMode,
@@ -5484,7 +5500,7 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return createTextStream(answerOnlyContent, persistence?.sessionId, createAskBrainDebugHeaders(askBrain.decision));
+    return respond(createTextStream(answerOnlyContent, persistence?.sessionId, createAskBrainDebugHeaders(askBrain.decision)));
   }
 
   if (
@@ -5549,7 +5565,7 @@ export async function POST(request: Request) {
         role: "assistant"
       });
 
-      return createProposalStream(proposal, persistence?.sessionId);
+      return respond(createProposalStream(proposal, persistence?.sessionId));
     }
 
     const hasCodeProjectFiles = Boolean(workspace.fileList.includes("app.py") || workspace.fileContents?.["app.py"] || workspace.fileList.includes("requirements.txt"));
@@ -5594,7 +5610,7 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return createProposalStream(proposal, persistence?.sessionId);
+    return respond(createProposalStream(proposal, persistence?.sessionId));
   }
 
   if (mode !== "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
@@ -5615,7 +5631,7 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return createTextStream(answerOnlyContent, persistence?.sessionId);
+    return respond(createTextStream(answerOnlyContent, persistence?.sessionId));
   }
 
   const directInvoiceArtifact = productMode === "WEBSITE" && mode === "EXECUTE" && isInvoiceRequest(effectiveUserPrompt);
@@ -5658,7 +5674,7 @@ export async function POST(request: Request) {
         },
         role: "assistant"
       });
-      return createProposalStream(localProposal, persistence?.sessionId);
+      return respond(createProposalStream(localProposal, persistence?.sessionId));
     }
     const proposalWithContract = withProjectContractUpdate({
       composition: proposalComposition,
@@ -5754,11 +5770,11 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return createProposalStream(proposal, persistence?.sessionId);
+    return respond(createProposalStream(proposal, persistence?.sessionId));
   }
 
   if (!process.env.OPENROUTER_API_KEY) {
-    return createPlaceholderStream(model, {
+    return respond(createPlaceholderStream(model, {
       onComplete: async (content) => {
         const selfReview = runSelfReviewForAskAnswer({
           answer: content,
@@ -5779,7 +5795,7 @@ export async function POST(request: Request) {
         });
       },
       sessionId: persistence?.sessionId
-    });
+    }));
   }
 
   if (mode === "SUGGEST" || mode === "EXECUTE") {
@@ -5828,7 +5844,7 @@ export async function POST(request: Request) {
         method: "POST"
       });
     } catch {
-      return createFallbackProposalResponse({
+      return respond(await createFallbackProposalResponse({
         composition,
         diagnostic,
         decision,
@@ -5851,11 +5867,11 @@ export async function POST(request: Request) {
         generatorContract,
         proposalContext,
         workspace
-      });
+      }));
     }
 
     if (!response.ok) {
-      return createFallbackProposalResponse({
+      return respond(await createFallbackProposalResponse({
         composition,
         diagnostic,
         decision,
@@ -5878,7 +5894,7 @@ export async function POST(request: Request) {
         generatorContract,
         proposalContext,
         workspace
-      });
+      }));
     }
 
     const completion = (await response.json()) as {
@@ -5899,7 +5915,7 @@ export async function POST(request: Request) {
           (!change.path || !change.proposedContent || change.proposedContent.trim().length === 0)
       )
     ) {
-      return createFallbackProposalResponse({
+      return respond(await createFallbackProposalResponse({
         composition,
         diagnostic,
         decision,
@@ -5922,7 +5938,7 @@ export async function POST(request: Request) {
         generatorContract,
         proposalContext,
         workspace
-      });
+      }));
     }
 
     const proposalComposition = compositionForCurrentWebsiteBrief(composition, proposalContext);
@@ -6021,7 +6037,7 @@ export async function POST(request: Request) {
       proposal.proposalRoutingReasons?.some((reason) => reason.code === "prompt_sovereignty_block") &&
       shouldUseDeterministicDecision(decision)
     ) {
-      return createFallbackProposalResponse({
+      return respond(await createFallbackProposalResponse({
         composition,
         diagnostic,
         decision,
@@ -6044,7 +6060,7 @@ export async function POST(request: Request) {
         generatorContract,
         proposalContext,
         workspace
-      });
+      }));
     }
 
     const quality = scoreProposalQuality({
@@ -6056,7 +6072,7 @@ export async function POST(request: Request) {
     });
 
     if (!quality.passed) {
-      return createFallbackProposalResponse({
+      return respond(await createFallbackProposalResponse({
         composition,
         diagnostic,
         decision,
@@ -6079,7 +6095,7 @@ export async function POST(request: Request) {
         generatorContract,
         proposalContext,
         workspace
-      });
+      }));
     }
 
     persistence = await persistChatMessage(persistence, {
@@ -6113,7 +6129,7 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return createProposalStream(proposal, persistence?.sessionId);
+    return respond(createProposalStream(proposal, persistence?.sessionId));
   }
 
   const response = await fetch(openRouterChatCompletionsUrl, {
@@ -6142,10 +6158,10 @@ export async function POST(request: Request) {
   });
 
   if (!response.ok) {
-    return Response.json({ error: "OpenRouter chat request failed." }, { status: response.status });
+    return respond(Response.json({ error: "OpenRouter chat request failed." }, { status: response.status }));
   }
 
-  return createOpenRouterTextStream(response, {
+  return respond(createOpenRouterTextStream(response, {
     onComplete: async (content) => {
       const selfReview = runSelfReviewForAskAnswer({
         answer: content,
@@ -6167,6 +6183,6 @@ export async function POST(request: Request) {
       });
     },
     sessionId: persistence?.sessionId
-  });
+  }));
 }
 

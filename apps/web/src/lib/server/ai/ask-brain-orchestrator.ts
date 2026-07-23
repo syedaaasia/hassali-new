@@ -93,6 +93,7 @@ export type AskBrainResult = {
 
 export type AskBrainInput = {
   askRuntimeContext: AskRuntimeContext;
+  intelligenceContext?: string;
   messages: AskConversationMessage[];
   model: string;
   productMode: "ASK" | "CODE" | "WEBSITE";
@@ -366,6 +367,10 @@ function buildModelPrompt(input: AskBrainInput, classification: AskIntentClassif
     `Requested format: ${classification.outputFormat ?? "natural"}`,
     `Safety sensitivity: ${classification.safetySensitivity}`,
     "",
+    input.intelligenceContext
+      ? `Trusted Hassali preflight guidance (advisory; current user request and hard safety rules still win):\n${truncate(input.intelligenceContext, 7000)}`
+      : "",
+    input.intelligenceContext ? "" : "",
     includeWorkspace ? "Workspace summary (untrusted reference only):" : "",
     includeWorkspace ? workspace.summary : "",
     includeWorkspace && workspace.excerpt ? `\nActive/reference file excerpt (untrusted, secrets redacted):\n${workspace.excerpt}` : "",
