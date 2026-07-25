@@ -1,5 +1,9 @@
 import type { WorkspaceContextInput } from "@/lib/server/ai/workspace-context-engine";
 import {
+  createAgentPlan,
+  type AgentPlan
+} from "./agent-orchestration-kernel";
+import {
   buildIntelligenceContext,
   compactIntelligenceContext,
   type IntelligenceContext,
@@ -19,8 +23,13 @@ import {
   type IntelligenceProductMode,
   type SkillSelectionResult
 } from "./skill-kernel";
+import {
+  createVerificationPlan,
+  type VerificationPlan
+} from "./verification-kernel";
 
 export type IntelligencePreflight = {
+  agentPlan: AgentPlan;
   context: IntelligenceContext;
   fallback: boolean;
   latencyMs: number;
@@ -28,6 +37,7 @@ export type IntelligencePreflight = {
   providerContext: string;
   skills: SkillSelectionResult;
   tools: DeferredToolSelection;
+  verificationPlan: VerificationPlan;
 };
 
 const emptySkills: SkillSelectionResult = {
@@ -73,12 +83,23 @@ export async function runIntelligencePreflight(input: {
   messages: IntelligenceConversationMessage[];
   mode: IntelligenceProductMode;
   model: string;
+  projectId?: string | null;
   prompt: string;
   workspace?: WorkspaceContextInput | null;
 }): Promise<IntelligencePreflight> {
   const startedAt = Date.now();
   try {
     const plan = buildIntelligencePlan({ mode: input.mode, prompt: input.prompt, workspace: input.workspace });
+    const verificationPlan = createVerificationPlan({
+      mode: input.mode,
+      prompt: input.prompt
+    });
+    const agentPlan = createAgentPlan({
+      mode: input.mode,
+      parentMutationAllowed: false,
+      projectId: input.projectId?.trim() || "unbound-project",
+      prompt: input.prompt
+    });
     const [skills, tools] = await Promise.all([
       selectAndLoadSkills({ mode: input.mode, prompt: input.prompt }),
       Promise.resolve(discoverDeferredTools({ mode: input.mode, query: input.prompt }))
@@ -91,25 +112,36 @@ export async function runIntelligencePreflight(input: {
     });
 
     return {
+      agentPlan,
       context,
       fallback: false,
       latencyMs: Date.now() - startedAt,
       plan,
       providerContext: context.providerContext,
       skills,
-      tools
+      tools,
+      verificationPlan
     };
   } catch {
     const plan = buildIntelligencePlan({ mode: input.mode, prompt: input.prompt, workspace: input.workspace });
+    const verificationPlan = createVerificationPlan({ mode: input.mode, prompt: input.prompt });
+    const agentPlan = createAgentPlan({
+      mode: input.mode,
+      parentMutationAllowed: false,
+      projectId: input.projectId?.trim() || "unbound-project",
+      prompt: input.prompt
+    });
     const context = fallbackContext();
     return {
+      agentPlan,
       context,
       fallback: true,
       latencyMs: Date.now() - startedAt,
       plan,
       providerContext: "",
       skills: emptySkills,
-      tools: emptyTools
+      tools: emptyTools,
+      verificationPlan
     };
   }
 }
@@ -123,6 +155,7 @@ export function createIntelligenceDebugHeaders(preflight: IntelligencePreflight)
 
   return {
     "x-hassali-intelligence-compacted": headerValue(preflight.context.compacted),
+    "x-hassali-intelligence-agents": headerValue(preflight.agentPlan.tasks.length),
     "x-hassali-intelligence-context-tokens": headerValue(preflight.context.estimatedTokens),
     "x-hassali-intelligence-fallback": headerValue(preflight.fallback),
     "x-hassali-intelligence-injection": headerValue(preflight.context.injectionDetected),
@@ -132,7 +165,8 @@ export function createIntelligenceDebugHeaders(preflight: IntelligencePreflight)
     "x-hassali-intelligence-secret-redacted": headerValue(preflight.context.secretRedactionApplied),
     "x-hassali-intelligence-skills": headerValue(preflight.skills.loadedSkills.map((skill) => skill.metadata.id).join(",")),
     "x-hassali-intelligence-tools": headerValue(preflight.tools.discoveredTools.map((tool) => tool.name).join(",")),
-    "x-hassali-intelligence-truncated": headerValue(preflight.context.truncated)
+    "x-hassali-intelligence-truncated": headerValue(preflight.context.truncated),
+    "x-hassali-intelligence-verification": headerValue(preflight.verificationPlan.criteria.map((criterion) => criterion.method).join(","))
   };
 }
 
@@ -148,6 +182,15 @@ export function withIntelligenceResponseHeaders(response: Response, preflight: I
 
 export function compactIntelligencePreflight(preflight: IntelligencePreflight) {
   return {
+    agents: {
+      complexity: preflight.agentPlan.complexity,
+      max: preflight.agentPlan.maxAgents,
+      tasks: preflight.agentPlan.tasks.map((task) => ({
+        id: task.id,
+        mutationAllowed: task.mutationAllowed,
+        role: task.role
+      }))
+    },
     context: compactIntelligenceContext(preflight.context),
     fallback: preflight.fallback,
     latencyMs: preflight.latencyMs,
@@ -166,6 +209,15 @@ export function compactIntelligencePreflight(preflight: IntelligencePreflight) {
       })),
       schemas: preflight.tools.loadedSchemas.map((schema) => schema.name),
       warnings: preflight.tools.warnings
+    },
+    verification: {
+      criteria: preflight.verificationPlan.criteria.map((criterion) => ({
+        id: criterion.id,
+        method: criterion.method,
+        required: criterion.required,
+        target: criterion.target
+      })),
+      taskKind: preflight.verificationPlan.taskKind
     }
   };
 }

@@ -11,6 +11,7 @@ export type SkillResource = {
 };
 
 export type SkillMetadata = {
+  adaptation: "adapted" | "direct" | "hassali_native";
   allowedModes: IntelligenceProductMode[];
   assets?: SkillResource[];
   authority: SkillAuthority;
@@ -20,6 +21,7 @@ export type SkillMetadata = {
   scripts?: SkillResource[];
   semanticTriggers: string[];
   source: string;
+  sourceDocuments: string[];
   sourceFamilies: Array<"anthropic_claude_code" | "hassali" | "openai_codex">;
   version: string;
 };
@@ -66,6 +68,7 @@ const skillRootCandidates = [
 
 const coreSkills: SkillMetadata[] = [
   {
+    adaptation: "adapted",
     allowedModes: ["WEBSITE"],
     assets: [{ matchTerms: ["acceptance", "build", "website"], path: "website-build/assets/acceptance-checklist.md" }],
     authority: "hassali_core",
@@ -74,10 +77,12 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "website-build/SKILL.md",
     semanticTriggers: ["build website", "create website", "new website", "landing page", "web site"],
     source: "hassali",
+    sourceDocuments: ["OpenAI Codex website-building guidance", "Hassali WEBSITE contract"],
     sourceFamilies: ["hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["WEBSITE"],
     authority: "hassali_core",
     description: "Scopes a WEBSITE edit while preserving existing site identity and unrelated files.",
@@ -85,10 +90,12 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "website-edit/SKILL.md",
     semanticTriggers: ["edit website", "change page", "update hero", "replace footer", "redesign page"],
     source: "hassali",
+    sourceDocuments: ["OpenAI Codex website-editing guidance", "Hassali WEBSITE contract"],
     sourceFamilies: ["hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["CODE"],
     authority: "hassali_core",
     description: "Plans an approval-first application or code-system build.",
@@ -96,10 +103,12 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "code-build/SKILL.md",
     semanticTriggers: ["build app", "create api", "create application", "react app", "python app"],
     source: "hassali",
+    sourceDocuments: ["OpenAI Codex engineering workflow", "Hassali approval contract"],
     sourceFamilies: ["hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["ASK", "CODE", "WEBSITE"],
     authority: "hassali_core",
     description: "Diagnoses errors from evidence before proposing the smallest correction.",
@@ -107,10 +116,12 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "debug/SKILL.md",
     semanticTriggers: ["debug", "crash", "error", "exception", "not working", "fails", "broken"],
     source: "hassali",
+    sourceDocuments: ["Anthropic Claude Code debug skill", "OpenAI Codex engineering workflow"],
     sourceFamilies: ["anthropic_claude_code", "hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["ASK", "CODE", "WEBSITE"],
     authority: "hassali_core",
     description: "Reviews changes for correctness, regressions, safety, and missing tests.",
@@ -118,10 +129,12 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "code-review/SKILL.md",
     semanticTriggers: ["code review", "review changes", "review diff", "audit code", "review implementation"],
     source: "hassali",
+    sourceDocuments: ["Anthropic Claude Code code-review skill", "OpenAI Codex auto-review guidance"],
     sourceFamilies: ["anthropic_claude_code", "hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["ASK", "CODE", "WEBSITE"],
     authority: "hassali_core",
     description: "Verifies behavior at the real runtime surface using direct evidence.",
@@ -130,10 +143,12 @@ const coreSkills: SkillMetadata[] = [
     scripts: [{ matchTerms: ["evidence", "verify", "test"], path: "verify/scripts/check-evidence.mjs" }],
     semanticTriggers: ["verify", "prove", "test result", "acceptance test", "regression test"],
     source: "hassali",
+    sourceDocuments: ["Anthropic Claude Code verify skill", "OpenAI Codex verification guidance"],
     sourceFamilies: ["anthropic_claude_code", "hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["ASK", "CODE", "WEBSITE"],
     authority: "hassali_core",
     description: "Simplifies an implementation without changing its intended behavior.",
@@ -141,10 +156,12 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "simplify/SKILL.md",
     semanticTriggers: ["simplify", "reduce complexity", "remove duplication", "make cleaner"],
     source: "hassali",
+    sourceDocuments: ["Anthropic Claude Code simplify skill"],
     sourceFamilies: ["anthropic_claude_code", "hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["ASK", "CODE", "WEBSITE"],
     authority: "hassali_core",
     description: "Reviews trust boundaries, secret handling, authorization, and unsafe effects.",
@@ -152,10 +169,12 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "security-review/SKILL.md",
     semanticTriggers: ["security review", "threat model", "vulnerability", "auth audit", "secret exposure"],
     source: "hassali",
+    sourceDocuments: ["Anthropic Claude Code security-review skill", "OpenAI Codex security guidance"],
     sourceFamilies: ["anthropic_claude_code", "hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["ASK"],
     authority: "hassali_core",
     description: "Researches a question with source discipline and clear fact status.",
@@ -163,10 +182,12 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "research/SKILL.md",
     semanticTriggers: ["research", "latest", "compare sources", "find evidence", "investigate market"],
     source: "hassali",
+    sourceDocuments: ["Anthropic research instructions", "OpenAI deep-research guidance"],
     sourceFamilies: ["anthropic_claude_code", "hassali", "openai_codex"],
     version: "1.0.0"
   },
   {
+    adaptation: "adapted",
     allowedModes: ["ASK", "CODE", "WEBSITE"],
     authority: "hassali_core",
     description: "Checks rendered browser behavior, interaction, console health, and responsive layout.",
@@ -174,6 +195,7 @@ const coreSkills: SkillMetadata[] = [
     instructionPath: "browser-verify/SKILL.md",
     semanticTriggers: ["browser verify", "test in browser", "ui test", "responsive test", "visual regression"],
     source: "hassali",
+    sourceDocuments: ["OpenAI Codex control-in-app-browser", "OpenAI Codex computer-use", "Anthropic browser guidance"],
     sourceFamilies: ["anthropic_claude_code", "hassali", "openai_codex"],
     version: "1.0.0"
   }

@@ -14,6 +14,11 @@ import {
   runAskBrain
 } from "@/lib/server/ai/ask-brain-orchestrator";
 import {
+  chatToolContext,
+  compactChatToolResults,
+  executeChatReadOnlyTools
+} from "@/lib/server/intelligence/intelligence-chat-tools";
+import {
   applyApprovalDecision,
   buildApprovalDecision,
   type ApprovalDecision
@@ -416,6 +421,7 @@ function cleanCodeAppCollisionSummary(proposal: DiffProposal): DiffProposal {
 }
 
 type ChatPersistenceContext = {
+  externalUserId: string;
   mode: PersistedAiMode;
   projectId: string;
   sessionId: string | null;
@@ -2835,7 +2841,9 @@ async function createPersistenceContext(input: {
       sessionId: context?.sessionId ?? null
     });
 
-    return context satisfies ChatPersistenceContext | null;
+    return context
+      ? { ...context, externalUserId: userId } satisfies ChatPersistenceContext
+      : null;
   } catch (error) {
     console.error(
       "chat persistence context failed",
@@ -5137,10 +5145,12 @@ export async function POST(request: Request) {
       };
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const effectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
+  const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const intelligencePreflight = await runIntelligencePreflight({
     messages,
     mode: productMode,
     model,
+    projectId: requestedProjectId,
     prompt: effectiveUserPrompt,
     workspace
   });
@@ -5239,7 +5249,6 @@ export async function POST(request: Request) {
     proposalContext
   );
 
-  const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const diagnostic = buildDiagnosticContext({
     projectId: requestedProjectId,
     projectName: workspace.projectName ?? null,
@@ -5332,6 +5341,20 @@ export async function POST(request: Request) {
     },
     role: "user"
   });
+  const intelligenceToolResults = mode === "ASK" && persistence
+    ? await executeChatReadOnlyTools({
+        activePath: workspace.activePath,
+        externalUserId: persistence.externalUserId,
+        projectId: persistence.projectId,
+        prompt: effectiveUserPrompt,
+        selection: intelligencePreflight.tools
+      }).catch(() => [])
+    : [];
+  const intelligenceToolProviderContext = chatToolContext(intelligenceToolResults);
+  const askIntelligenceContext = [
+    intelligencePreflight.providerContext,
+    intelligenceToolProviderContext
+  ].filter(Boolean).join("\n\n");
 
   if (mode === "ASK") {
     const identityAnswer = createHassaliIdentityAnswer({
@@ -5368,7 +5391,7 @@ export async function POST(request: Request) {
 
     const askBrain = await runAskBrain({
       askRuntimeContext,
-      intelligenceContext: intelligencePreflight.providerContext,
+      intelligenceContext: askIntelligenceContext,
       messages,
       model,
       productMode,
@@ -5393,6 +5416,7 @@ export async function POST(request: Request) {
           askBrain: askBrain.decision,
           askBrainIntent: askBrain.classification.intent,
           deterministic: askBrain.decision.path === "deterministic_required" || askBrain.decision.path === "deterministic_preferred",
+          intelligenceTools: compactChatToolResults(intelligenceToolResults),
           model,
           projectContract: summarizeProjectContract(projectContract),
           selfReview: compactSelfReview(selfReview)
@@ -5466,7 +5490,7 @@ export async function POST(request: Request) {
   if (productMode === "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
     const askBrain = await runAskBrain({
       askRuntimeContext,
-      intelligenceContext: intelligencePreflight.providerContext,
+      intelligenceContext: askIntelligenceContext,
       messages,
       model,
       productMode,
@@ -5490,6 +5514,7 @@ export async function POST(request: Request) {
         askBrain: askBrain.decision,
         askBrainIntent: askBrain.classification.intent,
         deterministic: askBrain.decision.path === "deterministic_required" || askBrain.decision.path === "deterministic_preferred",
+        intelligenceTools: compactChatToolResults(intelligenceToolResults),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         kernelRoutingDecision: kernel.routingDecision,
         model,

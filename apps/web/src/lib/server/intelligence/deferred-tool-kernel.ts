@@ -33,6 +33,19 @@ type ToolDefinition = DeferredToolMetadata & {
 const toolDefinitions: ToolDefinition[] = [
   {
     availability: "available",
+    description: "Search bounded selected workspace file content without reading outside the project context.",
+    effect: "READ_ONLY",
+    loadSchema: () => ({
+      input: { projectId: { type: "string" }, query: { type: "string" } },
+      name: "workspace.search_files",
+      output: { matches: { type: "array" }, query: { type: "string" } }
+    }),
+    modes: ["ASK", "CODE", "WEBSITE"],
+    name: "workspace.search_files",
+    semanticTriggers: ["search files", "search code", "find in project", "find source"]
+  },
+  {
+    availability: "available",
     description: "Read one selected workspace file after project and path validation.",
     effect: "READ_ONLY",
     loadSchema: () => ({
@@ -42,7 +55,14 @@ const toolDefinitions: ToolDefinition[] = [
     }),
     modes: ["ASK", "CODE", "WEBSITE"],
     name: "workspace.read_file",
-    semanticTriggers: ["read file", "inspect file", "active file", "source code"]
+    semanticTriggers: [
+      "read file",
+      "inspect file",
+      "inspect project",
+      "active file",
+      "source code",
+      "what framework"
+    ]
   },
   {
     availability: "permission_required",
@@ -71,8 +91,8 @@ const toolDefinitions: ToolDefinition[] = [
     semanticTriggers: ["reload preview", "refresh preview"]
   },
   {
-    availability: "unavailable",
-    description: "Inspect Git status. Arbitrary terminal execution is not connected to product chat.",
+    availability: "available",
+    description: "Inspect Git status through a fixed read-only command in the server-owned project workspace.",
     effect: "READ_ONLY",
     loadSchema: () => ({
       input: { projectId: { type: "string" } },
@@ -82,6 +102,19 @@ const toolDefinitions: ToolDefinition[] = [
     modes: ["ASK", "CODE", "WEBSITE"],
     name: "git.status",
     semanticTriggers: ["git status", "working tree", "changed files"]
+  },
+  {
+    availability: "available",
+    description: "Inspect the unstaged Git diff through a fixed read-only command in the server-owned project workspace.",
+    effect: "READ_ONLY",
+    loadSchema: () => ({
+      input: { projectId: { type: "string" } },
+      name: "git.diff",
+      output: { diff: { type: "string" } }
+    }),
+    modes: ["ASK", "CODE", "WEBSITE"],
+    name: "git.diff",
+    semanticTriggers: ["git diff", "review diff", "inspect changes", "changed code"]
   },
   {
     availability: "unavailable",

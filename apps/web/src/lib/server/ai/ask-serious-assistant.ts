@@ -425,6 +425,7 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (isWrongModeBuildRequest(prompt)) return classify(prompt, "mode_boundary_request", 0.94, "The user asks ASK to create/apply/run project files.");
   if (detectDangerousCodingRequest(prompt)) return classify(prompt, "auth_or_security_guidance", 0.96, "The user asked for harmful code; ASK should refuse and redirect to defensive security.");
   if (isWebsiteCodeTextRequest(prompt)) return classify(prompt, "website_code_text_only", 0.92, "The user asks for website code in chat only.");
+  if (/\b(?:compare|which is better|recommend|best option|versus|vs)\b/i.test(prompt)) return classify(prompt, "comparison_or_recommendation", 0.9, "The user asks for comparison or recommendation.");
   if (detectCodingCategory(prompt) || isCodingTextRequest(prompt)) return classify(prompt, /\b(?:xampp|cmd|localhost|install|run|commands?|setup)\b/i.test(prompt) ? "local_setup_guidance" : "coding_help_text_only", 0.9, "The user asks for code or setup guidance as text.");
   if (/\b(?:write it|write this|say politely|say this|make it|rewrite)\b/i.test(prompt) && (explicitMaxWordsFor(prompt) || /\b(?:human|sarcastic(?:ally)?|firm|simple|general)\b/i.test(prompt))) return classify(prompt, "writing_or_rewriting", 0.88, "The user asks for wording refinement with quality constraints.");
   if (/\b(?:debug|error|bug|fix this|not working|stack trace)\b/i.test(prompt)) return classify(prompt, "debugging_help", 0.86, "The user asks for debugging help.");
@@ -442,7 +443,6 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (/\b(?:learning|learn)\b[\s\S]{0,80}\b(?:spanish|verbs?)\b/i.test(prompt)) return classify(prompt, "explanation_or_teaching", 0.86, "The user asks for a learning explanation or plan.");
   if (/\b(?:plan|checklist|steps|schedule|tomorrow|roadmap)\b/i.test(prompt)) return classify(prompt, "planning_or_steps", 0.84, "The user is asking for a practical plan or checklist.");
   if (/\b(?:business plan|strategy|marketing|offer|follow-up|client drop|sales)\b/i.test(prompt)) return classify(prompt, "business_strategy", 0.82, "The user is asking for business strategy support.");
-  if (/\b(?:compare|which is better|recommend|best option|versus|vs)\b/i.test(prompt)) return classify(prompt, "comparison_or_recommendation", 0.82, "The user asks for comparison or recommendation.");
   if (/\b(?:travel|trip|itinerary|hotel|flight)\b/i.test(prompt)) return classify(prompt, "travel_or_lifestyle_planning", 0.78, "The user asks for travel or lifestyle planning.");
   if (/\b(?:translate|translation|rewrite in|say this in)\b/i.test(prompt)) return classify(prompt, "translation_or_language_help", 0.86, "The user is asking for language help.");
   if (/\b(?:explain|teach|what is|how does|like i am|i am very new|beginner)\b/i.test(prompt)) return classify(prompt, "explanation_or_teaching", 0.84, "The user is asking for a simple explanation.");

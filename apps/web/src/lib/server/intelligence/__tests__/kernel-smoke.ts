@@ -67,6 +67,7 @@ test("unknown explicit skills fail open without semantic substitution", async ()
 
 test("broken skill resources fail open", async () => {
   const missing: SkillMetadata = {
+    adaptation: "hassali_native",
     allowedModes: ["ASK"],
     authority: "user",
     description: "A deliberately unavailable test skill.",
@@ -74,6 +75,7 @@ test("broken skill resources fail open", async () => {
     instructionPath: "missing-test-skill/SKILL.md",
     semanticTriggers: ["missing"],
     source: "test",
+    sourceDocuments: ["test fixture"],
     sourceFamilies: ["hassali"],
     version: "1.0.0"
   };
@@ -95,11 +97,13 @@ test("optional references fail open while required references mark the skill inc
   await writeFile(path.join(optionalDir, "SKILL.md"), "# Optional\nreference: references/missing.md | fixture", "utf8");
   await writeFile(path.join(requiredDir, "SKILL.md"), "# Required\nreference!: references/missing.md | fixture", "utf8");
   const base: Omit<SkillMetadata, "id" | "instructionPath"> = {
+    adaptation: "hassali_native",
     allowedModes: ["ASK"],
     authority: "user",
     description: "Reference failure fixture.",
     semanticTriggers: ["fixture"],
     source: "test",
+    sourceDocuments: ["test fixture"],
     sourceFamilies: ["hassali"],
     version: "1.0.0"
   };
@@ -125,6 +129,7 @@ test("optional references fail open while required references mark the skill inc
 
 test("skill collision precedence is deterministic", async () => {
   const override: SkillMetadata = {
+    adaptation: "hassali_native",
     allowedModes: ["ASK"],
     authority: "user",
     description: "User-authority debug workflow.",
@@ -132,6 +137,7 @@ test("skill collision precedence is deterministic", async () => {
     instructionPath: "debug/SKILL.md",
     semanticTriggers: ["debug"],
     source: "user-test",
+    sourceDocuments: ["test fixture"],
     sourceFamilies: ["hassali"],
     version: "2.0.0"
   };
@@ -142,6 +148,7 @@ test("skill collision precedence is deterministic", async () => {
 
 test("unsafe skill paths and authority overrides are rejected", async () => {
   const traversal: SkillMetadata = {
+    adaptation: "hassali_native",
     allowedModes: ["ASK"],
     authority: "user",
     description: "Unsafe path fixture.",
@@ -149,6 +156,7 @@ test("unsafe skill paths and authority overrides are rejected", async () => {
     instructionPath: "../outside/SKILL.md",
     semanticTriggers: ["unsafe"],
     source: "test",
+    sourceDocuments: ["test fixture"],
     sourceFamilies: ["hassali"],
     version: "1.0.0"
   };

@@ -34,6 +34,7 @@ import type {
   WorkerRouterRiskLevel,
   WorkerRouterSnapshotStatus
 } from "@/lib/server/runtime/worker-router-types";
+import { runApprovedRuntimePostflight } from "@/lib/server/intelligence/intelligence-postflight";
 
 export const runtime = "nodejs";
 
@@ -336,6 +337,30 @@ export async function POST(request: Request) {
     });
   }
 
+  let ownedProjectFiles;
+  try {
+    ownedProjectFiles = await listUserProjectFiles({
+      externalUserId: userId,
+      projectId: parsed.projectId
+    });
+  } catch {
+    return errorResponse("Project ownership could not be verified.", 503, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  if (!ownedProjectFiles) {
+    return errorResponse("Project not found or access denied.", 404, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
   const workspaceBinding = await resolveProjectWorkspace(parsed.projectId);
 
   if (isWorkspaceBindingError(workspaceBinding)) {
@@ -596,6 +621,20 @@ export async function POST(request: Request) {
     viteRuntime
   });
   const fileApprovalSucceeded = result.ok;
+  const intelligencePostflight = runApprovedRuntimePostflight({
+    changedFiles: plan.steps
+      .filter((change) => change.tool === "write_file" && change.path && typeof change.content === "string")
+      .map((change) => ({
+        content: change.content ?? "",
+        path: change.path ?? ""
+      })),
+    implementationSucceeded: fileApprovalSucceeded,
+    productMode,
+    taskDescription: typeof body.taskKind === "string"
+      ? body.taskKind
+      : plan.steps.map((change) => change.summary).join(" "),
+    verification: result.verification
+  });
 
   return Response.json({
     applied: fileApprovalSucceeded,
@@ -608,6 +647,8 @@ export async function POST(request: Request) {
     })),
     errors: result.blockedReasons.map((reason) => reason.message),
     events: result.events,
+    intelligenceCompletion: intelligencePostflight.completion,
+    intelligencePostflight,
     deletedFiles,
     rejectedWorkers: workerRouter.rejectedWorkers,
     runnerId: session.id,
