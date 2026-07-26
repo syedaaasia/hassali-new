@@ -10,6 +10,11 @@ import {
   startRuntime,
   stopRuntime
 } from "@/lib/server/runtime/backend-process-registry";
+import { createCodeExecutionEnvironment } from "@/lib/server/runtime/code-command-executor";
+import {
+  isSafeDevelopmentScript,
+  waitForOwnedLocalHttp
+} from "@/lib/server/runtime/owned-runtime-safety";
 import { runtimeRecordToBackendPreviewBridge } from "@/lib/server/runtime/backend-preview-bridge";
 import { recordRuntimeStreamEvent } from "@/lib/server/runtime/runtime-event-buffer";
 import { isServerOwnedProjectWorkspaceRoot } from "@/lib/server/runtime/workspace-binding";
@@ -97,10 +102,6 @@ async function fileExists(path: string) {
   }
 }
 
-function npmExecutable() {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
-}
-
 function commandToSpawn(command: BackendRuntimeCommand) {
   if (command.command === "node") {
     return {
@@ -111,7 +112,7 @@ function commandToSpawn(command: BackendRuntimeCommand) {
 
   return {
     args: command.args,
-    command: npmExecutable()
+    command: process.execPath
   };
 }
 
@@ -130,12 +131,18 @@ async function commandFromPackageJson(workspaceRoot: string): Promise<BackendRun
     ? packageJson.scripts["start:dev"]
     : null;
 
-  if (dev && !/install|pnpm|yarn|docker|rm\s+-|del\s+/i.test(dev)) {
-    return { args: ["run", "dev"], command: "npm", label: "npm run dev" };
+  if (dev && isSafeDevelopmentScript(dev, "backend_node")) {
+    const target = dev.trim().split(/\s+/)[1];
+    return target
+      ? { args: [resolve(workspaceRoot, target)], command: "node", label: dev }
+      : null;
   }
 
-  if (startDev && !/install|pnpm|yarn|docker|rm\s+-|del\s+/i.test(startDev)) {
-    return { args: ["run", "start:dev"], command: "npm", label: "npm run start:dev" };
+  if (startDev && isSafeDevelopmentScript(startDev, "backend_node")) {
+    const target = startDev.trim().split(/\s+/)[1];
+    return target
+      ? { args: [resolve(workspaceRoot, target)], command: "node", label: startDev }
+      : null;
   }
 
   return null;
@@ -239,11 +246,10 @@ export async function startBackendRuntime(
   const runtimeId = `backend-runtime-${Date.now()}`;
   const child = spawn(spawnCommand.command, spawnCommand.args, {
     cwd: input.workspaceRoot,
-    env: {
-      ...process.env,
+    env: createCodeExecutionEnvironment({
       HOST: "127.0.0.1",
       PORT: String(port)
-    },
+    }),
     shell: false,
     stdio: "pipe",
     windowsHide: true
@@ -276,42 +282,26 @@ export async function startBackendRuntime(
     }
   });
 
-  return await new Promise<BackendRuntimeOperationResult>((resolveStart) => {
-    let resolved = false;
-
-    const finish = (result: BackendRuntimeOperationResult) => {
-      if (resolved) return;
-      resolved = true;
-      resolveStart(result);
-    };
-
-    child.once("error", (error) => {
-      finish(failed(input, error.message, runtimeLogLines(getRuntime(input.projectId))));
-    });
-    child.once("exit", (code) => {
-      const logs = runtimeLogLines(getRuntime(input.projectId));
-      finish(failed(input, `Backend runtime exited before startup completed with code ${code ?? "unknown"}.`, logs));
-    });
-
-    setTimeout(() => {
-      const current = markRuntimeStatus(input.projectId, "running");
-
-      if (!current) {
-        finish(failed(input, "Backend runtime registry did not return a running process."));
-        return;
-      }
-
-      appendRuntimeLog(input.projectId, "system", `Backend runtime ready at ${previewUrl}`);
-      finish({
-        ...runtimeRecordToBackendPreviewBridge({
-          analysis: input.analysis,
-          record: current
-        }),
-        logs: runtimeLogLines(getRuntime(input.projectId)),
-        runtimeStatus: "running"
-      });
-    }, startupProbeMs);
+  const readiness = await waitForOwnedLocalHttp({
+    timeoutMs: Math.max(10_000, startupProbeMs),
+    url: previewUrl
   });
+  if (!readiness.ok) {
+    const logs = runtimeLogLines(getRuntime(input.projectId));
+    await stopRuntime(input.projectId);
+    return failed(input, readiness.error ?? "Backend runtime did not become ready.", logs);
+  }
+  const current = markRuntimeStatus(input.projectId, "running");
+  if (!current) return failed(input, "Backend runtime registry did not return a running process.");
+  appendRuntimeLog(input.projectId, "system", `Backend runtime ready at ${previewUrl}`);
+  return {
+    ...runtimeRecordToBackendPreviewBridge({
+      analysis: input.analysis,
+      record: current
+    }),
+    logs: runtimeLogLines(getRuntime(input.projectId)),
+    runtimeStatus: "running"
+  };
 }
 
 export async function stopBackendRuntime(projectId: string) {

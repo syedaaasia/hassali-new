@@ -77,3 +77,32 @@ enter this workflow.
 After approved execution by the existing Hassali mechanism, verification must
 use the real public surface and evidence statuses. Until then, describe planned
 checks as `NOT_RUN`; never claim that proposed code already builds or runs.
+
+## 6. Continue after approval
+
+Once the exact project and proposal are approved, continue through the shared
+CODE execution orchestrator rather than inventing a second tool system:
+
+1. Revalidate project ownership, server-owned workspace binding, approved
+   paths, objective, explicit negatives, and current repository fingerprint.
+2. Apply only the authoritative approved file set.
+3. Run only discovered, allowlisted project scripts with fixed executable and
+   argument profiles. Never install a dependency or execute a free-form shell
+   string.
+4. Record each criterion, command, status, bounded evidence excerpt, and
+   failure classification.
+5. For an application failure, diagnose the owning boundary and propose the
+   smallest repair inside approved paths. Re-run the affected check and then
+   the bounded regression suite.
+6. Stop on scope expansion, destructive work, auth/database architecture
+   changes, provider or environment failures, repeated ineffective repairs,
+   cancellation, or exhausted policy budget.
+7. Roll back only the latest CODE-owned attempt when evidence worsens and the
+   file still matches that attempt. Never reset the repository.
+8. Claim verified completion only from real passing evidence. Keep browser
+   behavior `NOT_AVAILABLE` until an owned preview is inspected through a real
+   browser adapter.
+
+`CALM`, `FLOW`, and `AUTOPILOT_EXPERIMENTAL` alter continuation and repair
+budgets only. They never weaken approval, project isolation, path safety,
+secret handling, command policy, or scope-expansion pauses.

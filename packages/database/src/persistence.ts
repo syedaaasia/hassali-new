@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDatabaseClient, type DatabaseClient } from "./client";
 import {
@@ -11,6 +11,8 @@ import {
 } from "./schema/index";
 
 type Db = DatabaseClient;
+type TransactionDb = Parameters<Parameters<Db["transaction"]>[0]>[0];
+type QueryExecutor = Pick<Db, "execute">;
 
 export type ClerkUserInput = {
   displayName?: string | null;
@@ -100,6 +102,7 @@ const defaultStarterFiles: StarterFile[] = [
       "# Hassali.ai Workspace\n\nA quiet workspace for turning intent into working software.\n\n- Open files from the sidebar\n- Edit in Monaco\n- Save into PostgreSQL-backed workspace state\n"
   }
 ];
+const proposalApprovalLeaseMs = 60 * 60 * 1000;
 
 function slugify(value: string) {
   return (
@@ -118,6 +121,21 @@ function fileNameFromPath(path: string) {
 
 function hashContent(content: string) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function projectContentRevision(
+  projectFiles: Array<{ content: string; contentHash?: null | string; path: string }>
+) {
+  const digest = createHash("sha256");
+  for (const file of [...projectFiles].sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0
+  )) {
+    digest.update(file.path);
+    digest.update("\0");
+    digest.update(file.contentHash ?? hashContent(file.content));
+    digest.update("\0");
+  }
+  return digest.digest("hex");
 }
 
 function readSizeBytes(content: string) {
@@ -140,7 +158,7 @@ function mapFileRows(
 
 async function findOwnedProjectForExternalUser(
   input: { externalUserId: string; projectId: string },
-  db: Db
+  db: QueryExecutor
 ) {
   const ownedProjectResult = await db.execute<{ id: string }>(sql`
     select projects.id
@@ -155,6 +173,48 @@ async function findOwnedProjectForExternalUser(
   return ownedProjectResult.rows[0] ?? null;
 }
 
+async function lockProjectForMutation(projectId: string, db: TransactionDb) {
+  const result = await db.execute<{ id: string }>(sql`
+    select id
+    from projects
+    where id = ${projectId}
+    limit 1
+    for update
+  `);
+  return result.rows[0] ?? null;
+}
+
+async function lockOwnedProjectForMutation(
+  input: { externalUserId: string; projectId: string },
+  db: TransactionDb
+) {
+  const result = await db.execute<{ id: string }>(sql`
+    select projects.id
+    from projects
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+    limit 1
+    for update of projects
+  `);
+  return result.rows[0] ?? null;
+}
+
+async function listProjectFilesById(projectId: string, db: QueryExecutor) {
+  const result = await db.execute<{
+    content: string;
+    id: string;
+    path: string;
+  }>(sql`
+    select id, path, content
+    from files
+    where project_id = ${projectId}
+    order by path asc
+  `);
+  return mapFileRows(result.rows);
+}
+
 export async function listUserProjectFiles(
   input: { externalUserId: string; projectId: string },
   db: Db = getDatabaseClient()
@@ -165,18 +225,7 @@ export async function listUserProjectFiles(
     return null;
   }
 
-  const result = await db.execute<{
-    content: string;
-    id: string;
-    path: string;
-  }>(sql`
-    select id, path, content
-    from files
-    where project_id = ${input.projectId}
-    order by path asc
-  `);
-
-  return mapFileRows(result.rows);
+  return listProjectFilesById(input.projectId, db);
 }
 
 export async function getOrCreateUser(input: ClerkUserInput, db: Db = getDatabaseClient()) {
@@ -459,45 +508,50 @@ export async function saveFileContent(
   input: { content: string; path: string; projectId: string },
   db: Db = getDatabaseClient()
 ) {
-  const contentHash = hashContent(input.content);
-  const name = fileNameFromPath(input.path);
-  const sizeBytes = readSizeBytes(input.content);
-  const updatedResult = await db.execute<{
-    content: string;
-    id: string;
-    path: string;
-  }>(sql`
-    update files
-    set
-      content = ${input.content},
-      content_hash = ${contentHash},
-      name = ${name},
-      size_bytes = ${sizeBytes}
-    where project_id = ${input.projectId} and path = ${input.path}
-    returning id, path, content
-  `);
-  const updatedFile = updatedResult.rows[0];
+  return db.transaction(async (tx) => {
+    if (!(await lockProjectForMutation(input.projectId, tx))) {
+      throw new Error("Project not found.");
+    }
+    const contentHash = hashContent(input.content);
+    const name = fileNameFromPath(input.path);
+    const sizeBytes = readSizeBytes(input.content);
+    const updatedResult = await tx.execute<{
+      content: string;
+      id: string;
+      path: string;
+    }>(sql`
+      update files
+      set
+        content = ${input.content},
+        content_hash = ${contentHash},
+        name = ${name},
+        size_bytes = ${sizeBytes}
+      where project_id = ${input.projectId} and path = ${input.path}
+      returning id, path, content
+    `);
+    const updatedFile = updatedResult.rows[0];
 
-  if (updatedFile) {
-    return updatedFile;
-  }
+    if (updatedFile) {
+      return updatedFile;
+    }
 
-  const createdResult = await db.execute<{
-    content: string;
-    id: string;
-    path: string;
-  }>(sql`
-    insert into files (project_id, path, name, content, content_hash, size_bytes)
-    values (${input.projectId}, ${input.path}, ${name}, ${input.content}, ${contentHash}, ${sizeBytes})
-    returning id, path, content
-  `);
-  const createdFile = createdResult.rows[0];
+    const createdResult = await tx.execute<{
+      content: string;
+      id: string;
+      path: string;
+    }>(sql`
+      insert into files (project_id, path, name, content, content_hash, size_bytes)
+      values (${input.projectId}, ${input.path}, ${name}, ${input.content}, ${contentHash}, ${sizeBytes})
+      returning id, path, content
+    `);
+    const createdFile = createdResult.rows[0];
 
-  if (!createdFile) {
-    throw new Error("Failed to save file.");
-  }
+    if (!createdFile) {
+      throw new Error("Failed to save file.");
+    }
 
-  return createdFile;
+    return createdFile;
+  });
 }
 
 export async function saveUserProjectFileContent(
@@ -509,67 +563,171 @@ export async function saveUserProjectFileContent(
   },
   db: Db = getDatabaseClient()
 ) {
-  const contentHash = hashContent(input.content);
-  const name = fileNameFromPath(input.path);
-  const sizeBytes = readSizeBytes(input.content);
-  const ownedProject = await findOwnedProjectForExternalUser(
-    {
-      externalUserId: input.externalUserId,
-      projectId: input.projectId
-    },
-    db
-  );
+  return db.transaction(async (tx) => {
+    const ownedProject = await lockOwnedProjectForMutation(input, tx);
+    if (!ownedProject) {
+      return null;
+    }
+    const contentHash = hashContent(input.content);
+    const name = fileNameFromPath(input.path);
+    const sizeBytes = readSizeBytes(input.content);
 
-  if (!ownedProject) {
-    return null;
-  }
+    const updatedResult = await tx.execute<{
+      content: string;
+      id: string;
+      path: string;
+    }>(sql`
+      update files
+      set
+        content = ${input.content},
+        content_hash = ${contentHash},
+        name = ${name},
+        size_bytes = ${sizeBytes}
+      where project_id = ${input.projectId} and path = ${input.path}
+      returning id, path, content
+    `);
+    const updatedFile = updatedResult.rows[0];
+    if (updatedFile) return updatedFile;
 
-  await db.execute(sql`
-    update files
-    set
-      content = ${input.content},
-      content_hash = ${contentHash},
-      name = ${name},
-      size_bytes = ${sizeBytes}
-    where project_id = ${input.projectId} and path = ${input.path}
-  `);
-
-  let fileResult = await db.execute<{
-    content: string;
-    id: string;
-    path: string;
-  }>(sql`
-    select id, path, content
-    from files
-    where project_id = ${input.projectId} and path = ${input.path}
-    limit 1
-  `);
-  let file = fileResult.rows[0];
-
-  if (!file) {
-    await db.execute(sql`
+    const createdResult = await tx.execute<{
+      content: string;
+      id: string;
+      path: string;
+    }>(sql`
       insert into files (project_id, path, name, content, content_hash, size_bytes)
       values (${input.projectId}, ${input.path}, ${name}, ${input.content}, ${contentHash}, ${sizeBytes})
+      returning id, path, content
     `);
+    const file = createdResult.rows[0];
+    if (!file) {
+      throw new Error("Failed to save file.");
+    }
+    return file;
+  });
+}
 
-    fileResult = await db.execute<{
+export async function applyUserProjectFileBatch(
+  input: {
+    deletes: string[];
+    expectedProjectRevision: string;
+    externalUserId: string;
+    projectId: string;
+    proposalApproval: {
+      claimToken: string;
+      proposalId: string;
+      result: Record<string, unknown>;
+    };
+    writes: Array<{
+      content: string;
+      path: string;
+    }>;
+  },
+  db: Db = getDatabaseClient()
+) {
+  return db.transaction(async (tx) => {
+    const ownedProjectResult = await tx.execute<{ id: string }>(sql`
+      select projects.id
+      from projects
+      inner join workspaces on workspaces.id = projects.workspace_id
+      inner join users on users.id = workspaces.owner_id
+      where projects.id = ${input.projectId}
+        and users.external_id = ${input.externalUserId}
+      limit 1
+      for update
+    `);
+    if (!ownedProjectResult.rows[0]) return { files: [], status: "missing" as const };
+
+    const currentFileResult = await tx.execute<{
+      content: string;
+      content_hash: null | string;
+      id: string;
+      path: string;
+    }>(sql`
+      select id, path, content, content_hash
+      from files
+      where project_id = ${input.projectId}
+      order by path asc
+    `);
+    const currentRevision = projectContentRevision(currentFileResult.rows.map((file) => ({
+      content: file.content,
+      contentHash: file.content_hash,
+      path: file.path
+    })));
+    if (currentRevision !== input.expectedProjectRevision) {
+      return { files: mapFileRows(currentFileResult.rows), status: "stale" as const };
+    }
+
+    const claimResult = await tx.execute<{ id: string }>(sql`
+      select chat_messages.id
+      from chat_messages
+      inner join chat_sessions on chat_sessions.id = chat_messages.session_id
+      where chat_sessions.project_id = ${input.projectId}
+        and chat_messages.role = 'assistant'
+        and chat_messages.metadata -> 'proposal' ->> 'id' = ${input.proposalApproval.proposalId}
+        and chat_messages.metadata -> 'proposalApproval' ->> 'status' = 'executing'
+        and chat_messages.metadata -> 'proposalApproval' ->> 'claimToken' = ${input.proposalApproval.claimToken}
+      limit 1
+      for update of chat_messages
+    `);
+    if (!claimResult.rows[0]) return { files: [], status: "claim_lost" as const };
+
+    for (const path of input.deletes) {
+      await tx.execute(sql`
+        delete from files
+        where project_id = ${input.projectId} and path = ${path}
+      `);
+    }
+
+    for (const file of input.writes) {
+      const contentHash = hashContent(file.content);
+      const name = fileNameFromPath(file.path);
+      const sizeBytes = readSizeBytes(file.content);
+      const updated = await tx.execute<{ id: string }>(sql`
+        update files
+        set
+          content = ${file.content},
+          content_hash = ${contentHash},
+          name = ${name},
+          size_bytes = ${sizeBytes}
+        where project_id = ${input.projectId} and path = ${file.path}
+        returning id
+      `);
+      if (!updated.rows[0]) {
+        await tx.execute(sql`
+          insert into files (project_id, path, name, content, content_hash, size_bytes)
+          values (${input.projectId}, ${file.path}, ${name}, ${file.content}, ${contentHash}, ${sizeBytes})
+        `);
+      }
+    }
+
+    const result = await tx.execute<{
       content: string;
       id: string;
       path: string;
     }>(sql`
       select id, path, content
       from files
-      where project_id = ${input.projectId} and path = ${input.path}
-      limit 1
+      where project_id = ${input.projectId}
+      order by path asc
     `);
-    file = fileResult.rows[0];
-  }
-
-  if (!file) {
-    throw new Error("Failed to save file.");
-  }
-
-  return file;
+    const approval = JSON.stringify({
+      completedAt: new Date().toISOString(),
+      result: input.proposalApproval.result,
+      status: "completed"
+    });
+    const completed = await tx.execute<{ id: string }>(sql`
+      update chat_messages
+      set metadata = jsonb_set(metadata, '{proposalApproval}', ${approval}::jsonb, true)
+      where id = ${claimResult.rows[0].id}
+        and metadata -> 'proposalApproval' ->> 'status' = 'executing'
+        and metadata -> 'proposalApproval' ->> 'claimToken' = ${input.proposalApproval.claimToken}
+      returning id
+    `);
+    if (!completed.rows[0]) {
+      throw new Error("The durable proposal approval claim was lost before commit.");
+    }
+    return { files: mapFileRows(result.rows), status: "applied" as const };
+  });
 }
 
 export async function createUserProjectFile(
@@ -581,35 +739,31 @@ export async function createUserProjectFile(
   },
   db: Db = getDatabaseClient()
 ) {
-  const ownedProject = await findOwnedProjectForExternalUser(input, db);
+  return db.transaction(async (tx) => {
+    if (!(await lockOwnedProjectForMutation(input, tx))) {
+      return null;
+    }
+    const nestedPathPattern = `${input.path}/%`;
+    const conflictResult = await tx.execute<{ id: string }>(sql`
+      select id
+      from files
+      where project_id = ${input.projectId}
+        and (path = ${input.path} or path like ${nestedPathPattern})
+      limit 1
+    `);
+    if (conflictResult.rows[0]) {
+      throw new Error("A file or folder already exists at that path.");
+    }
 
-  if (!ownedProject) {
-    return null;
-  }
-
-  const nestedPathPattern = `${input.path}/%`;
-  const conflictResult = await db.execute<{ id: string }>(sql`
-    select id
-    from files
-    where project_id = ${input.projectId}
-      and (path = ${input.path} or path like ${nestedPathPattern})
-    limit 1
-  `);
-
-  if (conflictResult.rows[0]) {
-    throw new Error("A file or folder already exists at that path.");
-  }
-
-  const contentHash = hashContent(input.content);
-  const name = fileNameFromPath(input.path);
-  const sizeBytes = readSizeBytes(input.content);
-
-  await db.execute(sql`
-    insert into files (project_id, path, name, content, content_hash, size_bytes)
-    values (${input.projectId}, ${input.path}, ${name}, ${input.content}, ${contentHash}, ${sizeBytes})
-  `);
-
-  return listUserProjectFiles(input, db);
+    const contentHash = hashContent(input.content);
+    const name = fileNameFromPath(input.path);
+    const sizeBytes = readSizeBytes(input.content);
+    await tx.execute(sql`
+      insert into files (project_id, path, name, content, content_hash, size_bytes)
+      values (${input.projectId}, ${input.path}, ${name}, ${input.content}, ${contentHash}, ${sizeBytes})
+    `);
+    return listProjectFilesById(input.projectId, tx);
+  });
 }
 
 export async function createUserProjectFolder(
@@ -621,53 +775,37 @@ export async function createUserProjectFolder(
   },
   db: Db = getDatabaseClient()
 ) {
-  const ownedProject = await findOwnedProjectForExternalUser(
-    {
-      externalUserId: input.externalUserId,
-      projectId: input.projectId
-    },
-    db
-  );
+  return db.transaction(async (tx) => {
+    if (!(await lockOwnedProjectForMutation(input, tx))) {
+      return null;
+    }
+    const folderPattern = `${input.folderPath}/%`;
+    const existingResult = await tx.execute<{ id: string }>(sql`
+      select id
+      from files
+      where project_id = ${input.projectId}
+        and (path = ${input.folderPath} or path like ${folderPattern})
+      limit 1
+    `);
+    if (existingResult.rows[0]) {
+      throw new Error("A file or folder already exists at that path.");
+    }
 
-  if (!ownedProject) {
-    return null;
-  }
-
-  const folderPattern = `${input.folderPath}/%`;
-  const existingResult = await db.execute<{ id: string }>(sql`
-    select id
-    from files
-    where project_id = ${input.projectId}
-      and (path = ${input.folderPath} or path like ${folderPattern})
-    limit 1
-  `);
-
-  if (existingResult.rows[0]) {
-    throw new Error("A file or folder already exists at that path.");
-  }
-
-  const placeholderPath = `${input.folderPath}/${input.placeholderFileName}`;
-  const content = "";
-
-  await db.execute(sql`
-    insert into files (project_id, path, name, content, content_hash, size_bytes)
-    values (
-      ${input.projectId},
-      ${placeholderPath},
-      ${input.placeholderFileName},
-      ${content},
-      ${hashContent(content)},
-      0
-    )
-  `);
-
-  return listUserProjectFiles(
-    {
-      externalUserId: input.externalUserId,
-      projectId: input.projectId
-    },
-    db
-  );
+    const placeholderPath = `${input.folderPath}/${input.placeholderFileName}`;
+    const content = "";
+    await tx.execute(sql`
+      insert into files (project_id, path, name, content, content_hash, size_bytes)
+      values (
+        ${input.projectId},
+        ${placeholderPath},
+        ${input.placeholderFileName},
+        ${content},
+        ${hashContent(content)},
+        0
+      )
+    `);
+    return listProjectFilesById(input.projectId, tx);
+  });
 }
 
 export async function renameUserProjectPath(
@@ -680,69 +818,50 @@ export async function renameUserProjectPath(
   },
   db: Db = getDatabaseClient()
 ) {
-  const ownedProject = await findOwnedProjectForExternalUser(input, db);
-
-  if (!ownedProject) {
-    return null;
-  }
-
-  const newPathPattern = `${input.newPath}/%`;
-  const conflictResult = await db.execute<{ id: string }>(sql`
-    select id
-    from files
-    where project_id = ${input.projectId}
-      and (path = ${input.newPath} or path like ${newPathPattern})
-    limit 1
-  `);
-
-  if (conflictResult.rows[0]) {
-    throw new Error("A file or folder already exists at the new path.");
-  }
-
-  if (input.kind === "file") {
-    await db.execute(sql`
-      update files
-      set
-        path = ${input.newPath},
-        name = ${fileNameFromPath(input.newPath)}
-      where project_id = ${input.projectId} and path = ${input.path}
-    `);
-
-    const updatedResult = await db.execute<{ id: string }>(sql`
+  return db.transaction(async (tx) => {
+    if (!(await lockOwnedProjectForMutation(input, tx))) {
+      return null;
+    }
+    const newPathPattern = `${input.newPath}/%`;
+    const conflictResult = await tx.execute<{ id: string }>(sql`
       select id
       from files
-      where project_id = ${input.projectId} and path = ${input.newPath}
+      where project_id = ${input.projectId}
+        and (path = ${input.newPath} or path like ${newPathPattern})
       limit 1
     `);
-
-    if (!updatedResult.rows[0]) {
-      throw new Error("File not found.");
+    if (conflictResult.rows[0]) {
+      throw new Error("A file or folder already exists at the new path.");
     }
 
-    return listUserProjectFiles(input, db);
-  }
+    if (input.kind === "file") {
+      const updatedResult = await tx.execute<{ id: string }>(sql`
+        update files
+        set
+          path = ${input.newPath},
+          name = ${fileNameFromPath(input.newPath)}
+        where project_id = ${input.projectId} and path = ${input.path}
+        returning id
+      `);
+      if (!updatedResult.rows[0]) {
+        throw new Error("File not found.");
+      }
+      return listProjectFilesById(input.projectId, tx);
+    }
 
-  const folderPattern = `${input.path}/%`;
-  const prefixStart = input.path.length + 1;
-
-  await db.execute(sql`
-    update files
-    set path = ${input.newPath} || substring(path from ${prefixStart})
-    where project_id = ${input.projectId} and path like ${folderPattern}
-  `);
-
-  const updatedFolderResult = await db.execute<{ id: string }>(sql`
-    select id
-    from files
-    where project_id = ${input.projectId} and path like ${newPathPattern}
-    limit 1
-  `);
-
-  if (!updatedFolderResult.rows[0]) {
-    throw new Error("Folder not found.");
-  }
-
-  return listUserProjectFiles(input, db);
+    const folderPattern = `${input.path}/%`;
+    const prefixStart = input.path.length + 1;
+    const updatedFolderResult = await tx.execute<{ id: string }>(sql`
+      update files
+      set path = ${input.newPath} || substring(path from ${prefixStart})
+      where project_id = ${input.projectId} and path like ${folderPattern}
+      returning id
+    `);
+    if (!updatedFolderResult.rows[0]) {
+      throw new Error("Folder not found.");
+    }
+    return listProjectFilesById(input.projectId, tx);
+  });
 }
 
 export async function deleteUserProjectPath(
@@ -754,29 +873,25 @@ export async function deleteUserProjectPath(
   },
   db: Db = getDatabaseClient()
 ) {
-  const ownedProject = await findOwnedProjectForExternalUser(input, db);
+  return db.transaction(async (tx) => {
+    if (!(await lockOwnedProjectForMutation(input, tx))) {
+      return null;
+    }
+    if (input.kind === "file") {
+      await tx.execute(sql`
+        delete from files
+        where project_id = ${input.projectId} and path = ${input.path}
+      `);
+      return listProjectFilesById(input.projectId, tx);
+    }
 
-  if (!ownedProject) {
-    return null;
-  }
-
-  if (input.kind === "file") {
-    await db.execute(sql`
+    const folderPattern = `${input.path}/%`;
+    await tx.execute(sql`
       delete from files
-      where project_id = ${input.projectId} and path = ${input.path}
+      where project_id = ${input.projectId} and path like ${folderPattern}
     `);
-
-    return listUserProjectFiles(input, db);
-  }
-
-  const folderPattern = `${input.path}/%`;
-
-  await db.execute(sql`
-    delete from files
-    where project_id = ${input.projectId} and path like ${folderPattern}
-  `);
-
-  return listUserProjectFiles(input, db);
+    return listProjectFilesById(input.projectId, tx);
+  });
 }
 
 export async function loadWorkspaceForExternalUser(
@@ -1067,6 +1182,280 @@ export async function saveChatMessage(
     },
     session
   };
+}
+
+export async function loadOwnedChatProposal(
+  input: {
+    externalUserId: string;
+    projectId: string;
+    proposalId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const result = await db.execute<{ metadata: unknown }>(sql`
+    select chat_messages.metadata
+    from chat_messages
+    inner join chat_sessions on chat_sessions.id = chat_messages.session_id
+    inner join projects on projects.id = chat_sessions.project_id
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+      and chat_messages.role = 'assistant'
+      and chat_messages.metadata -> 'proposal' ->> 'id' = ${input.proposalId}
+    order by chat_messages.created_at desc
+    limit 1
+  `);
+  const metadata = result.rows[0]?.metadata;
+
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const proposal = (metadata as Record<string, unknown>).proposal;
+
+  if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) {
+    return null;
+  }
+
+  return {
+    ...(proposal as Record<string, unknown>),
+    serverProjectRevision: typeof (metadata as Record<string, unknown>).serverProjectRevision === "string"
+      ? (metadata as Record<string, unknown>).serverProjectRevision
+      : undefined,
+    serverSelectedModel: typeof (metadata as Record<string, unknown>).model === "string"
+      ? (metadata as Record<string, unknown>).model
+      : undefined,
+    serverTaskObjective: typeof (metadata as Record<string, unknown>).serverTaskObjective === "string"
+      ? (metadata as Record<string, unknown>).serverTaskObjective
+      : undefined
+  };
+}
+
+export async function loadOwnedProjectRevision(
+  input: {
+    externalUserId: string;
+    projectId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const ownership = await db.execute<{ id: string }>(sql`
+    select projects.id
+    from projects
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+    limit 1
+  `);
+  if (!ownership.rows[0]) return null;
+  const result = await db.execute<{
+    content: string;
+    content_hash: null | string;
+    path: string;
+  }>(sql`
+    select path, content, content_hash
+    from files
+    where project_id = ${input.projectId}
+    order by path asc
+  `);
+  return projectContentRevision(result.rows.map((file) => ({
+    content: file.content,
+    contentHash: file.content_hash,
+    path: file.path
+  })));
+}
+
+export async function beginOwnedChatProposalApproval(
+  input: {
+    expectedProjectRevision: string;
+    externalUserId: string;
+    projectId: string;
+    proposalId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  return db.transaction(async (tx) => {
+    const projectResult = await tx.execute<{ id: string }>(sql`
+      select projects.id
+      from projects
+      inner join workspaces on workspaces.id = projects.workspace_id
+      inner join users on users.id = workspaces.owner_id
+      where projects.id = ${input.projectId}
+        and users.external_id = ${input.externalUserId}
+      limit 1
+      for update of projects
+    `);
+    if (!projectResult.rows[0]) return { status: "missing" as const };
+    const result = await tx.execute<{
+      id: string;
+      metadata: unknown;
+    }>(sql`
+      select chat_messages.id, chat_messages.metadata
+      from chat_messages
+      inner join chat_sessions on chat_sessions.id = chat_messages.session_id
+      inner join projects on projects.id = chat_sessions.project_id
+      inner join workspaces on workspaces.id = projects.workspace_id
+      inner join users on users.id = workspaces.owner_id
+      where projects.id = ${input.projectId}
+        and users.external_id = ${input.externalUserId}
+        and chat_messages.role = 'assistant'
+        and chat_messages.metadata -> 'proposal' ->> 'id' = ${input.proposalId}
+      order by chat_messages.created_at desc
+      limit 1
+      for update
+    `);
+    const row = result.rows[0];
+    if (!row || !row.metadata || typeof row.metadata !== "object" || Array.isArray(row.metadata)) {
+      return { status: "missing" as const };
+    }
+    const metadata = row.metadata as Record<string, unknown>;
+    const approval = metadata.proposalApproval &&
+      typeof metadata.proposalApproval === "object" &&
+      !Array.isArray(metadata.proposalApproval)
+      ? metadata.proposalApproval as Record<string, unknown>
+      : {};
+    if (approval.status === "completed") {
+      return {
+        result: approval.result &&
+          typeof approval.result === "object" &&
+          !Array.isArray(approval.result)
+          ? approval.result as Record<string, unknown>
+          : {},
+        status: "completed" as const
+      };
+    }
+    const currentFileResult = await tx.execute<{
+      content: string;
+      content_hash: null | string;
+      path: string;
+    }>(sql`
+      select path, content, content_hash
+      from files
+      where project_id = ${input.projectId}
+      order by path asc
+    `);
+    const currentRevision = projectContentRevision(currentFileResult.rows.map((file) => ({
+      content: file.content,
+      contentHash: file.content_hash,
+      path: file.path
+    })));
+    if (currentRevision !== input.expectedProjectRevision) {
+      return { status: "stale" as const };
+    }
+    const activeResult = await tx.execute<{ metadata: unknown }>(sql`
+      select chat_messages.metadata
+      from chat_messages
+      inner join chat_sessions on chat_sessions.id = chat_messages.session_id
+      where chat_sessions.project_id = ${input.projectId}
+        and chat_messages.role = 'assistant'
+        and chat_messages.metadata -> 'proposalApproval' ->> 'status' = 'executing'
+        and chat_messages.metadata -> 'proposal' ->> 'id' <> ${input.proposalId}
+      order by chat_messages.created_at desc
+    `);
+    const activeProjectExecution = activeResult.rows.some((entry) => {
+      if (!entry.metadata || typeof entry.metadata !== "object" || Array.isArray(entry.metadata)) {
+        return false;
+      }
+      const entryApproval = (entry.metadata as Record<string, unknown>).proposalApproval;
+      if (!entryApproval || typeof entryApproval !== "object" || Array.isArray(entryApproval)) {
+        return false;
+      }
+      const entryClaimedAt = typeof (entryApproval as Record<string, unknown>).claimedAt === "string"
+        ? Date.parse((entryApproval as Record<string, unknown>).claimedAt as string)
+        : Number.NaN;
+      return Number.isFinite(entryClaimedAt) && Date.now() - entryClaimedAt < proposalApprovalLeaseMs;
+    });
+    if (activeProjectExecution) return { status: "project_busy" as const };
+    const claimedAt = typeof approval.claimedAt === "string"
+      ? Date.parse(approval.claimedAt)
+      : Number.NaN;
+    if (
+      approval.status === "executing" &&
+      Number.isFinite(claimedAt) &&
+      Date.now() - claimedAt < proposalApprovalLeaseMs
+    ) {
+      return { status: "executing" as const };
+    }
+    const claimToken = randomUUID();
+    const nextApproval = JSON.stringify({
+      claimedAt: new Date().toISOString(),
+      claimToken,
+      status: "executing"
+    });
+    await tx.execute(sql`
+      update chat_messages
+      set metadata = jsonb_set(metadata, '{proposalApproval}', ${nextApproval}::jsonb, true)
+      where id = ${row.id}
+    `);
+    return { claimToken, status: "acquired" as const };
+  });
+}
+
+export async function completeOwnedChatProposalApproval(
+  input: {
+    claimToken: string;
+    externalUserId: string;
+    projectId: string;
+    proposalId: string;
+    result: Record<string, unknown>;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const approval = JSON.stringify({
+    completedAt: new Date().toISOString(),
+    result: input.result,
+    status: "completed"
+  });
+  const result = await db.execute<{ id: string }>(sql`
+    update chat_messages
+    set metadata = jsonb_set(metadata, '{proposalApproval}', ${approval}::jsonb, true)
+    from chat_sessions, projects, workspaces, users
+    where chat_messages.session_id = chat_sessions.id
+      and projects.id = chat_sessions.project_id
+      and workspaces.id = projects.workspace_id
+      and users.id = workspaces.owner_id
+      and projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+      and chat_messages.role = 'assistant'
+      and chat_messages.metadata -> 'proposal' ->> 'id' = ${input.proposalId}
+      and chat_messages.metadata -> 'proposalApproval' ->> 'status' = 'executing'
+      and chat_messages.metadata -> 'proposalApproval' ->> 'claimToken' = ${input.claimToken}
+    returning chat_messages.id
+  `);
+  return Boolean(result.rows[0]);
+}
+
+export async function releaseOwnedChatProposalApproval(
+  input: {
+    claimToken: string;
+    externalUserId: string;
+    projectId: string;
+    proposalId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const approval = JSON.stringify({
+    releasedAt: new Date().toISOString(),
+    status: "pending"
+  });
+  const result = await db.execute<{ id: string }>(sql`
+    update chat_messages
+    set metadata = jsonb_set(metadata, '{proposalApproval}', ${approval}::jsonb, true)
+    from chat_sessions, projects, workspaces, users
+    where chat_messages.session_id = chat_sessions.id
+      and projects.id = chat_sessions.project_id
+      and workspaces.id = projects.workspace_id
+      and users.id = workspaces.owner_id
+      and projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+      and chat_messages.role = 'assistant'
+      and chat_messages.metadata -> 'proposal' ->> 'id' = ${input.proposalId}
+      and chat_messages.metadata -> 'proposalApproval' ->> 'status' = 'executing'
+      and chat_messages.metadata -> 'proposalApproval' ->> 'claimToken' = ${input.claimToken}
+    returning chat_messages.id
+  `);
+  return Boolean(result.rows[0]);
 }
 
 export async function loadChatHistory(

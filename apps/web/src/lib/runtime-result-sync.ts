@@ -13,6 +13,27 @@ export type RuntimeProposalChange = {
 export type RuntimeApprovalResponse = {
   applied?: boolean;
   appliedSteps?: string[];
+  codeExecution?: {
+    completionStatus: "BLOCKED" | "CANCELLED" | "COMPLETE_VERIFIED" | "COMPLETE_WITH_LIMITATIONS" | "FAILED";
+    executionPolicy: "AUTOPILOT_EXPERIMENTAL" | "CALM" | "FLOW";
+    limitations: string[];
+    metrics: {
+      commandsExecuted: number;
+      repairAttempts: number;
+      repairsApplied: number;
+      rollbackUsed: boolean;
+      successfulAttempt: number | null;
+      verificationOutcome: "FAILED" | "LIMITED" | "PASSED";
+    };
+    progress: Array<{
+      at: string;
+      label: string;
+      state: string;
+      status: "active" | "complete" | "failed" | "pending";
+    }>;
+    state: string;
+  } | null;
+  duplicateSuppressed?: boolean;
   backendExecutionRuntime?: {
     apiStatus: "candidate" | "failed" | "running";
     endpointCount: number;
@@ -41,6 +62,7 @@ export type RuntimeApprovalResponse = {
     metadata?: Record<string, unknown>;
     type?: string;
   }>;
+  fileContents?: Record<string, string>;
   requestedWorkerType?: string;
   runnerId?: string | null;
   runnerStatus?: string;
@@ -259,12 +281,17 @@ export function syncRuntimeApprovalResult(
       return [];
     }
 
-    if (typeof change.proposedContent !== "string") {
+    const authoritativeContent = input.runtimeResult?.fileContents?.[change.path];
+    const content = typeof authoritativeContent === "string"
+      ? authoritativeContent
+      : change.proposedContent;
+
+    if (typeof content !== "string") {
       warnings.push(`Runtime wrote ${change.path}, but the proposal did not include local content to sync.`);
       return [];
     }
 
-    return [{ content: change.proposedContent, path: change.path }];
+    return [{ content, path: change.path }];
   });
 
   for (const path of writtenFileSet) {

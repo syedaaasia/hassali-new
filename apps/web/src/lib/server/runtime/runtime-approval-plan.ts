@@ -1,4 +1,3 @@
-import { normalizeRuntimeWorkerType, type RuntimeWorkerType } from "@/lib/server/runtime/runtime-adapter-selector";
 import type {
   ApprovedExecutionPlan,
   ApprovedExecutionStep,
@@ -16,14 +15,10 @@ export type RuntimeApprovalChange = {
 };
 
 export type RuntimeApprovalBody = {
-  changes?: unknown;
   projectId?: unknown;
   proposalId?: unknown;
   productMode?: unknown;
-  proposalMetadata?: unknown;
-  riskLevel?: unknown;
   snapshotStatus?: unknown;
-  taskKind?: unknown;
   workerType?: unknown;
   workspaceRoot?: unknown;
 };
@@ -34,10 +29,8 @@ export type RuntimeApprovalValidationResult =
       status: 400;
     }
   | {
-      changes: RuntimeApprovalChange[];
       projectId: string;
       proposalId: string;
-      workerType: RuntimeWorkerType;
     };
 
 const supportedWriteActions = new Set(["create", "create_file", "modify", "update", "update_file", "write_file"]);
@@ -253,8 +246,6 @@ export function buildApprovedPlanFromProposal(input: {
 export function validateRuntimeApprovalRequest(body: RuntimeApprovalBody | null): RuntimeApprovalValidationResult {
   const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
   const proposalId = typeof body?.proposalId === "string" ? body.proposalId.trim() : "";
-  const workerType = normalizeRuntimeWorkerType(body?.workerType);
-
   if (!projectId) {
     return { error: "projectId is required.", status: 400 };
   }
@@ -263,14 +254,8 @@ export function validateRuntimeApprovalRequest(body: RuntimeApprovalBody | null)
     return { error: "proposalId is required.", status: 400 };
   }
 
-  if (!Array.isArray(body?.changes)) {
-    return { error: "changes array is required.", status: 400 };
-  }
-
   return {
-    changes: body.changes as RuntimeApprovalChange[],
     projectId,
-    proposalId,
-    workerType
+    proposalId
   };
 }

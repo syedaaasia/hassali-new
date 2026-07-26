@@ -1,4 +1,5 @@
 import {
+  loadOwnedProjectRevision,
   resolveChatPersistenceContext,
   saveChatMessage,
   type AiMode as PersistedAiMode
@@ -180,6 +181,7 @@ import type {
   SelfReviewStatus
 } from "@/lib/self-review-types";
 import { getRuntimeStatus } from "@/lib/server/runtime-manager";
+import { registerServerProposal } from "@/lib/server/runtime/server-proposal-registry";
 import {
   compactIntelligencePreflight,
   runIntelligencePreflight,
@@ -424,7 +426,9 @@ type ChatPersistenceContext = {
   externalUserId: string;
   mode: PersistedAiMode;
   projectId: string;
+  projectRevision: string;
   sessionId: string | null;
+  taskObjective: string;
   userId: string;
 };
 
@@ -2815,6 +2819,7 @@ async function createPersistenceContext(input: {
   mode: AiMode;
   projectId?: string | null;
   sessionId?: string | null;
+  taskObjective: string;
 }) {
   if (!input.projectId) {
     return null;
@@ -2834,6 +2839,12 @@ async function createPersistenceContext(input: {
       projectId: input.projectId,
       sessionId: input.sessionId ?? null
     });
+    const projectRevision = context
+      ? await loadOwnedProjectRevision({
+          externalUserId: userId,
+          projectId: input.projectId
+        })
+      : null;
 
     console.info("chat persistence context", {
       hasContext: Boolean(context),
@@ -2841,8 +2852,13 @@ async function createPersistenceContext(input: {
       sessionId: context?.sessionId ?? null
     });
 
-    return context
-      ? { ...context, externalUserId: userId } satisfies ChatPersistenceContext
+    return context && projectRevision
+      ? {
+          ...context,
+          externalUserId: userId,
+          projectRevision,
+          taskObjective: input.taskObjective
+        } satisfies ChatPersistenceContext
       : null;
   } catch (error) {
     console.error(
@@ -2872,7 +2888,13 @@ async function persistChatMessage(
   try {
     const saved = await saveChatMessage({
       content: input.content,
-      metadata: input.metadata,
+      metadata: input.metadata?.proposal
+        ? {
+            ...input.metadata,
+            serverProjectRevision: context.projectRevision,
+            serverTaskObjective: context.taskObjective
+          }
+        : input.metadata,
       mode: context.mode,
       projectId: context.projectId,
       role: input.role,
@@ -2898,7 +2920,21 @@ async function persistChatMessage(
   }
 }
 
-function createProposalStream(proposal: DiffProposal, sessionId?: string | null) {
+function createProposalStream(
+  proposal: DiffProposal,
+  sessionId?: string | null,
+  authority?: {
+    projectRevision?: string;
+    selectedModel: string;
+    taskObjective: string;
+  }
+) {
+  registerServerProposal({
+    ...(proposal as unknown as Record<string, unknown>),
+    serverProjectRevision: authority?.projectRevision,
+    serverSelectedModel: authority?.selectedModel,
+    serverTaskObjective: authority?.taskObjective
+  });
   const encoder = new TextEncoder();
   const visibleSummary =
     proposal.mode === "EXECUTE"
@@ -4986,7 +5022,11 @@ async function createFallbackProposalResponse(input: {
     role: "assistant"
   });
 
-  return createProposalStream(evaluatedProposal.proposal, persistence?.sessionId);
+  return createProposalStream(evaluatedProposal.proposal, persistence?.sessionId, {
+    projectRevision: persistence?.projectRevision,
+    selectedModel: input.model,
+    taskObjective: input.prompt
+  });
 }
 
 function createOpenRouterTextStream(
@@ -5305,7 +5345,8 @@ export async function POST(request: Request) {
   let persistence = await createPersistenceContext({
     mode,
     projectId: requestedProjectId,
-    sessionId: requestedSessionId
+    sessionId: requestedSessionId,
+    taskObjective: effectiveUserPrompt
   });
 
   persistence = await persistChatMessage(persistence, {
@@ -5590,7 +5631,11 @@ export async function POST(request: Request) {
         role: "assistant"
       });
 
-      return respond(createProposalStream(proposal, persistence?.sessionId));
+      return respond(createProposalStream(proposal, persistence?.sessionId, {
+        projectRevision: persistence?.projectRevision,
+        selectedModel: model,
+        taskObjective: effectiveUserPrompt
+      }));
     }
 
     const hasCodeProjectFiles = Boolean(workspace.fileList.includes("app.py") || workspace.fileContents?.["app.py"] || workspace.fileList.includes("requirements.txt"));
@@ -5635,7 +5680,11 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return respond(createProposalStream(proposal, persistence?.sessionId));
+    return respond(createProposalStream(proposal, persistence?.sessionId, {
+      projectRevision: persistence?.projectRevision,
+      selectedModel: model,
+      taskObjective: effectiveUserPrompt
+    }));
   }
 
   if (mode !== "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
@@ -5699,7 +5748,11 @@ export async function POST(request: Request) {
         },
         role: "assistant"
       });
-      return respond(createProposalStream(localProposal, persistence?.sessionId));
+      return respond(createProposalStream(localProposal, persistence?.sessionId, {
+        projectRevision: persistence?.projectRevision,
+        selectedModel: model,
+        taskObjective: effectiveUserPrompt
+      }));
     }
     const proposalWithContract = withProjectContractUpdate({
       composition: proposalComposition,
@@ -5795,7 +5848,11 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return respond(createProposalStream(proposal, persistence?.sessionId));
+    return respond(createProposalStream(proposal, persistence?.sessionId, {
+      projectRevision: persistence?.projectRevision,
+      selectedModel: model,
+      taskObjective: effectiveUserPrompt
+    }));
   }
 
   if (!process.env.OPENROUTER_API_KEY) {
@@ -6154,7 +6211,11 @@ export async function POST(request: Request) {
       role: "assistant"
     });
 
-    return respond(createProposalStream(proposal, persistence?.sessionId));
+    return respond(createProposalStream(proposal, persistence?.sessionId, {
+      projectRevision: persistence?.projectRevision,
+      selectedModel: model,
+      taskObjective: effectiveUserPrompt
+    }));
   }
 
   const response = await fetch(openRouterChatCompletionsUrl, {

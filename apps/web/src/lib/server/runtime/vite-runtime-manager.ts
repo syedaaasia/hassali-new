@@ -3,6 +3,12 @@ import { createServer } from "node:net";
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { buildDevServerRuntime } from "@/lib/server/runtime/dev-server-runtime";
+import { createCodeExecutionEnvironment } from "@/lib/server/runtime/code-command-executor";
+import { resolveSafeProjectScriptInvocation } from "@/lib/server/runtime/code-repository-inspector";
+import {
+  isSafeDevelopmentScript,
+  waitForOwnedLocalHttp
+} from "@/lib/server/runtime/owned-runtime-safety";
 import { recordRuntimeStreamEvent } from "@/lib/server/runtime/runtime-event-buffer";
 import { isServerOwnedProjectWorkspaceRoot } from "@/lib/server/runtime/workspace-binding";
 import {
@@ -134,8 +140,8 @@ async function validateViteRuntime(input: ViteRuntimeStartInput): Promise<ViteRu
 
   if (!devScript) {
     reasons.push("Vite runtime requires an approved package.json scripts.dev entry.");
-  } else if (!/\bvite\b/i.test(devScript)) {
-    reasons.push("Vite runtime only starts scripts.dev when it runs Vite.");
+  } else if (!isSafeDevelopmentScript(devScript, "vite")) {
+    reasons.push("Vite runtime only starts a single bounded Vite development script.");
   }
 
   return {
@@ -164,10 +170,6 @@ async function findAvailablePort(startPort = 5173) {
   throw new Error("Unable to allocate a local Vite preview port.");
 }
 
-function npmExecutable() {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
-}
-
 export async function startViteRuntime(
   input: ViteRuntimeStartInput
 ): Promise<ViteRuntimeOperationResult> {
@@ -193,15 +195,18 @@ export async function startViteRuntime(
 
   const previewUrl = `http://127.0.0.1:${port}/`;
   const runtimeId = `vite-runtime-${Date.now()}`;
+  const invocation = validation.devScript
+    ? resolveSafeProjectScriptInvocation(input.workspaceRoot, validation.devScript)
+    : null;
+  if (!invocation) {
+    return blocked(input, ["Vite executable is not available in the approved project dependency tree."]);
+  }
   const child = spawn(
-    npmExecutable(),
-    ["run", "dev", "--", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    invocation.command,
+    [...invocation.args, "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
     {
       cwd: input.workspaceRoot,
-      env: {
-        ...process.env,
-        BROWSER: "none"
-      },
+      env: createCodeExecutionEnvironment(),
       shell: false,
       stdio: "pipe",
       windowsHide: true
@@ -232,40 +237,24 @@ export async function startViteRuntime(
     }
   });
 
-  return await new Promise<ViteRuntimeOperationResult>((resolveStart) => {
-    let resolved = false;
-
-    const finish = (result: ViteRuntimeOperationResult) => {
-      if (resolved) return;
-      resolved = true;
-      resolveStart(result);
-    };
-
-    child.once("error", (error) => {
-      finish(failed(input, error.message, runtimeLogLines(getRuntime(input.projectId))));
-    });
-    child.once("exit", (code) => {
-      const logs = runtimeLogLines(getRuntime(input.projectId));
-      finish(failed(input, `Vite runtime exited before startup completed with code ${code ?? "unknown"}.`, logs));
-    });
-
-    setTimeout(() => {
-      const current = markRuntimeStatus(input.projectId, "running");
-
-      if (!current) {
-        finish(failed(input, "Vite runtime registry did not return a running process."));
-        return;
-      }
-
-      appendRuntimeLog(input.projectId, "system", `Vite runtime ready at ${previewUrl}`);
-      finish({
-        ...runtimeRecordToPreviewBridge(current),
-        devServerRuntime: input.devServerRuntime ?? undefined,
-        logs: runtimeLogLines(getRuntime(input.projectId)),
-        runtimeStatus: "running"
-      });
-    }, Math.min(startupTimeoutMs, 1800));
+  const readiness = await waitForOwnedLocalHttp({
+    timeoutMs: startupTimeoutMs,
+    url: previewUrl
   });
+  if (!readiness.ok) {
+    const logs = runtimeLogLines(getRuntime(input.projectId));
+    await stopRuntime(input.projectId);
+    return failed(input, readiness.error ?? "Vite runtime did not become ready.", logs);
+  }
+  const current = markRuntimeStatus(input.projectId, "running");
+  if (!current) return failed(input, "Vite runtime registry did not return a running process.");
+  appendRuntimeLog(input.projectId, "system", `Vite runtime ready at ${previewUrl}`);
+  return {
+    ...runtimeRecordToPreviewBridge(current),
+    devServerRuntime: input.devServerRuntime ?? undefined,
+    logs: runtimeLogLines(getRuntime(input.projectId)),
+    runtimeStatus: "running"
+  };
 }
 
 export async function stopViteRuntime(projectId: string) {

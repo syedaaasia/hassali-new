@@ -60,11 +60,14 @@ export type BrowserVerificationResult = {
 };
 
 export class BrowserVerificationError extends Error {
+  readonly classification: BrowserErrorClassification;
+
   constructor(
     message: string,
-    readonly classification: BrowserErrorClassification
+    classification: BrowserErrorClassification
   ) {
     super(message);
+    this.classification = classification;
     this.name = "BrowserVerificationError";
   }
 }

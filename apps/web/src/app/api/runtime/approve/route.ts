@@ -1,13 +1,17 @@
 import { auth } from "@clerk/nextjs/server";
 import {
-  deleteUserProjectPath,
+  applyUserProjectFileBatch,
+  beginOwnedChatProposalApproval,
+  completeOwnedChatProposalApproval,
   listUserProjectFiles,
-  saveUserProjectFileContent
+  loadOwnedChatProposal,
+  releaseOwnedChatProposalApproval
 } from "@hassali/database";
 import {
   persistCanonicalApprovalState,
   recordCanonicalEvent
 } from "@/lib/server/canonical-persistence";
+import { hassaliDefaultModelId } from "@/lib/model-registry";
 import {
   isWorkspaceBindingError,
   resolveProjectWorkspace
@@ -16,13 +20,27 @@ import { createGitSnapshotSafety } from "@/lib/server/runtime/git-snapshot-safet
 import { buildLiveRuntimePreviewMetadata } from "@/lib/server/runtime/live-runtime-sync";
 import { buildRuntimeAuthorityDecision } from "@/lib/server/runtime/runtime-authority";
 import { selectRuntimeAdapter } from "@/lib/server/runtime/runtime-adapter-selector";
+import { readApprovedFile } from "@/lib/server/runtime/approved-file-runner";
+import { runCodeAutonomousExecution } from "@/lib/server/runtime/code-autonomous-orchestrator";
+import {
+  codeExecutionKey,
+  runCodeExecutionOnce
+} from "@/lib/server/runtime/code-execution-registry";
 import { buildDevServerRuntime } from "@/lib/server/runtime/dev-server-runtime";
+import { startViteRuntime } from "@/lib/server/runtime/vite-runtime-manager";
+import { startNextRuntime } from "@/lib/server/runtime/next-runtime-manager";
+import { startBackendRuntime } from "@/lib/server/runtime/backend-runtime-manager";
+import {
+  clearOwnedProjectGeneratedArtifacts,
+  synchronizeOwnedProjectWorkspace
+} from "@/lib/server/runtime/owned-workspace-hydration";
 import { buildMobilePreviewRuntime } from "@/lib/server/preview/mobile-preview-runtime";
 import { buildMobileRuntimeCandidate } from "@/lib/server/runtime/mobile-runtime-manager";
 import {
   buildApprovedPlanFromProposal,
   validateRuntimeApprovalRequest,
-  type RuntimeApprovalBody
+  type RuntimeApprovalBody,
+  type RuntimeApprovalChange
 } from "@/lib/server/runtime/runtime-approval-plan";
 import { routeRuntimeWorker } from "@/lib/server/runtime/worker-router";
 import type {
@@ -31,19 +49,21 @@ import type {
 } from "@/lib/server/runtime/runtime-types";
 import type {
   WorkerRouterProductMode,
-  WorkerRouterRiskLevel,
   WorkerRouterSnapshotStatus
 } from "@/lib/server/runtime/worker-router-types";
 import { runApprovedRuntimePostflight } from "@/lib/server/intelligence/intelligence-postflight";
+import {
+  beginServerProposalApproval,
+  completeServerProposalApproval,
+  registerServerProposal,
+  releaseServerProposalApproval,
+  resolveServerProposal
+} from "@/lib/server/runtime/server-proposal-registry";
 
 export const runtime = "nodejs";
 
 function errorResponse(error: string, status = 400, extra?: Record<string, unknown>) {
   return Response.json({ error, ...extra }, { status });
-}
-
-function productModeFromBody(value: unknown): WorkerRouterProductMode {
-  return value === "ASK" || value === "WEBSITE" || value === "CODE" ? value : "CODE";
 }
 
 function snapshotStatusFromBody(value: unknown): WorkerRouterSnapshotStatus | undefined {
@@ -52,14 +72,43 @@ function snapshotStatusFromBody(value: unknown): WorkerRouterSnapshotStatus | un
     : undefined;
 }
 
-function riskLevelFromBody(value: unknown): WorkerRouterRiskLevel | undefined {
-  return value === "high" || value === "medium" || value === "low" ? value : undefined;
+function stringList(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+    : [];
 }
 
-function metadataFromBody(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+function compactDurableApprovalResult(result: Record<string, unknown>) {
+  return {
+    applied: result.applied === true,
+    deletedFiles: stringList(result.deletedFiles),
+    ok: result.ok === true,
+    runnerStatus: typeof result.runnerStatus === "string" ? result.runnerStatus : "completed",
+    runtimeStartStatus: typeof result.runtimeStartStatus === "string"
+      ? result.runtimeStartStatus
+      : "not_started",
+    verificationOk: typeof result.verificationOk === "boolean" ? result.verificationOk : null,
+    writtenFiles: stringList(result.writtenFiles)
+  };
+}
+
+function rebuildDurableApprovalResult(
+  result: Record<string, unknown>,
+  files: Array<{ content: string; path: string }>
+) {
+  const writtenFiles = stringList(result.writtenFiles);
+  const contentByPath = new Map(files.map((file) => [file.path, file.content]));
+  return {
+    ...result,
+    duplicateSuppressed: true,
+    fileContents: Object.fromEntries(
+      writtenFiles.flatMap((path) => {
+        const content = contentByPath.get(path);
+        return typeof content === "string" ? [[path, content]] : [];
+      })
+    ),
+    writtenFiles
+  };
 }
 
 function previewMetadataFromApproval(input: {
@@ -141,7 +190,7 @@ function pageToHtmlPath(page: string) {
 }
 
 function proposalApplyBlockReasons(input: {
-  changes: RuntimeApprovalBody["changes"];
+  changes: RuntimeApprovalChange[];
   metadata: Record<string, unknown> | undefined;
 }) {
   const reasons: string[] = [];
@@ -196,10 +245,6 @@ function proposalApplyBlockReasons(input: {
   }
 
   return Array.from(new Set(reasons.filter(Boolean)));
-}
-
-function workerTypeFromBody(value: unknown) {
-  return typeof value === "string" ? value : null;
 }
 
 async function recordBestEffortEvent(
@@ -321,22 +366,6 @@ export async function POST(request: Request) {
     return errorResponse(parsed.error, parsed.status ?? 400);
   }
 
-  const proposalMetadata = metadataFromBody(body.proposalMetadata);
-  const proposalBlockReasons = proposalApplyBlockReasons({
-    changes: body.changes,
-    metadata: proposalMetadata
-  });
-
-  if (proposalBlockReasons.length > 0) {
-    return errorResponse("This proposal failed validation and cannot be applied. Regenerate or fix the request.", 400, {
-      errors: proposalBlockReasons,
-      runnerStatus: "blocked",
-      runtimeStartAttempted: false,
-      runtimeStartStatus: "not_started",
-      writtenFiles: []
-    });
-  }
-
   let ownedProjectFiles;
   try {
     ownedProjectFiles = await listUserProjectFiles({
@@ -361,31 +390,236 @@ export async function POST(request: Request) {
     });
   }
 
-  const workspaceBinding = await resolveProjectWorkspace(parsed.projectId);
+  let authorizedProposal = resolveServerProposal({
+    projectId: parsed.projectId,
+    proposalId: parsed.proposalId
+  });
 
+  if (!authorizedProposal) {
+    try {
+      const persistedProposal = await loadOwnedChatProposal({
+        externalUserId: userId,
+        projectId: parsed.projectId,
+        proposalId: parsed.proposalId
+      });
+
+      if (persistedProposal) {
+        registerServerProposal(persistedProposal);
+        authorizedProposal = resolveServerProposal({
+          projectId: parsed.projectId,
+          proposalId: parsed.proposalId
+        });
+      }
+    } catch {
+      return errorResponse("Proposal authority could not be verified.", 503, {
+        runnerStatus: "blocked",
+        runtimeStartAttempted: false,
+        runtimeStartStatus: "not_started",
+        writtenFiles: []
+      });
+    }
+  }
+
+  if (!authorizedProposal) {
+    return errorResponse(
+      "This proposal is no longer available on the server. Regenerate it before approval.",
+      409,
+      {
+        runnerStatus: "blocked",
+        runtimeStartAttempted: false,
+        runtimeStartStatus: "not_started",
+        writtenFiles: []
+      }
+    );
+  }
+
+  const productMode = authorizedProposal.mode;
+  const proposalMetadata = authorizedProposal.metadata;
+  const proposalBlockReasons = proposalApplyBlockReasons({
+    changes: authorizedProposal.changes,
+    metadata: proposalMetadata
+  });
+
+  if (proposalBlockReasons.length > 0) {
+    return errorResponse("This proposal failed validation and cannot be applied. Regenerate or fix the request.", 400, {
+      errors: proposalBlockReasons,
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  const expectedProjectRevision = typeof proposalMetadata.serverProjectRevision === "string"
+    ? proposalMetadata.serverProjectRevision
+    : "";
+  if (!expectedProjectRevision) {
+    return errorResponse("This proposal predates revision-safe approval. Regenerate it before applying files.", 409, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+  let durableApprovalClaim;
+  try {
+    durableApprovalClaim = await beginOwnedChatProposalApproval({
+      expectedProjectRevision,
+      externalUserId: userId,
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId
+    });
+  } catch {
+    return errorResponse("The durable proposal approval claim could not be created.", 503, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  if (durableApprovalClaim.status === "completed") {
+    return Response.json(
+      rebuildDurableApprovalResult(durableApprovalClaim.result, ownedProjectFiles),
+      { status: 200 }
+    );
+  }
+
+  if (durableApprovalClaim.status === "executing") {
+    return errorResponse("This approved proposal is already executing.", 409, {
+      duplicateSuppressed: true,
+      runnerStatus: "running",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  if (durableApprovalClaim.status === "project_busy") {
+    return errorResponse("Another approved task is already executing for this project.", 409, {
+      duplicateSuppressed: true,
+      runnerStatus: "running",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  if (durableApprovalClaim.status === "stale") {
+    return errorResponse("The project changed after this proposal was created. Regenerate the proposal before approval.", 409, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  if (durableApprovalClaim.status !== "acquired") {
+    return errorResponse("The durable proposal authority could not be claimed for execution.", 409, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  const durableClaimToken = durableApprovalClaim.claimToken;
+  const releaseApprovalClaims = async () => {
+    releaseServerProposalApproval({
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId
+    });
+    await releaseOwnedChatProposalApproval({
+      claimToken: durableClaimToken,
+      externalUserId: userId,
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId
+    }).catch(() => false);
+  };
+  const approvalClaim = beginServerProposalApproval({
+    projectId: parsed.projectId,
+    proposalId: parsed.proposalId
+  });
+
+  if (approvalClaim.status === "completed") {
+    await completeOwnedChatProposalApproval({
+      claimToken: durableClaimToken,
+      externalUserId: userId,
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId,
+      result: compactDurableApprovalResult(approvalClaim.result)
+    }).catch(() => false);
+    return Response.json({
+      ...approvalClaim.result,
+      duplicateSuppressed: true
+    }, { status: 200 });
+  }
+
+  if (approvalClaim.status === "executing") {
+    await releaseApprovalClaims();
+    return errorResponse("This approved proposal is already executing.", 409, {
+      duplicateSuppressed: true,
+      runnerStatus: "running",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  if (approvalClaim.status !== "acquired") {
+    await releaseApprovalClaims();
+    return errorResponse("The server-authoritative proposal could not be claimed for execution.", 409, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
+
+  const workspaceBinding = await resolveProjectWorkspace(parsed.projectId);
   if (isWorkspaceBindingError(workspaceBinding)) {
+    await releaseApprovalClaims();
     return errorResponse(workspaceBinding.error, workspaceBinding.status);
+  }
+  try {
+    await synchronizeOwnedProjectWorkspace({
+      files: ownedProjectFiles,
+      workspaceRoot: workspaceBinding.workspaceRoot
+    });
+  } catch {
+    await releaseApprovalClaims();
+    return errorResponse("The owned project workspace could not be synchronized safely.", 503, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
   }
 
   const workspaceWarnings = [
     ...workspaceBinding.warnings,
+    ...(typeof body.productMode === "string" && body.productMode !== productMode
+      ? ["Client productMode differed from the server-authoritative proposal mode and was ignored."]
+      : []),
     ...(typeof body.workspaceRoot === "string" && body.workspaceRoot.trim().length > 0
       ? ["Client-supplied workspaceRoot was ignored; Hassali resolved the project workspace server-side."]
+      : []),
+    ...(body.workerType && body.workerType !== "local"
+      ? ["Client worker selection was ignored; approved CODE I1 execution is local and server-owned."]
       : [])
   ];
   const { blockedReasons, plan, runtimeWarnings, skippedSummaries } = buildApprovedPlanFromProposal({
-    changes: parsed.changes,
-    productMode: productModeFromBody(body.productMode),
+    changes: authorizedProposal.changes,
+    productMode,
     projectId: parsed.projectId,
     proposalId: parsed.proposalId,
     workspaceRoot: workspaceBinding.workspaceRoot
   });
-  const productMode = productModeFromBody(body.productMode);
   const latestApprovalPreviewMetadata = previewMetadataFromApproval({
     metadata: proposalMetadata,
     productMode
   });
-  const requestedWorkerType = workerTypeFromBody(body.workerType);
+  const requestedWorkerType = "local" as const;
   const preflightSnapshot = await resolveServerSnapshotStatus({
     clientSnapshotStatus: snapshotStatusFromBody(body.snapshotStatus),
     planId: plan.id,
@@ -400,13 +634,13 @@ export async function POST(request: Request) {
     projectId: parsed.projectId,
     proposalMetadata,
     requestedWorkerType,
-    riskLevel: riskLevelFromBody(body.riskLevel),
     snapshotStatus: preflightSnapshot.snapshotStatus,
-    taskKind: typeof body.taskKind === "string" ? body.taskKind : undefined,
+    taskKind: typeof proposalMetadata.taskType === "string" ? proposalMetadata.taskType : undefined,
     workspaceRoot: workspaceBinding.workspaceRoot
   });
 
   if (blockedReasons.length > 0) {
+    await releaseApprovalClaims();
     return Response.json({
       appliedSteps: [],
       blockedSteps: blockedReasons.map((reason, index) => ({
@@ -424,7 +658,7 @@ export async function POST(request: Request) {
       runtimeWarning: null,
       ...blockedWorkerExecutionMetadata,
       rejectedWorkers: workerRouter.rejectedWorkers,
-      requestedWorkerType: workerRouter.requestedWorkerType ?? parsed.workerType,
+      requestedWorkerType: workerRouter.requestedWorkerType ?? requestedWorkerType,
       selectedWorkerType: null,
       skippedSteps: skippedSummaries,
       snapshot: preflightSnapshot.snapshot,
@@ -444,12 +678,29 @@ export async function POST(request: Request) {
 
   const adapterSelection = selectRuntimeAdapter(workerRouter);
   const adapter = adapterSelection.adapter;
-  const session = await adapter.startSession({
-    projectId: parsed.projectId,
-    workspaceRoot: workspaceBinding.workspaceRoot
-  });
+  let session: Awaited<ReturnType<typeof adapter.startSession>>;
+  let result: Awaited<ReturnType<typeof adapter.sendApprovedPlan>>;
   const workerExecutionStartedAt = new Date().toISOString();
-  const result = await adapter.sendApprovedPlan(session, plan);
+
+  try {
+    session = await adapter.startSession({
+      projectId: parsed.projectId,
+      workspaceRoot: workspaceBinding.workspaceRoot
+    });
+    result = await adapter.sendApprovedPlan(session, plan);
+  } catch (error) {
+    await releaseApprovalClaims();
+    return errorResponse(
+      error instanceof Error ? error.message : "Approved CODE execution could not start.",
+      500,
+      {
+        runnerStatus: "failed",
+        runtimeStartAttempted: false,
+        runtimeStartStatus: "failed",
+        writtenFiles: []
+      }
+    );
+  }
   const workerExecutionFinishedAt = new Date().toISOString();
   const workerExecutionMetadata = buildWorkerExecutionMetadata({
     finishedAt: workerExecutionFinishedAt,
@@ -464,20 +715,69 @@ export async function POST(request: Request) {
     .filter((event) => event.type === "file_deleted")
     .map((event) => String(event.metadata?.path ?? ""))
     .filter(Boolean);
+  const selectedModel = typeof proposalMetadata.serverSelectedModel === "string" &&
+      proposalMetadata.serverSelectedModel.trim()
+    ? proposalMetadata.serverSelectedModel.trim()
+    : hassaliDefaultModelId;
+  const taskObjective = typeof proposalMetadata.serverTaskObjective === "string" &&
+      proposalMetadata.serverTaskObjective.trim()
+    ? proposalMetadata.serverTaskObjective.trim()
+    : authorizedProposal.summary;
+  const executionPolicy = /\bautopilot\b/i.test(taskObjective)
+    ? "AUTOPILOT_EXPERIMENTAL"
+    : /\bcalm mode\b/i.test(taskObjective)
+      ? "CALM"
+      : "FLOW";
+  let codeExecutionResult = null;
+  try {
+    codeExecutionResult =
+      result.ok &&
+      productMode === "CODE" &&
+      authorizedProposal.approvalMode === "EXECUTE"
+      ? await runCodeExecutionOnce({
+          execute: (abortSignal) => runCodeAutonomousExecution({
+            abortSignal,
+            approvedPaths: plan.steps
+              .filter((step) => step.tool === "write_file" && step.path)
+              .map((step) => step.path!),
+            executionPolicy,
+            objective: taskObjective,
+            projectId: parsed.projectId,
+            proposalId: parsed.proposalId,
+            selectedModel,
+            workspaceRoot: workspaceBinding.workspaceRoot
+          }),
+          key: codeExecutionKey(parsed.projectId, parsed.proposalId)
+        })
+      : null;
+  } catch (error) {
+    await synchronizeOwnedProjectWorkspace({
+      files: ownedProjectFiles,
+      workspaceRoot: workspaceBinding.workspaceRoot
+    }).catch(() => undefined);
+    await releaseApprovalClaims();
+    return errorResponse(
+      error instanceof Error ? error.message : "Autonomous CODE verification could not complete.",
+      500,
+      {
+        runnerStatus: "failed",
+        runtimeStartAttempted: false,
+        runtimeStartStatus: "failed",
+        writtenFiles: []
+      }
+    );
+  }
+  const codeExecution = codeExecutionResult?.report ?? null;
+  const finalFileContents = codeExecution?.finalFileContents ?? {};
+  let workspaceCanonicalizedForRuntime = false;
 
   if (result.ok) {
     try {
+      const persistenceWrites: Array<{ content: string; path: string }> = [];
+      const persistenceDeletes: string[] = [];
       for (const step of plan.steps) {
         if (step.tool === "delete_file" && step.path) {
-          const remaining = await deleteUserProjectPath({
-            externalUserId: userId,
-            kind: "file",
-            path: step.path,
-            projectId: parsed.projectId
-          });
-          if (!remaining) {
-            throw new Error(`Persistence verification failed for deleted file: ${step.path}`);
-          }
+          persistenceDeletes.push(step.path);
           continue;
         }
 
@@ -485,47 +785,91 @@ export async function POST(request: Request) {
           continue;
         }
 
-        await recordBestEffortEvent(workspaceBinding.workspaceRoot, "FILE_WRITE_STARTED", {
-          path: step.path,
-          projectId: parsed.projectId,
-          proposalId: parsed.proposalId
-        });
-        const saved = await saveUserProjectFileContent({
-          content: step.content,
-          externalUserId: userId,
-          path: step.path,
-          projectId: parsed.projectId
-        });
-
-        if (!saved || saved.content !== step.content) {
-          throw new Error(`Persistence verification failed for: ${step.path}`);
-        }
-
-        await recordBestEffortEvent(workspaceBinding.workspaceRoot, "FILE_WRITTEN", {
-          path: step.path,
-          projectId: parsed.projectId,
-          proposalId: parsed.proposalId
-        });
+        const finalContent = finalFileContents[step.path] ??
+          await readApprovedFile(workspaceBinding.workspaceRoot, step.path);
+        persistenceWrites.push({ content: finalContent, path: step.path });
       }
-
-      const persistedFiles = await listUserProjectFiles({
+      const persistenceResult = await applyUserProjectFileBatch({
+        deletes: persistenceDeletes,
+        expectedProjectRevision,
         externalUserId: userId,
-        projectId: parsed.projectId
+        projectId: parsed.projectId,
+        proposalApproval: {
+          claimToken: durableClaimToken,
+          proposalId: parsed.proposalId,
+          result: compactDurableApprovalResult({
+            applied: true,
+            deletedFiles,
+            ok: true,
+            runnerStatus: "completed",
+            runtimeStartStatus: "not_started",
+            verificationOk: result.verification?.ok ?? null,
+            writtenFiles
+          })
+        },
+        writes: persistenceWrites
       });
 
-      if (!persistedFiles) {
-        throw new Error("Project not found during approval persistence.");
+      if (persistenceResult.status !== "applied") {
+        const reason = persistenceResult.status === "stale"
+          ? "The project changed during execution. Hassali preserved the newer project state."
+          : persistenceResult.status === "claim_lost"
+            ? "The durable proposal claim was lost before persistence."
+            : "Project ownership was lost during approval persistence.";
+        throw new Error(reason);
+      }
+      const persistedFiles = persistenceResult.files;
+      const persistedByPath = new Map(persistedFiles.map((file) => [file.path, file.content]));
+      for (const file of persistenceWrites) {
+        if (persistedByPath.get(file.path) !== file.content) {
+          throw new Error(`Persistence verification failed for: ${file.path}`);
+        }
+        await recordBestEffortEvent(workspaceBinding.workspaceRoot, "FILE_WRITTEN", {
+          path: file.path,
+          projectId: parsed.projectId,
+          proposalId: parsed.proposalId
+        });
+      }
+      for (const deletedPath of persistenceDeletes) {
+        if (persistedByPath.has(deletedPath)) {
+          throw new Error(`Persistence verification failed for deleted file: ${deletedPath}`);
+        }
       }
 
-      await persistCanonicalApprovalState({
-        files: persistedFiles.map((file) => ({
-          content: String(file.content),
-          path: String(file.path)
-        })),
-        projectId: parsed.projectId,
-        proposalId: parsed.proposalId,
-        workspaceRoot: workspaceBinding.workspaceRoot
-      });
+      try {
+        await persistCanonicalApprovalState({
+          files: persistedFiles.map((file) => ({
+            content: String(file.content),
+            path: String(file.path)
+          })),
+          projectId: parsed.projectId,
+          proposalId: parsed.proposalId,
+          workspaceRoot: workspaceBinding.workspaceRoot
+        });
+      } catch {
+        workspaceWarnings.push(
+          "Database persistence succeeded, but local canonical preview metadata must be rebuilt on the next refresh."
+        );
+        await recordBestEffortEvent(workspaceBinding.workspaceRoot, "PERSIST_FAILURE", {
+          error: "Local canonical preview metadata could not be updated.",
+          projectId: parsed.projectId,
+          proposalId: parsed.proposalId
+        });
+      }
+      try {
+        if (codeExecution) {
+          await clearOwnedProjectGeneratedArtifacts(workspaceBinding.workspaceRoot);
+        }
+        await synchronizeOwnedProjectWorkspace({
+          files: persistedFiles,
+          workspaceRoot: workspaceBinding.workspaceRoot
+        });
+        workspaceCanonicalizedForRuntime = true;
+      } catch {
+        workspaceWarnings.push(
+          "Verified files were persisted, but the local runtime mirror could not be canonicalized. Hassali did not start a runtime."
+        );
+      }
       await recordBestEffortEvent(workspaceBinding.workspaceRoot, "PROPOSAL_APPROVED", {
         filesDeleted: deletedFiles,
         filesWritten: writtenFiles,
@@ -546,6 +890,17 @@ export async function POST(request: Request) {
         projectId: parsed.projectId,
         proposalId: parsed.proposalId
       });
+      const latestOwnedFiles = await listUserProjectFiles({
+        externalUserId: userId,
+        projectId: parsed.projectId
+      }).catch(() => null);
+      if (latestOwnedFiles) {
+        await synchronizeOwnedProjectWorkspace({
+          files: latestOwnedFiles,
+          workspaceRoot: workspaceBinding.workspaceRoot
+        }).catch(() => undefined);
+      }
+      await releaseApprovalClaims();
 
       return Response.json({
         applied: false,
@@ -575,7 +930,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const liveRuntimePreview = result.ok
+  const liveRuntimePreview = result.ok && workspaceCanonicalizedForRuntime
     ? await buildLiveRuntimePreviewMetadata({
         productMode,
         projectId: parsed.projectId,
@@ -593,9 +948,47 @@ export async function POST(request: Request) {
         files: liveRuntimePreview.analysis.generatedFiles
       })
     : null;
-  const viteRuntime = null;
-  const nextRuntime = null;
-  const backendExecutionRuntime = null;
+  const codeRuntimeExecutionAllowed = Boolean(
+    result.ok &&
+    productMode === "CODE" &&
+    workerRouter.selectedWorkerType === "local" &&
+    codeExecution &&
+    codeExecution.repository.commands.length > 0 &&
+    codeExecution.commandResults.every((command) => command.status === "PASSED") &&
+    codeExecution.scopeExpansionRequired.length === 0
+  );
+  const viteRuntime = codeRuntimeExecutionAllowed && devServerRuntime?.framework === "react_vite"
+    ? await startViteRuntime({
+        devServerRuntime,
+        productMode,
+        projectId: parsed.projectId,
+        workerType: workerRouter.selectedWorkerType,
+        workspaceRoot: workspaceBinding.workspaceRoot
+      })
+    : null;
+  const nextRuntime = codeRuntimeExecutionAllowed && !viteRuntime && devServerRuntime?.framework === "next_app"
+    ? await startNextRuntime({
+        devServerRuntime,
+        productMode,
+        projectId: parsed.projectId,
+        workerType: workerRouter.selectedWorkerType,
+        workspaceRoot: workspaceBinding.workspaceRoot
+      })
+    : null;
+  const backendExecutionRuntime =
+    codeRuntimeExecutionAllowed &&
+    !viteRuntime &&
+    !nextRuntime &&
+    liveRuntimePreview?.backendRuntime
+      ? await startBackendRuntime({
+          analysis: liveRuntimePreview.backendRuntime.analysis,
+          match: liveRuntimePreview.backendRuntime.match,
+          productMode,
+          projectId: parsed.projectId,
+          workerType: workerRouter.selectedWorkerType,
+          workspaceRoot: workspaceBinding.workspaceRoot
+        })
+      : null;
   const mobileRuntime =
     result.ok &&
     productMode === "CODE" &&
@@ -616,27 +1009,30 @@ export async function POST(request: Request) {
     runtimeWarnings: [
       ...runtimeWarnings,
       ...(devServerRuntime?.warnings ?? []),
-      "Approval recorded runtime metadata only; no runtime process was started."
+      ...(!viteRuntime && !nextRuntime && !backendExecutionRuntime
+        ? ["No supported owned CODE runtime was started; verified files remain applied."]
+        : [])
     ],
     viteRuntime
   });
   const fileApprovalSucceeded = result.ok;
+  const codeOutcomeSucceeded = !codeExecution ||
+    codeExecution.completionStatus === "COMPLETE_VERIFIED" ||
+    codeExecution.completionStatus === "COMPLETE_WITH_LIMITATIONS";
   const intelligencePostflight = runApprovedRuntimePostflight({
     changedFiles: plan.steps
       .filter((change) => change.tool === "write_file" && change.path && typeof change.content === "string")
       .map((change) => ({
-        content: change.content ?? "",
+        content: finalFileContents[change.path ?? ""] ?? change.content ?? "",
         path: change.path ?? ""
       })),
-    implementationSucceeded: fileApprovalSucceeded,
+    implementationSucceeded: fileApprovalSucceeded && codeOutcomeSucceeded,
     productMode,
-    taskDescription: typeof body.taskKind === "string"
-      ? body.taskKind
-      : plan.steps.map((change) => change.summary).join(" "),
+    taskDescription: taskObjective,
     verification: result.verification
   });
 
-  return Response.json({
+  const responsePayload = {
     applied: fileApprovalSucceeded,
     appliedSteps: result.events
       .filter((event) => (event.type === "file_written" || event.type === "file_deleted") && event.stepId)
@@ -647,6 +1043,9 @@ export async function POST(request: Request) {
     })),
     errors: result.blockedReasons.map((reason) => reason.message),
     events: result.events,
+    codeExecution,
+    duplicateSuppressed: codeExecutionResult?.duplicateSuppressed ?? false,
+    fileContents: finalFileContents,
     intelligenceCompletion: intelligencePostflight.completion,
     intelligencePostflight,
     deletedFiles,
@@ -680,5 +1079,17 @@ export async function POST(request: Request) {
     viteRuntime,
     verificationOk: result.verification?.ok ?? null,
     writtenFiles
-  }, { status: fileApprovalSucceeded ? 200 : 400 });
+  };
+
+  if (fileApprovalSucceeded) {
+    completeServerProposalApproval({
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId,
+      result: responsePayload
+    });
+  } else {
+    await releaseApprovalClaims();
+  }
+
+  return Response.json(responsePayload, { status: fileApprovalSucceeded ? 200 : 400 });
 }

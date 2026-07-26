@@ -8,6 +8,7 @@ import {
   recordRuntimeStreamEvent,
   sanitizeRuntimeText
 } from "@/lib/server/runtime/runtime-event-buffer";
+import { stopOwnedChild } from "@/lib/server/runtime/owned-runtime-safety";
 
 type ManagedNextRuntime = {
   child: ChildProcessWithoutNullStreams | null;
@@ -167,7 +168,7 @@ export async function stopRuntime(projectId: string) {
   runtime.record = appendRecordLog(runtime.record, "system", "Stopping Next.js runtime.");
 
   if (runtime.child && !runtime.child.killed) {
-    runtime.child.kill();
+    await stopOwnedChild(runtime.child);
     runtime.child.stdout.removeAllListeners();
     runtime.child.stderr.removeAllListeners();
   }

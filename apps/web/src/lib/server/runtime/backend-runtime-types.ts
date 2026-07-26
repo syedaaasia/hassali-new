@@ -126,7 +126,7 @@ export type BackendRuntimeCommand =
   | {
       args: string[];
       command: "node" | "npm";
-      label: "node server.js" | "npm run dev" | "npm run start:dev";
+      label: string;
     };
 
 export type BackendRuntimeOperationResult = {

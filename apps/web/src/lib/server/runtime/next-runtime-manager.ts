@@ -3,6 +3,12 @@ import { createServer } from "node:net";
 import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { buildDevServerRuntime } from "@/lib/server/runtime/dev-server-runtime";
+import { createCodeExecutionEnvironment } from "@/lib/server/runtime/code-command-executor";
+import { resolveSafeProjectScriptInvocation } from "@/lib/server/runtime/code-repository-inspector";
+import {
+  isSafeDevelopmentScript,
+  waitForOwnedLocalHttp
+} from "@/lib/server/runtime/owned-runtime-safety";
 import { recordRuntimeStreamEvent } from "@/lib/server/runtime/runtime-event-buffer";
 import {
   appendRuntimeLog,
@@ -170,8 +176,8 @@ async function validateNextRuntime(input: NextRuntimeStartInput): Promise<NextRu
 
   if (!devScript) {
     reasons.push("Next.js runtime requires an approved package.json scripts.dev entry.");
-  } else if (!/\bnext\b/i.test(devScript)) {
-    reasons.push("Next.js runtime only starts scripts.dev when it runs Next.js.");
+  } else if (!isSafeDevelopmentScript(devScript, "next")) {
+    reasons.push("Next.js runtime only starts a single bounded Next development script.");
   }
 
   if (!nextDependency) {
@@ -210,10 +216,6 @@ async function findAvailablePort(startPort = 3000) {
   throw new Error("Unable to allocate a local Next.js preview port.");
 }
 
-function npmExecutable() {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
-}
-
 export async function startNextRuntime(
   input: NextRuntimeStartInput
 ): Promise<NextRuntimeOperationResult> {
@@ -239,15 +241,18 @@ export async function startNextRuntime(
 
   const previewUrl = `http://127.0.0.1:${port}/`;
   const runtimeId = `next-runtime-${Date.now()}`;
+  const invocation = validation.devScript
+    ? resolveSafeProjectScriptInvocation(input.workspaceRoot, validation.devScript)
+    : null;
+  if (!invocation) {
+    return blocked(input, ["Next.js executable is not available in the approved project dependency tree."], validation.routerKind);
+  }
   const child = spawn(
-    npmExecutable(),
-    ["run", "dev", "--", "-H", "127.0.0.1", "-p", String(port)],
+    invocation.command,
+    [...invocation.args, "-H", "127.0.0.1", "-p", String(port)],
     {
       cwd: input.workspaceRoot,
-      env: {
-        ...process.env,
-        BROWSER: "none"
-      },
+      env: createCodeExecutionEnvironment(),
       shell: false,
       stdio: "pipe",
       windowsHide: true
@@ -280,40 +285,24 @@ export async function startNextRuntime(
     }
   });
 
-  return await new Promise<NextRuntimeOperationResult>((resolveStart) => {
-    let resolved = false;
-
-    const finish = (result: NextRuntimeOperationResult) => {
-      if (resolved) return;
-      resolved = true;
-      resolveStart(result);
-    };
-
-    child.once("error", (error) => {
-      finish(failed(input, error.message, runtimeLogLines(getRuntime(input.projectId)), validation.routerKind));
-    });
-    child.once("exit", (code) => {
-      const logs = runtimeLogLines(getRuntime(input.projectId));
-      finish(failed(input, `Next.js runtime exited before startup completed with code ${code ?? "unknown"}.`, logs, validation.routerKind));
-    });
-
-    setTimeout(() => {
-      const current = markRuntimeStatus(input.projectId, "running");
-
-      if (!current) {
-        finish(failed(input, "Next.js runtime registry did not return a running process.", [], validation.routerKind));
-        return;
-      }
-
-      appendRuntimeLog(input.projectId, "system", `Next.js runtime ready at ${previewUrl}`);
-      finish({
-        ...runtimeRecordToNextPreviewBridge(current),
-        devServerRuntime: input.devServerRuntime ?? undefined,
-        logs: runtimeLogLines(getRuntime(input.projectId)),
-        runtimeStatus: "running"
-      });
-    }, startupProbeMs);
+  const readiness = await waitForOwnedLocalHttp({
+    timeoutMs: Math.max(12_000, startupProbeMs),
+    url: previewUrl
   });
+  if (!readiness.ok) {
+    const logs = runtimeLogLines(getRuntime(input.projectId));
+    await stopRuntime(input.projectId);
+    return failed(input, readiness.error ?? "Next.js runtime did not become ready.", logs, validation.routerKind);
+  }
+  const current = markRuntimeStatus(input.projectId, "running");
+  if (!current) return failed(input, "Next.js runtime registry did not return a running process.", [], validation.routerKind);
+  appendRuntimeLog(input.projectId, "system", `Next.js runtime ready at ${previewUrl}`);
+  return {
+    ...runtimeRecordToNextPreviewBridge(current),
+    devServerRuntime: input.devServerRuntime ?? undefined,
+    logs: runtimeLogLines(getRuntime(input.projectId)),
+    runtimeStatus: "running"
+  };
 }
 
 export async function stopNextRuntime(projectId: string) {

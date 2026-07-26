@@ -75,5 +75,18 @@ Source inspection alone is `SOURCE_INSPECTED`, not runtime verification.
 Report root cause, evidence, changed boundary, verification, and remaining
 uncertainty.
 
+## 6. Approved repair ledger
+
+During approved CODE execution, retain a task-local ledger containing the
+failure signature, hypothesis, repair target, changed paths, verification
+result, and rollback outcome. Normalize volatile paths and line numbers before
+comparing signatures. Do not repeat a repair that already produced the same
+failure evidence, and do not treat a changed error message as improvement by
+itself. Compare failing-check count and severity against the prior attempt.
+
+Environment, network, authentication, provider, permission, and test-harness
+failures are not evidence that source code is wrong. Preserve resumable task
+state and stop speculative mutation for those categories.
+
 reference: references/react.md | react, vite, jsx, tsx, module
 reference: references/python.md | python, pip, importerror, flask, fastapi, streamlit

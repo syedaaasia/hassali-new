@@ -184,36 +184,7 @@ async function approveProposalThroughRuntime(
 
   const response = await fetch("/api/runtime/approve", {
     body: JSON.stringify({
-      changes: proposal.changes.map((change) => ({
-        action: change.action,
-        path: change.path,
-        proposedContent: change.proposedContent,
-        summary: change.summary
-      })),
       productMode,
-      proposalMetadata: {
-        approvalDecision: normalizeApprovalDecision(proposal),
-        approvalDisabled: proposal.approvalDisabled,
-        blockedReason: proposal.blockedReason,
-        contradictionStatus: proposal.contradictionStatus,
-        domainValidationStatus: proposal.domainValidationStatus,
-        generatorContractStatus: proposal.generatorContractStatus,
-        generatorMode: proposal.generatorMode,
-        proposalQualityStatus: proposal.proposalQualityStatus,
-        proposalRepairStatus: proposal.proposalRepairStatus,
-        previewMetadata: proposal.previewMetadata,
-        previewMode: proposal.previewMode,
-        previewType: proposal.previewType,
-        proposalRoutingMode: proposal.proposalRoutingMode,
-        publicCopyCleanStatus: proposal.publicCopyCleanStatus,
-        requiredPageCount: proposal.requiredPageCount,
-        sectionCopyQualityStatus: proposal.sectionCopyQualityStatus,
-        selfReviewStatus: proposal.selfReviewStatus,
-        shouldBlockExecution: proposal.shouldBlockExecution,
-        sourceOfTruthPages: proposal.sourceOfTruthPages,
-        staleTermScanStatus: proposal.staleTermScanStatus,
-        visualValidationStatus: proposal.visualValidationStatus
-      },
       projectId: selectedProjectId,
       proposalId: proposal.id
     }),
@@ -806,6 +777,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
       const runtimeResult = await approveProposalThroughRuntime(proposal, selectedProjectId, productMode);
 
       if (runtimeResult) {
+        if (useWorkspaceStore.getState().projectId !== selectedProjectId) {
+          throw new Error("The selected project changed while approval was running. Reload the current project before syncing results.");
+        }
         const syncResult = syncRuntimeApprovalResult({
           activePath,
           currentFiles: files,
@@ -1065,6 +1039,12 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                     : null}
                   {runtimeApprovalResult.runtimeWarning
                     ? ` ${runtimeApprovalResult.runtimeWarning}`
+                    : null}
+                  {runtimeApprovalResult.codeExecution
+                    ? ` CODE ${runtimeApprovalResult.codeExecution.completionStatus.toLowerCase().replace(/_/g, " ")}: ${runtimeApprovalResult.codeExecution.metrics.commandsExecuted} command(s), ${runtimeApprovalResult.codeExecution.metrics.repairAttempts} repair attempt(s).`
+                    : null}
+                  {runtimeApprovalResult.codeExecution?.limitations[0]
+                    ? ` ${runtimeApprovalResult.codeExecution.limitations[0]}`
                     : null}
                 </div>
               ) : null}
