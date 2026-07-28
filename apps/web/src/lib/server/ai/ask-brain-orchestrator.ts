@@ -8,7 +8,12 @@ import {
   type AskIntentClassification,
   type AskIntentName
 } from "./ask-serious-assistant";
-import { resolveAskFallbackProviders, resolveAskProvider } from "./provider-router";
+import {
+  getAskProviderCooldown,
+  recordAskProviderHealth,
+  resolveAskFallbackProviders,
+  resolveAskProvider
+} from "./provider-router";
 import {
   buildWorkspaceContext,
   createWorkspaceContextDebugHeaders,
@@ -104,6 +109,7 @@ export type AskBrainResult = {
 };
 
 export type AskBrainInput = {
+  abortSignal?: AbortSignal;
   askRuntimeContext: AskRuntimeContext;
   intelligenceContext?: string;
   messages: AskConversationMessage[];
@@ -118,9 +124,10 @@ export type AskBrainInput = {
 
 export type ModelCallResult =
   | { status: "ok"; content: string; servedModel: string | null }
-  | { status: "failed" | "not_configured" | "timeout"; category: string; reason: string; retryAfter?: string | null };
+  | { status: "cancelled" | "failed" | "not_configured" | "timeout"; category: string; reason: string; retryAfter?: string | null };
 
 export type AskProviderCall = (input: {
+  abortSignal?: AbortSignal;
   messages: Array<{ content: string; role: "assistant" | "system" | "user" }>;
   maxTokens?: number;
   model: string;
@@ -222,7 +229,16 @@ function hasInjectionLikeText(value: string) {
   return hasWorkspaceInjectionLikeText(value);
 }
 
+const workspaceContextCache = new WeakMap<AskBrainInput, {
+  context: NormalizedWorkspaceContext;
+  excerpt: string;
+  injectionDetected: boolean;
+  summary: string;
+}>();
+
 function getRelevantWorkspaceText(input: AskBrainInput) {
+  const cached = workspaceContextCache.get(input);
+  if (cached) return cached;
   const context = buildWorkspaceContext({
     mode: input.productMode,
     projectName: input.projectName,
@@ -230,12 +246,14 @@ function getRelevantWorkspaceText(input: AskBrainInput) {
     workspace: input.workspace
   });
 
-  return {
+  const result = {
     context,
     excerpt: context.activeFileExcerpt,
     injectionDetected: context.unsafeInstructionDetected,
     summary: context.modelContextSummary
   };
+  workspaceContextCache.set(input, result);
+  return result;
 }
 
 function isHardLengthOrFormatRequest(prompt: string) {
@@ -452,12 +470,16 @@ function providerConversation(input: AskBrainInput, systemPrompt: string, includ
 }
 
 async function fetchOpenRouterText(input: {
+  abortSignal?: AbortSignal;
   messages: Array<{ content: string; role: "assistant" | "system" | "user" }>;
   maxTokens?: number;
   model: string;
   timeoutMs: number;
   webSearch?: boolean;
 }): Promise<ModelCallResult> {
+  if (input.abortSignal?.aborted) {
+    return { status: "cancelled", category: "request_cancelled", reason: "ASK request was cancelled." };
+  }
   if (!process.env.OPENROUTER_API_KEY) {
     return { status: "not_configured", category: "provider_not_configured", reason: "OpenRouter is not configured." };
   }
@@ -484,7 +506,13 @@ async function fetchOpenRouterText(input: {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+  let timeoutTriggered = false;
+  const abortFromRequest = () => controller.abort(input.abortSignal?.reason);
+  input.abortSignal?.addEventListener("abort", abortFromRequest, { once: true });
+  const timeout = setTimeout(() => {
+    timeoutTriggered = true;
+    controller.abort();
+  }, input.timeoutMs);
 
   try {
     const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
@@ -527,13 +555,18 @@ async function fetchOpenRouterText(input: {
       ? { status: "ok", content, servedModel: completion.model ?? null }
       : { status: "failed", category: "provider_response_invalid", reason: "OpenRouter returned an empty ASK answer." };
   } catch (error) {
+    const cancelled = error instanceof Error &&
+      error.name === "AbortError" &&
+      Boolean(input.abortSignal?.aborted) &&
+      !timeoutTriggered;
     return {
-      status: error instanceof Error && error.name === "AbortError" ? "timeout" : "failed",
-      category: error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_network_error",
-      reason: error instanceof Error && error.name === "AbortError" ? "Provider request timed out." : "Provider network request failed."
+      status: cancelled ? "cancelled" : error instanceof Error && error.name === "AbortError" ? "timeout" : "failed",
+      category: cancelled ? "request_cancelled" : error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_network_error",
+      reason: cancelled ? "ASK request was cancelled." : error instanceof Error && error.name === "AbortError" ? "Provider request timed out." : "Provider network request failed."
     };
   } finally {
     clearTimeout(timeout);
+    input.abortSignal?.removeEventListener("abort", abortFromRequest);
   }
 }
 
@@ -775,6 +808,7 @@ async function maybeReviseWithModel(input: AskBrainInput, answer: string, issues
   }
 
   const revision = await (input.providerCall ?? fetchOpenRouterText)({
+    abortSignal: input.abortSignal,
     messages: [
       {
         role: "system",
@@ -851,6 +885,9 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   const selected = chooseDecisionPath(classification, input.prompt);
   const workspace = getRelevantWorkspaceText(input);
   const provider = resolveAskProvider(input.model);
+  const selectedProviderCooldown = input.providerCall
+    ? { active: false, failureCategory: null, remainingMs: 0 }
+    : getAskProviderCooldown(provider);
   const category = semanticCategory(input, classification);
   const workspaceContextIncluded = categoryUsesWorkspace(category);
   const modelSelectionPolicy = input.modelSelectionPolicy ?? "automatic";
@@ -895,65 +932,116 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   } else if (selected.path === "model_reasoning_preferred") {
     if (provider.configured && provider.executionProvider === "openrouter" && provider.executionModelId) {
       providerStatus = "configured";
-      modelCallRan = true;
-      webSearchRequested = provider.pricingClass !== "free" && (classification.wouldBenefitFromLiveWeb || /^who (?:is|was|are)\b/i.test(input.prompt.trim()));
       const providerMessages = providerConversation(input, buildModelPrompt(input, classification, category), categoryUsesHistory(category));
-      attemptedModels.push(provider.executionModelId);
-      providerCallCount += 1;
-      const modelResult = await providerCall({
-        messages: providerMessages,
-        maxTokens: provider.pricingClass === "free" ? 4_000 : 2_000,
-        model: provider.executionModelId,
-        timeoutMs: provider.pricingClass === "free" ? FREE_PRIMARY_TIMEOUT_MS : PRIMARY_TIMEOUT_MS,
-        webSearch: webSearchRequested
-      });
+      const cooldownFallbackProvider = modelSelectionPolicy === "automatic" && selectedProviderCooldown.active
+        ? resolveAskFallbackProviders(provider.requestedModelId)
+          .find((candidate) => !getAskProviderCooldown(candidate).active) ?? null
+        : null;
+      const executionProvider = cooldownFallbackProvider ?? provider;
 
-      if (modelResult.status === "ok") {
-        answer = modelResult.content;
-        modelCallSucceeded = true;
-        actualServedModel = modelResult.servedModel;
-        providerFailureCategory = null;
+      if (selectedProviderCooldown.active && modelSelectionPolicy === "automatic" && !cooldownFallbackProvider) {
+        providerStatus = "failed";
+        fallbackOccurred = true;
+        fallbackReason = `provider_cooldown:${selectedProviderCooldown.failureCategory ?? "recent_failure"}`;
+        providerFailureCategory = selectedProviderCooldown.failureCategory ?? "provider_unavailable";
+        answer = providerFailureAnswer(input, providerFailureCategory);
       } else {
-        primaryTimedOut = modelResult.status === "timeout";
-        const fallbackProvider = modelSelectionPolicy === "automatic"
-          ? resolveAskFallbackProviders(provider.requestedModelId)[0] ?? null
-          : null;
-
-        if (fallbackProvider?.executionModelId) {
-          attemptedModels.push(fallbackProvider.executionModelId);
-          providerCallCount += 1;
-          fallbackModel = fallbackProvider.resolvedModelId ?? fallbackProvider.executionModelId;
+        modelCallRan = true;
+        webSearchRequested = executionProvider.pricingClass !== "free" &&
+          (classification.wouldBenefitFromLiveWeb || /^who (?:is|was|are)\b/i.test(input.prompt.trim()));
+        if (cooldownFallbackProvider?.executionModelId) {
+          fallbackModel = cooldownFallbackProvider.resolvedModelId ?? cooldownFallbackProvider.executionModelId;
           fallbackOccurred = true;
-          fallbackReason = modelResult.category;
-          const fallbackResult = await providerCall({
-            messages: providerMessages,
-            maxTokens: 4_000,
-            model: fallbackProvider.executionModelId,
-            timeoutMs: FREE_PRIMARY_TIMEOUT_MS,
-            webSearch: false
+          fallbackReason = `provider_cooldown:${selectedProviderCooldown.failureCategory ?? "recent_failure"}`;
+        }
+        attemptedModels.push(executionProvider.executionModelId!);
+        providerCallCount += 1;
+        const modelResult = await providerCall({
+          abortSignal: input.abortSignal,
+          messages: providerMessages,
+          maxTokens: executionProvider.pricingClass === "free" ? 4_000 : 2_000,
+          model: executionProvider.executionModelId!,
+          timeoutMs: executionProvider.pricingClass === "free" ? FREE_PRIMARY_TIMEOUT_MS : PRIMARY_TIMEOUT_MS,
+          webSearch: webSearchRequested
+        });
+        if (!input.providerCall) {
+          recordAskProviderHealth({
+            category: modelResult.status === "ok" ? null : modelResult.category,
+            ok: modelResult.status === "ok",
+            provider: executionProvider,
+            retryAfter: modelResult.status === "ok" ? null : modelResult.retryAfter
           });
+        }
 
-          if (fallbackResult.status === "ok") {
-            answer = fallbackResult.content;
-            modelCallSucceeded = true;
-            actualServedModel = fallbackResult.servedModel;
-            providerFailureCategory = null;
-            providerStatus = "configured";
-          } else {
-            providerStatus = fallbackResult.status === "not_configured" ? "not_configured" : "failed";
-            providerFailureCategory = fallbackResult.category;
-            retryAfter = fallbackResult.retryAfter ?? modelResult.retryAfter ?? null;
-            answer = providerFailureAnswer(input, providerFailureCategory);
-          }
-        } else {
-          providerStatus = modelResult.status === "not_configured" ? "not_configured" : "failed";
-          fallbackOccurred = true;
-          fallbackReason = modelResult.category;
+        if (modelResult.status === "ok") {
+          answer = modelResult.content;
+          modelCallSucceeded = true;
+          actualServedModel = modelResult.servedModel;
+          providerFailureCategory = null;
+        } else if (modelResult.status === "cancelled") {
+          providerStatus = "failed";
           providerFailureCategory = modelResult.category;
-          retryAfter = modelResult.retryAfter ?? null;
-          answer = modelSelectionPolicy === "locked"
-            ? `${providerFailureAnswer(input, providerFailureCategory)} The model is locked, so Hassali did not substitute another model. Retry it or choose automatic fallback.`
-            : providerFailureAnswer(input, providerFailureCategory);
+          fallbackOccurred = false;
+          fallbackReason = modelResult.category;
+          answer = "Request stopped.";
+        } else {
+          primaryTimedOut = modelResult.status === "timeout";
+          const fallbackProvider = modelSelectionPolicy === "automatic" && !cooldownFallbackProvider
+            ? resolveAskFallbackProviders(provider.requestedModelId)
+              .find((candidate) => !getAskProviderCooldown(candidate).active) ?? null
+            : null;
+
+          if (fallbackProvider?.executionModelId) {
+            attemptedModels.push(fallbackProvider.executionModelId);
+            providerCallCount += 1;
+            fallbackModel = fallbackProvider.resolvedModelId ?? fallbackProvider.executionModelId;
+            fallbackOccurred = true;
+            fallbackReason = modelResult.category;
+            const fallbackResult = await providerCall({
+              abortSignal: input.abortSignal,
+              messages: providerMessages,
+              maxTokens: 4_000,
+              model: fallbackProvider.executionModelId,
+              timeoutMs: FREE_PRIMARY_TIMEOUT_MS,
+              webSearch: false
+            });
+            if (!input.providerCall) {
+              recordAskProviderHealth({
+                category: fallbackResult.status === "ok" ? null : fallbackResult.category,
+                ok: fallbackResult.status === "ok",
+                provider: fallbackProvider,
+                retryAfter: fallbackResult.status === "ok" ? null : fallbackResult.retryAfter
+              });
+            }
+
+            if (fallbackResult.status === "ok") {
+              answer = fallbackResult.content;
+              modelCallSucceeded = true;
+              actualServedModel = fallbackResult.servedModel;
+              providerFailureCategory = null;
+              providerStatus = "configured";
+            } else if (fallbackResult.status === "cancelled") {
+              providerStatus = "failed";
+              providerFailureCategory = fallbackResult.category;
+              fallbackOccurred = false;
+              fallbackReason = fallbackResult.category;
+              answer = "Request stopped.";
+            } else {
+              providerStatus = fallbackResult.status === "not_configured" ? "not_configured" : "failed";
+              providerFailureCategory = fallbackResult.category;
+              retryAfter = fallbackResult.retryAfter ?? modelResult.retryAfter ?? null;
+              answer = providerFailureAnswer(input, providerFailureCategory);
+            }
+          } else {
+            providerStatus = modelResult.status === "not_configured" ? "not_configured" : "failed";
+            fallbackOccurred = true;
+            fallbackReason = modelResult.category;
+            providerFailureCategory = modelResult.category;
+            retryAfter = modelResult.retryAfter ?? null;
+            answer = modelSelectionPolicy === "locked"
+              ? `${providerFailureAnswer(input, providerFailureCategory)} The model is locked, so Hassali did not substitute another model. Retry it or choose automatic fallback.`
+              : providerFailureAnswer(input, providerFailureCategory);
+          }
         }
       }
     } else {
@@ -975,6 +1063,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
 
   if (
     !review.passed &&
+    !input.abortSignal?.aborted &&
     modelCallRan &&
     providerCallCount < 2 &&
     !fallbackModel &&

@@ -56,7 +56,21 @@ export type ResolvedAskProvider = {
   pricingClass: "credit_required" | "free" | null;
 };
 
+export type AskProviderCooldown = {
+  active: boolean;
+  failureCategory: string | null;
+  remainingMs: number;
+};
+
 const automaticAskFallbackModelIds = ["openrouter/free"];
+const providerHealth = new Map<string, {
+  cooldownUntil: number;
+  failureCategory: string;
+}>();
+const providerFailureStreaks = new Map<string, {
+  count: number;
+  lastFailureAt: number;
+}>();
 
 const capabilityDefaults: Record<string, HassaliProviderCapability[]> = {
   anthropic: ["ASK", "CODE", "WEBSITE", "REASONING", "VALIDATION", "REPAIR", "VISION"],
@@ -324,6 +338,112 @@ export function resolveAskFallbackProviders(requestedModelId: string) {
       provider.pricingClass === "free"
     )
     .slice(0, 1);
+}
+
+function modelHealthKey(provider: ResolvedAskProvider) {
+  if (!provider.executionProvider || !provider.executionModelId) return null;
+  return `model:${provider.executionProvider}:${provider.executionModelId}`.toLowerCase();
+}
+
+function providerHealthKey(provider: ResolvedAskProvider) {
+  if (!provider.executionProvider) return null;
+  return `provider:${provider.executionProvider}`.toLowerCase();
+}
+
+function healthKeys(provider: ResolvedAskProvider) {
+  return [providerHealthKey(provider), modelHealthKey(provider)].filter(
+    (key): key is string => Boolean(key)
+  );
+}
+
+function isProviderWideFailure(category: string) {
+  return category === "provider_auth_failed" ||
+    category === "provider_insufficient_credits";
+}
+
+function needsRepeatedFailure(category: string) {
+  return category === "provider_timeout" ||
+    category === "provider_network_error";
+}
+
+function cooldownDurationMs(category: string, retryAfter?: string | null) {
+  const retryAfterSeconds = Number.parseFloat(retryAfter ?? "");
+  if (category === "provider_rate_limited") {
+    return Number.isFinite(retryAfterSeconds)
+      ? Math.min(Math.max(retryAfterSeconds * 1_000, 5_000), 120_000)
+      : 30_000;
+  }
+  if (category === "provider_auth_failed" || category === "provider_insufficient_credits") return 120_000;
+  if (category === "provider_model_unavailable") return 45_000;
+  if (category === "provider_timeout" || category === "provider_network_error") return 20_000;
+  return 0;
+}
+
+export function getAskProviderCooldown(
+  provider: ResolvedAskProvider,
+  now = Date.now()
+): AskProviderCooldown {
+  const activeStates = healthKeys(provider).flatMap((key) => {
+    const state = providerHealth.get(key);
+    if (!state) return [];
+    if (state.cooldownUntil <= now) {
+      providerHealth.delete(key);
+      return [];
+    }
+    return [state];
+  }).sort((left, right) => right.cooldownUntil - left.cooldownUntil);
+  const state = activeStates[0];
+  if (!state) {
+    return { active: false, failureCategory: null, remainingMs: 0 };
+  }
+  return {
+    active: true,
+    failureCategory: state.failureCategory,
+    remainingMs: state.cooldownUntil - now
+  };
+}
+
+export function recordAskProviderHealth(input: {
+  category?: string | null;
+  ok: boolean;
+  provider: ResolvedAskProvider;
+  retryAfter?: string | null;
+  now?: number;
+}) {
+  if (input.ok) {
+    healthKeys(input.provider).forEach((key) => {
+      providerHealth.delete(key);
+      providerFailureStreaks.delete(key);
+    });
+    return;
+  }
+  if (!input.category || input.category === "request_cancelled") return;
+  const durationMs = cooldownDurationMs(input.category, input.retryAfter);
+  if (!durationMs) return;
+  const key = isProviderWideFailure(input.category)
+    ? providerHealthKey(input.provider)
+    : modelHealthKey(input.provider);
+  if (!key) return;
+  const now = input.now ?? Date.now();
+  if (needsRepeatedFailure(input.category)) {
+    const previous = providerFailureStreaks.get(key);
+    const count = previous && now - previous.lastFailureAt <= 60_000
+      ? previous.count + 1
+      : 1;
+    providerFailureStreaks.set(key, { count, lastFailureAt: now });
+    if (count < 2) return;
+  } else {
+    providerFailureStreaks.delete(key);
+  }
+  providerHealth.set(key, {
+    cooldownUntil: now + durationMs,
+    failureCategory: input.category
+  });
+}
+
+export function resetAskProviderHealthForTests() {
+  providerHealth.clear();
+  providerFailureStreaks.clear();
 }
 
 export function getRegisteredModelMetadata() {

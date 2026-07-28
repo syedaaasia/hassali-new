@@ -1,5 +1,6 @@
 import type { IntelligenceProductMode } from "./skill-kernel";
 import { sanitizeUntrustedToolText } from "./security-kernel";
+import type { TaskComplexityClass } from "./task-complexity";
 
 export type AgentTaskComplexity = "HIGH" | "LOW" | "MEDIUM";
 export type AgentRole = "browser_verifier" | "investigator" | "reviewer" | "security_reviewer";
@@ -54,6 +55,13 @@ function complexityFor(prompt: string) {
   return "LOW" as const;
 }
 
+function agentComplexityFor(taskComplexity: TaskComplexityClass | undefined, prompt: string) {
+  if (!taskComplexity) return complexityFor(prompt);
+  if (taskComplexity === "INSTANT") return "LOW" as const;
+  if (taskComplexity === "DEEP") return "HIGH" as const;
+  return complexityFor(prompt);
+}
+
 function task(
   input: {
     allowedTools: string[];
@@ -76,8 +84,9 @@ export function createAgentPlan(input: {
   parentMutationAllowed: boolean;
   projectId: string;
   prompt: string;
+  taskComplexity?: TaskComplexityClass;
 }): AgentPlan {
-  const complexity = complexityFor(input.prompt);
+  const complexity = agentComplexityFor(input.taskComplexity, input.prompt);
   const normalized = input.prompt.toLowerCase();
   const tasks: AgentTask[] = [];
 

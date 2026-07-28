@@ -3,6 +3,10 @@
 import { create } from "zustand";
 import { canonicalProjectState } from "@/lib/canonical-project-state";
 import {
+  compactWorkspaceForChatRequest,
+  removeCancelledRequestTurn
+} from "@/lib/chat-request-context";
+import {
   handoffTargetDraft,
   parseModeHandoff,
   type ModeHandoff
@@ -535,6 +539,7 @@ type ChatState = {
   mode: AiMode;
   productMode: ProductMode;
   isStreaming: boolean;
+  progressLabel: string | null;
   proposal: DiffProposal | null;
   pendingHandoff: ModeHandoff | null;
   chatSessionId: string | null;
@@ -558,12 +563,27 @@ type ChatState = {
   setProductMode: (mode: ProductMode) => void;
   clearProposal: () => void;
   markProposalApproved: (metadata?: RuntimeSyncMetadata) => void;
+  cancelMessage: () => void;
   sendMessage: (workspaceContext: WorkspaceContext) => Promise<void>;
 };
 
 const defaultModel = hassaliDefaultModelId;
 const proposalMarker = "HASSALI_DIFF_PROPOSAL:";
 const handoffMarker = "HASSALI_MODE_HANDOFF:";
+let activeChatRequest: {
+  assistantMessageId: string;
+  controller: AbortController;
+  id: string;
+  pendingHandoff: ModeHandoff | null;
+  prompt: string;
+  userMessageId: string;
+} | null = null;
+
+function progressLabelFor(mode: ProductMode) {
+  if (mode === "CODE") return "Inspecting the project...";
+  if (mode === "WEBSITE") return "Understanding the business...";
+  return "Thinking...";
+}
 
 function productModeToAiMode(mode: ProductMode): AiMode {
   return mode === "ASK" ? "ASK" : "EXECUTE";
@@ -725,7 +745,7 @@ function isKernelRoutingDecision(value: unknown): value is KernelRoutingDecision
 function createGreetingMessage() {
   return createMessage(
     "assistant",
-    "Tell me what you want to build or understand. I will keep the response focused and careful."
+    "Ask Hassali anything. I can explain, plan, write, debug, compare, and help you think through an idea."
   );
 }
 
@@ -1348,6 +1368,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   mode: "ASK",
   productMode: "ASK",
   isStreaming: false,
+  progressLabel: null,
   proposal: null,
   pendingHandoff: null,
   chatSessionId: null,
@@ -1402,9 +1423,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
         : null
     }));
   },
+  cancelMessage: () => {
+    const active = activeChatRequest;
+    if (!active) return;
+    activeChatRequest = null;
+    active.controller.abort();
+    set((state) => ({
+      input: active.prompt,
+      isStreaming: false,
+      messages: removeCancelledRequestTurn(
+        state.messages,
+        active.userMessageId,
+        active.assistantMessageId
+      ),
+      pendingHandoff: active.pendingHandoff,
+      progressLabel: null,
+      proposal: null
+    }));
+  },
   sendMessage: async (workspaceContext) => {
     const prompt = get().input.trim();
     const mode = get().mode;
+    const productMode = get().productMode;
     const pendingHandoff = get().pendingHandoff;
 
     if (!prompt || get().isStreaming) {
@@ -1414,8 +1454,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const userMessage = createMessage("user", prompt);
     const assistantMessage = createMessage("assistant", "");
     const nextMessages = [...get().messages, userMessage, assistantMessage];
+    const controller = new AbortController();
+    const requestId = `chat-${crypto.randomUUID()}`;
+    const requestWorkspace = compactWorkspaceForChatRequest({
+      messages: get().messages,
+      mode: productMode,
+      prompt,
+      workspace: workspaceContext
+    });
+    activeChatRequest = {
+      assistantMessageId: assistantMessage.id,
+      controller,
+      id: requestId,
+      pendingHandoff,
+      prompt,
+      userMessageId: userMessage.id
+    };
+    const requestIsCurrent = () =>
+      activeChatRequest?.id === requestId && !controller.signal.aborted;
 
-    set({ input: "", isStreaming: true, messages: nextMessages, pendingHandoff: null, proposal: null });
+    set({
+      input: "",
+      isStreaming: true,
+      messages: nextMessages,
+      pendingHandoff: null,
+      progressLabel: progressLabelFor(productMode),
+      proposal: null
+    });
 
     try {
       const response = await fetch("/api/ai/chat", {
@@ -1428,22 +1493,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
           mode,
           model: get().model,
           modelSelectionPolicy: get().modelSelectionPolicy,
-          productMode: get().productMode,
+          productMode,
           projectId: workspaceContext.projectId,
           workspace: {
-            activeFileContent: workspaceContext.activeFileContent,
-            activePath: workspaceContext.activePath,
-            fileContents: workspaceContext.fileContents,
-            fileList: workspaceContext.fileList,
-            projectName: workspaceContext.projectName
+            activeFileContent: requestWorkspace.activeFileContent,
+            activePath: requestWorkspace.activePath,
+            fileContents: requestWorkspace.fileContents,
+            fileList: requestWorkspace.fileList,
+            projectName: requestWorkspace.projectName
           }
         }),
         headers: {
           "Content-Type": "application/json"
         },
-        method: "POST"
+        method: "POST",
+        signal: controller.signal
       });
 
+      if (!requestIsCurrent()) return;
       if (!response.ok || !response.body) {
         throw new Error("Unable to start assistant stream.");
       }
@@ -1453,10 +1520,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const providerFailureCategory = response.headers.get("x-hassali-ask-provider-failure");
 
       if (responseSessionId) {
+        if (!requestIsCurrent()) return;
         set({ chatSessionId: responseSessionId });
       }
 
       if (responseKind) {
+        if (!requestIsCurrent()) return;
         set((state) => ({
           messages: state.messages.map((message) => message.id === assistantMessage.id
             ? {
@@ -1475,6 +1544,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       while (true) {
         const { done, value } = await reader.read();
 
+        if (!requestIsCurrent()) {
+          await reader.cancel().catch(() => undefined);
+          return;
+        }
         if (done) {
           break;
         }
@@ -1482,6 +1555,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const chunk = decoder.decode(value, { stream: true });
         assistantContent += chunk;
 
+        if (!requestIsCurrent()) return;
         set((state) => ({
           messages: state.messages.map((message) =>
             message.id === assistantMessage.id
@@ -1494,6 +1568,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const handoffIndex = assistantContent.indexOf(handoffMarker);
 
       if (handoffIndex !== -1) {
+        if (!requestIsCurrent()) return;
         const visibleContent = assistantContent.slice(0, handoffIndex).trim();
         const handoff = parseModeHandoff(assistantContent.slice(handoffIndex + handoffMarker.length).trim());
 
@@ -1515,6 +1590,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const markerIndex = assistantContent.indexOf(proposalMarker);
 
         if (markerIndex !== -1) {
+          if (!requestIsCurrent()) return;
           const visibleContent = assistantContent.slice(0, markerIndex).trim();
           const proposalContent = assistantContent.slice(markerIndex + proposalMarker.length).trim();
           const parsedProposal = parseDiffProposal(proposalContent);
@@ -1557,7 +1633,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
         }
       }
-    } catch {
+    } catch (error) {
+      if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
+        if (activeChatRequest?.id === requestId) {
+          activeChatRequest = null;
+          set((state) => ({
+            input: prompt,
+            isStreaming: false,
+            messages: removeCancelledRequestTurn(
+              state.messages,
+              userMessage.id,
+              assistantMessage.id
+            ),
+            pendingHandoff,
+            progressLabel: null,
+            proposal: null
+          }));
+        }
+        return;
+      }
+      if (!requestIsCurrent()) return;
       set((state) => ({
         messages: state.messages.map((message) =>
           message.id === assistantMessage.id
@@ -1569,7 +1664,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         )
       }));
     } finally {
-      set({ isStreaming: false });
+      if (activeChatRequest?.id === requestId) {
+        activeChatRequest = null;
+        set({ isStreaming: false, progressLabel: null });
+      }
     }
   }
 }));

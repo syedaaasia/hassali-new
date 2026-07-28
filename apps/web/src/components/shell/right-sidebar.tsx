@@ -12,6 +12,7 @@ import {
   type ProductMode,
   useChatStore
 } from "@/lib/chat-store";
+import { selectWorkspaceContentPaths } from "@/lib/chat-request-context";
 import { getHassaliModelOptions } from "@/lib/model-registry";
 import {
   type RuntimeApprovalResponse,
@@ -619,6 +620,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const modelSelectionPolicy = useChatStore((state) => state.modelSelectionPolicy);
   const productMode = useChatStore((state) => state.productMode);
   const isStreaming = useChatStore((state) => state.isStreaming);
+  const progressLabel = useChatStore((state) => state.progressLabel);
   const proposal = useChatStore((state) => state.proposal);
   const chatSessionId = useChatStore((state) => state.chatSessionId);
   const setInput = useChatStore((state) => state.setInput);
@@ -628,6 +630,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const setProductMode = useChatStore((state) => state.setProductMode);
   const clearProposal = useChatStore((state) => state.clearProposal);
   const markProposalApproved = useChatStore((state) => state.markProposalApproved);
+  const cancelMessage = useChatStore((state) => state.cancelMessage);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const isPreviewOpen = useRuntimeStore((state) => state.isPreviewOpen);
   const applyRuntimePayload = useRuntimeStore((state) => state.applyRuntimePayload);
@@ -678,17 +681,31 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     regenerationInFlightRef.current = false;
   }, [proposal]);
 
-  const createWorkspaceContext = () => ({
-    activeFileContent: activeFile?.content ?? "",
-    activePath,
-    chatSessionId,
-    fileContents: Object.fromEntries(
-      visibleFileList.map((path) => [path, files[path]?.content ?? ""])
-    ),
-    fileList: visibleFileList,
-    projectId,
-    projectName
-  });
+  const createWorkspaceContext = () => {
+    const contentPaths = selectWorkspaceContentPaths({
+      messages,
+      mode: productMode,
+      prompt: input,
+      workspace: {
+        activePath,
+        fileList: visibleFileList,
+        projectName
+      }
+    });
+    const activeFileSelected = contentPaths.includes(activePath);
+
+    return {
+      activeFileContent: activeFileSelected ? activeFile?.content ?? "" : "",
+      activePath,
+      chatSessionId,
+      fileContents: Object.fromEntries(
+        contentPaths.map((path) => [path, files[path]?.content ?? ""])
+      ),
+      fileList: visibleFileList,
+      projectId,
+      projectName
+    };
+  };
 
   const sendWithContext = () => sendMessage(createWorkspaceContext());
 
@@ -977,7 +994,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                 ) : null}
               </div>
               <div className="whitespace-pre-wrap break-words">
-                {message.content || "Thinking quietly..."}
+                {message.content || progressLabel || "Thinking..."}
               </div>
               {message.handoff ? (
                 <div
@@ -1197,11 +1214,16 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               <MicIcon />
             </button>
             <button
+              aria-label={isStreaming ? "Stop response" : "Send message"}
               className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] text-[10px] font-semibold text-white shadow-[0_14px_34px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--premium-accent)/0.2)] disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={isStreaming || input.trim().length === 0}
-              type="submit"
+              disabled={!isStreaming && input.trim().length === 0}
+              onClick={isStreaming ? cancelMessage : undefined}
+              title={isStreaming ? "Stop response" : "Send message"}
+              type={isStreaming ? "button" : "submit"}
             >
-              Go
+              {isStreaming ? (
+                <span aria-hidden="true" className="h-3 w-3 rounded-[2px] bg-current" />
+              ) : "Go"}
             </button>
           </div>
         </form>

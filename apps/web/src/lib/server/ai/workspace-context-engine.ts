@@ -66,8 +66,16 @@ function truncate(value: string, maxLength: number) {
 
 export function redactWorkspaceSecrets(value: string) {
   const next = value
+    .replace(
+      /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\r\n]*PRIVATE KEY-----|$)/gi,
+      "[redacted-private-key]"
+    )
     .replace(/\b(DATABASE_URL\s*=\s*postgres(?:ql)?:\/\/[^:\s]+:)[^@\s]+(@[^\s]+)/gi, "$1[redacted-secret]$2")
     .replace(/\b((?:postgres|postgresql|mysql|mongodb):\/\/[^:\s]+:)[^@\s]+(@[^\s]+)/gi, "$1[redacted-secret]$2")
+    .replace(
+      /(["'](?:access[_-]?token|api[_-]?key|client[_-]?secret|password|private[_-]?key|refresh[_-]?token|secret(?:[_-]?access)?[_-]?key|token)["']\s*:\s*)["'][^"'\r\n]*(?:["']|$)/gi,
+      '$1"[redacted-secret]"'
+    )
     .replace(/\b((?:[A-Z0-9_]*API[_-]?KEY|[A-Z0-9_]*SECRET|[A-Z0-9_]*TOKEN|PASSWORD)\s*[:=]\s*)["']?[^"'\s]{6,}/gi, "$1[redacted-secret]")
     .replace(/\b(?:sk|pk|rk|ghp|gho|ghu|ghs|AIza|xox[baprs]|sk-or-v1)-?[A-Za-z0-9_-]{12,}\b/g, "[redacted-secret]");
 

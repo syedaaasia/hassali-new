@@ -1197,6 +1197,22 @@ export async function saveChatMessage(
   };
 }
 
+export async function deleteOwnedChatMessage(
+  input: {
+    messageId: string;
+    userId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const result = await db.execute<{ id: string }>(sql`
+    delete from chat_messages
+    where id = ${input.messageId}
+      and user_id = ${input.userId}
+    returning id
+  `);
+  return Boolean(result.rows[0]);
+}
+
 export async function loadOwnedChatProposal(
   input: {
     externalUserId: string;

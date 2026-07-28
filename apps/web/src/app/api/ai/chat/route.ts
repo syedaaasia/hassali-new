@@ -1,4 +1,5 @@
 import {
+  deleteOwnedChatMessage,
   loadOwnedChatHandoff,
   loadOwnedHandoffResponse,
   loadOwnedProjectRevision,
@@ -196,12 +197,22 @@ import {
   runIntelligencePreflight,
   withIntelligenceResponseHeaders
 } from "@/lib/server/intelligence/intelligence-preflight";
+import { recordBetaTelemetry } from "@/lib/server/intelligence/beta-telemetry";
 
 export const runtime = "nodejs";
 
 const fallbackModel = "openai/gpt-4o-mini";
 const openRouterChatCompletionsUrl = "https://openrouter.ai/api/v1/chat/completions";
 const handoffMarker = "\nHASSALI_MODE_HANDOFF:";
+function yieldForRequestCancellation(delayMs = 0) {
+  return new Promise<void>((resolve) => {
+    if (delayMs > 0) {
+      setTimeout(resolve, delayMs);
+    } else {
+      setImmediate(resolve);
+    }
+  });
+}
 
 type ChatRequestMessage = {
   role: "user" | "assistant" | "system";
@@ -2900,10 +2911,12 @@ async function persistChatMessage(
   input: {
     content: string;
     metadata?: Record<string, unknown>;
+    onSaved?: (messageId: string) => void;
     role: "user" | "assistant";
-  }
+  },
+  abortSignal?: AbortSignal
 ) {
-  if (!context || input.content.trim().length === 0) {
+  if (!context || input.content.trim().length === 0 || abortSignal?.aborted) {
     console.info("chat message persistence skipped", {
       hasContext: Boolean(context),
       role: input.role
@@ -2935,6 +2948,15 @@ async function persistChatMessage(
       sessionId: context.sessionId,
       userId: context.userId
     });
+    input.onSaved?.(saved.message.id);
+
+    if (abortSignal?.aborted) {
+      await deleteOwnedChatMessage({
+        messageId: saved.message.id,
+        userId: context.userId
+      }).catch(() => false);
+      return context;
+    }
 
     console.info("chat message saved", {
       role: input.role,
@@ -2958,11 +2980,15 @@ function createProposalStream(
   proposal: DiffProposal,
   sessionId?: string | null,
   authority?: {
+    abortSignal?: AbortSignal;
     projectRevision?: string;
     selectedModel: string;
     taskObjective: string;
   }
 ) {
+  if (authority?.abortSignal?.aborted) {
+    return new Response(null, { status: 499 });
+  }
   registerServerProposal({
     ...(proposal as unknown as Record<string, unknown>),
     serverProjectRevision: authority?.projectRevision,
@@ -4924,6 +4950,7 @@ function withProjectContractUpdate(input: {
 }
 
 async function createFallbackProposalResponse(input: {
+  abortSignal?: AbortSignal;
   composition: CompositionStrategy;
   diagnostic: DiagnosticContext;
   decision: DecisionPlan;
@@ -4932,6 +4959,7 @@ async function createFallbackProposalResponse(input: {
   mode: "SUGGEST" | "EXECUTE";
   model: string;
   persistence: ChatPersistenceContext | null;
+  persistMessage?: typeof persistChatMessage;
   prompt: string;
   projectContract: ProjectContract | null;
   reason: string;
@@ -4947,6 +4975,9 @@ async function createFallbackProposalResponse(input: {
   proposalContext: ProposalContext;
   workspace: WorkspaceContext;
 }) {
+  if (input.abortSignal?.aborted) {
+    return new Response(null, { status: 499 });
+  }
   const proposalComposition = compositionForCurrentWebsiteBrief(input.composition, input.proposalContext);
   const proposalDecision = decisionForProposalContext(input.decision, input.proposalContext);
   const proposal = createLocalProposal(
@@ -5023,7 +5054,10 @@ async function createFallbackProposalResponse(input: {
       ? "I prepared a safe local execution proposal for review. Nothing runs until you approve it."
       : "I prepared a safe local diff proposal for review. It will only apply if you approve it.";
 
-  persistence = await persistChatMessage(persistence, {
+  if (input.abortSignal?.aborted) {
+    return new Response(null, { status: 499 });
+  }
+  persistence = await (input.persistMessage ?? persistChatMessage)(persistence, {
     content: visibleSummary,
     metadata: {
       fallbackReason: input.reason,
@@ -5057,6 +5091,7 @@ async function createFallbackProposalResponse(input: {
   });
 
   return createProposalStream(evaluatedProposal.proposal, persistence?.sessionId, {
+    abortSignal: input.abortSignal,
     projectRevision: persistence?.projectRevision,
     selectedModel: input.model,
     taskObjective: input.prompt
@@ -5066,6 +5101,7 @@ async function createFallbackProposalResponse(input: {
 function createOpenRouterTextStream(
   response: Response,
   options?: {
+    abortSignal?: AbortSignal;
     onComplete?: (content: string) => Promise<void>;
     sessionId?: string | null;
   }
@@ -5085,7 +5121,7 @@ function createOpenRouterTextStream(
     new ReadableStream({
       async start(controller) {
         try {
-          while (true) {
+          while (!options?.abortSignal?.aborted) {
             const { done, value } = await reader.read();
 
             if (done) {
@@ -5129,10 +5165,21 @@ function createOpenRouterTextStream(
             }
           }
         } finally {
-          await options?.onComplete?.(streamedContent);
-          controller.close();
+          if (!options?.abortSignal?.aborted) {
+            await options?.onComplete?.(streamedContent);
+          } else {
+            await reader.cancel().catch(() => undefined);
+          }
+          try {
+            controller.close();
+          } catch {
+            // The downstream response may already be cancelled.
+          }
           reader.releaseLock();
         }
+      },
+      async cancel() {
+        await reader.cancel().catch(() => undefined);
       }
     }),
     {
@@ -5176,6 +5223,8 @@ function createPlaceholderStream(
 }
 
 export async function POST(request: Request) {
+  const routeStartedAt = Date.now();
+  const taskSignal = request.signal;
   const body = (await request.json().catch(() => null)) as {
     chatSessionId?: unknown;
     handoff?: unknown;
@@ -5212,7 +5261,7 @@ export async function POST(request: Request) {
       ? body.mode
       : "ASK";
   const productMode = productModeFromRequest(body?.productMode, mode);
-  const workspace = isWorkspaceContext(body?.workspace)
+  const requestedWorkspace = isWorkspaceContext(body?.workspace)
     ? body.workspace
     : {
         activeFileContent: "",
@@ -5230,9 +5279,111 @@ export async function POST(request: Request) {
     model,
     projectId: requestedProjectId,
     prompt: effectiveUserPrompt,
-    workspace
+    workspace: requestedWorkspace
   });
-  const respond = (response: Response) => withIntelligenceResponseHeaders(response, intelligencePreflight);
+  const workspace = productMode === "ASK" && !intelligencePreflight.complexity.projectContextSelected
+    ? {
+        activeFileContent: "",
+        activePath: "",
+        fileContents: {},
+        fileList: [],
+        projectName: null
+      }
+    : requestedWorkspace;
+  let terminalTelemetryRecorded = false;
+  const recordTerminalTelemetry = (
+    completionStatus: "cancelled" | "completed" | "failed",
+    failureCategory?: string | null
+  ) => {
+    if (terminalTelemetryRecorded) return;
+    terminalTelemetryRecorded = true;
+    recordBetaTelemetry({
+      completionStatus,
+      complexityClass: intelligencePreflight.complexity.class,
+      durationMs: Date.now() - routeStartedAt,
+      event: completionStatus === "cancelled"
+        ? "task_cancelled"
+        : completionStatus === "failed"
+          ? "task_failed"
+          : "task_completed",
+      failureCategory,
+      mode: productMode,
+      toolCount: intelligencePreflight.tools.discoveredTools.length
+    });
+  };
+  const onRequestAbort = () => recordTerminalTelemetry("cancelled", "request_cancelled");
+  taskSignal.addEventListener("abort", onRequestAbort, { once: true });
+  recordBetaTelemetry({
+    complexityClass: intelligencePreflight.complexity.class,
+    event: "task_started",
+    mode: productMode,
+    toolCount: intelligencePreflight.tools.discoveredTools.length
+  });
+  if (taskSignal.aborted) onRequestAbort();
+  const respond = (response: Response) => {
+    const finalResponse = taskSignal.aborted
+      ? new Response(null, { status: 499 })
+      : response;
+    const finishResponse = (
+      completionStatus: "cancelled" | "completed" | "failed",
+      failureCategory?: string | null
+    ) => {
+      recordTerminalTelemetry(completionStatus, failureCategory);
+      taskSignal.removeEventListener("abort", onRequestAbort);
+    };
+
+    if (!finalResponse.body) {
+      if (!taskSignal.aborted) {
+        finishResponse(
+          finalResponse.status >= 500 ? "failed" : "completed",
+          finalResponse.status >= 500 ? "route_error" : null
+        );
+      } else {
+        taskSignal.removeEventListener("abort", onRequestAbort);
+      }
+      return withIntelligenceResponseHeaders(finalResponse, intelligencePreflight, Date.now() - routeStartedAt);
+    }
+
+    const reader = finalResponse.body.getReader();
+    const monitoredBody = new ReadableStream<Uint8Array>({
+      async cancel(reason) {
+        await reader.cancel(reason).catch(() => undefined);
+        reader.releaseLock();
+        finishResponse("cancelled", "response_cancelled");
+      },
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+            reader.releaseLock();
+            finishResponse(
+              finalResponse.status >= 500 ? "failed" : "completed",
+              finalResponse.status >= 500 ? "route_error" : null
+            );
+            return;
+          }
+          controller.enqueue(value);
+        } catch (error) {
+          controller.error(error);
+          reader.releaseLock();
+          finishResponse(
+            taskSignal.aborted ? "cancelled" : "failed",
+            taskSignal.aborted ? "request_cancelled" : "stream_error"
+          );
+        }
+      }
+    });
+    const monitoredResponse = new Response(monitoredBody, {
+      headers: finalResponse.headers,
+      status: finalResponse.status,
+      statusText: finalResponse.statusText
+    });
+    return withIntelligenceResponseHeaders(monitoredResponse, intelligencePreflight, Date.now() - routeStartedAt);
+  };
+  if (taskSignal.aborted) {
+    return respond(new Response(null, { status: 499 }));
+  }
   const projectContract = readProjectContractFromWorkspace(workspace);
   const promptOwnership = decidePromptOwnership({
     mode: productMode,
@@ -5406,6 +5557,11 @@ export async function POST(request: Request) {
   }
 
   if (serverHandoff && persistence) {
+    recordBetaTelemetry({
+      complexityClass: intelligencePreflight.complexity.class,
+      event: "handoff_opened",
+      mode: productMode
+    });
     persistence = {
       ...persistence,
       sourceHandoff: serverHandoff,
@@ -5416,7 +5572,8 @@ export async function POST(request: Request) {
     };
   }
 
-  persistence = await persistChatMessage(persistence, {
+  let pendingUserMessageId: string | null = null;
+  const pendingUserMessage = {
     content: latestUserPrompt,
     metadata: {
       model,
@@ -5447,8 +5604,55 @@ export async function POST(request: Request) {
         promptIntent: diagnostic.promptIntent
       }
     },
-    role: "user"
-  });
+    onSaved: (messageId: string) => {
+      pendingUserMessageId = messageId;
+    },
+    role: "user" as const
+  };
+  let pendingUserPersisted = false;
+  const persistPendingUserMessage = async (context: ChatPersistenceContext | null) => {
+    await yieldForRequestCancellation(productMode === "ASK" ? 0 : 25);
+    if (pendingUserPersisted || taskSignal.aborted) return context;
+    const nextContext = await persistChatMessage(context, pendingUserMessage, taskSignal);
+    pendingUserPersisted = true;
+    return nextContext;
+  };
+  const removeCancelledSavedMessages = async (
+    context: ChatPersistenceContext | null,
+    messageIds: Array<string | null>
+  ) => {
+    if (!context || !taskSignal.aborted) return;
+    await Promise.all(
+      messageIds.filter((id): id is string => Boolean(id)).map((messageId) =>
+        deleteOwnedChatMessage({
+          messageId,
+          userId: context.userId
+        }).catch(() => false)
+      )
+    );
+  };
+  const persistRequestMessage = async (
+    context: ChatPersistenceContext | null,
+    message: Parameters<typeof persistChatMessage>[1]
+  ) => {
+    const nextContext = message.role === "assistant"
+      ? await persistPendingUserMessage(context)
+      : context;
+    if (taskSignal.aborted) return nextContext;
+    let messageId: string | null = null;
+    const persistedContext = await persistChatMessage(nextContext, {
+      ...message,
+      onSaved: (savedMessageId) => {
+        message.onSaved?.(savedMessageId);
+        messageId = savedMessageId;
+      }
+    }, taskSignal);
+    await removeCancelledSavedMessages(persistedContext, [
+      pendingUserMessageId,
+      messageId
+    ]);
+    return persistedContext;
+  };
 
   if (persistence?.sourceHandoffRequestKey && productMode !== "ASK") {
     const existingResponse = await loadOwnedHandoffResponse({
@@ -5459,8 +5663,10 @@ export async function POST(request: Request) {
     const existingProposal = existingResponse?.metadata.proposal;
 
     if (existingResponse && isDiffProposalPayload(existingProposal)) {
-      return respond(createProposalStream(existingProposal as DiffProposal, persistence.sessionId, {
-        projectRevision: persistence.projectRevision,
+      persistence = await persistPendingUserMessage(persistence);
+      return respond(createProposalStream(existingProposal as DiffProposal, persistence?.sessionId, {
+        abortSignal: taskSignal,
+        projectRevision: persistence?.projectRevision,
         selectedModel: model,
         taskObjective: effectiveUserPrompt
       }));
@@ -5490,8 +5696,13 @@ export async function POST(request: Request) {
   });
 
   if (generatedHandoff) {
+    recordBetaTelemetry({
+      complexityClass: intelligencePreflight.complexity.class,
+      event: "handoff_created",
+      mode: productMode
+    });
     const answer = handoffVisibleAnswer(generatedHandoff);
-    persistence = await persistChatMessage(persistence, {
+    persistence = await persistRequestMessage(persistence, {
       content: answer,
       metadata: {
         deterministic: true,
@@ -5522,7 +5733,7 @@ export async function POST(request: Request) {
         prompt: effectiveUserPrompt
       });
 
-      persistence = await persistChatMessage(persistence, {
+      persistence = await persistRequestMessage(persistence, {
         content: identityAnswer,
         metadata: {
           deterministic: true,
@@ -5542,6 +5753,7 @@ export async function POST(request: Request) {
     }
 
     const askBrain = await runAskBrain({
+      abortSignal: taskSignal,
       askRuntimeContext,
       intelligenceContext: askIntelligenceContext,
       messages,
@@ -5552,6 +5764,20 @@ export async function POST(request: Request) {
       projectName: workspace.projectName ?? null,
       workspace
     });
+    if (
+      askBrain.decision.fallbackModel &&
+      askBrain.decision.providerFailureCategory !== "request_cancelled" &&
+      !taskSignal.aborted
+    ) {
+      recordBetaTelemetry({
+        complexityClass: intelligencePreflight.complexity.class,
+        event: "provider_fallback",
+        failureCategory: askBrain.decision.fallbackReason,
+        fallbackUsed: true,
+        mode: productMode,
+        providerId: askBrain.decision.executionProvider
+      });
+    }
 
     if (askBrain.answer) {
       const selfReview = runSelfReviewForAskAnswer({
@@ -5561,7 +5787,7 @@ export async function POST(request: Request) {
         prompt: effectiveUserPrompt
       });
 
-      persistence = await persistChatMessage(persistence, {
+      persistence = await persistRequestMessage(persistence, {
         content: askBrain.answer,
         metadata: {
           askLiveIntent,
@@ -5590,7 +5816,7 @@ export async function POST(request: Request) {
         prompt: effectiveUserPrompt
       });
 
-      persistence = await persistChatMessage(persistence, {
+      persistence = await persistRequestMessage(persistence, {
         content: liveKnowledgeAnswer.answer,
         metadata: {
           deterministic: true,
@@ -5623,7 +5849,7 @@ export async function POST(request: Request) {
         prompt: effectiveUserPrompt
       });
 
-      persistence = await persistChatMessage(persistence, {
+      persistence = await persistRequestMessage(persistence, {
         content: hassaliPromptAnswer,
         metadata: {
           deterministic: true,
@@ -5642,6 +5868,7 @@ export async function POST(request: Request) {
 
   if (productMode === "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
     const askBrain = await runAskBrain({
+      abortSignal: taskSignal,
       askRuntimeContext,
       intelligenceContext: askIntelligenceContext,
       messages,
@@ -5652,6 +5879,20 @@ export async function POST(request: Request) {
       projectName: workspace.projectName ?? null,
       workspace
     });
+    if (
+      askBrain.decision.fallbackModel &&
+      askBrain.decision.providerFailureCategory !== "request_cancelled" &&
+      !taskSignal.aborted
+    ) {
+      recordBetaTelemetry({
+        complexityClass: intelligencePreflight.complexity.class,
+        event: "provider_fallback",
+        failureCategory: askBrain.decision.fallbackReason,
+        fallbackUsed: true,
+        mode: productMode,
+        providerId: askBrain.decision.executionProvider
+      });
+    }
     const answerOnlyContent = askBrain.answer;
     const selfReview = runSelfReviewForAskAnswer({
       answer: answerOnlyContent,
@@ -5660,7 +5901,7 @@ export async function POST(request: Request) {
       prompt: effectiveUserPrompt
     });
 
-    persistence = await persistChatMessage(persistence, {
+    persistence = await persistRequestMessage(persistence, {
       content: answerOnlyContent,
       metadata: {
         askLiveIntent,
@@ -5709,7 +5950,7 @@ export async function POST(request: Request) {
           ? "I reviewed the existing website edit request, but it is not safe to apply as-is."
           : "I prepared a contract-aware website edit proposal for review. It will only apply if you approve it.";
 
-      persistence = await persistChatMessage(persistence, {
+      persistence = await persistRequestMessage(persistence, {
         content: visibleSummary,
         metadata: {
           deterministic: true,
@@ -5745,6 +5986,7 @@ export async function POST(request: Request) {
       });
 
       return respond(createProposalStream(proposal, persistence?.sessionId, {
+        abortSignal: taskSignal,
         projectRevision: persistence?.projectRevision,
         selectedModel: model,
         taskObjective: effectiveUserPrompt
@@ -5777,7 +6019,7 @@ export async function POST(request: Request) {
       proposalContext
     });
 
-    persistence = await persistChatMessage(persistence, {
+    persistence = await persistRequestMessage(persistence, {
       content: blockedReason,
       metadata: {
         deterministic: true,
@@ -5794,6 +6036,7 @@ export async function POST(request: Request) {
     });
 
     return respond(createProposalStream(proposal, persistence?.sessionId, {
+      abortSignal: taskSignal,
       projectRevision: persistence?.projectRevision,
       selectedModel: model,
       taskObjective: effectiveUserPrompt
@@ -5806,7 +6049,7 @@ export async function POST(request: Request) {
       `${kernel.routingDecision.routingExplanation} ` +
       "No proposal was created and no project files were touched.";
 
-    persistence = await persistChatMessage(persistence, {
+    persistence = await persistRequestMessage(persistence, {
       content: answerOnlyContent,
       metadata: {
         intelligenceKernel: compactIntelligenceKernel(kernel),
@@ -5849,7 +6092,7 @@ export async function POST(request: Request) {
     );
     if (directInvoiceArtifact) {
       const visibleSummary = "I prepared an invoice template proposal for review. Nothing changes until you approve it.";
-      persistence = await persistChatMessage(persistence, {
+      persistence = await persistRequestMessage(persistence, {
         content: visibleSummary,
         metadata: {
           intelligenceKernel: compactIntelligenceKernel(kernel),
@@ -5862,6 +6105,7 @@ export async function POST(request: Request) {
         role: "assistant"
       });
       return respond(createProposalStream(localProposal, persistence?.sessionId, {
+        abortSignal: taskSignal,
         projectRevision: persistence?.projectRevision,
         selectedModel: model,
         taskObjective: effectiveUserPrompt
@@ -5930,7 +6174,7 @@ export async function POST(request: Request) {
         ? "I prepared an execution proposal for review. Nothing runs until you approve it."
         : "I prepared a diff proposal for review. It will only apply if you approve it.";
 
-    persistence = await persistChatMessage(persistence, {
+    persistence = await persistRequestMessage(persistence, {
       content: visibleSummary,
       metadata: {
         composition: proposalComposition,
@@ -5962,6 +6206,7 @@ export async function POST(request: Request) {
     });
 
     return respond(createProposalStream(proposal, persistence?.sessionId, {
+      abortSignal: taskSignal,
       projectRevision: persistence?.projectRevision,
       selectedModel: model,
       taskObjective: effectiveUserPrompt
@@ -5978,7 +6223,7 @@ export async function POST(request: Request) {
           prompt: effectiveUserPrompt
         });
 
-        persistence = await persistChatMessage(persistence, {
+        persistence = await persistRequestMessage(persistence, {
           content,
           metadata: {
             askLiveIntent,
@@ -6036,9 +6281,13 @@ export async function POST(request: Request) {
           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
           "Content-Type": "application/json"
         },
-        method: "POST"
+        method: "POST",
+        signal: taskSignal
       });
     } catch {
+      if (taskSignal.aborted) {
+        return respond(new Response(null, { status: 499 }));
+      }
       return respond(await createFallbackProposalResponse({
         composition,
         diagnostic,
@@ -6047,7 +6296,9 @@ export async function POST(request: Request) {
         kernel,
         mode,
         model,
+        abortSignal: taskSignal,
         persistence,
+        persistMessage: persistRequestMessage,
         prompt: effectiveUserPrompt,
         projectContract: activeProjectContract,
         reason: "openrouter_network_error",
@@ -6065,6 +6316,9 @@ export async function POST(request: Request) {
       }));
     }
 
+    if (taskSignal.aborted) {
+      return respond(new Response(null, { status: 499 }));
+    }
     if (!response.ok) {
       return respond(await createFallbackProposalResponse({
         composition,
@@ -6074,7 +6328,9 @@ export async function POST(request: Request) {
         kernel,
         mode,
         model,
+        abortSignal: taskSignal,
         persistence,
+        persistMessage: persistRequestMessage,
         prompt: effectiveUserPrompt,
         projectContract: activeProjectContract,
         reason: `openrouter_${response.status}`,
@@ -6118,7 +6374,9 @@ export async function POST(request: Request) {
         kernel,
         mode,
         model,
+        abortSignal: taskSignal,
         persistence,
+        persistMessage: persistRequestMessage,
         prompt: effectiveUserPrompt,
         projectContract: activeProjectContract,
         reason: "invalid_or_empty_model_proposal",
@@ -6240,7 +6498,9 @@ export async function POST(request: Request) {
         kernel,
         mode,
         model,
+        abortSignal: taskSignal,
         persistence,
+        persistMessage: persistRequestMessage,
         prompt: effectiveUserPrompt,
         projectContract: activeProjectContract,
         reason: "prompt_sovereignty_repair",
@@ -6275,7 +6535,9 @@ export async function POST(request: Request) {
         kernel,
         mode,
         model,
+        abortSignal: taskSignal,
         persistence,
+        persistMessage: persistRequestMessage,
         prompt: effectiveUserPrompt,
         projectContract: activeProjectContract,
         reason: `quality_score_${quality.score}_${quality.issues.join(",")}`,
@@ -6293,7 +6555,7 @@ export async function POST(request: Request) {
       }));
     }
 
-    persistence = await persistChatMessage(persistence, {
+    persistence = await persistRequestMessage(persistence, {
       content: proposal.summary,
       metadata: {
         composition: proposalComposition,
@@ -6325,42 +6587,53 @@ export async function POST(request: Request) {
     });
 
     return respond(createProposalStream(proposal, persistence?.sessionId, {
+      abortSignal: taskSignal,
       projectRevision: persistence?.projectRevision,
       selectedModel: model,
       taskObjective: effectiveUserPrompt
     }));
   }
 
-  const response = await fetch(openRouterChatCompletionsUrl, {
-    body: JSON.stringify({
-      messages: [
-        {
-          role: "system",
-          content:
-            `You are Hassali.ai in ASK mode. Keep answers concise and do not edit files from chat. ` +
-            `ASK is a universal assistant mode for explanation, planning, learning, debugging, and general help. ` +
-            `If the user asks to build or edit files, explain that WEBSITE or CODE mode should be used for approval-first file changes. ` +
-            `${formatAskRuntimeContext(askRuntimeContext, askLiveIntent)}\n` +
-            `${projectContractContext}\n` +
-            `Current mode: ${mode}. Active file: ${workspace.activePath}. Files: ${workspace.fileList.join(", ")}.`
-        },
-        ...messages
-      ],
-      model,
-      stream: true
-    }),
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json"
-    },
-    method: "POST"
-  });
+  let response: Response;
+  try {
+    response = await fetch(openRouterChatCompletionsUrl, {
+      body: JSON.stringify({
+        messages: [
+          {
+            role: "system",
+            content:
+              `You are Hassali.ai in ASK mode. Keep answers concise and do not edit files from chat. ` +
+              `ASK is a universal assistant mode for explanation, planning, learning, debugging, and general help. ` +
+              `If the user asks to build or edit files, explain that WEBSITE or CODE mode should be used for approval-first file changes. ` +
+              `${formatAskRuntimeContext(askRuntimeContext, askLiveIntent)}\n` +
+              `${projectContractContext}\n` +
+              `Current mode: ${mode}. Active file: ${workspace.activePath}. Files: ${workspace.fileList.join(", ")}.`
+          },
+          ...messages
+        ],
+        model,
+        stream: true
+      }),
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      method: "POST",
+      signal: taskSignal
+    });
+  } catch {
+    if (taskSignal.aborted) {
+      return respond(new Response(null, { status: 499 }));
+    }
+    return respond(Response.json({ error: "OpenRouter chat request failed." }, { status: 502 }));
+  }
 
   if (!response.ok) {
     return respond(Response.json({ error: "OpenRouter chat request failed." }, { status: response.status }));
   }
 
   return respond(createOpenRouterTextStream(response, {
+    abortSignal: taskSignal,
     onComplete: async (content) => {
       const selfReview = runSelfReviewForAskAnswer({
         answer: content,
@@ -6369,7 +6642,7 @@ export async function POST(request: Request) {
         prompt: effectiveUserPrompt
       });
 
-      persistence = await persistChatMessage(persistence, {
+      persistence = await persistRequestMessage(persistence, {
         content,
         metadata: {
           askLiveIntent,
