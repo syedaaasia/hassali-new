@@ -336,6 +336,14 @@ function isCodingTextRequest(prompt: string) {
     !wantsProjectExecution(prompt);
 }
 
+function isConceptualTechnicalExplanation(prompt: string) {
+  const asksForExplanation = /\b(?:explain|teach|what is|how does|when (?:should|not) (?:i|to))\b/i.test(prompt);
+  const technicalSubject = /\b(?:react|next\.?js|typescript|javascript|server components?|api|database|docker|git|sql|css|html|webgl|browser|component|framework|architecture)\b/i.test(prompt);
+  const asksForImplementation = /\b(?:write|create|build|implement|give me|show me|generate|fix|debug|setup|install|run|commands?|code\s+(?:for|to))\b/i.test(prompt);
+
+  return asksForExplanation && technicalSubject && !asksForImplementation && !wantsProjectExecution(prompt);
+}
+
 function isWrongModeBuildRequest(prompt: string) {
   return wantsProjectExecution(prompt) &&
     /\b(?:add|build|create|make|generate|design|edit|update|change|install|run|fix)\b[\s\S]{0,160}\b(?:website|site|homepage|app|tool|system|file|files|code|crm|dashboard|streamlit|app\.py|testimonials|python|react)\b/i.test(prompt);
@@ -426,6 +434,7 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (detectDangerousCodingRequest(prompt)) return classify(prompt, "auth_or_security_guidance", 0.96, "The user asked for harmful code; ASK should refuse and redirect to defensive security.");
   if (isWebsiteCodeTextRequest(prompt)) return classify(prompt, "website_code_text_only", 0.92, "The user asks for website code in chat only.");
   if (/\b(?:compare|which is better|recommend|best option|versus|vs)\b/i.test(prompt)) return classify(prompt, "comparison_or_recommendation", 0.9, "The user asks for comparison or recommendation.");
+  if (isConceptualTechnicalExplanation(prompt)) return classify(prompt, "explanation_or_teaching", 0.9, "The user asks for a conceptual technical explanation rather than implementation code.");
   if (detectCodingCategory(prompt) || isCodingTextRequest(prompt)) return classify(prompt, /\b(?:xampp|cmd|localhost|install|run|commands?|setup)\b/i.test(prompt) ? "local_setup_guidance" : "coding_help_text_only", 0.9, "The user asks for code or setup guidance as text.");
   if (/\b(?:write it|write this|say politely|say this|make it|rewrite)\b/i.test(prompt) && (explicitMaxWordsFor(prompt) || /\b(?:human|sarcastic(?:ally)?|firm|simple|general)\b/i.test(prompt))) return classify(prompt, "writing_or_rewriting", 0.88, "The user asks for wording refinement with quality constraints.");
   if (/\b(?:debug|error|bug|fix this|not working|stack trace)\b/i.test(prompt)) return classify(prompt, "debugging_help", 0.86, "The user asks for debugging help.");

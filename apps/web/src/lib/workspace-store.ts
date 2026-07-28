@@ -35,8 +35,11 @@ export type WorkspaceLoadResult = {
   chat: {
     messages: Array<{
       content: string;
+      handoff?: unknown;
       id: string;
       mode: "ASK" | "SUGGEST" | "EXECUTE";
+      providerFailureCategory?: string | null;
+      responseKind?: string | null;
       role: "user" | "assistant";
     }>;
     sessionId: string | null;

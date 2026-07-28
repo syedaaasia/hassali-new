@@ -56,6 +56,8 @@ export type ResolvedAskProvider = {
   pricingClass: "credit_required" | "free" | null;
 };
 
+const automaticAskFallbackModelIds = ["openrouter/free"];
+
 const capabilityDefaults: Record<string, HassaliProviderCapability[]> = {
   anthropic: ["ASK", "CODE", "WEBSITE", "REASONING", "VALIDATION", "REPAIR", "VISION"],
   "custom-openai-compatible": ["ASK", "CODE", "WEBSITE", "REASONING", "VALIDATION"],
@@ -307,6 +309,21 @@ export function resolveAskProvider(requestedModelId: string): ResolvedAskProvide
     resolvedModelId: model.modelId,
     pricingClass: model.pricingClass
   };
+}
+
+export function resolveAskFallbackProviders(requestedModelId: string) {
+  const requested = requestedModelId.trim().toLowerCase();
+
+  return automaticAskFallbackModelIds
+    .filter((modelId) => modelId.toLowerCase() !== requested)
+    .map((modelId) => resolveAskProvider(modelId))
+    .filter((provider) =>
+      provider.configured &&
+      provider.executionProvider === "openrouter" &&
+      Boolean(provider.executionModelId) &&
+      provider.pricingClass === "free"
+    )
+    .slice(0, 1);
 }
 
 export function getRegisteredModelMetadata() {

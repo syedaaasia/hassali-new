@@ -8,7 +8,7 @@ import {
   type AskIntentClassification,
   type AskIntentName
 } from "./ask-serious-assistant";
-import { resolveAskProvider } from "./provider-router";
+import { resolveAskFallbackProviders, resolveAskProvider } from "./provider-router";
 import {
   buildWorkspaceContext,
   createWorkspaceContextDebugHeaders,
@@ -26,6 +26,14 @@ export type AskBrainDecisionPath =
   | "unsafe_refusal";
 
 export type AskBrainStreamingStrategy = "buffered_final_answer";
+export type AskModelSelectionPolicy = "automatic" | "locked";
+export type AskProviderAvailabilityCategory =
+  | "AUTH_CONFIGURATION_ERROR"
+  | "EXTERNAL_SERVICE_ERROR"
+  | "MODEL_UNAVAILABLE"
+  | "NETWORK_ERROR"
+  | "PROVIDER_UNAVAILABLE"
+  | "RATE_LIMITED";
 export type AskResponseKind =
   | "deterministic_answer"
   | "identity_response"
@@ -72,6 +80,10 @@ export type AskBrainDecision = {
   responseKind: AskResponseKind;
   priorMessageCount: number;
   actualServedModel: string | null;
+  attemptedModels: string[];
+  availabilityCategory: AskProviderAvailabilityCategory | null;
+  fallbackModel: string | null;
+  modelSelectionPolicy: AskModelSelectionPolicy;
   providerCallCount: number;
   secondaryCallCount: number;
   secondaryModels: string[];
@@ -100,11 +112,21 @@ export type AskBrainInput = {
   prompt: string;
   projectName?: string | null;
   workspace?: AskBrainWorkspaceContext;
+  modelSelectionPolicy?: AskModelSelectionPolicy;
+  providerCall?: AskProviderCall;
 };
 
-type ModelCallResult =
+export type ModelCallResult =
   | { status: "ok"; content: string; servedModel: string | null }
   | { status: "failed" | "not_configured" | "timeout"; category: string; reason: string; retryAfter?: string | null };
+
+export type AskProviderCall = (input: {
+  messages: Array<{ content: string; role: "assistant" | "system" | "user" }>;
+  maxTokens?: number;
+  model: string;
+  timeoutMs: number;
+  webSearch?: boolean;
+}) => Promise<ModelCallResult>;
 
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
 const PRIMARY_TIMEOUT_MS = 25_000;
@@ -155,6 +177,37 @@ const deterministicRequiredIntents = new Set<AskIntentName>([
 
 function nowMs() {
   return Date.now();
+}
+
+function createLocalConversationalAnswer(prompt: string) {
+  const normalized = prompt.trim().replace(/[.!?]+$/g, "").toLowerCase();
+
+  if (/^(?:hi|hello|hey|salam|assalam(?:u alaikum)?|good (?:morning|afternoon|evening))$/.test(normalized)) {
+    return "Hello! How can I help you today?";
+  }
+  if (/^(?:thanks|thank you|thankyou|much appreciated)$/.test(normalized)) {
+    return "You are welcome. What would you like to work through next?";
+  }
+  if (/^(?:help|help me|can you help|can you help me)$/.test(normalized)) {
+    return "Yes. Ask me to explain, compare, plan, write, debug, or reason through something. I can prepare a handoff when you explicitly want CODE or WEBSITE to build, but ASK itself will not change files.";
+  }
+  if (/^(?:what can you do|what do you do|how can you help(?: me)?)$/.test(normalized)) {
+    return "I can answer questions, teach, plan, compare options, help with writing, inspect relevant project context, and give code guidance as text. For file changes, I can prepare an explicit handoff to CODE or WEBSITE, where approval is still required.";
+  }
+
+  return null;
+}
+
+function availabilityCategory(category: string | null): AskProviderAvailabilityCategory | null {
+  if (!category) return null;
+  if (category === "provider_rate_limited") return "RATE_LIMITED";
+  if (category === "provider_auth_failed" || category === "provider_not_configured") return "AUTH_CONFIGURATION_ERROR";
+  if (category === "provider_network_error" || category === "provider_timeout") return "NETWORK_ERROR";
+  if (category === "model_unknown" || category === "provider_model_unavailable" || category === "provider_response_invalid") {
+    return "MODEL_UNAVAILABLE";
+  }
+  if (category === "provider_unsupported") return "PROVIDER_UNAVAILABLE";
+  return "EXTERNAL_SERVICE_ERROR";
 }
 
 function truncate(value: string, maxLength: number) {
@@ -721,7 +774,7 @@ async function maybeReviseWithModel(input: AskBrainInput, answer: string, issues
     return { content: answer, revisionCallRan: false, revisionReason: "provider_not_configured" };
   }
 
-  const revision = await fetchOpenRouterText({
+  const revision = await (input.providerCall ?? fetchOpenRouterText)({
     messages: [
       {
         role: "system",
@@ -749,9 +802,16 @@ function buildDecisionHeadersSafeValue(value: unknown) {
 }
 
 export function createAskBrainDebugHeaders(decision: AskBrainDecision): Record<string, string> {
-  if (process.env.NODE_ENV === "production") return {};
+  const publicResponseHeaders = {
+    "x-hassali-ask-provider-failure": buildDecisionHeadersSafeValue(decision.providerFailureCategory ?? "none"),
+    "x-hassali-ask-response-kind": buildDecisionHeadersSafeValue(decision.responseKind),
+    "x-hassali-ask-model-selection-policy": buildDecisionHeadersSafeValue(decision.modelSelectionPolicy)
+  };
+
+  if (process.env.NODE_ENV === "production") return publicResponseHeaders;
 
   return {
+    ...publicResponseHeaders,
     ...createWorkspaceContextDebugHeaders(decision.context as NormalizedWorkspaceContext),
     "x-hassali-ask-brain-fallback": buildDecisionHeadersSafeValue(decision.fallbackOccurred),
     "x-hassali-ask-brain-injection": buildDecisionHeadersSafeValue(decision.injectionDetected),
@@ -764,10 +824,11 @@ export function createAskBrainDebugHeaders(decision: AskBrainDecision): Record<s
     "x-hassali-ask-execution-provider": buildDecisionHeadersSafeValue(decision.executionProvider ?? ""),
     "x-hassali-ask-credential-source": buildDecisionHeadersSafeValue(decision.credentialSource),
     "x-hassali-ask-provider-configured": buildDecisionHeadersSafeValue(decision.providerConfigured),
-    "x-hassali-ask-provider-failure": buildDecisionHeadersSafeValue(decision.providerFailureCategory ?? "none"),
-    "x-hassali-ask-response-kind": buildDecisionHeadersSafeValue(decision.responseKind),
     "x-hassali-ask-prior-count": buildDecisionHeadersSafeValue(decision.priorMessageCount),
     "x-hassali-ask-actual-model": buildDecisionHeadersSafeValue(decision.actualServedModel ?? ""),
+    "x-hassali-ask-attempted-models": buildDecisionHeadersSafeValue(decision.attemptedModels.join(",")),
+    "x-hassali-ask-availability-category": buildDecisionHeadersSafeValue(decision.availabilityCategory ?? "none"),
+    "x-hassali-ask-fallback-model": buildDecisionHeadersSafeValue(decision.fallbackModel ?? ""),
     "x-hassali-ask-provider-call-count": buildDecisionHeadersSafeValue(decision.providerCallCount),
     "x-hassali-ask-secondary-call-count": buildDecisionHeadersSafeValue(decision.secondaryCallCount),
     "x-hassali-ask-secondary-models": buildDecisionHeadersSafeValue(decision.secondaryModels.join(",")),
@@ -792,6 +853,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   const provider = resolveAskProvider(input.model);
   const category = semanticCategory(input, classification);
   const workspaceContextIncluded = categoryUsesWorkspace(category);
+  const modelSelectionPolicy = input.modelSelectionPolicy ?? "automatic";
+  const providerCall = input.providerCall ?? fetchOpenRouterText;
   let answer = "";
   let fallbackOccurred = false;
   let fallbackReason: string | null = null;
@@ -805,10 +868,18 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   let actualServedModel: string | null = null;
   let retryAfter: string | null = null;
   let webSearchRequested = false;
+  let fallbackModel: string | null = null;
+  let providerCallCount = 0;
+  const attemptedModels: string[] = [];
 
   const deterministicAnswer = await createAskDirectAnswer(input.prompt, input.askRuntimeContext, input.messages);
+  const localConversationalAnswer = createLocalConversationalAnswer(input.prompt);
 
-  if (isReferenceSummaryRequest(input)) {
+  if (localConversationalAnswer) {
+    answer = localConversationalAnswer;
+    providerFailureCategory = null;
+    providerStatus = "not_needed";
+  } else if (isReferenceSummaryRequest(input)) {
     answer = summarizeReferenceFile(input);
   } else if (
     selected.path === "boundary_only" ||
@@ -826,8 +897,11 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
       providerStatus = "configured";
       modelCallRan = true;
       webSearchRequested = provider.pricingClass !== "free" && (classification.wouldBenefitFromLiveWeb || /^who (?:is|was|are)\b/i.test(input.prompt.trim()));
-      const modelResult = await fetchOpenRouterText({
-        messages: providerConversation(input, buildModelPrompt(input, classification, category), categoryUsesHistory(category)),
+      const providerMessages = providerConversation(input, buildModelPrompt(input, classification, category), categoryUsesHistory(category));
+      attemptedModels.push(provider.executionModelId);
+      providerCallCount += 1;
+      const modelResult = await providerCall({
+        messages: providerMessages,
         maxTokens: provider.pricingClass === "free" ? 4_000 : 2_000,
         model: provider.executionModelId,
         timeoutMs: provider.pricingClass === "free" ? FREE_PRIMARY_TIMEOUT_MS : PRIMARY_TIMEOUT_MS,
@@ -841,12 +915,46 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
         providerFailureCategory = null;
       } else {
         primaryTimedOut = modelResult.status === "timeout";
-        providerStatus = modelResult.status === "not_configured" ? "not_configured" : "failed";
-        fallbackOccurred = true;
-        fallbackReason = modelResult.category;
-        providerFailureCategory = modelResult.category;
-        retryAfter = modelResult.retryAfter ?? null;
-        answer = providerFailureAnswer(input, providerFailureCategory);
+        const fallbackProvider = modelSelectionPolicy === "automatic"
+          ? resolveAskFallbackProviders(provider.requestedModelId)[0] ?? null
+          : null;
+
+        if (fallbackProvider?.executionModelId) {
+          attemptedModels.push(fallbackProvider.executionModelId);
+          providerCallCount += 1;
+          fallbackModel = fallbackProvider.resolvedModelId ?? fallbackProvider.executionModelId;
+          fallbackOccurred = true;
+          fallbackReason = modelResult.category;
+          const fallbackResult = await providerCall({
+            messages: providerMessages,
+            maxTokens: 4_000,
+            model: fallbackProvider.executionModelId,
+            timeoutMs: FREE_PRIMARY_TIMEOUT_MS,
+            webSearch: false
+          });
+
+          if (fallbackResult.status === "ok") {
+            answer = fallbackResult.content;
+            modelCallSucceeded = true;
+            actualServedModel = fallbackResult.servedModel;
+            providerFailureCategory = null;
+            providerStatus = "configured";
+          } else {
+            providerStatus = fallbackResult.status === "not_configured" ? "not_configured" : "failed";
+            providerFailureCategory = fallbackResult.category;
+            retryAfter = fallbackResult.retryAfter ?? modelResult.retryAfter ?? null;
+            answer = providerFailureAnswer(input, providerFailureCategory);
+          }
+        } else {
+          providerStatus = modelResult.status === "not_configured" ? "not_configured" : "failed";
+          fallbackOccurred = true;
+          fallbackReason = modelResult.category;
+          providerFailureCategory = modelResult.category;
+          retryAfter = modelResult.retryAfter ?? null;
+          answer = modelSelectionPolicy === "locked"
+            ? `${providerFailureAnswer(input, providerFailureCategory)} The model is locked, so Hassali did not substitute another model. Retry it or choose automatic fallback.`
+            : providerFailureAnswer(input, providerFailureCategory);
+        }
       }
     } else {
       providerStatus = "not_configured";
@@ -868,6 +976,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   if (
     !review.passed &&
     modelCallRan &&
+    providerCallCount < 2 &&
+    !fallbackModel &&
     providerStatus === "configured" &&
     selected.path !== "unsafe_refusal" &&
     selected.path !== "boundary_only"
@@ -877,6 +987,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     revisionReason = revision.revisionReason;
     sanitized = sanitizeAskOutput(revision.content);
     review = reviewAnswer(sanitized.value, classification, input);
+    if (revisionCallRan) providerCallCount += 1;
   }
 
   if (!sanitized.value || !review.passed) {
@@ -922,9 +1033,13 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
             : "deterministic_answer",
     priorMessageCount: Math.max(0, input.messages.filter((message) => message.content.trim()).length - 1),
     actualServedModel,
-    providerCallCount: (modelCallRan ? 1 : 0) + (revisionCallRan ? 1 : 0),
-    secondaryCallCount: revisionCallRan ? 1 : 0,
-    secondaryModels: revisionCallRan ? [provider.executionModelId ?? input.model] : [],
+    attemptedModels,
+    availabilityCategory: availabilityCategory(providerFailureCategory),
+    fallbackModel,
+    modelSelectionPolicy,
+    providerCallCount,
+    secondaryCallCount: Math.max(0, providerCallCount - (modelCallRan ? 1 : 0)),
+    secondaryModels: attemptedModels.slice(1),
     webSearchRequested,
     retryAfter,
     workspaceContextIncluded,

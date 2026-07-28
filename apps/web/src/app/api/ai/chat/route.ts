@@ -1,10 +1,13 @@
 import {
+  loadOwnedChatHandoff,
+  loadOwnedHandoffResponse,
   loadOwnedProjectRevision,
   resolveChatPersistenceContext,
   saveChatMessage,
   type AiMode as PersistedAiMode
 } from "@hassali/database";
 import { auth } from "@clerk/nextjs/server";
+import { parseModeHandoff, type ModeHandoff } from "@/lib/mode-handoff";
 import {
   buildAskRuntimeContext,
   detectAskLiveIntent,
@@ -12,8 +15,14 @@ import {
 } from "@/lib/server/ai/ask-context";
 import {
   createAskBrainDebugHeaders,
-  runAskBrain
+  runAskBrain,
+  type AskModelSelectionPolicy
 } from "@/lib/server/ai/ask-brain-orchestrator";
+import {
+  buildModeHandoff,
+  handoffRequestKey,
+  handoffVisibleAnswer
+} from "@/lib/server/ai/mode-handoff-orchestrator";
 import {
   chatToolContext,
   compactChatToolResults,
@@ -192,6 +201,7 @@ export const runtime = "nodejs";
 
 const fallbackModel = "openai/gpt-4o-mini";
 const openRouterChatCompletionsUrl = "https://openrouter.ai/api/v1/chat/completions";
+const handoffMarker = "\nHASSALI_MODE_HANDOFF:";
 
 type ChatRequestMessage = {
   role: "user" | "assistant" | "system";
@@ -428,6 +438,9 @@ type ChatPersistenceContext = {
   projectId: string;
   projectRevision: string;
   sessionId: string | null;
+  sourceHandoff?: ModeHandoff;
+  sourceHandoffRequestKey?: string;
+  sourceHandoffStale?: boolean;
   taskObjective: string;
   userId: string;
 };
@@ -2815,12 +2828,25 @@ function createTextStream(content: string, sessionId?: string | null, extraHeade
   );
 }
 
+function createHandoffStream(
+  content: string,
+  handoff: ModeHandoff,
+  sessionId?: string | null,
+  extraHeaders?: Record<string, string>
+) {
+  return createTextStream(
+    `${content}${handoffMarker}${JSON.stringify(handoff)}`,
+    sessionId,
+    extraHeaders
+  );
+}
+
 async function createPersistenceContext(input: {
   mode: AiMode;
   projectId?: string | null;
   sessionId?: string | null;
   taskObjective: string;
-}) {
+}): Promise<ChatPersistenceContext | null> {
   if (!input.projectId) {
     return null;
   }
@@ -2886,15 +2912,23 @@ async function persistChatMessage(
   }
 
   try {
+    const messageMetadata = input.role === "assistant" && context.sourceHandoff
+      ? {
+          ...input.metadata,
+          sourceHandoff: context.sourceHandoff,
+          sourceHandoffRequestKey: context.sourceHandoffRequestKey,
+          sourceHandoffStale: context.sourceHandoffStale
+        }
+      : input.metadata;
     const saved = await saveChatMessage({
       content: input.content,
-      metadata: input.metadata?.proposal
+      metadata: messageMetadata?.proposal
         ? {
-            ...input.metadata,
+            ...messageMetadata,
             serverProjectRevision: context.projectRevision,
             serverTaskObjective: context.taskObjective
           }
-        : input.metadata,
+        : messageMetadata,
       mode: context.mode,
       projectId: context.projectId,
       role: input.role,
@@ -5144,9 +5178,11 @@ function createPlaceholderStream(
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     chatSessionId?: unknown;
+    handoff?: unknown;
     messages?: unknown;
     mode?: unknown;
     model?: unknown;
+    modelSelectionPolicy?: unknown;
     productMode?: unknown;
     projectId?: unknown;
     workspace?: unknown;
@@ -5169,6 +5205,8 @@ export async function POST(request: Request) {
     typeof body?.model === "string" && body.model.trim().length > 0
       ? body.model.trim()
       : process.env.HASSALI_DEFAULT_MODEL || fallbackModel;
+  const modelSelectionPolicy: AskModelSelectionPolicy =
+    body?.modelSelectionPolicy === "locked" ? "locked" : "automatic";
   const mode: AiMode =
     body?.mode === "SUGGEST" || body?.mode === "EXECUTE" || body?.mode === "ASK"
       ? body.mode
@@ -5348,6 +5386,35 @@ export async function POST(request: Request) {
     sessionId: requestedSessionId,
     taskObjective: effectiveUserPrompt
   });
+  const requestedHandoff = parseModeHandoff(body?.handoff);
+  let serverHandoff: ModeHandoff | null = null;
+
+  if (
+    requestedHandoff &&
+    requestedHandoff.targetMode === productMode &&
+    (!requestedHandoff.projectId || requestedHandoff.projectId === requestedProjectId)
+  ) {
+    if (requestedHandoff.projectId && persistence) {
+      serverHandoff = parseModeHandoff(await loadOwnedChatHandoff({
+        externalUserId: persistence.externalUserId,
+        handoffId: requestedHandoff.id,
+        projectId: persistence.projectId
+      }));
+    } else if (!requestedHandoff.projectId && !requestedProjectId) {
+      serverHandoff = requestedHandoff;
+    }
+  }
+
+  if (serverHandoff && persistence) {
+    persistence = {
+      ...persistence,
+      sourceHandoff: serverHandoff,
+      sourceHandoffRequestKey: handoffRequestKey(serverHandoff, effectiveUserPrompt, productMode),
+      sourceHandoffStale: Boolean(
+        serverHandoff.projectRevision && serverHandoff.projectRevision !== persistence.projectRevision
+      )
+    };
+  }
 
   persistence = await persistChatMessage(persistence, {
     content: latestUserPrompt,
@@ -5382,6 +5449,23 @@ export async function POST(request: Request) {
     },
     role: "user"
   });
+
+  if (persistence?.sourceHandoffRequestKey && productMode !== "ASK") {
+    const existingResponse = await loadOwnedHandoffResponse({
+      externalUserId: persistence.externalUserId,
+      projectId: persistence.projectId,
+      requestKey: persistence.sourceHandoffRequestKey
+    });
+    const existingProposal = existingResponse?.metadata.proposal;
+
+    if (existingResponse && isDiffProposalPayload(existingProposal)) {
+      return respond(createProposalStream(existingProposal as DiffProposal, persistence.sessionId, {
+        projectRevision: persistence.projectRevision,
+        selectedModel: model,
+        taskObjective: effectiveUserPrompt
+      }));
+    }
+  }
   const intelligenceToolResults = mode === "ASK" && persistence
     ? await executeChatReadOnlyTools({
         activePath: workspace.activePath,
@@ -5396,6 +5480,33 @@ export async function POST(request: Request) {
     intelligencePreflight.providerContext,
     intelligenceToolProviderContext
   ].filter(Boolean).join("\n\n");
+  const generatedHandoff = buildModeHandoff({
+    messages,
+    projectId: requestedProjectId,
+    projectRevision: persistence?.projectRevision ?? null,
+    prompt: effectiveUserPrompt,
+    selectedMode: productMode,
+    workspace
+  });
+
+  if (generatedHandoff) {
+    const answer = handoffVisibleAnswer(generatedHandoff);
+    persistence = await persistChatMessage(persistence, {
+      content: answer,
+      metadata: {
+        deterministic: true,
+        handoff: generatedHandoff,
+        model,
+        responseKind: generatedHandoff.targetMode === "ASK" ? "deterministic_answer" : "mode_boundary"
+      },
+      role: "assistant"
+    });
+
+    return respond(createHandoffStream(answer, generatedHandoff, persistence?.sessionId, {
+      "x-hassali-ask-provider-failure": "none",
+      "x-hassali-ask-response-kind": generatedHandoff.targetMode === "ASK" ? "deterministic_answer" : "mode_boundary"
+    }));
+  }
 
   if (mode === "ASK") {
     const identityAnswer = createHassaliIdentityAnswer({
@@ -5435,6 +5546,7 @@ export async function POST(request: Request) {
       intelligenceContext: askIntelligenceContext,
       messages,
       model,
+      modelSelectionPolicy,
       productMode,
       prompt: effectiveUserPrompt,
       projectName: workspace.projectName ?? null,
@@ -5534,6 +5646,7 @@ export async function POST(request: Request) {
       intelligenceContext: askIntelligenceContext,
       messages,
       model,
+      modelSelectionPolicy,
       productMode,
       prompt: effectiveUserPrompt,
       projectName: workspace.projectName ?? null,

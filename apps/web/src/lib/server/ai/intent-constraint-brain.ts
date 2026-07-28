@@ -160,14 +160,24 @@ function extractPromptIdentity(message: string) {
 
 function extractCountConstraints(message: string) {
   const constraints: IntentCountConstraint[] = [];
+  const explicitCountPattern = /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(pages?|products?|screens?|steps?|sections?)\b/gi;
   const pattern = /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+([a-z][a-z -]{0,24}?)(?=\s*(?:,|\.|and\b|with\b|that\b|which\b|$))/gi;
+
+  for (const match of message.matchAll(explicitCountPattern)) {
+    const rawCount = match[1].toLowerCase();
+    const count = /^\d+$/.test(rawCount) ? Number(rawCount) : NUMBER_WORDS[rawCount];
+    const unit = match[2].toLowerCase();
+    if (count) constraints.push({ count, source: match[0].trim(), unit });
+  }
 
   for (const match of message.matchAll(pattern)) {
     const rawCount = match[1].toLowerCase();
     const count = /^\d+$/.test(rawCount) ? Number(rawCount) : NUMBER_WORDS[rawCount];
     const unit = match[2].trim().replace(/\s+/g, " ");
     if (!count || !unit || /^(?:am|pm|minutes?|hours?|days?|weeks?|months?|years?)$/i.test(unit)) continue;
-    constraints.push({ count, source: match[0].trim(), unit });
+    if (!constraints.some((constraint) => constraint.count === count && constraint.unit === unit)) {
+      constraints.push({ count, source: match[0].trim(), unit });
+    }
   }
 
   return constraints;

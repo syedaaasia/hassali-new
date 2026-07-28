@@ -616,12 +616,15 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const messages = useChatStore((state) => state.messages);
   const input = useChatStore((state) => state.input);
   const model = useChatStore((state) => state.model);
+  const modelSelectionPolicy = useChatStore((state) => state.modelSelectionPolicy);
   const productMode = useChatStore((state) => state.productMode);
   const isStreaming = useChatStore((state) => state.isStreaming);
   const proposal = useChatStore((state) => state.proposal);
   const chatSessionId = useChatStore((state) => state.chatSessionId);
   const setInput = useChatStore((state) => state.setInput);
   const setModel = useChatStore((state) => state.setModel);
+  const setModelSelectionPolicy = useChatStore((state) => state.setModelSelectionPolicy);
+  const activateHandoff = useChatStore((state) => state.activateHandoff);
   const setProductMode = useChatStore((state) => state.setProductMode);
   const clearProposal = useChatStore((state) => state.clearProposal);
   const markProposalApproved = useChatStore((state) => state.markProposalApproved);
@@ -688,6 +691,11 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   });
 
   const sendWithContext = () => sendMessage(createWorkspaceContext());
+
+  const prepareProviderRetry = (policy: "automatic" | "locked") => {
+    setModelSelectionPolicy(policy);
+    setInput(getLatestOriginalRequest(messages));
+  };
 
   const toggleVoiceInput = () => {
     if (isListening) {
@@ -971,6 +979,48 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               <div className="whitespace-pre-wrap break-words">
                 {message.content || "Thinking quietly..."}
               </div>
+              {message.handoff ? (
+                <div
+                  className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[hsl(var(--premium-accent)/0.25)] bg-[hsl(var(--premium-accent)/0.08)] px-3 py-2 text-[11px] leading-4"
+                  data-mode-handoff={message.handoff.targetMode}
+                >
+                  <div>
+                    <div className="font-medium text-foreground">Prepared for {message.handoff.targetMode}</div>
+                    <div className="text-muted-foreground">Review the carried objective and continue only when you explicitly open the target mode.</div>
+                  </div>
+                  <button
+                    className="rounded-lg border border-[hsl(var(--premium-accent)/0.35)] px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-[hsl(var(--premium-accent)/0.15)]"
+                    data-handoff-target={message.handoff.targetMode}
+                    disabled={isStreaming}
+                    onClick={() => activateHandoff(message.handoff!)}
+                    type="button"
+                  >
+                    Open in {message.handoff.targetMode}
+                  </button>
+                </div>
+              ) : null}
+              {message.role === "assistant" && message.responseKind === "provider_failure" ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                  <button
+                    className="rounded-lg border border-white/15 px-2.5 py-1 text-muted-foreground hover:text-foreground"
+                    disabled={isStreaming}
+                    onClick={() => prepareProviderRetry("locked")}
+                    type="button"
+                  >
+                    Retry selected model
+                  </button>
+                  {modelSelectionPolicy === "locked" ? (
+                    <button
+                      className="rounded-lg border border-[hsl(var(--premium-accent)/0.35)] px-2.5 py-1 text-foreground hover:bg-[hsl(var(--premium-accent)/0.15)]"
+                      disabled={isStreaming}
+                      onClick={() => prepareProviderRetry("automatic")}
+                      type="button"
+                    >
+                      Use automatic fallback
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </motion.div>
           ))}
           {proposal ? (

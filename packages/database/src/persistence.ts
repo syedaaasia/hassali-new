@@ -1003,11 +1003,21 @@ export async function loadWorkspaceForExternalUser(
   const messagesResult = session
     ? await db.execute<{
         content: string;
+        handoff: unknown;
         id: string;
         mode: AiMode;
+        provider_failure_category: null | string;
+        response_kind: null | string;
         role: ChatRole;
       }>(sql`
-        select id, role, content, mode
+        select
+          id,
+          role,
+          content,
+          mode,
+          metadata -> 'handoff' as handoff,
+          coalesce(metadata ->> 'providerFailureCategory', metadata -> 'askBrain' ->> 'providerFailureCategory') as provider_failure_category,
+          coalesce(metadata ->> 'responseKind', metadata -> 'askBrain' ->> 'responseKind') as response_kind
         from chat_messages
         where session_id = ${session.id}
         order by created_at asc
@@ -1018,8 +1028,11 @@ export async function loadWorkspaceForExternalUser(
     chat: {
       messages: messagesResult.rows.map((message) => ({
         content: String(message.content),
+        handoff: message.handoff ?? null,
         id: String(message.id),
         mode: message.mode,
+        providerFailureCategory: message.provider_failure_category,
+        responseKind: message.response_kind,
         role: message.role
       })),
       sessionId: session ? String(session.id) : null
@@ -1229,6 +1242,66 @@ export async function loadOwnedChatProposal(
     serverTaskObjective: typeof (metadata as Record<string, unknown>).serverTaskObjective === "string"
       ? (metadata as Record<string, unknown>).serverTaskObjective
       : undefined
+  };
+}
+
+export async function loadOwnedChatHandoff(
+  input: {
+    externalUserId: string;
+    handoffId: string;
+    projectId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const result = await db.execute<{ handoff: unknown }>(sql`
+    select chat_messages.metadata -> 'handoff' as handoff
+    from chat_messages
+    inner join chat_sessions on chat_sessions.id = chat_messages.session_id
+    inner join projects on projects.id = chat_sessions.project_id
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+      and chat_messages.role = 'assistant'
+      and chat_messages.metadata -> 'handoff' ->> 'id' = ${input.handoffId}
+    order by chat_messages.created_at desc
+    limit 1
+  `);
+
+  return result.rows[0]?.handoff ?? null;
+}
+
+export async function loadOwnedHandoffResponse(
+  input: {
+    externalUserId: string;
+    projectId: string;
+    requestKey: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const result = await db.execute<{ content: string; metadata: unknown }>(sql`
+    select chat_messages.content, chat_messages.metadata
+    from chat_messages
+    inner join chat_sessions on chat_sessions.id = chat_messages.session_id
+    inner join projects on projects.id = chat_sessions.project_id
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+      and chat_messages.role = 'assistant'
+      and chat_messages.metadata ->> 'sourceHandoffRequestKey' = ${input.requestKey}
+    order by chat_messages.created_at desc
+    limit 1
+  `);
+  const row = result.rows[0];
+
+  if (!row || !row.metadata || typeof row.metadata !== "object" || Array.isArray(row.metadata)) {
+    return null;
+  }
+
+  return {
+    content: String(row.content),
+    metadata: row.metadata as Record<string, unknown>
   };
 }
 

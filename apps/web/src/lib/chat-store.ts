@@ -2,6 +2,11 @@
 
 import { create } from "zustand";
 import { canonicalProjectState } from "@/lib/canonical-project-state";
+import {
+  handoffTargetDraft,
+  parseModeHandoff,
+  type ModeHandoff
+} from "@/lib/mode-handoff";
 import { hassaliDefaultModelId } from "@/lib/model-registry";
 import type { RuntimeSyncMetadata } from "@/lib/runtime-result-sync";
 import type {
@@ -36,6 +41,7 @@ export type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
+  handoff?: ModeHandoff | null;
   providerFailureCategory?: string | null;
   responseKind?: "deterministic_answer" | "identity_response" | "mode_boundary" | "provider_failure" | "safety_response" | "substantive_answer";
 };
@@ -525,22 +531,29 @@ type ChatState = {
   messages: ChatMessage[];
   input: string;
   model: string;
+  modelSelectionPolicy: "automatic" | "locked";
   mode: AiMode;
   productMode: ProductMode;
   isStreaming: boolean;
   proposal: DiffProposal | null;
+  pendingHandoff: ModeHandoff | null;
   chatSessionId: string | null;
   hydrateChat: (
     messages: Array<{
       content: string;
+      handoff?: unknown;
       id: string;
       mode?: AiMode;
+      providerFailureCategory?: string | null;
+      responseKind?: string | null;
       role: ChatRole;
     }>,
     sessionId: string | null
   ) => void;
   setInput: (input: string) => void;
   setModel: (model: string) => void;
+  setModelSelectionPolicy: (policy: "automatic" | "locked") => void;
+  activateHandoff: (handoff: ModeHandoff) => void;
   setMode: (mode: AiMode) => void;
   setProductMode: (mode: ProductMode) => void;
   clearProposal: () => void;
@@ -550,6 +563,7 @@ type ChatState = {
 
 const defaultModel = hassaliDefaultModelId;
 const proposalMarker = "HASSALI_DIFF_PROPOSAL:";
+const handoffMarker = "HASSALI_MODE_HANDOFF:";
 
 function productModeToAiMode(mode: ProductMode): AiMode {
   return mode === "ASK" ? "ASK" : "EXECUTE";
@@ -718,8 +732,11 @@ function createGreetingMessage() {
 function normalizeHydratedMessages(
   messages: Array<{
     content: string;
+    handoff?: unknown;
     id: string;
     mode?: AiMode;
+    providerFailureCategory?: string | null;
+    responseKind?: string | null;
     role: ChatRole;
   }>
 ) {
@@ -732,6 +749,7 @@ function normalizeHydratedMessages(
     )
     .map((message) => ({
       content: message.content,
+      handoff: parseModeHandoff(message.handoff),
       id: message.id,
       role: message.role,
       providerFailureCategory: "providerFailureCategory" in message && typeof message.providerFailureCategory === "string" ? message.providerFailureCategory : null,
@@ -1326,10 +1344,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [createGreetingMessage()],
   input: "",
   model: defaultModel,
+  modelSelectionPolicy: "automatic",
   mode: "ASK",
   productMode: "ASK",
   isStreaming: false,
   proposal: null,
+  pendingHandoff: null,
   chatSessionId: null,
   hydrateChat: (messages, sessionId) => {
     const hydratedMessages = normalizeHydratedMessages(messages);
@@ -1346,14 +1366,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
   setInput: (input) => set({ input }),
-  setModel: (model) => set({ model }),
+  setModel: (model) => set({ model, modelSelectionPolicy: "locked" }),
+  setModelSelectionPolicy: (modelSelectionPolicy) => set({ modelSelectionPolicy }),
+  activateHandoff: (handoff) => {
+    canonicalProjectState.setMode(handoff.targetMode);
+    set({
+      input: handoffTargetDraft(handoff),
+      mode: productModeToAiMode(handoff.targetMode),
+      pendingHandoff: handoff,
+      productMode: handoff.targetMode,
+      proposal: null
+    });
+  },
   setMode: (mode) => {
     canonicalProjectState.setMode(aiModeToProductMode(mode));
-    set({ mode, productMode: aiModeToProductMode(mode), proposal: null });
+    set({ mode, pendingHandoff: null, productMode: aiModeToProductMode(mode), proposal: null });
   },
   setProductMode: (productMode) => {
     canonicalProjectState.setMode(productMode);
-    set({ mode: productModeToAiMode(productMode), productMode, proposal: null });
+    set({ mode: productModeToAiMode(productMode), pendingHandoff: null, productMode, proposal: null });
   },
   clearProposal: () => {
     canonicalProjectState.clearProposalState();
@@ -1374,6 +1405,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   sendMessage: async (workspaceContext) => {
     const prompt = get().input.trim();
     const mode = get().mode;
+    const pendingHandoff = get().pendingHandoff;
 
     if (!prompt || get().isStreaming) {
       return;
@@ -1383,7 +1415,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const assistantMessage = createMessage("assistant", "");
     const nextMessages = [...get().messages, userMessage, assistantMessage];
 
-    set({ input: "", isStreaming: true, messages: nextMessages, proposal: null });
+    set({ input: "", isStreaming: true, messages: nextMessages, pendingHandoff: null, proposal: null });
 
     try {
       const response = await fetch("/api/ai/chat", {
@@ -1392,8 +1424,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
             .filter((message) => message.content.trim().length > 0)
             .map(({ role, content, providerFailureCategory, responseKind }) => ({ role, content, providerFailureCategory, responseKind })),
           chatSessionId: workspaceContext.chatSessionId,
+          handoff: pendingHandoff,
           mode,
           model: get().model,
+          modelSelectionPolicy: get().modelSelectionPolicy,
           productMode: get().productMode,
           projectId: workspaceContext.projectId,
           workspace: {
@@ -1455,6 +1489,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : message
           )
         }));
+      }
+
+      const handoffIndex = assistantContent.indexOf(handoffMarker);
+
+      if (handoffIndex !== -1) {
+        const visibleContent = assistantContent.slice(0, handoffIndex).trim();
+        const handoff = parseModeHandoff(assistantContent.slice(handoffIndex + handoffMarker.length).trim());
+
+        set((state) => ({
+          messages: state.messages.map((message) =>
+            message.id === assistantMessage.id
+              ? {
+                  ...message,
+                  content: visibleContent || message.content,
+                  handoff
+                }
+              : message
+          )
+        }));
+        assistantContent = visibleContent;
       }
 
       if (mode === "SUGGEST" || mode === "EXECUTE") {
