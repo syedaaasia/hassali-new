@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
+import { HassaliActivityMascot } from "@/components/ai/hassali-activity-mascot";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
 import {
@@ -13,6 +14,10 @@ import {
   useChatStore
 } from "@/lib/chat-store";
 import { selectWorkspaceContentPaths } from "@/lib/chat-request-context";
+import {
+  deriveAssistantActivity,
+  hasMeaningfulAssistantOutput
+} from "@/lib/assistant-activity";
 import { getHassaliModelOptions } from "@/lib/model-registry";
 import {
   type RuntimeApprovalResponse,
@@ -620,7 +625,6 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const modelSelectionPolicy = useChatStore((state) => state.modelSelectionPolicy);
   const productMode = useChatStore((state) => state.productMode);
   const isStreaming = useChatStore((state) => state.isStreaming);
-  const progressLabel = useChatStore((state) => state.progressLabel);
   const proposal = useChatStore((state) => state.proposal);
   const chatSessionId = useChatStore((state) => state.chatSessionId);
   const setInput = useChatStore((state) => state.setInput);
@@ -708,6 +712,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   };
 
   const sendWithContext = () => sendMessage(createWorkspaceContext());
+  const activeAssistantMessageId = isStreaming
+    ? [...messages].reverse().find((message) => message.role === "assistant")?.id ?? null
+    : null;
 
   const prepareProviderRetry = (policy: "automatic" | "locked") => {
     setModelSelectionPolicy(policy);
@@ -975,27 +982,36 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-smooth px-4 py-4 lg:px-6">
-          {messages.map((message) => (
-            <motion.div
-              animate={{ opacity: 1, y: 0 }}
-              initial={{ opacity: 0, y: 4 }}
-              key={message.id}
-              transition={{ duration: 0.16, ease: "easeOut" }}
-              className={`mx-auto w-full max-w-4xl rounded-2xl border px-4 py-3 text-[13px] leading-6 ${
-                message.role === "user"
-                  ? "border-[hsl(var(--premium-accent)/0.25)] bg-[hsl(var(--premium-accent)/0.1)] text-[hsl(var(--premium-paper))] [.light_&]:text-[#000000]"
-                  : "border-white/10 bg-white/[0.035] text-[#e8dfcf] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-900"
-              }`}
-            >
-              <div className="mb-1 flex items-center justify-between gap-2 font-medium text-foreground">
-                <span>{message.role === "user" ? "You" : "Hassali"}</span>
-                {message.role === "assistant" && isStreaming && message.content.length === 0 ? (
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[hsl(var(--premium-accent))] shadow-[0_0_16px_hsl(var(--premium-accent)/0.5)]" />
-                ) : null}
-              </div>
-              <div className="whitespace-pre-wrap break-words">
-                {message.content || progressLabel || "Thinking..."}
-              </div>
+          {messages.map((message) => {
+            const activity = deriveAssistantActivity({
+              hasVisibleOutput: hasMeaningfulAssistantOutput(message.content),
+              isRequestActive: isStreaming && message.id === activeAssistantMessageId,
+              mode: productMode
+            });
+
+            return (
+              <motion.div
+                animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: 4 }}
+                key={message.id}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className={`mx-auto w-full max-w-4xl rounded-2xl border px-4 py-3 text-[13px] leading-6 ${
+                  message.role === "user"
+                    ? "border-[hsl(var(--premium-accent)/0.25)] bg-[hsl(var(--premium-accent)/0.1)] text-[hsl(var(--premium-paper))] [.light_&]:text-[#000000]"
+                    : "border-white/10 bg-white/[0.035] text-[#e8dfcf] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-900"
+                }`}
+              >
+                <div className="mb-1 flex items-center justify-between gap-2 font-medium text-foreground">
+                  <span>{message.role === "user" ? "You" : "Hassali"}</span>
+                </div>
+                <div className="min-h-7 whitespace-pre-wrap break-words">
+                  {activity.visibility === "pre-output" ? (
+                    <HassaliActivityMascot
+                      active
+                      label={activity.label}
+                    />
+                  ) : message.content}
+                </div>
               {message.handoff ? (
                 <div
                   className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[hsl(var(--premium-accent)/0.25)] bg-[hsl(var(--premium-accent)/0.08)] px-3 py-2 text-[11px] leading-4"
@@ -1038,8 +1054,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   ) : null}
                 </div>
               ) : null}
-            </motion.div>
-          ))}
+              </motion.div>
+            );
+          })}
           {proposal ? (
             <motion.div
               animate={{ opacity: 1, y: 0 }}

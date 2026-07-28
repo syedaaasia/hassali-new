@@ -539,7 +539,6 @@ type ChatState = {
   mode: AiMode;
   productMode: ProductMode;
   isStreaming: boolean;
-  progressLabel: string | null;
   proposal: DiffProposal | null;
   pendingHandoff: ModeHandoff | null;
   chatSessionId: string | null;
@@ -578,12 +577,6 @@ let activeChatRequest: {
   prompt: string;
   userMessageId: string;
 } | null = null;
-
-function progressLabelFor(mode: ProductMode) {
-  if (mode === "CODE") return "Inspecting the project...";
-  if (mode === "WEBSITE") return "Understanding the business...";
-  return "Thinking...";
-}
 
 function productModeToAiMode(mode: ProductMode): AiMode {
   return mode === "ASK" ? "ASK" : "EXECUTE";
@@ -1368,7 +1361,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   mode: "ASK",
   productMode: "ASK",
   isStreaming: false,
-  progressLabel: null,
   proposal: null,
   pendingHandoff: null,
   chatSessionId: null,
@@ -1437,7 +1429,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         active.assistantMessageId
       ),
       pendingHandoff: active.pendingHandoff,
-      progressLabel: null,
       proposal: null
     }));
   },
@@ -1478,7 +1469,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: true,
       messages: nextMessages,
       pendingHandoff: null,
-      progressLabel: progressLabelFor(productMode),
       proposal: null
     });
 
@@ -1646,7 +1636,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
               assistantMessage.id
             ),
             pendingHandoff,
-            progressLabel: null,
             proposal: null
           }));
         }
@@ -1666,7 +1655,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } finally {
       if (activeChatRequest?.id === requestId) {
         activeChatRequest = null;
-        set({ isStreaming: false, progressLabel: null });
+        set({ isStreaming: false });
       }
     }
   }

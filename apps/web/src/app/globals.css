@@ -245,6 +245,80 @@ textarea {
   }
 }
 
+@keyframes hassali-activity-reveal {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes hassali-activity-patrol {
+  0% {
+    transform: translate3d(0, 0, 0) scaleX(1);
+  }
+  42% {
+    transform: translate3d(28px, -1px, 0) scaleX(1);
+  }
+  48% {
+    transform: translate3d(28px, 0, 0) scaleX(1);
+  }
+  50% {
+    transform: translate3d(28px, 0, 0) scaleX(-1);
+  }
+  92% {
+    transform: translate3d(0, -1px, 0) scaleX(-1);
+  }
+  98% {
+    transform: translate3d(0, 0, 0) scaleX(-1);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scaleX(1);
+  }
+}
+
+.hassali-activity-stage {
+  position: relative;
+  width: 56px;
+  height: 28px;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0;
+  animation: hassali-activity-reveal 1ms linear forwards;
+  animation-delay: 140ms;
+}
+
+.hassali-activity-mascot {
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  width: 24px;
+  height: 24px;
+  transform-origin: center bottom;
+  will-change: transform;
+  animation: hassali-activity-patrol 1.45s steps(14, end) infinite;
+}
+
+.hassali-activity-image {
+  display: block;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  pointer-events: none;
+  user-select: none;
+  filter:
+    drop-shadow(0 0 1px rgba(244, 243, 238, 0.72))
+    drop-shadow(0 2px 2px rgba(0, 0, 0, 0.24));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hassali-activity-mascot {
+    animation: none;
+    transform: translate3d(16px, 0, 0);
+    will-change: auto;
+  }
+}
+
 .hassali-hero-field {
   background:
     radial-gradient(circle at 20% 16%, hsl(var(--accent) / 0.28), transparent 18rem),
