@@ -131,6 +131,7 @@ function hasSignal(text: string, signal: string) {
 
 function cleanPhrase(value: string) {
   return value
+    .replace(/(?:[.!?]\s+|\s+(?:(?:and|but)\s+)?(?:(?:please|kindly)\s+)?)(?:do\s+not|don't|must\s+not|never|avoid|exclude)\b[\s\S]*$/i, "")
     .replace(/\b(?:in|using|with)\s+(?:interactive\s+)?(?:3d|webgl|three(?:\.js)?|threejs)[\s\S]*$/i, "")
     .replace(/\b(?:with|using|including|featuring|that|which)\b[\s\S]*$/i, "")
     .replace(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)[-\s]+pages?\b/gi, "")
