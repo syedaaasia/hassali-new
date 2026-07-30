@@ -4,6 +4,7 @@ import {
   createIssue,
   createReport
 } from "@/lib/server/ai/self-review/review-helpers";
+import { containsUnfinishedWorkMarker } from "@/lib/server/ai/unfinished-content";
 
 function normalizePath(path: string) {
   return path.trim().replace(/\\/g, "/").replace(/^\.?\//, "").replace(/\/+$/, "").replace(/\/{2,}/g, "/");
@@ -463,7 +464,7 @@ export const codeReviewer: SelfReviewReviewer = {
         }));
       }
 
-      if (/\b(?:todo|placeholder|lorem ipsum)\b/i.test(file.content)) {
+      if (containsUnfinishedWorkMarker(file.content) || /\b(?:placeholder|lorem ipsum)\b/i.test(file.content)) {
         warnings.push(codeIssue({
           category: "placeholder_marker",
           description: `${file.path} contains placeholder markers.`,

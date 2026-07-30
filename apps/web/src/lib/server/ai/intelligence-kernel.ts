@@ -9,6 +9,7 @@ import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
+import type { BehavioralDecision } from "@/lib/server/ai/behavioral-intelligence";
 
 export type KernelMode = "ASK" | "CODE" | "WEBSITE";
 export type KernelMutationPolicy = "answer_only" | "proposal_required" | "safe_auto_apply_blocked";
@@ -153,6 +154,7 @@ export type IntelligenceKernelResult = {
 };
 
 type IntelligenceKernelInput = {
+  behavior?: BehavioralDecision;
   composition: CompositionStrategy;
   decision: DecisionPlan;
   diagnostic: DiagnosticContext;
@@ -243,6 +245,20 @@ function includesPromptAny(input: IntelligenceKernelInput, terms: string[]) {
 function taskTypeFor(input: IntelligenceKernelInput) {
   const translatedFeatures = input.translatedIntent?.requestedFeatures ?? [];
 
+  if (input.behavior) {
+    if (["ANALYZE", "ANSWER", "EXPLAIN", "PLAN", "RESEARCH"].includes(input.behavior.action)) {
+      return "explanation_or_guidance";
+    }
+    if (input.behavior.action === "HANDOFF") return "mode_handoff";
+    if (["EXECUTE", "RUN", "TEST"].includes(input.behavior.action)) return "preview_runtime_action";
+    if (input.behavior.action === "BUILD") {
+      return input.mode === "WEBSITE" ? "website_generation_or_edit" : "code_system_generation";
+    }
+    if (["EDIT", "FIX"].includes(input.behavior.action)) {
+      return input.mode === "WEBSITE" ? "website_generation_or_edit" : "code_change";
+    }
+  }
+
   if (input.mode === "ASK" || input.decision.requestType === "ask" || input.intent.userIntent === "question") {
     return "explanation_or_guidance";
   }
@@ -289,6 +305,11 @@ function taskTypeFor(input: IntelligenceKernelInput) {
 }
 
 function mutationPolicyFor(input: IntelligenceKernelInput, taskType: string): KernelMutationPolicy {
+  if (input.behavior) {
+    if (input.mode === "ASK" || !input.behavior.mutationIntent) return "answer_only";
+    return "proposal_required";
+  }
+
   if (
     input.mode === "ASK" ||
     input.decision.requestType === "ask" ||
@@ -889,8 +910,14 @@ export function buildIntelligenceKernel(input: IntelligenceKernelInput): Intelli
   const executionProposal: ExecutionProposal = {
     allowedRuntimeActions: ["restart_runtime", "reload_preview", "stop_runtime"],
     approvalRequired: true,
-    canMutateFiles: input.mode !== "ASK" && selectedPlan.expectedFiles.length > 0,
-    canRunRuntimeActions: input.mode !== "ASK" && selectedPlan.runtimeActions.length > 0,
+    canMutateFiles:
+      input.mode !== "ASK" &&
+      (input.behavior?.mutationIntent ?? true) &&
+      selectedPlan.expectedFiles.length > 0,
+    canRunRuntimeActions:
+      input.mode !== "ASK" &&
+      (input.behavior?.executionIntent ?? true) &&
+      selectedPlan.runtimeActions.length > 0,
     mutationScope: input.mode === "ASK" ? "none" : "selected_project",
     summary:
       input.mode === "ASK"

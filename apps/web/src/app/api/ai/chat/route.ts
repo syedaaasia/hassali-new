@@ -78,12 +78,16 @@ import {
   generatePlannedWebsiteFiles,
   type SiteDomain
 } from "@/lib/server/ai/domain-site-generator";
-import { assertWebsiteGenerationContract } from "@/lib/server/ai/generation-brief";
+import {
+  assertWebsiteGenerationContract,
+  type CodeGenerationBrief
+} from "@/lib/server/ai/generation-brief";
 import {
   createReactProductPreviewMetadata,
   generateCrmPythonStreamlitSource,
   generateCrmViteSource,
-  generateMobilePhoneInventoryStreamlitSource
+  generateMobilePhoneInventoryStreamlitSource,
+  validateCodeProductFidelity
 } from "@/lib/server/ai/code-app-source-generator";
 import {
   buildExecutionPlan,
@@ -134,6 +138,10 @@ import {
   type IntelligenceKernelResult,
   type KernelRoutingDecision
 } from "@/lib/server/ai/intelligence-kernel";
+import {
+  resolveBehavioralDecision,
+  type BehavioralDecision
+} from "@/lib/server/ai/behavioral-intelligence";
 import {
   buildProposalRoutingDecision,
   type ProposalRoutingDecision
@@ -1081,9 +1089,15 @@ function titleCaseWords(value: string) {
     .join(" ");
 }
 
-function createCodeAppPreview(prompt: string): CodeAppPreview {
+function createCodeAppPreview(
+  prompt: string,
+  brief?: CodeGenerationBrief | null
+): CodeAppPreview {
   const promptText = prompt.toLowerCase();
-  const appKind = promptText.includes("crm")
+  const productBrief = brief?.productBrief;
+  const appKind = productBrief
+    ? titleCaseWords(productBrief.productType.replace(/_/g, " "))
+    : promptText.includes("crm")
     ? "CRM"
     : promptText.includes("inventory")
       ? "Inventory system"
@@ -1092,22 +1106,33 @@ function createCodeAppPreview(prompt: string): CodeAppPreview {
         : promptText.includes("pos")
           ? "POS system"
           : "software app";
-  const appName = extractRequestedAppName(prompt, appKind === "CRM" ? "Hello CRM" : titleCaseWords(appKind));
+  const appName = extractRequestedAppName(
+    prompt,
+    appKind === "CRM" ? "Hello CRM" : titleCaseWords(appKind)
+  );
 
   return {
     appKind,
     appName,
-    entities:
+    entities: productBrief?.expectedDataModel.length
+      ? productBrief.expectedDataModel
+      :
       appKind === "CRM"
         ? ["User", "Customer", "Deal/Record", "Invoice/Subscription"]
         : ["User", "Record", "Activity", "Report"],
-    integrations: [
-      "Auth placeholder",
-      "Database placeholder",
-      promptText.includes("billing") ? "Billing provider placeholder" : "Integration placeholder"
-    ],
-    mockDataNotice: "Preview uses mock dashboard data only; no database, auth provider, billing provider, or file mutation runs before approval.",
-    screens:
+    integrations: productBrief?.complexity === "simple"
+      ? ["Local browser state"]
+      : [
+          "Auth placeholder",
+          "Database placeholder",
+          promptText.includes("billing") ? "Billing provider placeholder" : "Integration placeholder"
+        ],
+    mockDataNotice: productBrief?.complexity === "simple"
+      ? "Preview uses local browser state only; no backend, account, or file mutation runs before approval."
+      : "Preview uses mock dashboard data only; no database, auth provider, billing provider, or file mutation runs before approval.",
+    screens: productBrief?.expectedScreens.length
+      ? productBrief.expectedScreens
+      :
       appKind === "CRM"
         ? ["Login/Auth", "Dashboard", "Customers", "Records/Deals", "Billing", "Settings"]
         : ["Login/Auth", "Dashboard", "Records", "Reports", "Settings"]
@@ -2079,7 +2104,8 @@ function createLocalProposal(
 
   if (decision.requestType === "code_system_generation" || (proposalContext?.mode === "CODE" && proposalContext.codeGenerationBrief)) {
     const promptText = prompt.toLowerCase();
-    const rawAppPreview = createCodeAppPreview(prompt);
+    const codeBrief = proposalContext?.codeGenerationBrief ?? null;
+    const rawAppPreview = createCodeAppPreview(prompt, codeBrief);
     const systemName = promptText.includes("crm")
       ? "CRM"
       : promptText.includes("inventory")
@@ -2102,7 +2128,6 @@ function createLocalProposal(
       ].filter(Boolean) as string[])
     );
     const usePythonStack = promptRequestsPythonStack(prompt) && !promptRequestsReactFrontendStack(prompt);
-    const codeBrief = proposalContext?.codeGenerationBrief ?? null;
     const promptRequestsReactApp = promptRequestsReactFrontendStack(prompt) || codeBrief?.requestedStack === "react_vite" || codeBrief?.preferredFramework === "react_vite";
     const promptMentionsPhoneInventory = /\b(?:mobile phone shop|phone shop|smartphone store|mobile store|cellphone shop|phone retail|phone accessories|iphone|samsung|android phones?|unlocked phones?|phone repair shop)\b/.test(promptText);
     const isMobilePhoneInventory =
@@ -2165,10 +2190,28 @@ function createLocalProposal(
           brief: codeBrief,
           prompt: effectiveGenerationPrompt
         }), workspace);
+    const productFidelity = codeBrief
+      ? validateCodeProductFidelity(codeBrief.productBrief, sourceFiles)
+      : null;
+    if (productFidelity && !productFidelity.passed) {
+      return {
+        approvalDisabled: true,
+        approvalRecommendation: "reject",
+        blockedReason: `CODE_PRODUCT_FIDELITY_FAILED: ${productFidelity.failures.join(" ")}`,
+        changes: [],
+        id: `proposal-${Date.now()}`,
+        mode,
+        projectId: diagnostic.projectId,
+        shouldBlockExecution: true,
+        status: "pending",
+        summary: "Hassali rejected generated CODE files that drifted from the request-specific Product Brief. No file changes are proposed."
+      };
+    }
     const reactProductPreview = isPythonPreview
       ? null
       : createReactProductPreviewMetadata({
           appName: effectiveAppName,
+          brief: codeBrief,
           prompt: effectiveGenerationPrompt
         });
 
@@ -2212,7 +2255,9 @@ function createLocalProposal(
             ? `Detected CODE-mode inventory management software for a mobile phone shop. I will create a Python / Streamlit inventory scaffold with products, stock, suppliers, sales, repairs, billing, and documentation. No package install or runtime command runs before approval.`
           : usePythonStack || codeBrief?.preferredFramework === "streamlit"
           ? `Detected a CODE-mode ${appPreview.appName} ${systemName} request with explicit Python stack intent and ${requestedCapabilities.join(", ")}. I will create a Python / Streamlit CRM scaffold with mock data, dashboard metrics, billing charts, and documentation. No package install or runtime command runs before approval.`
-          : `${requestedCodeApp.requestKind === "replace_current_app" && existingCodeApp ? `This will replace the existing CODE app in this project (${existingCodeApp.appName}) with ${requestedCodeApp.appName}. ` : ""}Detected a CODE-mode ${appPreview.appName} React mini-product request. I will create a Product Intelligence Blueprint-driven Vite React app with tabs, local state, forms, computed metrics, realistic mock data, README, architecture, data model, and security docs. No package install or runtime command runs before approval.`
+          : codeBrief?.productBrief.complexity === "simple"
+            ? `Detected a focused CODE-mode ${codeBrief.productBrief.productType.replace(/_/g, " ")} request. I will create a small React/Vite app around ${codeBrief.productBrief.primaryEntity} and the requested actions only. No package install or runtime command runs before approval.`
+            : `${requestedCodeApp.requestKind === "replace_current_app" && existingCodeApp ? `This will replace the existing CODE app in this project (${existingCodeApp.appName}) with ${requestedCodeApp.appName}. ` : ""}Detected a CODE-mode ${appPreview.appName} React mini-product request. I will create a request-specific Vite React app with local state and the required product workflows. No package install or runtime command runs before approval.`
     };
     const architecture = `# ${systemName.toUpperCase()} Architecture Plan
 
@@ -3386,6 +3431,21 @@ function compactIntelligenceKernel(kernel: IntelligenceKernelResult) {
     shouldProceed: kernel.shouldProceed,
     summary: kernel.summary,
     verificationChecks: kernel.verificationPlan.checks
+  };
+}
+
+function compactBehavioralDecision(behavior: BehavioralDecision) {
+  return {
+    action: behavior.action,
+    answerValidation: behavior.answerContract,
+    confidence: behavior.confidence,
+    handoffIntent: behavior.handoffIntent,
+    mode: behavior.mode,
+    mutationIntent: behavior.mutationIntent,
+    referencedObjective: behavior.referencedObjective,
+    requestedCount: behavior.requestedCount,
+    requestedEntityCount: behavior.requestedEntities.length,
+    resolvedObjective: behavior.objective
   };
 }
 
@@ -5591,7 +5651,14 @@ export async function POST(request: Request) {
         projectName: null
       };
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
-  const effectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
+  const rawEffectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
+  const behavior = resolveBehavioralDecision({
+    messages,
+    prompt: rawEffectiveUserPrompt,
+    selectedMode: productMode,
+    workspace: requestedWorkspace
+  });
+  const effectiveUserPrompt = behavior.resolvedRequest;
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const intelligencePreflight = await runIntelligencePreflight({
     messages,
@@ -5822,6 +5889,7 @@ export async function POST(request: Request) {
   });
   const composition = buildCompositionStrategy(intent);
   const kernel = buildIntelligenceKernel({
+    behavior,
     blueprint,
     composition,
     compositionPlan,
@@ -5902,6 +5970,7 @@ export async function POST(request: Request) {
   const pendingUserMessage = {
     content: latestUserPrompt,
     metadata: {
+      behavioralDecision: compactBehavioralDecision(behavior),
       model,
       askRuntimeContext: mode === "ASK" ? askRuntimeContext : undefined,
       askLiveIntent: mode === "ASK" ? askLiveIntent : undefined,
@@ -6013,6 +6082,7 @@ export async function POST(request: Request) {
     intelligenceToolProviderContext
   ].filter(Boolean).join("\n\n");
   const generatedHandoff = buildModeHandoff({
+    behavior,
     messages,
     projectId: requestedProjectId,
     projectRevision: persistence?.projectRevision ?? null,
@@ -6043,6 +6113,68 @@ export async function POST(request: Request) {
       "x-hassali-ask-provider-failure": "none",
       "x-hassali-ask-response-kind": generatedHandoff.targetMode === "ASK" ? "deterministic_answer" : "mode_boundary"
     }));
+  }
+
+  if (productMode !== "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
+    const expertAnswer = await runAskBrain({
+      abortSignal: taskSignal,
+      askRuntimeContext,
+      behavior,
+      intelligenceContext: askIntelligenceContext,
+      messages,
+      model,
+      modelSelectionPolicy,
+      productMode,
+      prompt: effectiveUserPrompt,
+      projectName: workspace.projectName ?? null,
+      workspace
+    });
+    if (
+      expertAnswer.decision.fallbackModel &&
+      expertAnswer.decision.providerFailureCategory !== "request_cancelled" &&
+      !taskSignal.aborted
+    ) {
+      recordBetaTelemetry({
+        complexityClass: intelligencePreflight.complexity.class,
+        event: "provider_fallback",
+        failureCategory: expertAnswer.decision.fallbackReason,
+        fallbackUsed: true,
+        mode: productMode,
+        providerId: expertAnswer.decision.executionProvider
+      });
+    }
+    const selfReview = runSelfReviewForAskAnswer({
+      answer: expertAnswer.answer,
+      generator: `${productMode.toLowerCase()}_expert_answer`,
+      projectId: requestedProjectId,
+      prompt: effectiveUserPrompt
+    });
+
+    persistence = await persistRequestMessage(persistence, {
+      content: expertAnswer.answer,
+      metadata: {
+        askBrain: expertAnswer.decision,
+        askBrainIntent: expertAnswer.classification.intent,
+        behavioralDecision: compactBehavioralDecision(behavior),
+        deterministic:
+          expertAnswer.decision.path === "deterministic_required" ||
+          expertAnswer.decision.path === "deterministic_preferred",
+        intelligenceKernel: compactIntelligenceKernel(kernel),
+        intelligenceTools: compactChatToolResults(intelligenceToolResults),
+        kernelRoutingDecision: kernel.routingDecision,
+        model,
+        productMode,
+        projectContract: summarizeProjectContract(projectContract),
+        selfReview: compactSelfReview(selfReview)
+      },
+      role: "assistant"
+    });
+
+    return respond(createTextStream(
+      expertAnswer.answer,
+      persistence?.sessionId,
+      createAskBrainDebugHeaders(expertAnswer.decision)
+    ));
   }
 
   if (mode === "ASK") {
@@ -6081,6 +6213,7 @@ export async function POST(request: Request) {
     const askBrain = await runAskBrain({
       abortSignal: taskSignal,
       askRuntimeContext,
+      behavior,
       intelligenceContext: askIntelligenceContext,
       messages,
       model,
@@ -6196,6 +6329,7 @@ export async function POST(request: Request) {
     const askBrain = await runAskBrain({
       abortSignal: taskSignal,
       askRuntimeContext,
+      behavior,
       intelligenceContext: askIntelligenceContext,
       messages,
       model,
@@ -6367,27 +6501,6 @@ export async function POST(request: Request) {
       selectedModel: model,
       taskObjective: effectiveUserPrompt
     }));
-  }
-
-  if (mode !== "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
-    const answerOnlyContent =
-      "I can answer this without changing files. " +
-      `${kernel.routingDecision.routingExplanation} ` +
-      "No proposal was created and no project files were touched.";
-
-    persistence = await persistRequestMessage(persistence, {
-      content: answerOnlyContent,
-      metadata: {
-        intelligenceKernel: compactIntelligenceKernel(kernel),
-        kernelRoutingDecision: kernel.routingDecision,
-        model,
-        productMode,
-        projectContract: summarizeProjectContract(projectContract)
-      },
-      role: "assistant"
-    });
-
-    return respond(createTextStream(answerOnlyContent, persistence?.sessionId));
   }
 
   const directInvoiceArtifact = productMode === "WEBSITE" && mode === "EXECUTE" && isInvoiceRequest(effectiveUserPrompt);

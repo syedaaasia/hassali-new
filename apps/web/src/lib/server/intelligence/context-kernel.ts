@@ -8,6 +8,7 @@ import {
 import type { DeferredToolSelection } from "./deferred-tool-kernel";
 import type { IntelligencePlan, PlanFact } from "./plan-kernel";
 import type { IntelligenceProductMode, SkillSelectionResult } from "./skill-kernel";
+import { buildConversationObjectiveState } from "../ai/behavioral-intelligence";
 
 export type IntelligenceConversationMessage = {
   content: string;
@@ -25,10 +26,13 @@ export type ContextLayer = {
 
 export type CompactedTaskState = {
   activeConstraints: string[];
+  activeTopic: string | null;
   completedWork: string[];
   currentObjective: string;
   factLedger: PlanFact[];
   nextActions: string[];
+  recentObjectives: string[];
+  referencedEntities: string[];
   unresolvedDecisions: string[];
   verificationState: string[];
 };
@@ -121,9 +125,15 @@ function compactConversation(messages: IntelligenceConversationMessage[], plan: 
   ];
   const failed = valuesFor("Failed");
   const repaired = valuesFor("Repaired");
+  const objectiveState = buildConversationObjectiveState(messages);
 
   return {
-    activeConstraints: Array.from(new Set([...plan.mutationScope, ...valuesFor("Constraint")])),
+    activeConstraints: Array.from(new Set([
+      ...plan.mutationScope,
+      ...valuesFor("Constraint"),
+      ...objectiveState.acceptedConstraints
+    ])),
+    activeTopic: objectiveState.activeTopic,
     completedWork: Array.from(new Set([...valuesFor("Completed"), ...repaired])),
     currentObjective: valuesFor("Objective")[0] ?? plan.objective,
     factLedger: [...plan.facts, ...historyFacts],
@@ -132,6 +142,8 @@ function compactConversation(messages: IntelligenceConversationMessage[], plan: 
       ...valuesFor("Next"),
       ...valuesFor("Pending")
     ])),
+    recentObjectives: objectiveState.recentObjectives,
+    referencedEntities: objectiveState.referencedEntities,
     unresolvedDecisions: Array.from(new Set([
       ...(plan.genuineUserDecision ? [plan.genuineUserDecision] : []),
       ...valuesFor("Decision")

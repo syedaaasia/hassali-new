@@ -337,7 +337,7 @@ function isCodingTextRequest(prompt: string) {
 }
 
 function isConceptualTechnicalExplanation(prompt: string) {
-  const asksForExplanation = /\b(?:explain|teach|what is|how does|when (?:should|not) (?:i|to))\b/i.test(prompt);
+  const asksForExplanation = /\b(?:explain|teach|what is|what does|what .{1,60} mean|how does|when (?:should|not) (?:i|to))\b/i.test(prompt);
   const technicalSubject = /\b(?:react|next\.?js|typescript|javascript|server components?|api|database|docker|git|sql|css|html|webgl|browser|component|framework|architecture)\b/i.test(prompt);
   const asksForImplementation = /\b(?:write|create|build|implement|give me|show me|generate|fix|debug|setup|install|run|commands?|code\s+(?:for|to))\b/i.test(prompt);
 

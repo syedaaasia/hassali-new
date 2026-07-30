@@ -58,6 +58,7 @@ export type WebsiteEditIntent = {
 };
 
 const editVerbPattern = /\b(?:change|update|make|use|turn|enable|convert|add|remove|rename|replace|rewrite|rebuild|redesign|improve|polish|edit|darken|lighten)\b/i;
+const businessNameFactPattern = /^(?:our\s+(?:(?:business|brand|company|site|website)\s+)?name|(?:my|the)\s+(?:business|brand|company|site|website)\s+name)\s+(?:is|should be)\s+\S/i;
 
 const pagePattern = /\b(?:homepage|home|about(?: us)?|services?|products?|pricing|contact|blog|checkout|cart|gallery)(?:\s+page)?\b/i;
 const sectionPattern = /\b(?:hero|footer|navigation|navbar|header|testimonials?|faq|cta|call to action|product grid|service grid)\b/i;
@@ -99,6 +100,7 @@ export function classifyWebsiteRequestScope(prompt: string): WebsiteRequestScope
   if (sectionPattern.test(text)) return "section_edit";
   if (/\b(?:theme|palette|color|colour|dark mode|glassmorphism|luxury|premium|apple style)\b/i.test(text)) return "style_theme_edit";
   if (/\b(?:rewrite|replace|update|fix|add)\b[\s\S]{0,60}\b(?:copy|text|grammar|faq|description|content)\b/i.test(text)) return "content_edit";
+  if (businessNameFactPattern.test(text)) return "targeted_edit";
   if (/^(?:fix|improve|update|change|make better|make it better)(?:\s+(?:my|the|this))?\s*(?:website|site|it|this)?[.!?]*$/i.test(text)) {
     return "ambiguous_edit";
   }
@@ -128,6 +130,28 @@ function extractQuotedOrTrailingValue(prompt: string, pattern: RegExp) {
   return raw?.replace(/^["'`]+|["'`.]+$/g, "").trim();
 }
 
+function containsUnsafeBusinessNameCharacter(value: string) {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127 || "<>{}[]\\".includes(character);
+  });
+}
+
+function normalizeBusinessName(value: string | undefined) {
+  const normalized = value?.replace(/\s+/g, " ").trim();
+
+  if (
+    !normalized ||
+    normalized.length > 80 ||
+    containsUnsafeBusinessNameCharacter(normalized) ||
+    !/[a-z0-9]/i.test(normalized)
+  ) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
 function extractServices(prompt: string) {
   const match = prompt.match(/\b(?:change|update|replace|edit)\s+services\s+(?:to|with|as)\s+(.+)$/i);
   const raw = match?.[1]?.trim();
@@ -141,7 +165,7 @@ function extractServices(prompt: string) {
 }
 
 export function hasWebsiteEditSignal(prompt: string) {
-  return editVerbPattern.test(prompt);
+  return editVerbPattern.test(prompt) || businessNameFactPattern.test(prompt.trim());
 }
 
 export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
@@ -155,7 +179,16 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const phone = extractQuotedOrTrailingValue(prompt, /\b(?:phone|phone number|number)\s+(?:to|as|with)\s+(.+)$/i);
   const email = extractQuotedOrTrailingValue(prompt, /\b(?:email|email address)\s+(?:to|as|with)\s+([^\s]+@[^\s]+)$/i);
   const address = extractQuotedOrTrailingValue(prompt, /\b(?:address|location)\s+(?:to|as|with)\s+(.+)$/i);
-  const businessName = extractQuotedOrTrailingValue(prompt, /\b(?:business name|site name|brand name|rename site)\s+(?:to|as|with)\s+(.+)$/i);
+  const businessName = normalizeBusinessName(
+    extractQuotedOrTrailingValue(
+      prompt,
+      /\b(?:business name|site name|brand name|rename site)\s+(?:to|as|with)\s+(.+?)(?=\s+(?:and|but)\s+(?:use|make|change|update|add|remove|set|keep)\b|$)/i
+    )
+  );
+  const explicitBusinessName = businessName ?? normalizeBusinessName(extractQuotedOrTrailingValue(
+    prompt,
+    /\b(?:our\s+(?:(?:business|brand|company|site|website)\s+)?name|(?:my|the)\s+(?:business|brand|company|site|website)\s+name)\s+(?:is|should be)\s+(.+?)(?=\s+(?:and|but)\s+(?:use|make|change|update|add|remove|set|keep)\b|$)/i
+  ));
   const primaryCta = extractQuotedOrTrailingValue(prompt, /\b(?:cta|button text|main cta)\s+(?:to|say|as|with)\s+(.+)$/i);
   const pageToRemove = extractQuotedOrTrailingValue(prompt, /\bremove\s+(?:the\s+)?([a-z0-9 -]+?)\s+page\b/i);
   const services = extractServices(prompt);
@@ -192,7 +225,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
     !phone &&
     !email &&
     !address &&
-    !businessName &&
+    !explicitBusinessName &&
     !primaryCta &&
     !wantsTestimonials;
 
@@ -207,7 +240,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   else if (wantsWebgl) editType = "set_webgl";
   else if (wantsCarousel) editType = "add_carousel";
   else if (phone || email || address || /\bcontact details\b/i.test(prompt)) editType = "contact_info";
-  else if (businessName) editType = "business_name";
+  else if (explicitBusinessName) editType = "business_name";
   else if (primaryCta) editType = "cta_text";
   else if (wantsTestimonials) editType = "add_testimonials";
   else if (pageToRemove) editType = "remove_page";
@@ -246,7 +279,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
     editType,
     extractedValues: {
       address,
-      businessName,
+      businessName: explicitBusinessName,
       colorIntent: editType === "color_palette" ? prompt : undefined,
       email,
       experienceSectionTarget,

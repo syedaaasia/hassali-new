@@ -166,6 +166,7 @@ export type WebsiteQualityBlueprint = {
   assets: WebsiteAssetIntelligence;
   brand: {
     generatedName: string;
+    nameProvenance: "GENERATED_PLACEHOLDER" | "USER_SUPPLIED";
     logo: WebsiteLogoBlueprint;
     logoStrategy: "generated-local-svg";
     palette: WebsitePalette;
@@ -804,10 +805,9 @@ function pageSections(input: { page: string; profile: DomainProfile }) {
       title: "Take the next step"
     }
   ];
-  const trustItems = input.profile.trustSignals.map((signal) => ({
-    detail: `Ask how ${signal.toLowerCase()} applies to the option, service, or project you are considering.`,
-    title: signal
-  }));
+  const trustItems = input.profile.trustSignals.map((signal) =>
+    visitorTrustSignal(signal, input.profile.businessType)
+  );
   const core = input.profile.sectionIdeas.map(([title, body, kind], index) => createSection({
     body,
     eyebrow: titleCase(input.profile.businessType),
@@ -845,9 +845,42 @@ function pageSections(input: { page: string; profile: DomainProfile }) {
   return [
     createSection({ body: `Understand the choices and working principles behind this ${input.profile.businessType}.`, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-story`, items: entities.slice(0, 3), kind: "content", title: `${pageName} and ${input.profile.tagline.toLowerCase()}` }),
     createSection({ body: input.profile.sectionIdeas[1]?.[1] ?? input.profile.primaryGoal, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-process`, items: entities.slice(0, 5), kind: "process", title: input.profile.sectionIdeas[1]?.[0] ?? `${pageName} process` }),
-    createSection({ body: `Understand the details that shape a confident ${input.profile.businessType} decision.`, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-trust`, items: input.profile.trustSignals.map((signal) => ({ detail: "Ask about this when choosing the option that fits your needs.", title: signal })), kind: "trust", title: `${pageName} details` }),
+    createSection({ body: `Understand the details that shape a confident ${input.profile.businessType} decision.`, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-trust`, items: input.profile.trustSignals.map((signal) => visitorTrustSignal(signal, input.profile.businessType)), kind: "trust", title: `${pageName} details` }),
     createSection({ body: input.profile.faq[0]?.[1] ?? input.profile.primaryGoal, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-faq`, items: input.profile.faq.map(([title, detail]) => ({ detail, title })), kind: "faq", title: `${pageName} questions` })
   ];
+}
+
+function visitorTrustSignal(signal: string, businessType: string) {
+  const normalized = signal.toLowerCase().trim();
+  const exact: Record<string, { detail: string; title: string }> = {
+    "general-information boundary": {
+      detail: "Understand what the initial information can clarify and when tailored legal advice requires a direct consultation.",
+      title: "Clear legal information"
+    },
+    "no outcome guarantees": {
+      detail: "Receive a realistic explanation of process, options, and uncertainty without promises about a particular result.",
+      title: "Honest expectations"
+    },
+    "secure-intake reminder": {
+      detail: "Start with only the information needed for an initial inquiry, then use the firm's confirmed confidential intake process.",
+      title: "Careful initial inquiry"
+    }
+  };
+  if (exact[normalized]) return exact[normalized];
+
+  const title = normalized
+    .replace(/^editable\s+/, "Current ")
+    .replace(/^sample\s+/, "Representative ")
+    .replace(/^prototype\s+/, "Featured ")
+    .replace(/^no fabricated\s+/, "Verified ")
+    .replace(/^no invented\s+/, "Clear ")
+    .replace(/^honest\s+/, "Clear ")
+    .replace(/-/g, " ");
+
+  return {
+    detail: `Ask how this ${businessType} detail applies to the option, service, or project you are considering.`,
+    title: titleCase(title)
+  };
 }
 
 function domainCtas(profileValue: DomainProfile) {
@@ -975,7 +1008,8 @@ export function buildWebsiteQualityBlueprint(input: {
   });
   const semanticRepairApplied = initialConsistency.repairRecommended && semantic.source !== "generic_fallback" && semantic.source !== "canonical_taxonomy";
   if (semanticRepairApplied) selectedProfile = genericSemanticProfile(input.prompt, input.plan);
-  const brandName = cleanBrand(input.intent.brandName) ?? generatedBrand(selectedProfile, `${input.prompt}:${input.plan.pages.join(",")}`);
+  const userSuppliedBrand = cleanBrand(input.intent.brandName);
+  const brandName = userSuppliedBrand ?? generatedBrand(selectedProfile, `${input.prompt}:${input.plan.pages.join(",")}`);
   const contractCta = input.brief?.ctaPatterns[0]?.trim();
   const ctas = domainCtas(selectedProfile);
   const domainId = input.brief?.domainId ?? input.plan.sourceOfTruthDomain;
@@ -1101,6 +1135,7 @@ export function buildWebsiteQualityBlueprint(input: {
     assets,
     brand: {
       generatedName: brandName,
+      nameProvenance: userSuppliedBrand ? "USER_SUPPLIED" : "GENERATED_PLACEHOLDER",
       logo: logoBlueprint(brandName, selectedProfile, domainId),
       logoStrategy: "generated-local-svg",
       palette: brandPalette,

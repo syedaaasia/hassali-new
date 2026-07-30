@@ -13,7 +13,6 @@ import {
   buildModeHandoff,
   handoffRequestKey
 } from "../mode-handoff-orchestrator";
-import { handoffTargetDraft } from "../../../mode-handoff";
 
 type TestCase = { name: string; run: () => Promise<void> | void };
 const tests: TestCase[] = [];
@@ -193,7 +192,7 @@ test("analytical ASK questions do not become build handoffs", () => {
   assert.equal(handoff, null);
 });
 
-test("CODE explanatory work prepares an ASK handoff", () => {
+test("CODE explanatory work stays in CODE without a handoff", () => {
   const handoff = buildModeHandoff({
     messages: [{ role: "user", content: "Explain why this app's tests are failing." }],
     projectId: "project-1",
@@ -202,11 +201,10 @@ test("CODE explanatory work prepares an ASK handoff", () => {
     selectedMode: "CODE",
     workspace: { fileList: ["package.json", "src/App.tsx"] }
   });
-  assert.equal(handoff?.targetMode, "ASK");
-  assert.equal(handoff?.acceptanceCriteria[0], "Return analysis only; do not create a proposal or mutate files.");
+  assert.equal(handoff, null);
 });
 
-test("CODE to ASK keeps bounded execution evidence and the original objective", () => {
+test("CODE follow-up analysis stays in CODE without a handoff", () => {
   const handoff = buildModeHandoff({
     messages: [
       { role: "user", content: "Build a safe account settings screen." },
@@ -222,12 +220,7 @@ test("CODE to ASK keeps bounded execution evidence and the original objective", 
     selectedMode: "CODE",
     workspace: { fileList: ["src/Settings.tsx", "src/routes.tsx"] }
   });
-  assert.equal(handoff?.targetMode, "ASK");
-  assert(handoff?.relevantContext.some((value) => value.includes("Original CODE objective: Build a safe account settings screen.")));
-  assert(handoff?.relevantContext.some((value) => value.includes("Files changed: src/Settings.tsx")));
-  assert(handoff?.relevantContext.some((value) => value.includes("Verification: typecheck passed.")));
-  assert(handoff?.relevantContext.some((value) => value.includes("Limitation: browser verification was not run.")));
-  assert(handoff && handoffTargetDraft(handoff).includes("Context (reference only; newest user instruction wins):"));
+  assert.equal(handoff, null);
 });
 
 test("continuation inherits the prior build objective", () => {

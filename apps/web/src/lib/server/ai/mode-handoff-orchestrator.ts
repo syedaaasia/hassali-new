@@ -14,6 +14,7 @@ import {
   redactWorkspaceSecrets,
   type WorkspaceContextInput
 } from "./workspace-context-engine";
+import type { BehavioralDecision } from "./behavioral-intelligence";
 import { sanitizeUntrustedToolText } from "../intelligence/security-kernel";
 
 type ConversationMessage = {
@@ -22,6 +23,7 @@ type ConversationMessage = {
 };
 
 export type HandoffBuildInput = {
+  behavior?: BehavioralDecision;
   messages: ConversationMessage[];
   projectId: string | null;
   projectRevision: string | null;
@@ -60,13 +62,18 @@ function inferTargetMode(
   selectedMode: HandoffMode,
   prompt: string,
   intent: IntentConstraintResult,
-  priorObjective: string
+  priorObjective: string,
+  behavior?: BehavioralDecision
 ): HandoffMode | null {
-  if (selectedMode === "CODE" && intent.taskType === "question_or_explanation") return "ASK";
   const explicitBuildOrEdit = /\b(?:build|create|design|generate|implement|write|apply|develop|add|modify|edit|replace|rewrite|rebuild|start over|make)\b/i.test(prompt);
   const analyticalRequest = /\b(?:compare|comparison|recommend|recommendation|which|should i|tradeoffs?|explain|why|how does|what is)\b/i.test(prompt);
 
-  if (selectedMode !== "ASK" || !intent.mutationIntent || !explicitBuildOrEdit || analyticalRequest) return null;
+  if (
+    selectedMode !== "ASK" ||
+    !(behavior?.handoffIntent ?? intent.mutationIntent) ||
+    !explicitBuildOrEdit ||
+    analyticalRequest
+  ) return null;
 
   const combined = `${prompt}\n${priorObjective}`;
   if (intent.semanticMode === "WEBSITE" || /\b(?:website|landing page|web page|static site)\b/i.test(combined)) {
@@ -169,7 +176,13 @@ export function buildModeHandoff(input: HandoffBuildInput): ModeHandoff | null {
     selectedMode: input.selectedMode,
     workspace: input.workspace
   });
-  const targetMode = inferTargetMode(input.selectedMode, input.prompt, intent, priorObjective);
+  const targetMode = inferTargetMode(
+    input.selectedMode,
+    input.prompt,
+    intent,
+    priorObjective,
+    input.behavior
+  );
 
   if (!targetMode) return null;
 
@@ -255,9 +268,5 @@ export function handoffContextForTarget(handoff: ModeHandoff, newestUserPrompt: 
 }
 
 export function handoffVisibleAnswer(handoff: ModeHandoff) {
-  if (handoff.targetMode === "ASK") {
-    return "This is an analysis request. I kept CODE from generating files and prepared the relevant objective for ASK mode.";
-  }
-
   return `ASK stays read-only, so I did not create or change files. I prepared a structured handoff to ${handoff.targetMode}; review it, then switch modes explicitly if you want an approval-first proposal.`;
 }

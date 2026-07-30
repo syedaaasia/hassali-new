@@ -49,6 +49,15 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function escapeHtmlText(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function setOrAppendContractLine(content: string, key: string, value: string) {
   const pattern = new RegExp(`^${escapeRegExp(key)}:\\s*.*$`, "im");
 
@@ -206,15 +215,21 @@ function dedupePhoneContactDetails(content: string, phone: string) {
   });
 }
 
-function replaceBrand(content: string, context: WebsiteEditContext, businessName: string) {
+function replaceBrand(
+  content: string,
+  context: WebsiteEditContext,
+  businessName: string,
+  htmlContext = false
+) {
   let next = content;
+  const replacement = htmlContext ? escapeHtmlText(businessName) : businessName;
   const candidates = unique([
     context.brandName ?? "",
     context.displayName ?? ""
   ]);
 
   for (const candidate of candidates) {
-    next = next.replace(new RegExp(escapeRegExp(candidate), "g"), businessName);
+    next = next.replace(new RegExp(escapeRegExp(candidate), "g"), replacement);
   }
 
   return next;
@@ -630,13 +645,20 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
 
   if (intent.editType === "business_name" && intent.extractedValues.businessName) {
     for (const path of htmlFiles(context)) {
-      const next = replaceBrand(files[path] ?? "", context, intent.extractedValues.businessName);
+      const next = replaceBrand(files[path] ?? "", context, intent.extractedValues.businessName, true);
       if (next !== files[path]) changes.push(change(path, next, "Updates visible brand/business name."));
     }
 
-    changes.push(change(contractPath, updateHassali(hassali, {
-      "brand/app/site name": intent.extractedValues.businessName
-    }), contractSummary));
+    const renamedContract = replaceBrand(hassali, context, intent.extractedValues.businessName);
+    const updatedContract = updateHassali(renamedContract, {
+      "brand/app/site name": intent.extractedValues.businessName,
+      brandNameConfirmed: "true",
+      brandNameProvenance: "USER_SUPPLIED"
+    }).replace(
+      /^-\s+\*\*Brand Name Provenance:\*\*.*$/im,
+      "- **Brand Name Provenance:** USER_SUPPLIED"
+    );
+    changes.push(change(contractPath, updatedContract, contractSummary));
   }
 
   if ((intent.editType === "hero_style" || intent.editType === "color_palette") && files["styles.css"]) {

@@ -62,6 +62,7 @@ const liveCurrentPatterns = [
 const timezoneAliases: Record<string, string> = {
   "america/new york": "America/New_York",
   "asia/kolkata": "Asia/Kolkata",
+  amsterdam: "Europe/Amsterdam",
   bangkok: "Asia/Bangkok",
   dubai: "Asia/Dubai",
   faisalabad: "Asia/Karachi",
@@ -413,6 +414,39 @@ function getTimezoneMatch(prompt: string, context: AskRuntimeContext): TimezoneM
   };
 }
 
+function getTimezoneMatches(prompt: string, context: AskRuntimeContext): TimezoneMatch[] {
+  const locationList = prompt.match(/\b(?:time|date|day)\b[\s\S]{0,50}?\b(?:in|for|at)\s+([^?!.]+)/i)?.[1];
+  if (!locationList) return [getTimezoneMatch(prompt, context)];
+
+  const candidates = Array.from(new Set(
+    locationList
+      .split(/\s*,\s*|\s+and\s+/i)
+      .map((candidate) => candidate.trim())
+      .filter(Boolean)
+  ));
+  if (candidates.length <= 1) return [getTimezoneMatch(prompt, context)];
+
+  return candidates.map((candidate) => {
+    const normalized = normalizeLookup(candidate);
+    const alias = timezoneAliases[normalized];
+    const iana = alias ?? canonicalTimezoneCandidate(candidate);
+
+    if (alias || isValidTimezone(iana)) {
+      return {
+        label: alias ? titleCaseLocation(normalized) : candidate,
+        source: "recognized" as const,
+        timezone: alias ?? iana
+      };
+    }
+
+    return {
+      label: candidate,
+      source: "unknown" as const,
+      timezone: context.serverTimezone
+    };
+  });
+}
+
 function isSimpleDateTimeQuestion(prompt: string) {
   const normalized = prompt.trim().toLowerCase().replace(/[?.!]+$/g, "");
 
@@ -673,7 +707,8 @@ export function createDeterministicAskAnswer(
   const intent = detectAskLiveIntent(prompt);
   const asksForTime = /\b(?:time|now|right now)\b/i.test(prompt);
   const asksForDay = /\b(?:day)\b/i.test(prompt);
-  const timezoneMatch = getTimezoneMatch(prompt, context);
+  const timezoneMatches = getTimezoneMatches(prompt, context);
+  const timezoneMatch = timezoneMatches[0];
   const requestedTimezone = timezoneMatch.timezone;
   const label = timezoneMatch.source === "default" ? requestedTimezone : timezoneMatch.label;
   const relativeAnswer = relativeDateAnswer(prompt, context, requestedTimezone, label);
@@ -691,6 +726,19 @@ export function createDeterministicAskAnswer(
   }
 
   if (intent === "current_time" || simpleDateTimeQuestion) {
+    if (timezoneMatches.length > 1) {
+      const now = new Date(context.currentIsoDatetime);
+      return timezoneMatches.map((match) => {
+        if (match.source === "unknown") {
+          return `- ${match.label}: I could not map this location to a timezone, so I did not guess.`;
+        }
+        if (asksForTime) {
+          return `- ${match.label}: ${formatTime(now, match.timezone)} on ${formatDate(now, match.timezone)} (${match.timezone}).`;
+        }
+        return `- ${match.label}: ${formatDate(now, match.timezone)} (${match.timezone}).`;
+      }).join("\n");
+    }
+
     if (asksForTime) {
       const prefix = timezoneMatch.source === "default"
         ? "The current time is"

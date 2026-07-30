@@ -79,6 +79,21 @@ export type CodeGenerationBrief = CodeIntentContract & {
   };
   installPolicy: "no_auto_install";
   nonGoals: string[];
+  productBrief: CodeProductBrief;
+};
+
+export type CodeProductBrief = {
+  complexity: "complex" | "moderate" | "simple";
+  coreActions: string[];
+  expectedDataModel: string[];
+  expectedScreens: string[];
+  explicitConstraints: string[];
+  nonGoals: string[];
+  optionalFeatures: string[];
+  primaryEntity: string;
+  productType: string;
+  requiredFeatures: string[];
+  userGoal: string;
 };
 
 function titleCase(value: string) {
@@ -240,7 +255,178 @@ export function assertWebsiteGenerationContract(input: {
   };
 }
 
-function codeFilePlan(contract: CodeIntentContract) {
+function buildCodeProductBrief(contract: CodeIntentContract): CodeProductBrief {
+  const prompt = contract.originalPrompt.toLowerCase();
+  const explicitConstraints = Array.from(
+    contract.originalPrompt.matchAll(/\b(?:do not|don't|dont|without|no)\s+([^.!?\n]{2,100})/gi)
+  ).map((match) => match[1].trim());
+  const base = {
+    explicitConstraints,
+    optionalFeatures: [] as string[]
+  };
+
+  const taskProductRequested = /\b(?:todo|to-do|task list|task manager)\b/i.test(prompt);
+  const advancedTaskSignals = [
+    /\bkanban\b/i.test(prompt) ? "kanban board" : null,
+    /\bboards?\b/i.test(prompt) ? "project boards" : null,
+    /\bassignees?\b/i.test(prompt) ? "assignees" : null,
+    /\bdue dates?\b/i.test(prompt) ? "due dates" : null,
+    /\bcollaborat(?:e|ion|ive)\b/i.test(prompt) ? "collaboration" : null,
+    /\bteams?\b/i.test(prompt) ? "team members" : null
+  ].filter(Boolean) as string[];
+
+  if (taskProductRequested && advancedTaskSignals.length > 0) {
+    return {
+      ...base,
+      complexity: "complex",
+      coreActions: ["create task", "assign task", "move task across board", "track due date"],
+      expectedDataModel: ["task: id, title, status, assignee, due date", "board: id, name, columns"],
+      expectedScreens: ["project board", "tasks", "team"],
+      nonGoals: ["CRM sales pipeline", "invoices", "inventory", "unrequested accounting"],
+      optionalFeatures: ["local persistence"],
+      primaryEntity: "task",
+      productType: "task_management",
+      requiredFeatures: Array.from(new Set(["task creation", ...advancedTaskSignals])),
+      userGoal: "Coordinate tasks across boards, owners, and due dates without unrelated business modules."
+    };
+  }
+
+  if (taskProductRequested) {
+    return {
+      ...base,
+      complexity: "simple",
+      coreActions: ["create task", "complete or reopen task", "delete task"],
+      expectedDataModel: ["task: id, title, completed"],
+      expectedScreens: ["tasks"],
+      nonGoals: ["CRM", "clients", "invoices", "payments", "business metrics", "workflow board", "admin settings"],
+      optionalFeatures: ["active/completed filter", "local persistence"],
+      primaryEntity: "task",
+      productType: "todo_app",
+      requiredFeatures: ["task input", "task list", "completion toggle", "delete action"],
+      userGoal: "Capture small tasks and mark them complete without business-dashboard overhead."
+    };
+  }
+
+  if (/\bcalculator\b/i.test(prompt) && /\b(?:scientific|trigonometry|trigonometric|sin|cos|tan|logarithm|history|graphing)\b/i.test(prompt)) {
+    return {
+      ...base,
+      complexity: "moderate",
+      coreActions: ["enter a value", "apply arithmetic or trigonometric operation", "review calculation history", "clear result"],
+      expectedDataModel: ["calculation: expression, result, timestamp"],
+      expectedScreens: ["scientific calculator", "calculation history"],
+      nonGoals: ["CRM", "clients", "invoices", "inventory", "business dashboard"],
+      primaryEntity: "calculation",
+      productType: "scientific_calculator",
+      requiredFeatures: ["numeric input", "basic arithmetic", "sin/cos/tan", "square root", "calculation history"],
+      userGoal: "Perform arithmetic and common scientific calculations with visible history."
+    };
+  }
+
+  if (/\bcalculator\b/i.test(prompt)) {
+    return {
+      ...base,
+      complexity: "simple",
+      coreActions: ["enter values", "choose an arithmetic operation", "clear the result"],
+      expectedDataModel: ["calculation: expression, result"],
+      expectedScreens: ["calculator"],
+      nonGoals: ["CRM", "clients", "invoices", "business dashboard", "analytics"],
+      primaryEntity: "calculation",
+      productType: "calculator",
+      requiredFeatures: ["numeric keypad", "basic arithmetic", "clear action", "result display"],
+      userGoal: "Perform basic arithmetic quickly in a focused interface."
+    };
+  }
+
+  if (/\b(?:pomodoro|focus timer|work timer)\b/i.test(prompt)) {
+    return {
+      ...base,
+      complexity: "simple",
+      coreActions: ["start timer", "pause timer", "reset timer"],
+      expectedDataModel: ["timer: duration, remaining seconds, running state"],
+      expectedScreens: ["focus timer"],
+      nonGoals: ["CRM", "clients", "billing", "business metrics", "admin settings"],
+      primaryEntity: "focus session",
+      productType: "pomodoro_timer",
+      requiredFeatures: ["25-minute timer", "start", "pause", "reset"],
+      userGoal: "Run a focused work interval with clear timer controls."
+    };
+  }
+
+  if (/\b(?:expense tracker|spending tracker|track expenses)\b/i.test(prompt)) {
+    return {
+      ...base,
+      complexity: "simple",
+      coreActions: ["add expense", "review total", "delete expense"],
+      expectedDataModel: ["expense: id, description, amount, category"],
+      expectedScreens: ["expenses"],
+      nonGoals: ["CRM", "sales pipeline", "inventory", "client management"],
+      primaryEntity: "expense",
+      productType: "expense_tracker",
+      requiredFeatures: ["expense form", "expense list", "running total", "delete action"],
+      userGoal: "Record everyday expenses and see the current total."
+    };
+  }
+
+  if (/\b(?:restaurant ordering|food ordering|menu ordering|order food)\b/i.test(prompt)) {
+    return {
+      ...base,
+      complexity: "moderate",
+      coreActions: ["browse menu", "add item to order", "change quantity", "review total"],
+      expectedDataModel: ["menu item: id, name, price", "order line: item id, quantity"],
+      expectedScreens: ["menu", "current order"],
+      nonGoals: ["CRM", "inventory purchasing", "supplier dashboard", "unrequested delivery backend"],
+      primaryEntity: "order",
+      productType: "restaurant_ordering",
+      requiredFeatures: ["menu", "add-to-order action", "quantity controls", "order total"],
+      userGoal: "Build and review a restaurant order from a clear menu."
+    };
+  }
+
+  if (contract.appType === "crm" || /\bcrm\b|customer relationship|sales pipeline/i.test(prompt)) {
+    return {
+      ...base,
+      complexity: "complex",
+      coreActions: ["manage contacts", "track deals", "record interactions", "manage client-linked billing"],
+      expectedDataModel: ["contact", "company", "deal", "activity", "invoice"],
+      expectedScreens: contract.screens,
+      nonGoals: ["inventory-first stock management", "unrelated supplier purchasing"],
+      primaryEntity: "contact",
+      productType: "crm",
+      requiredFeatures: contract.modules,
+      userGoal: "Manage customer relationships and move opportunities through a sales pipeline."
+    };
+  }
+
+  if (contract.appType === "inventory_system") {
+    return {
+      ...base,
+      complexity: "complex",
+      coreActions: ["manage products", "update stock", "record sales and purchases", "review low-stock alerts"],
+      expectedDataModel: contract.entities,
+      expectedScreens: contract.screens,
+      nonGoals: ["CRM-first sales pipeline", "unrequested customer relationship workflows"],
+      primaryEntity: "product",
+      productType: "inventory_system",
+      requiredFeatures: contract.modules,
+      userGoal: "Track products, stock movement, suppliers, and related operational records."
+    };
+  }
+
+  return {
+    ...base,
+    complexity: contract.modules.length >= 5 ? "complex" : "moderate",
+    coreActions: contract.requestedFeatures.length ? contract.requestedFeatures : ["create record", "review records"],
+    expectedDataModel: contract.entities.length ? contract.entities : ["domain record"],
+    expectedScreens: contract.screens,
+    nonGoals: ["unrequested CRM", "unrequested inventory", "unrequested billing", "generic business metrics"],
+    primaryEntity: contract.entities[0] ?? "record",
+    productType: contract.appType,
+    requiredFeatures: contract.requestedFeatures,
+    userGoal: `Support the requested ${contract.appType.replace(/_/g, " ")} workflow without adding unrelated product domains.`
+  };
+}
+
+function codeFilePlan(contract: CodeIntentContract, productBrief: CodeProductBrief) {
   const wantsInventory = contract.appType === "inventory_system" || contract.modules.some((moduleName) => ["products", "stock", "sales", "suppliers", "repairs"].includes(moduleName));
   const pythonFiles = wantsInventory
     ? [
@@ -261,7 +447,17 @@ function codeFilePlan(contract: CodeIntentContract) {
         ["SECURITY_AND_TESTING.md", "Security and test notes for future implementation."],
         ["HASSALI.md", "Human-readable CODE contract generated from the current prompt."]
       ];
-  const reactFiles = [
+  const reactFiles = productBrief.complexity === "simple"
+    ? [
+        ["package.json", "Vite React package metadata. No install is executed."],
+        ["vite.config.ts", "Vite React configuration for future approved runtime preview."],
+        ["index.html", "Vite app entry shell, not a public marketing website."],
+        ["src/main.tsx", "React entry point."],
+        ["src/App.tsx", `Focused ${productBrief.productType.replace(/_/g, " ")} interaction.`],
+        ["src/styles.css", "Focused responsive application styles."],
+        ["HASSALI.md", "Human-readable CODE contract generated from the current prompt."]
+      ]
+    : [
     ["package.json", "Vite React package metadata. No install is executed."],
     ["vite.config.ts", "Vite React configuration for future approved runtime preview."],
     ["index.html", "Vite app entry shell, not a public marketing website."],
@@ -273,7 +469,7 @@ function codeFilePlan(contract: CodeIntentContract) {
     ["DATA_MODEL.md", "Data model notes."],
     ["SECURITY_AND_TESTING.md", "Security and testing notes."],
     ["HASSALI.md", "Human-readable CODE contract generated from the current prompt."]
-  ];
+      ];
   const rows = contract.preferredFramework === "streamlit" || contract.requestedStack === "python"
     ? pythonFiles
     : reactFiles;
@@ -282,9 +478,11 @@ function codeFilePlan(contract: CodeIntentContract) {
 }
 
 export function buildCodeGenerationBrief(contract: CodeIntentContract): CodeGenerationBrief {
-  const filePlan = codeFilePlan(contract);
+  const productBrief = buildCodeProductBrief(contract);
+  const filePlan = codeFilePlan(contract, productBrief);
   const selectedStreamlit = contract.preferredFramework === "streamlit" || contract.requestedStack === "python";
   const nonGoals = [
+    ...productBrief.nonGoals,
     "No package install during proposal approval.",
     "No runtime process auto-start.",
     "No secrets in generated client-visible files.",
@@ -316,6 +514,7 @@ export function buildCodeGenerationBrief(contract: CodeIntentContract): CodeGene
     },
     installPolicy: "no_auto_install",
     nonGoals,
+    productBrief,
     preferredFramework: selectedStreamlit ? "streamlit" : contract.preferredFramework,
     previewStrategy: selectedStreamlit
       ? "python_streamlit_summary_until_runtime_enabled"

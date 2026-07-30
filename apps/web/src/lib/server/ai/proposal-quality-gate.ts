@@ -7,6 +7,7 @@ import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
+import { containsUnfinishedWorkMarker } from "@/lib/server/ai/unfinished-content";
 
 export type ProposalQualityStatus = "blocked" | "passed" | "review_required" | "warning";
 export type ApprovalRecommendation = "approve" | "reject" | "review";
@@ -351,7 +352,7 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
   const loremDetected = /\blorem ipsum\b/i.test(mode === "WEBSITE" ? visibleContent : content);
   const todoDetected = mode === "WEBSITE"
     ? unsafeTemplateTokenDetected
-    : /\b(?:TODO|coming soon|TBD)\b/i.test(content);
+    : containsUnfinishedWorkMarker(content);
   const fakeContentDetected = includesAny(mode === "WEBSITE" ? visibleContent : content, fakeContentPatterns);
   const repeatedEvidence = repeatedPageBodies(files);
   const repeatedContentDetected = repeatedEvidence.length > 0;

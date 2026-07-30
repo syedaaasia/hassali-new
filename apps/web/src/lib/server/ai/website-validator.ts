@@ -56,6 +56,8 @@ const visitorCopyViolations = [
   /confirm\s+(?:the\s+)?photographer\s+credit(?:\s+before\s+launch)?/i,
   /\b(?:placeholder|sample)\s+image\b/i,
   /\b(?:generator|blueprint|content\s+strategy|selected\s+composition|current\s+prompt)\b/i,
+  /\b(?:general-information boundary|no outcome guarantees|secure-intake reminder)\b/i,
+  /\b(?:editable technical reference|editable specification area|confirm this detail before launch|add before launch)\b/i,
   /\bdomain-specific\s+(?:output|hero|copy)\b/i,
   /\b(?:screen_light_stage|mechanical_precision|product_pedestal|spatial_brand_world|card_data_journey|architectural_volume|material_orbit|abstract_motion)\b/i
 ];

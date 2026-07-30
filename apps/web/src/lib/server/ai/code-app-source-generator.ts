@@ -1,10 +1,65 @@
-import type { CodeGenerationBrief } from "@/lib/server/ai/generation-brief";
+import type {
+  CodeGenerationBrief,
+  CodeProductBrief
+} from "@/lib/server/ai/generation-brief";
 
 export type CodeAppSourceFile = {
   content: string;
   path: string;
   summary: string;
 };
+
+export type CodeProductFidelityResult = {
+  failures: string[];
+  passed: boolean;
+  prohibitedSignals: string[];
+  requiredSignals: string[];
+};
+
+export function validateCodeProductFidelity(
+  brief: CodeProductBrief,
+  files: CodeAppSourceFile[]
+): CodeProductFidelityResult {
+  const content = files.map((file) => `${file.path}\n${file.content}`).join("\n").toLowerCase();
+  const runtimeContent = files
+    .filter((file) => !/^(?:HASSALI|README|ARCHITECTURE|DATA_MODEL|SECURITY_AND_TESTING)\.md$/i.test(file.path))
+    .map((file) => `${file.path}\n${file.content}`)
+    .join("\n")
+    .toLowerCase();
+  const requiredSignals = Array.from(new Set([
+    brief.productType.replace(/_/g, " "),
+    brief.primaryEntity,
+    ...brief.coreActions.map((action) => action.split(/\s+/).slice(-2).join(" "))
+  ])).filter(Boolean);
+  const prohibitedSignals = brief.nonGoals.filter((nonGoal) => {
+    const phrase = nonGoal.toLowerCase().replace(/\bunrequested\b|\bunless requested\b|\badmin\b/g, "").trim();
+    if (!phrase || phrase.length < 3) return false;
+    return runtimeContent.includes(phrase);
+  });
+  const presentRequired = requiredSignals.filter((signal) => {
+    const words = signal.toLowerCase().split(/\s+/).filter((word) => word.length > 2);
+    return words.some((word) => content.includes(word));
+  });
+  const failures = [
+    files.length === 0 ? "No source files were generated." : null,
+    presentRequired.length < Math.min(2, requiredSignals.length)
+      ? `Generated source does not preserve enough product signals for ${brief.productType}.`
+      : null,
+    prohibitedSignals.length
+      ? `Generated source includes non-goal domains: ${prohibitedSignals.join(", ")}.`
+      : null,
+    ...brief.explicitConstraints
+      .filter((constraint) => runtimeContent.includes(constraint.toLowerCase()))
+      .map((constraint) => `Generated source violates explicit negative constraint: ${constraint}.`)
+  ].filter(Boolean) as string[];
+
+  return {
+    failures,
+    passed: failures.length === 0,
+    prohibitedSignals,
+    requiredSignals
+  };
+}
 
 export type ReactProductPreviewMetadata = {
   appName: string;
@@ -52,13 +107,618 @@ export type ReactProductPreviewMetadata = {
   targetUser: string;
 };
 
+function focusedTodoApp(appName: string) {
+  return `import { useEffect, useMemo, useState } from "react";
+
+type Task = { id: string; title: string; completed: boolean };
+type Filter = "all" | "active" | "completed";
+
+const starterTasks: Task[] = [
+  { id: "welcome", title: "Add your first task", completed: false },
+  { id: "done", title: "Mark a task complete", completed: true }
+];
+
+export default function App() {
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    const saved = localStorage.getItem("hassali-todo-tasks");
+    return saved ? JSON.parse(saved) as Task[] : starterTasks;
+  });
+  const [title, setTitle] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+
+  useEffect(() => {
+    localStorage.setItem("hassali-todo-tasks", JSON.stringify(tasks));
+  }, [tasks]);
+
+  const visibleTasks = useMemo(() => tasks.filter((task) =>
+    filter === "all" || (filter === "completed" ? task.completed : !task.completed)
+  ), [filter, tasks]);
+
+  function addTask(event: React.FormEvent) {
+    event.preventDefault();
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+    setTasks((current) => [{ id: crypto.randomUUID(), title: nextTitle, completed: false }, ...current]);
+    setTitle("");
+  }
+
+  return (
+    <main className="app-shell">
+      <section className="task-panel" aria-labelledby="app-title">
+        <header>
+          <p className="eyebrow">Focused task list</p>
+          <h1 id="app-title">${escapeHtml(appName)}</h1>
+          <p>Capture what matters, finish it, and clear the list.</p>
+        </header>
+
+        <form className="entry-form" onSubmit={addTask}>
+          <label htmlFor="task-title">New task</label>
+          <div>
+            <input
+              id="task-title"
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="What needs doing?"
+              value={title}
+            />
+            <button type="submit">Add task</button>
+          </div>
+        </form>
+
+        <div className="filter-row" aria-label="Filter tasks">
+          {(["all", "active", "completed"] as Filter[]).map((value) => (
+            <button
+              aria-pressed={filter === value}
+              className={filter === value ? "active" : ""}
+              key={value}
+              onClick={() => setFilter(value)}
+              type="button"
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+
+        <ul className="task-list">
+          {visibleTasks.map((task) => (
+            <li className={task.completed ? "completed" : ""} key={task.id}>
+              <label>
+                <input
+                  checked={task.completed}
+                  onChange={() => setTasks((current) => current.map((item) =>
+                    item.id === task.id ? { ...item, completed: !item.completed } : item
+                  ))}
+                  type="checkbox"
+                />
+                <span>{task.title}</span>
+              </label>
+              <button
+                aria-label={\`Delete \${task.title}\`}
+                className="icon-button"
+                onClick={() => setTasks((current) => current.filter((item) => item.id !== task.id))}
+                type="button"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+        {!visibleTasks.length ? <p className="empty-state">No {filter === "all" ? "" : \`\${filter} \`}tasks.</p> : null}
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function focusedCalculatorApp(appName: string) {
+  return `import { useState } from "react";
+
+const keys = ["7", "8", "9", "÷", "4", "5", "6", "×", "1", "2", "3", "−", "0", ".", "=", "+"];
+
+export default function App() {
+  const [display, setDisplay] = useState("0");
+  const [left, setLeft] = useState<number | null>(null);
+  const [operator, setOperator] = useState<string | null>(null);
+  const [replace, setReplace] = useState(true);
+
+  function press(key: string) {
+    if (/^\\d|\\.$/.test(key)) {
+      setDisplay((current) => replace ? key : current === "0" ? key : current + key);
+      setReplace(false);
+      return;
+    }
+    if (key === "=") {
+      if (left === null || !operator) return;
+      const right = Number(display);
+      const result = operator === "+" ? left + right : operator === "−" ? left - right : operator === "×" ? left * right : right === 0 ? NaN : left / right;
+      setDisplay(Number.isFinite(result) ? String(result) : "Error");
+      setLeft(null);
+      setOperator(null);
+      setReplace(true);
+      return;
+    }
+    setLeft(Number(display));
+    setOperator(key);
+    setReplace(true);
+  }
+
+  return (
+    <main className="app-shell">
+      <section className="calculator" aria-labelledby="app-title">
+        <p className="eyebrow">Basic calculator</p>
+        <h1 id="app-title">${escapeHtml(appName)}</h1>
+        <output aria-live="polite">{display}</output>
+        <div className="keypad">
+          <button className="clear" onClick={() => { setDisplay("0"); setLeft(null); setOperator(null); setReplace(true); }} type="button">Clear</button>
+          {keys.map((key) => <button key={key} onClick={() => press(key)} type="button">{key}</button>)}
+        </div>
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function focusedScientificCalculatorApp(appName: string) {
+  return `import { useState } from "react";
+
+type HistoryItem = { id: string; expression: string; result: number };
+
+const scientificOperations = [
+  { label: "sin", run: (value: number) => Math.sin(value) },
+  { label: "cos", run: (value: number) => Math.cos(value) },
+  { label: "tan", run: (value: number) => Math.tan(value) },
+  { label: "sqrt", run: (value: number) => Math.sqrt(value) },
+  { label: "log10", run: (value: number) => Math.log10(value) }
+];
+
+export default function App() {
+  const [value, setValue] = useState("0");
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  function calculate(label: string, run: (input: number) => number) {
+    const input = Number(value);
+    const result = run(input);
+    if (!Number.isFinite(result)) return;
+    setValue(String(Number(result.toFixed(8))));
+    setHistory((current) => [
+      { id: crypto.randomUUID(), expression: \`\${label}(\${input})\`, result },
+      ...current
+    ].slice(0, 12));
+  }
+
+  return (
+    <main className="app-shell">
+      <section className="calculator" aria-labelledby="app-title">
+        <header>
+          <p className="eyebrow">Scientific calculator</p>
+          <h1 id="app-title">${escapeHtml(appName)}</h1>
+          <p>Run arithmetic and common trigonometric operations with visible calculation history.</p>
+        </header>
+        <label htmlFor="calculator-value">Value in radians</label>
+        <input
+          id="calculator-value"
+          onChange={(event) => setValue(event.target.value)}
+          type="number"
+          value={value}
+        />
+        <output>{value}</output>
+        <div className="keypad scientific-keypad">
+          {scientificOperations.map((operation) => (
+            <button key={operation.label} onClick={() => calculate(operation.label, operation.run)} type="button">
+              {operation.label}
+            </button>
+          ))}
+          <button className="clear" onClick={() => { setValue("0"); setHistory([]); }} type="button">Clear</button>
+        </div>
+        <h2>Calculation history</h2>
+        <ol className="history-list">
+          {history.map((item) => <li key={item.id}>{item.expression} = {Number(item.result.toFixed(8))}</li>)}
+        </ol>
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function focusedPomodoroApp(appName: string) {
+  return `import { useEffect, useState } from "react";
+
+const SESSION_SECONDS = 25 * 60;
+
+export default function App() {
+  const [remaining, setRemaining] = useState(SESSION_SECONDS);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (!running || remaining <= 0) return;
+    const timer = window.setInterval(() => setRemaining((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [remaining, running]);
+
+  useEffect(() => {
+    if (remaining === 0) setRunning(false);
+  }, [remaining]);
+
+  const minutes = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const seconds = String(remaining % 60).padStart(2, "0");
+
+  return (
+    <main className="app-shell">
+      <section className="timer-panel" aria-labelledby="app-title">
+        <p className="eyebrow">Focus session</p>
+        <h1 id="app-title">${escapeHtml(appName)}</h1>
+        <output aria-live="polite">{minutes}:{seconds}</output>
+        <div className="action-row">
+          <button onClick={() => setRunning((value) => !value)} type="button">{running ? "Pause" : "Start"}</button>
+          <button className="secondary" onClick={() => { setRunning(false); setRemaining(SESSION_SECONDS); }} type="button">Reset</button>
+        </div>
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function focusedExpenseApp(appName: string) {
+  return `import { useMemo, useState } from "react";
+
+type Expense = { id: string; description: string; amount: number; category: string };
+
+export default function App() {
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState("General");
+  const total = useMemo(() => expenses.reduce((sum, expense) => sum + expense.amount, 0), [expenses]);
+
+  function addExpense(event: React.FormEvent) {
+    event.preventDefault();
+    const value = Number(amount);
+    if (!description.trim() || !Number.isFinite(value) || value <= 0) return;
+    setExpenses((current) => [{ id: crypto.randomUUID(), description: description.trim(), amount: value, category }, ...current]);
+    setDescription("");
+    setAmount("");
+  }
+
+  return (
+    <main className="app-shell">
+      <section className="task-panel" aria-labelledby="app-title">
+        <header><p className="eyebrow">Personal spending</p><h1 id="app-title">${escapeHtml(appName)}</h1><strong className="total">Total: \${total.toFixed(2)}</strong></header>
+        <form className="expense-form" onSubmit={addExpense}>
+          <input aria-label="Description" onChange={(event) => setDescription(event.target.value)} placeholder="Expense description" value={description} />
+          <input aria-label="Amount" min="0" onChange={(event) => setAmount(event.target.value)} placeholder="Amount" step="0.01" type="number" value={amount} />
+          <select aria-label="Category" onChange={(event) => setCategory(event.target.value)} value={category}>
+            <option>General</option><option>Food</option><option>Transport</option><option>Home</option>
+          </select>
+          <button type="submit">Add expense</button>
+        </form>
+        <ul className="task-list">
+          {expenses.map((expense) => <li key={expense.id}><span><strong>{expense.description}</strong><small>{expense.category}</small></span><span>\${expense.amount.toFixed(2)} <button className="icon-button" onClick={() => setExpenses((current) => current.filter((item) => item.id !== expense.id))} type="button">×</button></span></li>)}
+        </ul>
+        {!expenses.length ? <p className="empty-state">No expenses recorded yet.</p> : null}
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function focusedRestaurantApp(appName: string) {
+  return `import { useMemo, useState } from "react";
+
+const menu = [
+  { id: "bowl", name: "Garden Bowl", price: 12 },
+  { id: "sandwich", name: "Grilled Sandwich", price: 10 },
+  { id: "tea", name: "House Iced Tea", price: 4 }
+];
+
+export default function App() {
+  const [order, setOrder] = useState<Record<string, number>>({});
+  const total = useMemo(() => menu.reduce((sum, item) => sum + item.price * (order[item.id] ?? 0), 0), [order]);
+  const change = (id: string, delta: number) => setOrder((current) => ({ ...current, [id]: Math.max(0, (current[id] ?? 0) + delta) }));
+
+  return (
+    <main className="app-shell">
+      <section className="task-panel" aria-labelledby="app-title">
+        <header><p className="eyebrow">Current menu</p><h1 id="app-title">${escapeHtml(appName)}</h1><p>Choose items and review the order before checkout.</p></header>
+        <div className="menu-grid">
+          {menu.map((item) => <article key={item.id}><h2>{item.name}</h2><p>\${item.price.toFixed(2)}</p><div className="action-row"><button className="secondary" onClick={() => change(item.id, -1)} type="button">−</button><strong>{order[item.id] ?? 0}</strong><button onClick={() => change(item.id, 1)} type="button">Add</button></div></article>)}
+        </div>
+        <footer className="order-total"><span>Order total</span><strong>\${total.toFixed(2)}</strong></footer>
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function focusedBriefDrivenApp(appName: string, brief: CodeProductBrief) {
+  const screens = JSON.stringify(brief.expectedScreens);
+  const actions = JSON.stringify(brief.coreActions);
+  const features = JSON.stringify(brief.requiredFeatures);
+  const productLabel = escapeHtml(brief.productType.replace(/_/g, " "));
+  const goal = escapeHtml(brief.userGoal);
+  const entity = escapeHtml(brief.primaryEntity);
+
+  return `import { FormEvent, useEffect, useState } from "react";
+
+type RecordItem = { id: string; title: string; owner: string; status: string };
+
+const screens = ${screens};
+const actions = ${actions};
+const features = ${features};
+
+export default function App() {
+  const [activeScreen, setActiveScreen] = useState(screens[0] ?? "${productLabel}");
+  const [title, setTitle] = useState("");
+  const [records, setRecords] = useState<RecordItem[]>(() => {
+    const saved = localStorage.getItem("hassali-${slug(appName)}-records");
+    return saved ? JSON.parse(saved) as RecordItem[] : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem("hassali-${slug(appName)}-records", JSON.stringify(records));
+  }, [records]);
+
+  function addRecord(event: FormEvent) {
+    event.preventDefault();
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+    setRecords((current) => [
+      { id: crypto.randomUUID(), title: nextTitle, owner: "Unassigned", status: "new" },
+      ...current
+    ]);
+    setTitle("");
+  }
+
+  return (
+    <main className="app-shell">
+      <section className="task-panel product-panel" aria-labelledby="app-title">
+        <header>
+          <p className="eyebrow">${productLabel}</p>
+          <h1 id="app-title">${escapeHtml(appName)}</h1>
+          <p>${goal}</p>
+        </header>
+        <nav className="filter-row" aria-label="Product screens">
+          {screens.map((screen) => (
+            <button
+              aria-pressed={activeScreen === screen}
+              className={activeScreen === screen ? "active" : ""}
+              key={screen}
+              onClick={() => setActiveScreen(screen)}
+              type="button"
+            >
+              {screen}
+            </button>
+          ))}
+        </nav>
+        <section aria-labelledby="active-screen-title">
+          <h2 id="active-screen-title">{activeScreen}</h2>
+          <ul className="feature-grid">
+            {features.map((feature) => <li key={feature}>{feature}</li>)}
+          </ul>
+          <form className="entry-form" onSubmit={addRecord}>
+            <label htmlFor="record-title">New ${entity}</label>
+            <div>
+              <input id="record-title" onChange={(event) => setTitle(event.target.value)} value={title} />
+              <button type="submit">Add ${entity}</button>
+            </div>
+          </form>
+          <ul className="task-list">
+            {records.map((record) => (
+              <li key={record.id}>
+                <span><strong>{record.title}</strong><small>{record.owner} · {record.status}</small></span>
+                <button
+                  className="icon-button"
+                  onClick={() => setRecords((current) => current.filter((item) => item.id !== record.id))}
+                  type="button"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+          {!records.length ? <p className="empty-state">No ${entity} records yet.</p> : null}
+        </section>
+        <aside className="workflow-summary">
+          <h2>Core actions</h2>
+          <ul>{actions.map((action) => <li key={action}>{action}</li>)}</ul>
+        </aside>
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function focusedAppContent(appName: string, brief: CodeProductBrief) {
+  if (brief.productType === "todo_app") return focusedTodoApp(appName);
+  if (brief.productType === "calculator") return focusedCalculatorApp(appName);
+  if (brief.productType === "scientific_calculator") return focusedScientificCalculatorApp(appName);
+  if (brief.productType === "pomodoro_timer") return focusedPomodoroApp(appName);
+  if (brief.productType === "expense_tracker") return focusedExpenseApp(appName);
+  if (brief.productType === "restaurant_ordering") return focusedRestaurantApp(appName);
+  return focusedBriefDrivenApp(appName, brief);
+}
+
+function focusedStyles() {
+  return `:root {
+  color: #171717;
+  background: #f4f3ee;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, select { font: inherit; }
+button { border: 0; background: #de7356; color: #fff; padding: 0.7rem 1rem; cursor: pointer; }
+button:hover { background: #bd5940; }
+button.secondary, .filter-row button { background: #ece9e2; color: #27231f; }
+.app-shell { min-height: 100vh; display: grid; place-items: start center; padding: clamp(1rem, 5vw, 4rem); }
+.task-panel, .calculator, .timer-panel { width: min(100%, 680px); background: #fff; border: 1px solid #dedbd3; padding: clamp(1.25rem, 4vw, 2.5rem); }
+.eyebrow { color: #a44732; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; }
+h1 { margin: 0.25rem 0 0.6rem; font-size: clamp(1.8rem, 5vw, 3rem); }
+.entry-form label { display: block; margin: 1.5rem 0 0.5rem; font-weight: 700; }
+.entry-form > div, .action-row { display: flex; gap: 0.5rem; }
+input, select { min-width: 0; border: 1px solid #cfcac0; padding: 0.75rem; background: #fff; }
+.entry-form input { flex: 1; }
+.filter-row { display: flex; gap: 0.4rem; margin: 1.25rem 0; }
+.filter-row button.active { background: #27231f; color: #fff; }
+.task-list { list-style: none; margin: 0; padding: 0; }
+.task-list li { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid #ece9e2; }
+.task-list label { display: flex; align-items: center; gap: 0.7rem; }
+.task-list li.completed span { color: #77716a; text-decoration: line-through; }
+.task-list small { display: block; color: #77716a; }
+.icon-button { width: 34px; height: 34px; padding: 0; background: transparent; color: #8b3c2a; font-size: 1.25rem; }
+.empty-state { color: #77716a; padding: 1.5rem 0; text-align: center; }
+.calculator, .timer-panel { max-width: 360px; }
+.calculator output, .timer-panel output { display: block; margin: 1.5rem 0; font-size: 3rem; font-variant-numeric: tabular-nums; text-align: right; }
+.keypad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+.keypad .clear { grid-column: 1 / -1; background: #27231f; }
+.expense-form { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.5rem; margin: 1.5rem 0; }
+.total { display: block; margin-top: 1rem; font-size: 1.4rem; }
+.menu-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin: 1.5rem 0; }
+.menu-grid article { border: 1px solid #dedbd3; padding: 1rem; }
+.order-total { display: flex; justify-content: space-between; border-top: 2px solid #27231f; padding-top: 1rem; font-size: 1.25rem; }
+.scientific-keypad { margin: 1rem 0; }
+.feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; padding-left: 1.25rem; }
+.workflow-summary { margin-top: 1.5rem; border-top: 1px solid #dedbd3; padding-top: 1rem; }
+.history-list { max-height: 220px; overflow: auto; padding-left: 1.5rem; }
+@media (max-width: 620px) {
+  .expense-form, .feature-grid, .menu-grid { grid-template-columns: 1fr; }
+}
+`;
+}
+
+function generateFocusedReactSource(input: {
+  appName: string;
+  brief: CodeProductBrief;
+  prompt: string;
+}): CodeAppSourceFile[] {
+  const appName = input.appName && !/^software app$/i.test(input.appName)
+    ? input.appName
+    : titleCase(input.brief.productType);
+  const contract = `# ${appName}
+
+mode: CODE
+appName: ${appName}
+appType: ${input.brief.productType}
+framework: react_vite
+previewType: code_app_preview
+entryPoint: src/main.tsx
+primaryEntity: ${input.brief.primaryEntity}
+
+## User goal
+${input.brief.userGoal}
+
+## Core actions
+${input.brief.coreActions.map((action) => `- ${action}`).join("\n")}
+
+## Non-goals
+${input.brief.nonGoals.map((item) => `- ${item}`).join("\n")}
+
+Runtime and package installation remain approval-gated.
+`;
+
+  return [
+    {
+      path: "package.json",
+      summary: `Adds deterministic Vite React metadata for the focused ${input.brief.productType.replace(/_/g, " ")}.`,
+      content: `{
+  "name": "${slug(appName)}",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.3",
+    "typescript": "5.6.3",
+    "vite": "5.4.10"
+  }
+}
+`
+    },
+    {
+      path: "vite.config.ts",
+      summary: "Adds the Vite React configuration.",
+      content: `import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({ plugins: [react()] });
+`
+    },
+    {
+      path: "index.html",
+      summary: "Adds the Vite app entry shell.",
+      content: `<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${escapeHtml(appName)}</title></head>
+  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+</html>
+`
+    },
+    {
+      path: "src/main.tsx",
+      summary: "Adds the React entry point.",
+      content: `import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./styles.css";
+
+createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
+`
+    },
+    {
+      path: "src/App.tsx",
+      summary: `Implements the requested ${input.brief.productType.replace(/_/g, " ")} interactions without unrelated business modules.`,
+      content: focusedAppContent(appName, input.brief)
+    },
+    {
+      path: "src/styles.css",
+      summary: "Adds focused responsive app styling.",
+      content: focusedStyles()
+    },
+    {
+      path: "HASSALI.md",
+      summary: "Records the request-grounded CODE product contract.",
+      content: contract
+    }
+  ];
+}
+
 export function generateCrmViteSource(input: {
   appName: string;
   brief?: CodeGenerationBrief | null;
   prompt: string;
 }): CodeAppSourceFile[] {
+  if (
+    input.brief?.productBrief &&
+    !["crm", "inventory_system"].includes(input.brief.productBrief.productType) &&
+    input.brief.productBrief.productType !== "custom_app"
+  ) {
+    return generateFocusedReactSource({
+      appName: input.appName,
+      brief: input.brief.productBrief,
+      prompt: input.prompt
+    });
+  }
+
   const blueprint = buildReactProductBlueprint({
     appName: input.appName,
+    brief: input.brief,
     prompt: input.prompt
   });
   const appName = blueprint.appName;
@@ -181,8 +841,59 @@ createRoot(document.getElementById("root")!).render(
 
 export function createReactProductPreviewMetadata(input: {
   appName: string;
+  brief?: CodeGenerationBrief | null;
   prompt: string;
 }): ReactProductPreviewMetadata {
+  if (input.brief?.productBrief.complexity === "simple") {
+    const product = input.brief.productBrief;
+    const sections = product.expectedScreens.length ? product.expectedScreens : [product.productType];
+    return {
+      appName: input.appName,
+      copyLines: [product.userGoal],
+      disclaimer: "Local browser demo only. No backend, account, cloud sync, or external service is included.",
+      domain: product.productType.replace(/_/g, " "),
+      metrics: product.coreActions.slice(0, 4),
+      productPreviewQuality: {
+        distinctLayoutKinds: 1,
+        hasAppName: true,
+        hasDomainSections: true,
+        hasLocalOnlyLimitations: true,
+        hasMetrics: true,
+        hasSampleRecords: true,
+        hasStaticSnapshot: true,
+        maxLayoutKindShare: 1,
+        screenGateFailures: [],
+        screenGateWarnings: [],
+        screenLayoutGatePassed: true,
+        totalScreens: sections.length
+      },
+      sampleRecords: [{
+        amount: 0,
+        category: product.productType.replace(/_/g, " "),
+        note: product.coreActions.join(", "),
+        owner: "Local user",
+        status: "ready",
+        title: product.primaryEntity
+      }],
+      sections,
+      screenQualityGate: {
+        distinctLayoutKinds: 1,
+        failures: [],
+        maxLayoutKindShare: 1,
+        passed: true,
+        totalScreens: sections.length,
+        warnings: []
+      },
+      screens: sections.map((label) => ({
+        label: titleCase(label),
+        layoutKind: "form_and_queue",
+        purpose: product.userGoal,
+        screenId: slug(label)
+      })),
+      targetUser: "A user completing the requested focused workflow"
+    };
+  }
+
   const blueprint = buildReactProductBlueprint(input);
 
   return {
@@ -259,7 +970,7 @@ type ReactProductBlueprint = {
   statusOptions: string[];
   targetUser: string;
   tone: string;
-  type: "afforfix" | "generic" | "inventory_system" | "safe_client_check" | "tax_dedo";
+  type: "afforfix" | "crm" | "generic" | "inventory_system" | "safe_client_check" | "tax_dedo";
   workflowMap: string[];
 };
 
@@ -810,11 +1521,96 @@ function genericScreens(records: ReactProductBlueprint["records"], statusOptions
   ];
 }
 
+function crmScreens(records: ReactProductBlueprint["records"], statusOptions: string[]): ReactProductScreen[] {
+  return [
+    screen({
+      actions: ["Review pipeline", "Check follow-ups", "Open unpaid invoices"],
+      domainVocabulary: ["contacts", "companies", "deals", "customer interactions"],
+      emptyState: "No customer activity is visible yet.",
+      fields: ["open deals", "pipeline value", "follow-ups", "unpaid invoices"],
+      label: "Dashboard",
+      layoutKind: "dashboard_overview",
+      metrics: ["Contacts", "Open deals", "Pipeline value", "Invoices due"],
+      primaryEntity: "customer relationship snapshot",
+      purpose: "Show customer relationships, opportunities, and billing follow-ups at a glance.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add contact", "Record interaction", "Schedule follow-up"],
+      domainVocabulary: ["contacts", "customer relationships", "interaction history"],
+      emptyState: "No contacts match this filter.",
+      fields: ["contact", "company", "email", "last interaction"],
+      label: "Contacts",
+      layoutKind: "people_roster",
+      metrics: ["Contacts", "New leads", "Follow-ups", "Active customers"],
+      primaryEntity: "contact",
+      purpose: "Keep contact details and recent customer interactions together.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add company", "Assign account owner", "Review related contacts"],
+      domainVocabulary: ["companies", "accounts", "account owners", "customer organizations"],
+      emptyState: "No companies match this filter.",
+      fields: ["company", "industry", "account owner", "relationship status"],
+      label: "Companies",
+      layoutKind: "records_table",
+      metrics: ["Companies", "Active accounts", "Prospects", "Account owners"],
+      primaryEntity: "company",
+      purpose: "Organize customer companies and their relationship owners.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add deal", "Move deal stage", "Review expected value"],
+      domainVocabulary: ["deals", "sales pipeline", "lead", "qualified", "proposal", "won"],
+      emptyState: "No deals are in this pipeline stage.",
+      fields: ["deal", "company", "stage", "value"],
+      label: "Sales Pipeline",
+      layoutKind: "kanban_status_board",
+      metrics: ["Leads", "Qualified", "Proposals", "Won"],
+      primaryEntity: "deal",
+      purpose: "Move opportunities through clear sales stages.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Log interaction", "Add task", "Mark follow-up complete"],
+      domainVocabulary: ["activities", "calls", "meetings", "notes", "tasks"],
+      emptyState: "No customer activities are scheduled.",
+      fields: ["activity", "contact", "date", "owner"],
+      label: "Activities",
+      layoutKind: "calendar_or_schedule",
+      metrics: ["Calls", "Meetings", "Tasks", "Overdue follow-ups"],
+      primaryEntity: "customer activity",
+      purpose: "Track conversations, meetings, and client follow-up tasks.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Create client invoice", "Mark paid", "Review overdue billing"],
+      domainVocabulary: ["client-linked invoices", "billing", "paid", "overdue"],
+      emptyState: "No client invoices match this status.",
+      fields: ["invoice", "client", "amount", "payment status"],
+      label: "Billing",
+      layoutKind: "payments_revenue",
+      metrics: ["Invoices", "Paid", "Due", "Overdue"],
+      primaryEntity: "client invoice",
+      purpose: "Keep billing connected to the customer and related deal.",
+      sampleRecords: records,
+      statusOptions
+    })
+  ];
+}
+
 function buildReactProductBlueprint(input: {
   appName: string;
+  brief?: CodeGenerationBrief | null;
   prompt: string;
 }): ReactProductBlueprint {
   const prompt = input.prompt.toLowerCase();
+  const productType = input.brief?.productBrief.productType;
 
   if (/\b(?:anthropic|openai|gemini|claude|ai api|api key|browser api|directly from the browser)\b/i.test(input.prompt)) {
     const records = [
@@ -948,7 +1744,54 @@ function buildReactProductBlueprint(input: {
     }, input.prompt);
   }
 
-  if (/\b(?:inventory|inventory management|inventory system|stock levels?|low stock|products?|billing|cash in|cash out|purchase records?|sales records?)\b/.test(prompt)) {
+  if (productType === "crm" || (!productType && /\b(?:crm|customer relationship|sales pipeline)\b/.test(prompt))) {
+    const records = [
+      { amount: 86000, category: "Proposal", note: "Product demo completed. Follow up on security review.", owner: "Maya Chen", status: "proposal", title: "Northstar platform rollout" },
+      { amount: 42000, category: "Qualified", note: "Operations lead confirmed budget and implementation window.", owner: "Daniel Reed", status: "qualified", title: "Harbor Foods renewal" },
+      { amount: 19500, category: "Lead", note: "Introductory call requested for next Tuesday.", owner: "Ayesha Malik", status: "lead", title: "Lumen Studio onboarding" },
+      { amount: 64000, category: "Won", note: "Contract signed. First client invoice is due this month.", owner: "Omar Farooq", status: "won", title: "Atlas Retail expansion" }
+    ];
+    const statusOptions = ["lead", "qualified", "proposal", "won", "lost", "invoice due", "paid"];
+
+    return finalizeBlueprint({
+      appName: input.appName && !/^software app$/i.test(input.appName) ? input.appName : "Customer Relationship Manager",
+      copyLines: [
+        "Customer relationships, opportunities, and follow-ups in one focused workspace.",
+        "Track contacts, companies, deals, interactions, tasks, and client-linked invoices.",
+        "Local demo only - no live backend, email sync, or payment processing."
+      ],
+      disclaimer: "Local CRM demo only. No backend, email delivery, calendar sync, cloud sharing, or payment processing is included.",
+      domain: "customer relationship management",
+      excitementGate: "A team sees contacts, open deals, pipeline value, follow-ups, and invoice status on the first screen.",
+      jobToBeDone: "Help a small sales team manage contacts, companies, deals, customer interactions, follow-up tasks, and client-linked billing.",
+      localStorageKey: "hassali-crm-demo",
+      metricLabels: ["Contacts", "Open deals", "Pipeline value", "Invoices due"],
+      palette: {
+        accent: "#2563eb",
+        accent2: "#0f766e",
+        canvas: "#f7f8fa",
+        ink: "#172033",
+        muted: "#667085",
+        soft: "#dbeafe",
+        surface: "rgba(255,255,255,0.9)"
+      },
+      primaryActionLabel: "Add contact",
+      recordLabel: "contact",
+      records,
+      sections: ["Dashboard", "Contacts", "Companies", "Sales Pipeline", "Activities", "Billing"],
+      screens: crmScreens(records, statusOptions),
+      statusOptions,
+      targetUser: "small sales teams managing customer relationships and opportunities",
+      tone: "clear, professional, relationship-focused",
+      type: "crm",
+      workflowMap: ["Add contact", "Link company", "Create deal", "Move pipeline stage", "Record interaction", "Create client invoice"]
+    }, input.prompt);
+  }
+
+  if (
+    productType === "inventory_system" ||
+    (!productType && /\b(?:inventory|inventory management|inventory system|stock levels?|low stock|sku|cash in|cash out|purchase records?|supplier records?)\b/.test(prompt))
+  ) {
     const records = [
       { amount: 128500, category: "Electronics", note: "SKU INV-1042. Stock 18, reorder point 12, billing ready.", owner: "Apex Wholesale", status: "in stock", title: "Bluetooth Speaker Pro" },
       { amount: 42800, category: "Accessories", note: "SKU INV-2210. Stock 4, low stock alert active, supplier follow-up needed.", owner: "Bright Supply Co.", status: "low stock", title: "USB-C Charging Cable" },
@@ -2459,6 +3302,14 @@ Runtime:
 `
     }
   ];
+}
+
+function titleCase(value: string) {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }
 
 function slug(value: string) {

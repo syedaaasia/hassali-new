@@ -25,12 +25,25 @@ function escapeHtml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
-function visitorReadyText(value: string) {
+export function visitorReadyText(value: string) {
   return value
-    .replace(/\b(?:generated|editable|prototype)\b/gi, "")
-    .replace(/\bplaceholders?\b/gi, "examples")
+    .replace(/\baccurate and editable\b/gi, "clear and accurate")
+    .replace(/\beditable clinician details\b/gi, "current clinician details")
+    .replace(/\beditable sample pricing\b/gi, "illustrative pricing")
+    .replace(/\beditable menu\b/gi, "current menu")
+    .replace(/\beditable delivery policy\b/gi, "clear delivery guidance")
+    .replace(/\beditable service areas\b/gi, "current service areas")
+    .replace(/\beditable fit guidance\b/gi, "clear fit guidance")
+    .replace(/\bprototype inventory\b/gi, "featured inventory")
+    .replace(/\beditable samples?\b/gi, "representative examples")
+    .replace(/\beditable placeholders?\b/gi, "representative details")
+    .replace(/\bprototype content\b/gi, "representative content")
+    .replace(/\bgenerated demo\b/gi, "website")
+    .replace(/\bgenerated case studies\b/gi, "representative case studies")
+    .replace(/\bgenerated properties\b/gi, "representative properties")
+    .replace(/\bgenerated products\b/gi, "representative products")
+    .replace(/\bgenerated model names\b/gi, "concept model names")
     .replace(/\bsample content\b/gi, "guidance")
-    .replace(/\bsamples?\b/gi, "examples")
     .replace(/\s+until\s+(?:the\s+)?(?:business|shop|restaurant|product owner|portfolio owner|agent)[^.]*\.?/gi, ".")
     .replace(/\bconfirm this detail before launch\.?/gi, "Ask about this detail when you get in touch.")
     .replace(/\breal contact and policy details should be supplied before launch\.?/gi, "")
