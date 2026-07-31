@@ -152,6 +152,20 @@ test("coin throws stay bounded and completed coins leave the DOM", () => {
   assert.match(css, /hassali-activity-coin-spin/);
 });
 
+test("visible thinking copy is decorative and bound to the coin throw", () => {
+  assert.match(component, /aria-label=\{label\}/);
+  assert(!component.includes("Hassali is thinking"));
+  assert.equal([...component.matchAll(/Thinking\.\.\./g)].length, 1);
+  assert.match(
+    component,
+    /\{isThrowing \? \([\s\S]*hassali-activity-coin-flight[\s\S]*hassali-activity-coin-label[\s\S]*Thinking\.\.\.[\s\S]*\) : null\}/
+  );
+  assert.match(
+    css,
+    /\.hassali-activity-coin-label\s*\{[\s\S]*top:\s*18px[\s\S]*color:\s*#ffc755[\s\S]*text-shadow:/
+  );
+});
+
 test("cleanup is event-driven with no orphaned animation timers", () => {
   assert.match(component, /observer\.disconnect\(\)/);
   assert.match(component, /removeEventListener\("change", stopThrowForReducedMotion\)/);

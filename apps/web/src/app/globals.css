@@ -423,6 +423,23 @@ textarea {
   animation: hassali-activity-coin-spin 420ms steps(4, end) infinite;
 }
 
+.hassali-activity-coin-label {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #ffc755;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-shadow:
+    0 1px 1px rgba(28, 13, 2, 0.96),
+    0 0 5px rgba(255, 168, 35, 0.56);
+  pointer-events: none;
+}
+
 .hassali-activity-mascot.is-throwing,
 .hassali-activity-mascot.is-throwing .hassali-activity-facing {
   animation-play-state: paused;

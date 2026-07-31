@@ -134,6 +134,7 @@ export function HassaliActivityMascot({ active, label }: HassaliActivityMascotPr
               <div className="hassali-activity-throw-sprite" onAnimationEnd={handleThrowComplete} />
               <div className="hassali-activity-coin-flight">
                 <div className="hassali-activity-coin-sprite" />
+                <span className="hassali-activity-coin-label">Thinking...</span>
               </div>
             </>
           ) : null}
