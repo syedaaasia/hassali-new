@@ -8,6 +8,8 @@ export type AssistantActivityState = {
   visibility: "hidden" | "pre-output";
 };
 
+export type MascotThrowSide = "left" | "right";
+
 export const HASSALI_ACTIVITY_MASCOT_ASSET = {
   coinFrames: 5,
   coinStripPath: "/mascots/hassali-coin-strip.png",
@@ -39,6 +41,15 @@ export function calculateMascotTrack(stageWidth: number) {
     safePadding: Math.round(safePadding),
     travel: Math.round(availableTravel * HASSALI_ACTIVITY_MASCOT_ASSET.travelRatio)
   };
+}
+
+export function calculateMascotCoinRange(stageWidth: number) {
+  const track = calculateMascotTrack(stageWidth);
+  return Math.min(132, Math.round(track.travel * 0.78));
+}
+
+export function getNextMascotThrowSide(previousSide: MascotThrowSide | null): MascotThrowSide {
+  return previousSide === "right" ? "left" : "right";
 }
 
 const activityByMode: Record<

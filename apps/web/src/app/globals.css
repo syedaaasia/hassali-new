@@ -252,16 +252,11 @@ textarea {
 }
 
 @keyframes hassali-activity-patrol {
-  0% {
+  from {
     transform: translate3d(0, 0, 0);
   }
-  47%,
-  49.5% {
+  to {
     transform: translate3d(var(--hassali-mascot-travel), 0, 0);
-  }
-  97.5%,
-  100% {
-    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -318,14 +313,14 @@ textarea {
   }
   52% {
     opacity: 1;
-    transform: translate3d(38px, -24px, 0) scale(1);
+    transform: translate3d(var(--hassali-coin-arc-mid), -24px, 0) scale(1);
   }
   82% {
     opacity: 1;
   }
   100% {
     opacity: 0;
-    transform: translate3d(78px, 2px, 0) scale(0.72);
+    transform: translate3d(var(--hassali-coin-arc-end), 2px, 0) scale(0.72);
   }
 }
 
@@ -360,7 +355,7 @@ textarea {
   height: var(--hassali-character-height);
   transform-origin: center bottom;
   will-change: transform;
-  animation: hassali-activity-patrol 6.8s linear infinite;
+  animation: hassali-activity-patrol 2.8s linear infinite alternate;
 }
 
 .hassali-activity-facing {
@@ -369,7 +364,7 @@ textarea {
   height: 100%;
   transform-origin: center bottom;
   will-change: transform;
-  animation: hassali-activity-facing 6.8s linear infinite;
+  animation: hassali-activity-facing 5.6s linear infinite;
 }
 
 .hassali-activity-walk-sprite,
@@ -396,19 +391,31 @@ textarea {
   z-index: 2;
   background-image: var(--hassali-throw-strip);
   background-size: 600% 100%;
-  animation: hassali-activity-throw-frames 1.12s steps(5, end) 1 both;
+  animation: hassali-activity-throw-frames 880ms steps(5, end) 1 both;
+}
+
+.hassali-activity-mascot.throw-from-left {
+  --hassali-coin-arc-end: var(--hassali-coin-range-positive);
+  --hassali-coin-arc-mid: var(--hassali-coin-range-positive-mid);
+  --hassali-coin-origin: 31px;
+}
+
+.hassali-activity-mascot.throw-from-right {
+  --hassali-coin-arc-end: var(--hassali-coin-range-negative);
+  --hassali-coin-arc-mid: var(--hassali-coin-range-negative-mid);
+  --hassali-coin-origin: -3px;
 }
 
 .hassali-activity-coin-flight {
   position: absolute;
   z-index: 3;
   top: 12px;
-  left: 31px;
+  left: var(--hassali-coin-origin);
   width: 16px;
   height: 24px;
   opacity: 0;
   will-change: opacity, transform;
-  animation: hassali-activity-coin-arc 760ms cubic-bezier(0.22, 0.72, 0.35, 1) 220ms 1 both;
+  animation: hassali-activity-coin-arc 700ms cubic-bezier(0.22, 0.72, 0.35, 1) 120ms 1 both;
 }
 
 .hassali-activity-coin-sprite {

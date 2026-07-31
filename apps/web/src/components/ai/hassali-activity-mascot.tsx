@@ -1,7 +1,13 @@
 "use client";
 
 import { type AnimationEvent, type CSSProperties, useEffect, useRef, useState } from "react";
-import { calculateMascotTrack, HASSALI_ACTIVITY_MASCOT_ASSET } from "@/lib/assistant-activity";
+import {
+  calculateMascotCoinRange,
+  calculateMascotTrack,
+  getNextMascotThrowSide,
+  HASSALI_ACTIVITY_MASCOT_ASSET,
+  type MascotThrowSide
+} from "@/lib/assistant-activity";
 
 type HassaliActivityMascotProps = {
   active: boolean;
@@ -10,6 +16,10 @@ type HassaliActivityMascotProps = {
 
 type MascotStageStyle = CSSProperties & {
   "--hassali-coin-frames": number;
+  "--hassali-coin-range-negative": string;
+  "--hassali-coin-range-negative-mid": string;
+  "--hassali-coin-range-positive": string;
+  "--hassali-coin-range-positive-mid": string;
   "--hassali-coin-strip": string;
   "--hassali-mascot-left": string;
   "--hassali-mascot-travel": string;
@@ -42,11 +52,14 @@ type MascotWindow = {
 
 export function HassaliActivityMascot({ active, label }: HassaliActivityMascotProps) {
   const stageRef = useRef<MascotStageElement | null>(null);
-  const [isThrowing, setIsThrowing] = useState(false);
+  const lastThrowSideRef = useRef<MascotThrowSide | null>(null);
+  const [throwSide, setThrowSide] = useState<MascotThrowSide | null>(null);
+  const isThrowing = throwSide !== null;
 
   useEffect(() => {
     if (!active) {
-      setIsThrowing(false);
+      lastThrowSideRef.current = null;
+      setThrowSide(null);
       return;
     }
 
@@ -56,8 +69,19 @@ export function HassaliActivityMascot({ active, label }: HassaliActivityMascotPr
 
     const updateTrack = () => {
       const track = calculateMascotTrack(stage.clientWidth);
+      const coinRange = calculateMascotCoinRange(stage.clientWidth);
       stage.style.setProperty("--hassali-mascot-left", `${track.safePadding}px`);
       stage.style.setProperty("--hassali-mascot-travel", `${track.travel}px`);
+      stage.style.setProperty("--hassali-coin-range-positive", `${coinRange}px`);
+      stage.style.setProperty(
+        "--hassali-coin-range-positive-mid",
+        `${Math.round(coinRange * 0.52)}px`
+      );
+      stage.style.setProperty("--hassali-coin-range-negative", `${-coinRange}px`);
+      stage.style.setProperty(
+        "--hassali-coin-range-negative-mid",
+        `${-Math.round(coinRange * 0.52)}px`
+      );
     };
 
     updateTrack();
@@ -75,7 +99,7 @@ export function HassaliActivityMascot({ active, label }: HassaliActivityMascotPr
 
     const reducedMotion = browserWindow.matchMedia("(prefers-reduced-motion: reduce)");
     const stopThrowForReducedMotion = () => {
-      if (reducedMotion.matches) setIsThrowing(false);
+      if (reducedMotion.matches) setThrowSide(null);
     };
 
     stopThrowForReducedMotion();
@@ -89,6 +113,10 @@ export function HassaliActivityMascot({ active, label }: HassaliActivityMascotPr
 
   const style: MascotStageStyle = {
     "--hassali-coin-frames": HASSALI_ACTIVITY_MASCOT_ASSET.coinFrames,
+    "--hassali-coin-range-negative": "-50px",
+    "--hassali-coin-range-negative-mid": "-26px",
+    "--hassali-coin-range-positive": "50px",
+    "--hassali-coin-range-positive-mid": "26px",
     "--hassali-coin-strip": `url("${HASSALI_ACTIVITY_MASCOT_ASSET.coinStripPath}")`,
     "--hassali-mascot-left": "8px",
     "--hassali-mascot-travel": "64px",
@@ -100,13 +128,15 @@ export function HassaliActivityMascot({ active, label }: HassaliActivityMascotPr
 
   const handlePatrolIteration = (event: AnimationEvent<HTMLDivElement>) => {
     if (event.currentTarget === event.target && event.animationName === "hassali-activity-patrol") {
-      setIsThrowing(true);
+      const nextSide = getNextMascotThrowSide(lastThrowSideRef.current);
+      lastThrowSideRef.current = nextSide;
+      setThrowSide(nextSide);
     }
   };
 
   const handleThrowComplete = (event: AnimationEvent<HTMLDivElement>) => {
     if (event.animationName === "hassali-activity-throw-frames") {
-      setIsThrowing(false);
+      setThrowSide(null);
     }
   };
 
@@ -123,22 +153,25 @@ export function HassaliActivityMascot({ active, label }: HassaliActivityMascotPr
     >
       <div
         aria-hidden="true"
-        className={`hassali-activity-mascot${isThrowing ? " is-throwing" : ""}`}
+        className={`hassali-activity-mascot${
+          throwSide ? ` is-throwing throw-from-${throwSide}` : ""
+        }`}
         data-coin-count={isThrowing ? 1 : 0}
+        data-throw-side={throwSide ?? "none"}
         onAnimationIteration={handlePatrolIteration}
       >
         <div className="hassali-activity-facing">
           <div className="hassali-activity-walk-sprite" />
           {isThrowing ? (
-            <>
-              <div className="hassali-activity-throw-sprite" onAnimationEnd={handleThrowComplete} />
-              <div className="hassali-activity-coin-flight">
-                <div className="hassali-activity-coin-sprite" />
-                <span className="hassali-activity-coin-label">Thinking...</span>
-              </div>
-            </>
+            <div className="hassali-activity-throw-sprite" onAnimationEnd={handleThrowComplete} />
           ) : null}
         </div>
+        {isThrowing ? (
+          <div className="hassali-activity-coin-flight">
+            <div className="hassali-activity-coin-sprite" />
+            <span className="hassali-activity-coin-label">Thinking...</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import {
+  calculateMascotCoinRange,
   calculateMascotTrack,
   deriveAssistantActivity,
+  getNextMascotThrowSide,
   hasMeaningfulAssistantOutput,
   HASSALI_ACTIVITY_MASCOT_ASSET
 } from "../assistant-activity";
@@ -131,12 +133,31 @@ test("responsive track remains bounded and travels 72 percent of safe space", ()
   }
 });
 
+test("coin range grows responsively while staying bounded by mascot travel", () => {
+  const expectedRanges = new Map([
+    [120, 32],
+    [156, 49],
+    [220, 79],
+    [300, 117],
+    [420, 117]
+  ]);
+
+  for (const [stageWidth, expectedRange] of expectedRanges) {
+    const range = calculateMascotCoinRange(stageWidth);
+    const track = calculateMascotTrack(stageWidth);
+    assert.equal(range, expectedRange);
+    assert(range <= track.travel);
+    assert(range <= 132);
+  }
+});
+
 test("CSS provides real sprite walking, calm travel, and natural turnaround", () => {
   assert.match(css, /@keyframes hassali-activity-patrol/);
   assert.match(css, /@keyframes hassali-activity-walk-frames/);
   assert.match(css, /background-size:\s*700%\s+100%/);
   assert.match(css, /steps\(6,\s*end\)/);
-  assert.match(css, /hassali-activity-patrol\s+6\.8s\s+linear\s+infinite/);
+  assert.match(css, /hassali-activity-patrol\s+2\.8s\s+linear\s+infinite\s+alternate/);
+  assert.match(css, /hassali-activity-facing\s+5\.6s\s+linear\s+infinite/);
   assert.match(css, /49\.5%[\s\S]*scaleX\(-1\)/);
   assert.match(css, /97\.5%[\s\S]*scaleX\(1\)/);
   assert.match(css, /animation-delay:\s*140ms/);
@@ -147,9 +168,33 @@ test("coin throws stay bounded and completed coins leave the DOM", () => {
   assert.equal([...component.matchAll(/className="hassali-activity-coin-flight"/g)].length, 1);
   assert.match(component, /data-coin-count=\{isThrowing \? 1 : 0\}/);
   assert.match(component, /onAnimationEnd=\{handleThrowComplete\}/);
-  assert.match(component, /setIsThrowing\(false\)/);
+  assert.match(component, /setThrowSide\(null\)/);
   assert.match(css, /@keyframes hassali-activity-coin-arc/);
   assert.match(css, /hassali-activity-coin-spin/);
+});
+
+test("each one-way patrol alternates right-edge and left-edge throws", () => {
+  const rightSide = getNextMascotThrowSide(null);
+  const leftSide = getNextMascotThrowSide(rightSide);
+  assert.equal(rightSide, "right");
+  assert.equal(leftSide, "left");
+  assert.equal(getNextMascotThrowSide(leftSide), "right");
+  assert.match(component, /onAnimationIteration=\{handlePatrolIteration\}/);
+  assert.match(component, /data-throw-side=\{throwSide \?\? "none"\}/);
+  assert.match(component, /lastThrowSideRef\.current = nextSide/);
+});
+
+test("edge throws use opposite inward trajectories and a faster flight", () => {
+  assert.match(
+    css,
+    /\.hassali-activity-mascot\.throw-from-left\s*\{[\s\S]*--hassali-coin-arc-end:\s*var\(--hassali-coin-range-positive\)/
+  );
+  assert.match(
+    css,
+    /\.hassali-activity-mascot\.throw-from-right\s*\{[\s\S]*--hassali-coin-arc-end:\s*var\(--hassali-coin-range-negative\)/
+  );
+  assert.match(css, /hassali-activity-coin-arc\s+700ms[\s\S]*120ms\s+1\s+both/);
+  assert.match(css, /hassali-activity-throw-frames\s+880ms/);
 });
 
 test("visible thinking copy is decorative and bound to the coin throw", () => {
@@ -159,6 +204,10 @@ test("visible thinking copy is decorative and bound to the coin throw", () => {
   assert.match(
     component,
     /\{isThrowing \? \([\s\S]*hassali-activity-coin-flight[\s\S]*hassali-activity-coin-label[\s\S]*Thinking\.\.\.[\s\S]*\) : null\}/
+  );
+  assert.match(
+    component,
+    /<\/div>\s*\{isThrowing \? \(\s*<div className="hassali-activity-coin-flight">/
   );
   assert.match(
     css,
