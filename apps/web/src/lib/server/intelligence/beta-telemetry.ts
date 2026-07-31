@@ -1,5 +1,9 @@
 import type { TaskComplexityClass } from "./task-complexity";
 import type { IntelligenceProductMode } from "./skill-kernel";
+import type {
+  BehavioralIntentClass,
+  FinalActionDisposition
+} from "@/lib/server/ai/behavioral-intelligence";
 
 export type BetaTelemetryEventName =
   | "handoff_created"
@@ -11,13 +15,24 @@ export type BetaTelemetryEventName =
   | "task_started";
 
 export type BetaTelemetryEvent = {
+  answerOnly?: boolean;
+  approvalRequired?: boolean;
+  approvalSatisfied?: boolean;
   completionStatus?: "cancelled" | "completed" | "failed";
   complexityClass: TaskComplexityClass;
+  contextItemsExcluded?: number;
+  contextItemsIncluded?: number;
+  contextScope?: string[];
   durationMs?: number;
   event: BetaTelemetryEventName;
+  executionCompleted?: boolean;
+  executionStarted?: boolean;
   failureCategory?: string | null;
   fallbackUsed?: boolean;
+  finalDisposition?: FinalActionDisposition;
+  intentClass?: BehavioralIntentClass;
   mode: IntelligenceProductMode;
+  mutationRequested?: boolean;
   providerId?: string | null;
   repairAttemptCount?: number;
   toolCount?: number;
@@ -72,15 +87,42 @@ function durationBucket(durationMs: number) {
 
 export function sanitizeBetaTelemetryEvent(input: BetaTelemetryEvent) {
   const durationMs = boundedInteger(input.durationMs, 300_000);
+  const answerOnly = Boolean(input.answerOnly);
+  const mutationRequested = answerOnly ? false : Boolean(input.mutationRequested);
+  const approvalRequired = mutationRequested && Boolean(input.approvalRequired);
+  const approvalSatisfied = approvalRequired && Boolean(input.approvalSatisfied);
+  const executionStarted = mutationRequested && approvalSatisfied && Boolean(input.executionStarted);
+  const executionCompleted = executionStarted && Boolean(input.executionCompleted);
+  const completionStatus = input.event === "task_cancelled"
+    ? "cancelled"
+    : input.event === "task_failed"
+      ? "failed"
+      : input.event === "task_completed"
+        ? "completed"
+        : input.completionStatus ?? "not_applicable";
+  const failureCategory = completionStatus === "completed"
+    ? "none"
+    : safeFailureCategory(input.failureCategory);
   return {
-    completionStatus: input.completionStatus ?? "not_applicable",
+    answerOnly,
+    approvalRequired,
+    approvalSatisfied,
+    completionStatus,
     complexityClass: input.complexityClass,
+    contextItemsExcluded: boundedInteger(input.contextItemsExcluded, 100),
+    contextItemsIncluded: boundedInteger(input.contextItemsIncluded, 100),
+    contextScope: Array.from(new Set((input.contextScope ?? []).map(safeCategory))).filter(Boolean).slice(0, 8),
     durationBucket: durationBucket(durationMs),
     durationMs,
     event: input.event,
-    failureCategory: safeFailureCategory(input.failureCategory),
+    executionCompleted,
+    executionStarted,
+    failureCategory,
     fallbackUsed: Boolean(input.fallbackUsed),
+    finalDisposition: safeCategory(input.finalDisposition),
+    intentClass: safeCategory(input.intentClass),
     mode: input.mode,
+    mutationRequested,
     providerId: safeCategory(input.providerId),
     repairAttemptCount: boundedInteger(input.repairAttemptCount, 3),
     toolCount: boundedInteger(input.toolCount, 20)

@@ -140,6 +140,7 @@ import {
 } from "@/lib/server/ai/intelligence-kernel";
 import {
   resolveBehavioralDecision,
+  selectRelevantBehavioralContext,
   type BehavioralDecision
 } from "@/lib/server/ai/behavioral-intelligence";
 import {
@@ -3316,6 +3317,40 @@ async function persistChatMessage(
   }
 }
 
+async function persistAnswerOnlyExchange(input: {
+  assistantContent: string;
+  assistantMetadata: Record<string, unknown>;
+  persistence: ChatPersistenceContext | null;
+  signal: AbortSignal;
+  userContent: string;
+  userMetadata: Record<string, unknown>;
+}) {
+  let context = input.persistence;
+  const savedMessageIds: string[] = [];
+  context = await persistChatMessage(context, {
+    content: input.userContent,
+    metadata: input.userMetadata,
+    onSaved: (messageId) => savedMessageIds.push(messageId),
+    role: "user"
+  }, input.signal);
+  context = await persistChatMessage(context, {
+    content: input.assistantContent,
+    metadata: input.assistantMetadata,
+    onSaved: (messageId) => savedMessageIds.push(messageId),
+    role: "assistant"
+  }, input.signal);
+
+  if (input.signal.aborted && context) {
+    await Promise.all(savedMessageIds.map((messageId) =>
+      deleteOwnedChatMessage({
+        messageId,
+        userId: context!.userId
+      }).catch(() => false)
+    ));
+  }
+  return context;
+}
+
 function createProposalStream(
   proposal: DiffProposal,
   sessionId?: string | null,
@@ -3437,16 +3472,59 @@ function compactIntelligenceKernel(kernel: IntelligenceKernelResult) {
 function compactBehavioralDecision(behavior: BehavioralDecision) {
   return {
     action: behavior.action,
+    answerOnly: behavior.answerOnly,
     answerValidation: behavior.answerContract,
+    approvalRequired: behavior.approvalRequired,
+    approvalSatisfied: behavior.approvalSatisfied,
     confidence: behavior.confidence,
+    contextItemsExcluded: behavior.contextItemsExcluded,
+    contextItemsIncluded: behavior.contextItemsIncluded,
+    decisionReasons: behavior.decisionReasons,
+    executionAllowed: behavior.executionAllowed,
+    finalDisposition: behavior.finalDisposition,
     handoffIntent: behavior.handoffIntent,
+    intentClass: behavior.intentClass,
+    mixedIntent: behavior.mixedIntent,
     mode: behavior.mode,
     mutationIntent: behavior.mutationIntent,
+    planRequested: behavior.planRequested,
     referencedObjective: behavior.referencedObjective,
+    relevantContextScope: behavior.relevantContextScope,
     requestedCount: behavior.requestedCount,
     requestedEntityCount: behavior.requestedEntities.length,
-    resolvedObjective: behavior.objective
+    resolvedObjective: behavior.objective,
+    topicShift: behavior.topicShift,
+    validationWarnings: behavior.validationWarnings
   };
+}
+
+function createFinalActionHeaders(behavior: BehavioralDecision) {
+  const header = (value: unknown) => String(value ?? "").replace(/[^\x20-\x7E]/g, "").slice(0, 220);
+  return {
+    "x-hassali-activity-state": behavior.answerOnly ? "preparing_answer" : "preparing_proposal",
+    "x-hassali-final-answer-only": header(behavior.answerOnly),
+    "x-hassali-final-approval-required": header(behavior.approvalRequired),
+    "x-hassali-final-context-excluded": header(behavior.contextItemsExcluded),
+    "x-hassali-final-context-included": header(behavior.contextItemsIncluded),
+    "x-hassali-final-context-scope": header(behavior.relevantContextScope.join(",")),
+    "x-hassali-final-disposition": header(behavior.finalDisposition),
+    "x-hassali-final-execution-allowed": header(behavior.executionAllowed),
+    "x-hassali-final-intent-class": header(behavior.intentClass),
+    "x-hassali-final-mutation-requested": header(behavior.mutationIntent),
+    "x-hassali-final-topic-shift": header(behavior.topicShift)
+  };
+}
+
+function withFinalActionHeaders(response: Response, behavior: BehavioralDecision) {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(createFinalActionHeaders(behavior))) {
+    headers.set(name, value);
+  }
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText
+  });
 }
 
 function compactTranslatedIntent(translatedIntent: TranslatedIntentSpec) {
@@ -5660,23 +5738,58 @@ export async function POST(request: Request) {
   });
   const effectiveUserPrompt = behavior.resolvedRequest;
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
-  const intelligencePreflight = await runIntelligencePreflight({
+  const relevantContext = selectRelevantBehavioralContext({
     messages,
+    mode: productMode,
+    mutationRequested: behavior.mutationIntent,
+    prompt: rawEffectiveUserPrompt,
+    referencedObjective: behavior.referencedObjective,
+    workspace: requestedWorkspace
+  });
+  const relevantMessages: ChatRequestMessage[] = relevantContext.messages.flatMap(
+    (message): ChatRequestMessage[] => message.role === "system"
+      ? []
+      : [{ content: message.content, role: message.role }]
+  );
+  const emptyWorkspace: WorkspaceContext = {
+    activeFileContent: "",
+    activePath: "",
+    fileContents: {},
+    fileList: [],
+    projectName: null
+  };
+  const nonMutatingFinalAction = behavior.answerOnly &&
+    ["answer", "clarify", "plan"].includes(behavior.finalDisposition);
+  const preflightWorkspace = nonMutatingFinalAction && !behavior.relevantWorkspaceContext
+    ? emptyWorkspace
+    : requestedWorkspace;
+  const intelligencePreflight = await runIntelligencePreflight({
+    finalAction: behavior,
+    messages: relevantMessages,
     mode: productMode,
     model,
     projectId: requestedProjectId,
     prompt: effectiveUserPrompt,
-    workspace: requestedWorkspace
+    workspace: preflightWorkspace
   });
-  const workspace = productMode === "ASK" && !intelligencePreflight.complexity.projectContextSelected
-    ? {
-        activeFileContent: "",
-        activePath: "",
-        fileContents: {},
-        fileList: [],
-        projectName: null
-      }
-    : requestedWorkspace;
+  const workspace = nonMutatingFinalAction && !behavior.relevantWorkspaceContext
+    ? emptyWorkspace
+    : productMode === "ASK" && !intelligencePreflight.complexity.projectContextSelected
+      ? emptyWorkspace
+      : requestedWorkspace;
+  const semanticTelemetry = {
+    answerOnly: behavior.answerOnly,
+    approvalRequired: behavior.approvalRequired,
+    approvalSatisfied: behavior.approvalSatisfied,
+    contextItemsExcluded: behavior.contextItemsExcluded,
+    contextItemsIncluded: behavior.contextItemsIncluded,
+    contextScope: behavior.relevantContextScope,
+    executionCompleted: false,
+    executionStarted: false,
+    finalDisposition: behavior.finalDisposition,
+    intentClass: behavior.intentClass,
+    mutationRequested: behavior.mutationIntent
+  } as const;
   let terminalTelemetryRecorded = false;
   const recordTerminalTelemetry = (
     completionStatus: "cancelled" | "completed" | "failed",
@@ -5685,6 +5798,7 @@ export async function POST(request: Request) {
     if (terminalTelemetryRecorded) return;
     terminalTelemetryRecorded = true;
     recordBetaTelemetry({
+      ...semanticTelemetry,
       completionStatus,
       complexityClass: intelligencePreflight.complexity.class,
       durationMs: Date.now() - routeStartedAt,
@@ -5701,6 +5815,7 @@ export async function POST(request: Request) {
   const onRequestAbort = () => recordTerminalTelemetry("cancelled", "request_cancelled");
   taskSignal.addEventListener("abort", onRequestAbort, { once: true });
   recordBetaTelemetry({
+    ...semanticTelemetry,
     complexityClass: intelligencePreflight.complexity.class,
     event: "task_started",
     mode: productMode,
@@ -5708,9 +5823,12 @@ export async function POST(request: Request) {
   });
   if (taskSignal.aborted) onRequestAbort();
   const respond = (response: Response) => {
-    const finalResponse = taskSignal.aborted
-      ? new Response(null, { status: 499 })
-      : response;
+    const finalResponse = withFinalActionHeaders(
+      taskSignal.aborted
+        ? new Response(null, { status: 499 })
+        : response,
+      behavior
+    );
     const finishResponse = (
       completionStatus: "cancelled" | "completed" | "failed",
       failureCategory?: string | null
@@ -5771,6 +5889,90 @@ export async function POST(request: Request) {
   if (taskSignal.aborted) {
     return respond(new Response(null, { status: 499 }));
   }
+  const askRuntimeContext = buildAskRuntimeContext();
+  const askLiveIntent = detectAskLiveIntent(effectiveUserPrompt);
+  const requestedSessionId = typeof body?.chatSessionId === "string" ? body.chatSessionId : null;
+
+  if (productMode !== "ASK" && nonMutatingFinalAction) {
+    let specialistPersistence = await createPersistenceContext({
+      mode,
+      projectId: requestedProjectId,
+      sessionId: requestedSessionId,
+      taskObjective: effectiveUserPrompt
+    });
+    const expertAnswer = await runAskBrain({
+      abortSignal: taskSignal,
+      askRuntimeContext,
+      behavior,
+      intelligenceContext: intelligencePreflight.providerContext,
+      messages: relevantMessages,
+      model,
+      modelSelectionPolicy,
+      productMode,
+      prompt: effectiveUserPrompt,
+      projectName: workspace.projectName ?? null,
+      workspace
+    });
+    if (
+      expertAnswer.decision.fallbackModel &&
+      expertAnswer.decision.providerFailureCategory !== "request_cancelled" &&
+      !taskSignal.aborted
+    ) {
+      recordBetaTelemetry({
+        ...semanticTelemetry,
+        complexityClass: intelligencePreflight.complexity.class,
+        event: "provider_fallback",
+        failureCategory: expertAnswer.decision.fallbackReason,
+        fallbackUsed: true,
+        mode: productMode,
+        providerId: expertAnswer.decision.executionProvider
+      });
+    }
+    const selfReview = runSelfReviewForAskAnswer({
+      answer: expertAnswer.answer,
+      generator: `${productMode.toLowerCase()}_specialist_answer`,
+      projectId: requestedProjectId,
+      prompt: effectiveUserPrompt
+    });
+    specialistPersistence = await persistAnswerOnlyExchange({
+      assistantContent: expertAnswer.answer,
+      assistantMetadata: {
+        activityState: "answer_completed",
+        askBrain: expertAnswer.decision,
+        askBrainIntent: expertAnswer.classification.intent,
+        behavioralDecision: compactBehavioralDecision(behavior),
+        intelligencePreflight: compactIntelligencePreflight(intelligencePreflight),
+        model,
+        productMode,
+        responseKind: expertAnswer.decision.responseKind,
+        selfReview: compactSelfReview(selfReview)
+      },
+      persistence: specialistPersistence,
+      signal: taskSignal,
+      userContent: latestUserPrompt,
+      userMetadata: {
+        activityState: "preparing_answer",
+        behavioralDecision: compactBehavioralDecision(behavior),
+        intelligencePreflight: compactIntelligencePreflight(intelligencePreflight),
+        model,
+        workspace: {
+          activePath: workspace.activePath,
+          fileList: workspace.fileList,
+          productMode
+        }
+      }
+    });
+
+    if (taskSignal.aborted) {
+      return respond(new Response(null, { status: 499 }));
+    }
+    return respond(createTextStream(
+      expertAnswer.answer,
+      specialistPersistence?.sessionId,
+      createAskBrainDebugHeaders(expertAnswer.decision)
+    ));
+  }
+
   const projectContract = sanitizeProjectContractForPlanning(
     readProjectContractFromWorkspace(workspace)
   );
@@ -5904,9 +6106,6 @@ export async function POST(request: Request) {
     translatedIntent
   });
   const routing = buildProposalRoutingDecision(kernel);
-  const askRuntimeContext = buildAskRuntimeContext();
-  const askLiveIntent = detectAskLiveIntent(effectiveUserPrompt);
-
   if (mode === "SUGGEST" || mode === "EXECUTE") {
     console.info("intent intelligence", sanitizeUntrustedStructuredReference(intent));
     console.info("intent translation", sanitizeUntrustedStructuredReference(summarizeTranslatedIntent(translatedIntent)));
@@ -5924,7 +6123,6 @@ export async function POST(request: Request) {
   }
 
   const formattedDiagnostic = redactWorkspaceSecrets(formatDiagnosticContext(diagnostic)).redacted;
-  const requestedSessionId = typeof body?.chatSessionId === "string" ? body.chatSessionId : null;
   let persistence = await createPersistenceContext({
     mode,
     projectId: requestedProjectId,
@@ -5952,6 +6150,7 @@ export async function POST(request: Request) {
 
   if (serverHandoff && persistence) {
     recordBetaTelemetry({
+      ...semanticTelemetry,
       complexityClass: intelligencePreflight.complexity.class,
       event: "handoff_opened",
       mode: productMode
@@ -6093,6 +6292,7 @@ export async function POST(request: Request) {
 
   if (generatedHandoff) {
     recordBetaTelemetry({
+      ...semanticTelemetry,
       complexityClass: intelligencePreflight.complexity.class,
       event: "handoff_created",
       mode: productMode
@@ -6113,68 +6313,6 @@ export async function POST(request: Request) {
       "x-hassali-ask-provider-failure": "none",
       "x-hassali-ask-response-kind": generatedHandoff.targetMode === "ASK" ? "deterministic_answer" : "mode_boundary"
     }));
-  }
-
-  if (productMode !== "ASK" && kernel.routingDecision.mutationPolicy === "answer_only") {
-    const expertAnswer = await runAskBrain({
-      abortSignal: taskSignal,
-      askRuntimeContext,
-      behavior,
-      intelligenceContext: askIntelligenceContext,
-      messages,
-      model,
-      modelSelectionPolicy,
-      productMode,
-      prompt: effectiveUserPrompt,
-      projectName: workspace.projectName ?? null,
-      workspace
-    });
-    if (
-      expertAnswer.decision.fallbackModel &&
-      expertAnswer.decision.providerFailureCategory !== "request_cancelled" &&
-      !taskSignal.aborted
-    ) {
-      recordBetaTelemetry({
-        complexityClass: intelligencePreflight.complexity.class,
-        event: "provider_fallback",
-        failureCategory: expertAnswer.decision.fallbackReason,
-        fallbackUsed: true,
-        mode: productMode,
-        providerId: expertAnswer.decision.executionProvider
-      });
-    }
-    const selfReview = runSelfReviewForAskAnswer({
-      answer: expertAnswer.answer,
-      generator: `${productMode.toLowerCase()}_expert_answer`,
-      projectId: requestedProjectId,
-      prompt: effectiveUserPrompt
-    });
-
-    persistence = await persistRequestMessage(persistence, {
-      content: expertAnswer.answer,
-      metadata: {
-        askBrain: expertAnswer.decision,
-        askBrainIntent: expertAnswer.classification.intent,
-        behavioralDecision: compactBehavioralDecision(behavior),
-        deterministic:
-          expertAnswer.decision.path === "deterministic_required" ||
-          expertAnswer.decision.path === "deterministic_preferred",
-        intelligenceKernel: compactIntelligenceKernel(kernel),
-        intelligenceTools: compactChatToolResults(intelligenceToolResults),
-        kernelRoutingDecision: kernel.routingDecision,
-        model,
-        productMode,
-        projectContract: summarizeProjectContract(projectContract),
-        selfReview: compactSelfReview(selfReview)
-      },
-      role: "assistant"
-    });
-
-    return respond(createTextStream(
-      expertAnswer.answer,
-      persistence?.sessionId,
-      createAskBrainDebugHeaders(expertAnswer.decision)
-    ));
   }
 
   if (mode === "ASK") {
@@ -6229,6 +6367,7 @@ export async function POST(request: Request) {
       !taskSignal.aborted
     ) {
       recordBetaTelemetry({
+        ...semanticTelemetry,
         complexityClass: intelligencePreflight.complexity.class,
         event: "provider_fallback",
         failureCategory: askBrain.decision.fallbackReason,
@@ -6345,6 +6484,7 @@ export async function POST(request: Request) {
       !taskSignal.aborted
     ) {
       recordBetaTelemetry({
+        ...semanticTelemetry,
         complexityClass: intelligencePreflight.complexity.class,
         event: "provider_fallback",
         failureCategory: askBrain.decision.fallbackReason,

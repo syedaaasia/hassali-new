@@ -1,4 +1,5 @@
 import type { WorkspaceContextInput } from "@/lib/server/ai/workspace-context-engine";
+import type { BehavioralDecision } from "@/lib/server/ai/behavioral-intelligence";
 import {
   createAgentPlan,
   type AgentPlan
@@ -107,6 +108,10 @@ function fallbackComplexity(input: {
 }
 
 export async function runIntelligencePreflight(input: {
+  finalAction?: Pick<
+    BehavioralDecision,
+    "answerOnly" | "finalDisposition" | "mutationIntent" | "planRequested"
+  >;
   messages: IntelligenceConversationMessage[];
   mode: IntelligenceProductMode;
   model: string;
@@ -121,10 +126,22 @@ export async function runIntelligencePreflight(input: {
     complexity = classifyTaskComplexity(input);
     const classificationMs = Date.now() - classificationStartedAt;
     const workspace = complexity.projectContextSelected ? input.workspace : null;
+    const nonMutatingFinalAction = Boolean(
+      input.finalAction?.answerOnly &&
+      ["answer", "clarify", "plan"].includes(input.finalAction.finalDisposition)
+    );
 
     const planningStartedAt = Date.now();
-    const plan = buildIntelligencePlan({ mode: input.mode, prompt: input.prompt, workspace });
+    const plan = buildIntelligencePlan({
+      answerOnly: nonMutatingFinalAction,
+      mode: input.mode,
+      mutationRequested: input.finalAction?.mutationIntent,
+      planRequested: input.finalAction?.planRequested,
+      prompt: input.prompt,
+      workspace
+    });
     const verificationPlan = createVerificationPlan({
+      answerOnly: nonMutatingFinalAction,
       mode: input.mode,
       prompt: input.prompt
     });
@@ -133,13 +150,13 @@ export async function runIntelligencePreflight(input: {
       parentMutationAllowed: false,
       projectId: input.projectId?.trim() || "unbound-project",
       prompt: input.prompt,
-      taskComplexity: complexity.class
+      taskComplexity: nonMutatingFinalAction ? "INSTANT" : complexity.class
     });
     const planningMs = Date.now() - planningStartedAt;
 
     let skillSelectionMs = 0;
     let toolSelectionMs = 0;
-    const [skills, tools] = complexity.class === "INSTANT"
+    const [skills, tools] = complexity.class === "INSTANT" || nonMutatingFinalAction
       ? [emptySkills, emptyTools] as const
       : await Promise.all([
           (async () => {
@@ -193,14 +210,29 @@ export async function runIntelligencePreflight(input: {
     };
   } catch {
     const workspace = complexity.projectContextSelected ? input.workspace : null;
-    const plan = buildIntelligencePlan({ mode: input.mode, prompt: input.prompt, workspace });
-    const verificationPlan = createVerificationPlan({ mode: input.mode, prompt: input.prompt });
+    const nonMutatingFinalAction = Boolean(
+      input.finalAction?.answerOnly &&
+      ["answer", "clarify", "plan"].includes(input.finalAction.finalDisposition)
+    );
+    const plan = buildIntelligencePlan({
+      answerOnly: nonMutatingFinalAction,
+      mode: input.mode,
+      mutationRequested: input.finalAction?.mutationIntent,
+      planRequested: input.finalAction?.planRequested,
+      prompt: input.prompt,
+      workspace
+    });
+    const verificationPlan = createVerificationPlan({
+      answerOnly: nonMutatingFinalAction,
+      mode: input.mode,
+      prompt: input.prompt
+    });
     const agentPlan = createAgentPlan({
       mode: input.mode,
       parentMutationAllowed: false,
       projectId: input.projectId?.trim() || "unbound-project",
       prompt: input.prompt,
-      taskComplexity: complexity.class
+      taskComplexity: nonMutatingFinalAction ? "INSTANT" : complexity.class
     });
     const context = fallbackContext();
     const totalMs = Date.now() - startedAt;

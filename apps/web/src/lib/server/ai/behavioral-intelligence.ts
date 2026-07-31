@@ -21,9 +21,45 @@ export type BehavioralAction =
   | "RUN"
   | "TEST";
 
+export type BehavioralIntentClass =
+  | "CLARIFICATION_NEEDED"
+  | "CODE_MUTATION"
+  | "DIAGNOSIS"
+  | "EXECUTION_REQUEST"
+  | "EXPLANATION"
+  | "INFORMATIONAL_ANSWER"
+  | "MIXED_INTENT"
+  | "NEW_CODE_BUILD"
+  | "NEW_WEBSITE_BUILD"
+  | "PLAN_ONLY"
+  | "RECOMMENDATION"
+  | "WEBSITE_MUTATION";
+
+export type FinalActionDisposition =
+  | "answer"
+  | "clarify"
+  | "execute_approved_action"
+  | "plan"
+  | "propose_action"
+  | "request_approval";
+
+export type FinalActionValidationWarning = {
+  code: string;
+  message: string;
+};
+
 export type BehavioralConversationMessage = {
   content: string;
   role: "assistant" | "system" | "user";
+};
+
+export type BehavioralContextSelection = {
+  excludedCount: number;
+  includedCount: number;
+  messages: BehavioralConversationMessage[];
+  relevantContextScope: string[];
+  topicShift: boolean;
+  workspaceContextIncluded: boolean;
 };
 
 export type ConversationObjectiveState = {
@@ -61,25 +97,44 @@ export type AnswerCountRequirement = {
 export type BehavioralDecision = {
   action: BehavioralAction;
   ambiguities: string[];
+  answerOnly: boolean;
   answerContract: AnswerContract;
   answerIntent: boolean;
+  approvalRequired: boolean;
+  approvalSatisfied: boolean;
+  artifactRequested: boolean;
   confidence: number;
   constraints: string[];
+  contextItemsExcluded: number;
+  contextItemsIncluded: number;
+  decisionReasons: string[];
+  clarificationRequired: boolean;
+  executionAllowed: boolean;
   executionIntent: boolean;
   explicitNegatives: string[];
+  finalDisposition: FinalActionDisposition;
   handoffIntent: boolean;
   intent: IntentConstraintResult;
+  intentClass: BehavioralIntentClass;
+  mixedIntent: boolean;
   mode: WorkspaceProductMode;
   mutationIntent: boolean;
   objective: string;
   objectiveState: ConversationObjectiveState;
+  planRequested: boolean;
   referencedObjective: string | null;
+  relevantContextScope: string[];
+  relevantWorkspaceContext: boolean;
   requestedComparisons: string[];
   requestedCount: number | null;
   requestedEntities: string[];
+  requestedOutcome: string;
   requiredOutputs: string[];
   researchIntent: boolean;
   resolvedRequest: string;
+  topicShift: boolean;
+  userGoal: string;
+  validationWarnings: FinalActionValidationWarning[];
 };
 
 export type BehavioralDecisionInput = {
@@ -168,6 +223,28 @@ function contentTokens(value: string) {
   );
 }
 
+const CONTEXT_STOP_WORDS = new Set([
+  ...STOP_WORDS,
+  "app",
+  "application",
+  "code",
+  "current",
+  "file",
+  "project",
+  "site",
+  "task",
+  "todo",
+  "website"
+]);
+
+function contextTokens(value: string) {
+  return unique(
+    normalize(value)
+      .split(/\s+/)
+      .filter((token) => token.length >= 3 && !CONTEXT_STOP_WORDS.has(token))
+  );
+}
+
 function isEllipticalFollowup(value: string) {
   const text = value.trim();
   return (
@@ -183,7 +260,7 @@ function isEllipticalFollowup(value: string) {
 function isAnswerableObjective(value: string) {
   return (
     /\?/u.test(value) ||
-    /^(?:analy[sz]e|compare|explain|give|help me plan|list|recommend|review|should|tell|think|what|which|who|why|how)\b/i.test(value.trim())
+    /^(?:analy[sz]e|compare|explain|give|help me plan|list|plan|propose|recommend|review|should|tell|think|what|which|who|why|how)\b/i.test(value.trim())
   );
 }
 
@@ -254,7 +331,7 @@ function selectReferencedObjective(
     return priorUserObjectives.at(-1) ?? answerableObjectives.at(-1) ?? null;
   }
 
-  if (/^(?:build|do|fix|implement|apply)\s+(?:it|that)[.!?]*$/i.test(prompt.trim())) {
+  if (/^(?:build|do|fix|implement|apply)\s+(?:it|that(?: plan)?)[.!?]*$/i.test(prompt.trim())) {
     return actionableObjectives.at(-1) ?? answerableObjectives.at(-1) ?? priorUserObjectives.at(-1) ?? null;
   }
 
@@ -385,8 +462,8 @@ function resolveFollowup(prompt: string, referencedObjective: string | null, req
   if (requestedCount && /\btop\b/i.test(trimmed)) {
     return `${trimmed.replace(/[.!?]+$/, "")} for this objective: ${referencedObjective}`;
   }
-  if (/^(?:build|do|fix|implement|apply)\s+(?:it|that)[.!?]*$/i.test(trimmed)) {
-    return `${trimmed.replace(/\b(?:it|that)\b/i, `"${referencedObjective}"`)}`;
+  if (/^(?:build|do|fix|implement|apply)\s+(?:it|that(?: plan)?)[.!?]*$/i.test(trimmed)) {
+    return `${trimmed.replace(/\b(?:it|that(?: plan)?)\b/i, `"${referencedObjective}"`)}`;
   }
   return `${trimmed}\nReferenced objective: ${referencedObjective}`;
 }
@@ -407,6 +484,10 @@ function inferAction(prompt: string, resolvedRequest: string): BehavioralAction 
   }
 
   if (/\b(?:research|look up|browse|search (?:for|the web)|verify (?:online|current|latest))\b/i.test(raw)) return "RESEARCH";
+  if (
+    /^(?:give|create|draft|outline|prepare|write)(?:\s+me)?\b[\s\S]{0,100}\b(?:(?:implementation |migration |step-by-step )?plan|implementation steps|proposed change list|technical specification|architecture proposal)\b/i.test(raw) ||
+    /^(?:plan|help me plan|outline a plan)\b/i.test(raw)
+  ) return "PLAN";
   if (/^(?:(?:please|(?:can|could|would)\s+you(?:\s+please)?|i (?:want|need) (?:you )?to)\s+)?(?:run|start|launch|execute)\b/i.test(raw)) return "RUN";
   if (
     /^(?:(?:please|(?:can|could|would)\s+you(?:\s+please)?|i (?:want|need) (?:you )?to)\s+)?(?:test|verify)\b/i.test(raw) &&
@@ -419,10 +500,9 @@ function inferAction(prompt: string, resolvedRequest: string): BehavioralAction 
     /\b(?:build|create|implement)\s+(?:this|it)\s+for me\b/i.test(raw)
   ) return "BUILD";
   if (
-    /^(?:add|apply|change|delete|edit|modify|refactor|remove|rename|replace|rewrite|redesign|update|use)\b/i.test(raw) ||
+    /^(?:go ahead and\s+)?(?:add|apply|change|delete|edit|modify|refactor|remove|rename|replace|rewrite|redesign|update|use)\b/i.test(raw) ||
     /^(?:i want|i need|please)\s+(?:you\s+to\s+)?(?:add|apply|change|edit|modify|refactor|remove|replace|rewrite|update)\b/i.test(raw)
   ) return "EDIT";
-  if (/^(?:plan|help me plan|outline a plan)\b/i.test(raw)) return "PLAN";
   if (
     /^(?:(?:can|could)\s+(?:you|u)\s+)?(?:explain|describe|teach)\b/i.test(raw) ||
     /^what does\b[\s\S]*\bmean\b/i.test(raw) ||
@@ -446,12 +526,209 @@ function inferAction(prompt: string, resolvedRequest: string): BehavioralAction 
   return "ANSWER";
 }
 
+function inferMixedMutationAction(prompt: string): BehavioralAction | null {
+  const text = prompt.trim();
+  const startsInformational =
+    /^(?:analy[sz]e|compare|describe|explain|recommend|review|tell me|walk me through|what|why|how|which|should)\b/i.test(text);
+  const actionClause = text.match(
+    /\b(?:and\s+then|then|and)\s+(?:please\s+)?(add|apply|build|change|create|edit|fix|implement|modify|refactor|remove|replace|rewrite|update)\b/i
+  );
+  if (!startsInformational || !actionClause) return null;
+
+  const verb = actionClause[1].toLowerCase();
+  if (verb === "fix") return "FIX";
+  if (["build", "create", "implement"].includes(verb)) return "BUILD";
+  return "EDIT";
+}
+
 function isMutationAction(action: BehavioralAction) {
   return ["BUILD", "EDIT", "EXECUTE", "FIX", "RUN", "TEST"].includes(action);
 }
 
 function isAnswerAction(action: BehavioralAction) {
   return ["ANALYZE", "ANSWER", "EXPLAIN", "PLAN", "RESEARCH"].includes(action);
+}
+
+function intentClassFor(input: {
+  action: BehavioralAction;
+  clarificationRequired: boolean;
+  mixedIntent: boolean;
+  mode: WorkspaceProductMode;
+  prompt: string;
+}): BehavioralIntentClass {
+  if (input.clarificationRequired) return "CLARIFICATION_NEEDED";
+  if (input.mixedIntent) return "MIXED_INTENT";
+  if (input.action === "PLAN") return "PLAN_ONLY";
+  if (["EXECUTE", "RUN", "TEST"].includes(input.action)) return "EXECUTION_REQUEST";
+  if (input.action === "BUILD") {
+    return input.mode === "WEBSITE" ? "NEW_WEBSITE_BUILD" : "NEW_CODE_BUILD";
+  }
+  if (["EDIT", "FIX"].includes(input.action)) {
+    return input.mode === "WEBSITE" ? "WEBSITE_MUTATION" : "CODE_MUTATION";
+  }
+  if (input.action === "EXPLAIN") return "EXPLANATION";
+  if (
+    /\b(?:recommend|which|should|best|trade-?offs?|pros?\s+(?:and|&)\s+cons?)\b/i.test(input.prompt)
+  ) {
+    return "RECOMMENDATION";
+  }
+  if (/\b(?:diagnose|why\b[\s\S]{0,80}\b(?:fail|slow|error)|root cause|not working)\b/i.test(input.prompt)) {
+    return "DIAGNOSIS";
+  }
+  return "INFORMATIONAL_ANSWER";
+}
+
+export function normalizeFinalActionDecision(input: {
+  answerOnly: boolean;
+  approvalRequired: boolean;
+  approvalSatisfied: boolean;
+  clarificationRequired: boolean;
+  disposition: FinalActionDisposition;
+  executionAllowed: boolean;
+  mutationRequested: boolean;
+}) {
+  let answerOnly = input.answerOnly;
+  let approvalRequired = input.approvalRequired;
+  const approvalSatisfied = input.approvalSatisfied;
+  let clarificationRequired = input.clarificationRequired;
+  let disposition = input.disposition;
+  let executionAllowed = input.executionAllowed;
+  let mutationRequested = input.mutationRequested;
+  const warnings: FinalActionValidationWarning[] = [];
+  const warn = (code: string, message: string) => warnings.push({ code, message });
+
+  if (answerOnly && mutationRequested) {
+    warn("FINAL_ACTION_ANSWER_MUTATION", "Answer-only state cannot request mutation; the decision was normalized to a non-mutating answer.");
+    mutationRequested = false;
+  }
+  if (answerOnly && approvalRequired) {
+    warn("FINAL_ACTION_ANSWER_APPROVAL", "Answer-only state cannot require approval; approval was removed.");
+    approvalRequired = false;
+  }
+  if (answerOnly && executionAllowed) {
+    warn("FINAL_ACTION_ANSWER_EXECUTION", "Answer-only state cannot execute; execution was blocked.");
+    executionAllowed = false;
+  }
+  if (clarificationRequired && executionAllowed) {
+    warn("FINAL_ACTION_CLARIFY_EXECUTION", "Clarification state cannot execute; execution was blocked.");
+    executionAllowed = false;
+  }
+  if (executionAllowed && !approvalSatisfied) {
+    warn("FINAL_ACTION_UNAPPROVED_EXECUTION", "Execution requires satisfied approval; execution was blocked.");
+    executionAllowed = false;
+  }
+  if (disposition === "request_approval" && !mutationRequested) {
+    warn("FINAL_ACTION_APPROVAL_WITHOUT_MUTATION", "Approval cannot be requested without a mutation; the decision was normalized to an answer.");
+    disposition = "answer";
+    answerOnly = true;
+    approvalRequired = false;
+  }
+  if (disposition === "execute_approved_action" && !executionAllowed) {
+    warn("FINAL_ACTION_EXECUTION_NOT_ALLOWED", "Approved execution disposition lacked execution authority; the decision was normalized safely.");
+    disposition = mutationRequested ? "request_approval" : "answer";
+    approvalRequired = mutationRequested;
+    answerOnly = !mutationRequested;
+  }
+  if (clarificationRequired && disposition !== "clarify") {
+    warn("FINAL_ACTION_CLARIFY_DISPOSITION", "Clarification was required, so the disposition was normalized to clarify.");
+    disposition = "clarify";
+    answerOnly = true;
+    approvalRequired = false;
+    mutationRequested = false;
+  }
+
+  return {
+    answerOnly,
+    approvalRequired,
+    approvalSatisfied,
+    clarificationRequired,
+    disposition,
+    executionAllowed,
+    mutationRequested,
+    warnings
+  };
+}
+
+function overlapScore(left: string, right: string) {
+  const leftTokens = contextTokens(left);
+  const rightTokens = new Set(contextTokens(right));
+  const overlap = leftTokens.filter((token) => rightTokens.has(token)).length;
+  const denominator = Math.max(1, Math.min(leftTokens.length, rightTokens.size));
+  return { overlap, ratio: overlap / denominator };
+}
+
+export function selectRelevantBehavioralContext(input: {
+  messages: BehavioralConversationMessage[];
+  mode: WorkspaceProductMode;
+  mutationRequested: boolean;
+  prompt: string;
+  referencedObjective?: string | null;
+  workspace?: WorkspaceContextInput;
+}): BehavioralContextSelection {
+  const prior = [...input.messages];
+  let currentMessage: BehavioralConversationMessage = { content: input.prompt, role: "user" };
+  for (let index = prior.length - 1; index >= 0; index -= 1) {
+    if (prior[index].role === "user" && prior[index].content.trim() === input.prompt.trim()) {
+      currentMessage = prior[index];
+      prior.splice(index, 1);
+      break;
+    }
+  }
+
+  const explicitContinuity = Boolean(input.referencedObjective) ||
+    /\b(?:apply that plan|continue (?:the )?previous|same (?:app|file|project|site|website)|use the (?:same|website we just discussed)|go back to|return to)\b/i.test(input.prompt);
+  const selectedIndexes = new Set<number>();
+  const priorUserIndexes = prior
+    .map((message, index) => ({ index, message }))
+    .filter((entry) => entry.message.role === "user")
+    .slice(-6);
+
+  for (const entry of priorUserIndexes) {
+    const isReferenced = Boolean(
+      input.referencedObjective &&
+      entry.message.content.trim() === input.referencedObjective.trim()
+    );
+    const relevance = overlapScore(entry.message.content, input.prompt);
+    const related = isReferenced || relevance.overlap >= 2 || (relevance.overlap >= 1 && relevance.ratio >= 0.5);
+    if (!related && !explicitContinuity) continue;
+    if (explicitContinuity && !isReferenced && entry !== priorUserIndexes.at(-1) && !related) continue;
+
+    selectedIndexes.add(entry.index);
+    if (prior[entry.index + 1]?.role === "assistant") selectedIndexes.add(entry.index + 1);
+    for (let index = entry.index + 1; index < prior.length; index += 1) {
+      if (prior[index].role === "user" && isConstraintOnly(prior[index].content)) selectedIndexes.add(index);
+      if (prior[index].role === "user" && !isConstraintOnly(prior[index].content)) break;
+    }
+  }
+
+  const selectedPrior = prior.filter((_, index) => selectedIndexes.has(index)).slice(-8);
+  const referencedPath = (input.workspace?.fileList ?? []).some((path) => {
+    const normalizedPath = path.replace(/\\/g, "/").toLowerCase();
+    const basename = normalizedPath.split("/").at(-1) ?? normalizedPath;
+    const prompt = input.prompt.toLowerCase();
+    return prompt.includes(normalizedPath) || prompt.includes(basename);
+  });
+  const localContextRequested =
+    /\b(?:active file|current (?:app|codebase|file|project|repo(?:sitory)?|site|website|workspace)|existing (?:app|project|site|website)|my (?:app|code|files?|project|repo(?:sitory)?|site|website)|selected file|this (?:app|code|file|function|project|site|website))\b/i.test(input.prompt) ||
+    /\b(?:inside|within|in) (?:my|the|this) (?:codebase|project|repo(?:sitory)?|workspace)\b/i.test(input.prompt) ||
+    /^(?:explain|review|summari[sz]e|walk me through)\s+this\b/i.test(input.prompt);
+  const workspaceContextIncluded = input.mutationRequested || localContextRequested || referencedPath;
+  const topicShift = priorUserIndexes.length > 0 && selectedPrior.length === 0 && !explicitContinuity;
+  const relevantContextScope = unique([
+    "current_message",
+    selectedPrior.length ? "related_conversation" : null,
+    workspaceContextIncluded ? "selected_project" : null,
+    referencedPath ? "referenced_file" : null
+  ]);
+
+  return {
+    excludedCount: Math.max(0, prior.length - selectedPrior.length),
+    includedCount: selectedPrior.length + 1,
+    messages: [...selectedPrior, currentMessage],
+    relevantContextScope,
+    topicShift,
+    workspaceContextIncluded
+  };
 }
 
 export function buildConversationObjectiveState(
@@ -559,11 +836,13 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
     workspace: input.workspace
   });
   const inferredAction = inferAction(input.prompt, resolvedRequest);
+  const mixedAction = inferMixedMutationAction(input.prompt);
   const action = input.selectedMode === "WEBSITE" && isExplicitWebsiteFactUpdate(input.prompt)
     ? "EDIT"
-    : inferredAction;
+    : mixedAction ?? inferredAction;
+  const mixedIntent = Boolean(mixedAction);
   const mutationIntent = isMutationAction(action);
-  const answerIntent = isAnswerAction(action);
+  const answerIntent = mixedIntent || isAnswerAction(action);
   const requestedCount = requestedCountFromPrompt ?? extractRequestedCount(resolvedRequest);
   const entitySource = resolvedRequest.replace(
     /\b(?:do not|don't|dont|never|no|without)\s+[^.!?\n]{2,120}/gi,
@@ -595,10 +874,56 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   )
     ? objectiveState.acceptedConstraints
     : [];
+  const clarificationRequired = Boolean(
+    ambiguities.some((ambiguity) => /no relevant conversation objective/i.test(ambiguity))
+  );
+  const intentClass = intentClassFor({
+    action,
+    clarificationRequired,
+    mixedIntent,
+    mode: input.selectedMode,
+    prompt: input.prompt
+  });
+  const initialDisposition: FinalActionDisposition = clarificationRequired
+    ? "clarify"
+    : action === "PLAN"
+      ? "plan"
+      : mutationIntent
+        ? input.selectedMode === "ASK"
+          ? "propose_action"
+          : "request_approval"
+        : "answer";
+  const normalizedFinalAction = normalizeFinalActionDecision({
+    answerOnly: !mutationIntent,
+    approvalRequired: mutationIntent && input.selectedMode !== "ASK",
+    approvalSatisfied: false,
+    clarificationRequired,
+    disposition: initialDisposition,
+    executionAllowed: false,
+    mutationRequested: mutationIntent
+  });
+  const contextSelection = selectRelevantBehavioralContext({
+    messages,
+    mode: input.selectedMode,
+    mutationRequested: normalizedFinalAction.mutationRequested,
+    prompt: input.prompt,
+    referencedObjective,
+    workspace: input.workspace
+  });
+  const decisionReasons = unique([
+    mixedIntent ? "The request combines specialist explanation with an explicit implementation action." : null,
+    action === "PLAN" ? "The user requested a plan without asking Hassali to apply it." : null,
+    !mutationIntent ? "The requested outcome can be satisfied without changing project state." : null,
+    mutationIntent ? "The user explicitly requested a project, file, or runtime action." : null,
+    normalizedFinalAction.approvalRequired ? "Selected-mode mutation requires approval before execution." : null,
+    contextSelection.topicShift ? "Low topic overlap indicates a new task, so stale task-specific history was excluded." : null,
+    contextSelection.workspaceContextIncluded ? "The request explicitly targets selected project or file context." : null
+  ]);
 
   return {
     action: finalAction,
     ambiguities,
+    answerOnly: normalizedFinalAction.answerOnly,
     answerContract: buildAnswerContract(
       finalAction,
       resolvedRequest,
@@ -608,18 +933,29 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
       persistentConstraints
     ),
     answerIntent,
+    approvalRequired: normalizedFinalAction.approvalRequired,
+    approvalSatisfied: normalizedFinalAction.approvalSatisfied,
+    artifactRequested: ["BUILD", "EDIT", "FIX"].includes(action),
     confidence,
     constraints: unique([
       ...intent.contentConstraints,
       ...intent.styleConstraints,
       ...intent.countConstraints.map((constraint) => constraint.source)
     ]),
+    contextItemsExcluded: contextSelection.excludedCount,
+    contextItemsIncluded: contextSelection.includedCount,
+    decisionReasons,
+    clarificationRequired: normalizedFinalAction.clarificationRequired,
+    executionAllowed: normalizedFinalAction.executionAllowed,
     executionIntent: ["EXECUTE", "RUN", "TEST"].includes(action),
     explicitNegatives: extractExplicitNegatives(resolvedRequest),
+    finalDisposition: normalizedFinalAction.disposition,
     handoffIntent,
     intent,
+    intentClass,
+    mixedIntent,
     mode: input.selectedMode,
-    mutationIntent,
+    mutationIntent: normalizedFinalAction.mutationRequested,
     objective,
     objectiveState: {
       ...objectiveState,
@@ -627,13 +963,20 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
       activeTopic: topicFromObjective(objective),
       referencedEntities: unique([...objectiveState.referencedEntities, ...requestedEntities]).slice(-16)
     },
+    planRequested: action === "PLAN",
     referencedObjective,
+    relevantContextScope: contextSelection.relevantContextScope,
+    relevantWorkspaceContext: contextSelection.workspaceContextIncluded,
     requestedComparisons,
     requestedCount,
     requestedEntities,
+    requestedOutcome: resolvedRequest,
     requiredOutputs,
     researchIntent: action === "RESEARCH" || /\b(?:current|latest|today|right now)\b/i.test(resolvedRequest),
-    resolvedRequest
+    resolvedRequest,
+    topicShift: contextSelection.topicShift,
+    userGoal: topicFromObjective(objective),
+    validationWarnings: normalizedFinalAction.warnings
   };
 }
 

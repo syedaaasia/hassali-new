@@ -8,6 +8,7 @@ import {
 } from "../../../chat-request-context";
 import { buildAskRuntimeContext } from "../../ai/ask-context";
 import { runAskBrain } from "../../ai/ask-brain-orchestrator";
+import { resolveBehavioralDecision } from "../../ai/behavioral-intelligence";
 import { redactWorkspaceSecrets } from "../../ai/workspace-context-engine";
 import {
   getAskProviderCooldown,
@@ -235,6 +236,39 @@ test("INSTANT preflight skips skills tools agents and project context", async ()
   assert.equal(preflight.agentPlan.tasks.length, 0);
 });
 
+test("answer-only preflight suppresses builder planning regardless of CODE keywords", async () => {
+  const prompt = "Explain how I could fix this authentication architecture.";
+  const messages = [{ content: prompt, role: "user" as const }];
+  const finalAction = resolveBehavioralDecision({
+    messages,
+    prompt,
+    selectedMode: "CODE",
+    workspace: {
+      activeFileContent: "",
+      activePath: "",
+      fileContents: {},
+      fileList: [],
+      projectName: null
+    }
+  });
+  const preflight = await runIntelligencePreflight({
+    finalAction,
+    messages,
+    mode: "CODE",
+    model: "tencent/hy3:free",
+    prompt
+  });
+  assert.equal(finalAction.finalDisposition, "answer");
+  assert.equal(finalAction.mutationIntent, false);
+  assert.equal(preflight.plan.state, "DIRECT");
+  assert.equal(preflight.plan.executionState.approvalRequired, false);
+  assert.deepEqual(preflight.plan.steps, []);
+  assert.equal(preflight.agentPlan.tasks.length, 0);
+  assert.equal(preflight.skills.loadedSkills.length, 0);
+  assert.equal(preflight.tools.discoveredTools.length, 0);
+  assert.equal(preflight.verificationPlan.taskKind, "explanation");
+});
+
 test("provider cooldown expires and cancellation does not create one", () => {
   resetAskProviderHealthForTests();
   const provider = resolveAskProvider("tencent/hy3:free");
@@ -389,10 +423,36 @@ test("beta telemetry is bounded private and non-blocking", () => {
   const serialized = JSON.stringify(event);
   assert(!serialized.includes("SECRET_VALUE_123"));
   assert(!serialized.toLowerCase().includes("customer_prompt"));
-  assert.equal(event.failureCategory, "other");
+  assert.equal(event.failureCategory, "none");
   assert(!serialized.includes("prompt"));
   assert(!serialized.includes("file"));
   assert.equal(event.toolCount, 20);
+  const contradictory = sanitizeBetaTelemetryEvent({
+    answerOnly: true,
+    approvalRequired: true,
+    approvalSatisfied: true,
+    complexityClass: "STANDARD",
+    contextItemsExcluded: 400,
+    contextItemsIncluded: 4,
+    contextScope: ["current_message", "selected_project"],
+    event: "task_completed",
+    executionCompleted: true,
+    executionStarted: true,
+    failureCategory: "provider_timeout",
+    finalDisposition: "answer",
+    intentClass: "INFORMATIONAL_ANSWER",
+    mode: "CODE",
+    mutationRequested: true
+  });
+  assert.equal(contradictory.answerOnly, true);
+  assert.equal(contradictory.mutationRequested, false);
+  assert.equal(contradictory.approvalRequired, false);
+  assert.equal(contradictory.approvalSatisfied, false);
+  assert.equal(contradictory.executionStarted, false);
+  assert.equal(contradictory.executionCompleted, false);
+  assert.equal(contradictory.completionStatus, "completed");
+  assert.equal(contradictory.failureCategory, "none");
+  assert.equal(contradictory.contextItemsExcluded, 100);
   assert.equal(recordBetaTelemetry({
     complexityClass: "INSTANT",
     event: "task_started",

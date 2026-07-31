@@ -100,15 +100,23 @@ function requestedTargets(prompt: string) {
 }
 
 export function buildIntelligencePlan(input: {
+  answerOnly?: boolean;
   mode: IntelligenceProductMode;
+  mutationRequested?: boolean;
+  planRequested?: boolean;
   prompt: string;
   workspace?: WorkspaceContextInput | null;
 }): IntelligencePlan {
-  const mutation = isMutationRequest(input.prompt, input.mode);
-  const explore = needsExploration(input.prompt);
+  const mutation = input.mutationRequested ?? isMutationRequest(input.prompt, input.mode);
+  const planOnly = Boolean(input.planRequested && !mutation);
+  const explore = !input.answerOnly && !planOnly && needsExploration(input.prompt);
   const complex = isComplexRequest(input.prompt);
   const userDecision = genuineDecision(input.prompt);
-  const state: PlanState = explore
+  const state: PlanState = planOnly
+    ? "PLAN"
+    : input.answerOnly
+      ? "DIRECT"
+      : explore
     ? "EXPLORE"
     : mutation || complex
       ? "PLAN"
@@ -128,7 +136,7 @@ export function buildIntelligencePlan(input: {
   if (detectedZod) facts.push({ status: "CONFIRMED", value: "The selected project already uses Zod for validation." });
   if (userDecision) facts.push({ status: "PENDING", value: userDecision });
 
-  const steps: PlanStep[] = state === "DIRECT"
+  const steps: PlanStep[] = state === "DIRECT" || planOnly
     ? []
     : explore
       ? [
@@ -162,8 +170,8 @@ export function buildIntelligencePlan(input: {
     objective,
     state,
     steps,
-    tests: state === "DIRECT" ? [] : ["Focused direct test", "Adjacent regression test"],
-    verificationCriteria: state === "DIRECT"
+    tests: state === "DIRECT" || planOnly ? [] : ["Focused direct test", "Adjacent regression test"],
+    verificationCriteria: state === "DIRECT" || planOnly
       ? ["Answer addresses the current request directly."]
       : ["No unrelated behavior changes.", "Required approval and safety boundaries remain intact."]
   };

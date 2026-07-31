@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
+  normalizeFinalActionDecision,
   resolveBehavioralDecision,
+  selectRelevantBehavioralContext,
   validateAnswerAgainstContract,
   type BehavioralAction
 } from "../behavioral-intelligence";
@@ -103,6 +105,149 @@ test("question grammar around build remains explanatory", () => {
   const result = decision("Can you explain how to build authentication?", "CODE");
   assert.equal(result.action, "EXPLAIN");
   assert.equal(result.mutationIntent, false);
+});
+
+test("final action gate separates specialist answers, plans, and mutations", () => {
+  const database = decision("Which database should I use for a multi-tenant SaaS?", "CODE");
+  assert.equal(database.intentClass, "RECOMMENDATION");
+  assert.equal(database.finalDisposition, "answer");
+  assert.equal(database.answerOnly, true);
+  assert.equal(database.mutationIntent, false);
+  assert.equal(database.approvalRequired, false);
+  assert.equal(database.executionAllowed, false);
+
+  const explanation = decision("Explain how I could fix this authentication architecture.", "CODE");
+  assert.equal(explanation.intentClass, "EXPLANATION");
+  assert.equal(explanation.finalDisposition, "answer");
+  assert.equal(explanation.mutationIntent, false);
+
+  const mutation = decision("Fix the authentication architecture in my current project.", "CODE");
+  assert.equal(mutation.intentClass, "CODE_MUTATION");
+  assert.equal(mutation.finalDisposition, "request_approval");
+  assert.equal(mutation.mutationIntent, true);
+  assert.equal(mutation.approvalRequired, true);
+  assert.equal(mutation.executionAllowed, false);
+
+  const plan = decision("Give me a step-by-step plan to migrate this app to Postgres.", "CODE");
+  assert.equal(plan.intentClass, "PLAN_ONLY");
+  assert.equal(plan.finalDisposition, "plan");
+  assert.equal(plan.answerOnly, true);
+  assert.equal(plan.mutationIntent, false);
+  assert.equal(plan.approvalRequired, false);
+  assert.equal(plan.executionAllowed, false);
+});
+
+test("todo and build words follow semantic outcome rather than isolated keywords", () => {
+  const informational = decision("What architecture should I use for a todo app?", "CODE");
+  assert.equal(informational.finalDisposition, "answer");
+  assert.equal(informational.mutationIntent, false);
+
+  const walkthrough = decision("Could you walk me through how this should be built?", "CODE");
+  assert.equal(walkthrough.answerOnly, true);
+  assert.equal(walkthrough.mutationIntent, false);
+
+  const mutation = decision("Build a todo app in the current project.", "CODE");
+  assert.equal(mutation.intentClass, "NEW_CODE_BUILD");
+  assert.equal(mutation.finalDisposition, "request_approval");
+  assert.equal(mutation.approvalRequired, true);
+
+  const paraphrasedMutation = decision("Go ahead and apply the suggested changes.", "CODE");
+  assert.equal(paraphrasedMutation.mutationIntent, true);
+  assert.equal(paraphrasedMutation.finalDisposition, "request_approval");
+});
+
+test("website guidance answers while explicit hero replacement requests approval", () => {
+  const guidance = decision("How should I improve the hero section for conversions?", "WEBSITE");
+  assert.equal(guidance.finalDisposition, "answer");
+  assert.equal(guidance.answerOnly, true);
+  assert.equal(guidance.approvalRequired, false);
+
+  const mutation = decision("Replace the current hero with a conversion-focused version.", "WEBSITE");
+  assert.equal(mutation.intentClass, "WEBSITE_MUTATION");
+  assert.equal(mutation.finalDisposition, "request_approval");
+  assert.equal(mutation.approvalRequired, true);
+});
+
+test("mixed intent keeps explanation intent while requiring approval for mutation", () => {
+  const result = decision("Explain the problem and then fix it in the selected file.", "CODE");
+  assert.equal(result.intentClass, "MIXED_INTENT");
+  assert.equal(result.mixedIntent, true);
+  assert.equal(result.answerIntent, true);
+  assert.equal(result.mutationIntent, true);
+  assert.equal(result.finalDisposition, "request_approval");
+  assert.equal(result.approvalRequired, true);
+  assert.equal(result.executionAllowed, false);
+});
+
+test("context relevance excludes stale tasks and retains explicit continuity", () => {
+  const staleWebsiteMessages = [
+    { content: "Build a Korean beauty ecommerce website for Seoul Glow.", role: "user" as const },
+    { content: "The Seoul Glow website proposal is ready.", role: "assistant" as const },
+    { content: "Explain Redis caching for a Node API.", role: "user" as const }
+  ];
+  const staleWebsiteDecision = decision(
+    "Explain Redis caching for a Node API.",
+    "CODE",
+    staleWebsiteMessages.slice(0, -1)
+  );
+  const codeContext = selectRelevantBehavioralContext({
+    messages: staleWebsiteMessages,
+    mode: "CODE",
+    mutationRequested: staleWebsiteDecision.mutationIntent,
+    prompt: "Explain Redis caching for a Node API.",
+    referencedObjective: staleWebsiteDecision.referencedObjective
+  });
+  assert.equal(codeContext.topicShift, true);
+  assert.equal(codeContext.messages.length, 1);
+  assert.doesNotMatch(JSON.stringify(codeContext.messages), /Korean beauty|Seoul Glow|ecommerce/i);
+
+  const staleCodeMessages = [
+    { content: "Build a todo application with recurring tasks.", role: "user" as const },
+    { content: "The todo application proposal is ready.", role: "assistant" as const },
+    { content: "How should a florist homepage establish trust?", role: "user" as const }
+  ];
+  const staleCodeDecision = decision(
+    "How should a florist homepage establish trust?",
+    "WEBSITE",
+    staleCodeMessages.slice(0, -1)
+  );
+  const websiteContext = selectRelevantBehavioralContext({
+    messages: staleCodeMessages,
+    mode: "WEBSITE",
+    mutationRequested: staleCodeDecision.mutationIntent,
+    prompt: "How should a florist homepage establish trust?",
+    referencedObjective: staleCodeDecision.referencedObjective
+  });
+  assert.equal(websiteContext.messages.length, 1);
+  assert.doesNotMatch(JSON.stringify(websiteContext.messages), /todo|recurring/i);
+
+  const continuityPrior = [
+    { content: "Give me a plan to refactor authentication safely.", role: "user" as const },
+    { content: "Plan: isolate session validation, then migrate callers.", role: "assistant" as const }
+  ];
+  const continuity = decision("Apply that plan.", "CODE", continuityPrior);
+  assert.match(continuity.resolvedRequest, /refactor authentication/i);
+  assert.equal(continuity.mutationIntent, true);
+  assert.equal(continuity.approvalRequired, true);
+  assert(continuity.relevantContextScope.includes("related_conversation"));
+});
+
+test("contradictory final action metadata fails closed with structured warnings", () => {
+  const normalized = normalizeFinalActionDecision({
+    answerOnly: true,
+    approvalRequired: true,
+    approvalSatisfied: false,
+    clarificationRequired: false,
+    disposition: "execute_approved_action",
+    executionAllowed: true,
+    mutationRequested: true
+  });
+  assert.equal(normalized.disposition, "answer");
+  assert.equal(normalized.mutationRequested, false);
+  assert.equal(normalized.approvalRequired, false);
+  assert.equal(normalized.executionAllowed, false);
+  assert(normalized.warnings.length >= 3);
+  assert(normalized.warnings.every((warning) => warning.code.startsWith("FINAL_ACTION_")));
 });
 
 test("question grammar is not treated as a required named entity", () => {

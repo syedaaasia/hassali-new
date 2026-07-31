@@ -77,10 +77,12 @@ function uniqueById(criteria: VerificationCriterion[]) {
 }
 
 function taskKindFor(input: {
+  answerOnly?: boolean;
   changedFiles?: string[];
   mode: IntelligenceProductMode;
   prompt: string;
 }): VerificationPlan["taskKind"] {
+  if (input.answerOnly) return "explanation";
   const prompt = input.prompt.toLowerCase();
   const files = input.changedFiles ?? [];
 
@@ -94,6 +96,7 @@ function taskKindFor(input: {
 }
 
 export function createVerificationPlan(input: {
+  answerOnly?: boolean;
   changedFiles?: string[];
   mode: IntelligenceProductMode;
   prompt: string;
@@ -129,7 +132,7 @@ export function createVerificationPlan(input: {
     add("typecheck", "TYPECHECK", "project", "Changed code typechecks.", false);
   }
 
-  if (input.mode === "WEBSITE") {
+  if (input.mode === "WEBSITE" && !input.answerOnly) {
     add("website-artifact", "GENERATED_ARTIFACT", "website-artifact", "Generated WEBSITE files satisfy their artifact contract.");
   }
 
