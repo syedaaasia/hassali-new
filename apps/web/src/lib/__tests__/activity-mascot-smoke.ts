@@ -156,8 +156,18 @@ test("CSS provides real sprite walking, calm travel, and natural turnaround", ()
   assert.match(css, /@keyframes hassali-activity-walk-frames/);
   assert.match(css, /background-size:\s*700%\s+100%/);
   assert.match(css, /steps\(6,\s*end\)/);
-  assert.match(css, /hassali-activity-patrol\s+2\.8s\s+linear\s+infinite\s+alternate/);
-  assert.match(css, /hassali-activity-facing\s+5\.6s\s+linear\s+infinite/);
+  assert.match(css, /--hassali-patrol-duration:\s*1300ms/);
+  assert.match(css, /--hassali-facing-duration:\s*2600ms/);
+  assert.match(css, /--hassali-walk-cycle-duration:\s*300ms/);
+  assert.match(css, /--hassali-step-cycle-duration:\s*150ms/);
+  assert.match(
+    css,
+    /hassali-activity-patrol\s+var\(--hassali-patrol-duration\)\s+linear\s+infinite\s+alternate/
+  );
+  assert.match(
+    css,
+    /hassali-activity-facing\s+var\(--hassali-facing-duration\)\s+linear\s+infinite/
+  );
   assert.match(css, /49\.5%[\s\S]*scaleX\(-1\)/);
   assert.match(css, /97\.5%[\s\S]*scaleX\(1\)/);
   assert.match(css, /animation-delay:\s*140ms/);
@@ -193,8 +203,18 @@ test("edge throws use opposite inward trajectories and a faster flight", () => {
     css,
     /\.hassali-activity-mascot\.throw-from-right\s*\{[\s\S]*--hassali-coin-arc-end:\s*var\(--hassali-coin-range-negative\)/
   );
-  assert.match(css, /hassali-activity-coin-arc\s+700ms[\s\S]*120ms\s+1\s+both/);
-  assert.match(css, /hassali-activity-throw-frames\s+880ms/);
+  assert.match(css, /--hassali-edge-settle-duration:\s*60ms/);
+  assert.match(css, /--hassali-coin-release-delay:\s*45ms/);
+  assert.match(css, /--hassali-coin-flight-duration:\s*440ms/);
+  assert.match(css, /--hassali-throw-motion-duration:\s*485ms/);
+  assert.match(
+    css,
+    /hassali-activity-coin-arc[\s\S]*var\(--hassali-coin-flight-duration\)[\s\S]*calc\(var\(--hassali-edge-settle-duration\) \+ var\(--hassali-coin-release-delay\)\)[\s\S]*1[\s\S]*both/
+  );
+  assert.match(
+    css,
+    /hassali-activity-throw-frames[\s\S]*var\(--hassali-throw-motion-duration\)[\s\S]*var\(--hassali-edge-settle-duration\)[\s\S]*1[\s\S]*both/
+  );
 });
 
 test("visible thinking copy is decorative and bound to the coin throw", () => {
