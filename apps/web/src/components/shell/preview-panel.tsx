@@ -26,6 +26,7 @@ import {
 } from "@/lib/static-preview-compiler";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 import type { PreviewManifest, VfsFile } from "@/lib/preview-manifest";
+import { verifyWebsitePreviewFidelity } from "@/lib/website-preview-fidelity";
 
 type UnifiedPreviewType = "application" | "architecture" | "component" | "dashboard" | "mobile" | "none" | "website";
 type RealPreviewFrame = {
@@ -290,12 +291,18 @@ function manifestWithCommittedFallback(
 
 function StaticWebsitePreview({
   committedFiles,
+  expectedAssetPaths,
+  expectedIdentity,
   onDiagnostics,
-  projectId
+  projectId,
+  serverVerified
 }: {
   committedFiles: Map<string, VfsFile>;
+  expectedAssetPaths: string[];
+  expectedIdentity: string | null;
   onDiagnostics: (diagnostics: StaticPreviewDiagnostic[]) => void;
   projectId: string | null;
+  serverVerified: boolean | null;
 }) {
   const [currentPage, setCurrentPage] = useState("index.html");
   const iframeWindowRef = useRef<unknown>(null);
@@ -307,14 +314,42 @@ function StaticWebsitePreview({
     () => compileStaticPreview({ activeHtmlPath: currentPage, files, projectId: projectId ?? "" }),
     [currentPage, files, projectId]
   );
+  const fidelity = useMemo(
+    () => expectedIdentity
+      ? verifyWebsitePreviewFidelity({
+          entryRoute: "index.html",
+          expectedAssetPaths,
+          expectedIdentity,
+          files,
+          filesApplied: true,
+          workspaceMatches: serverVerified !== false
+        })
+      : null,
+    [expectedAssetPaths, expectedIdentity, files, serverVerified]
+  );
+  const fidelityDiagnostic = useMemo(
+    () => fidelity && (!fidelity.previewReady || serverVerified === false)
+      ? {
+          code: fidelity.failureClass,
+          message: fidelity.failureDetails ?? "The approved website preview identity could not be verified.",
+          path: fidelity.route,
+          reference: fidelity.expectedIdentity,
+          severity: "blocking" as const
+        }
+      : null,
+    [fidelity, serverVerified]
+  );
 
   useEffect(() => {
     setCurrentPage("index.html");
   }, [committedFiles]);
 
   useEffect(() => {
-    onDiagnostics(compilation.diagnostics);
-  }, [compilation.diagnostics, onDiagnostics]);
+    onDiagnostics([
+      ...compilation.diagnostics,
+      ...(fidelityDiagnostic ? [fidelityDiagnostic] : [])
+    ]);
+  }, [compilation.diagnostics, fidelityDiagnostic, onDiagnostics]);
 
   useEffect(() => {
     const messageTarget = globalThis as unknown as {
@@ -337,6 +372,20 @@ function StaticWebsitePreview({
     messageTarget.addEventListener("message", handler);
     return () => messageTarget.removeEventListener("message", handler);
   }, [currentPage, files, projectId]);
+
+  if (fidelityDiagnostic) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-2xl border border-red-400/20 bg-black/35 p-6 text-center">
+        <div className="max-w-sm">
+          <p className="text-sm font-semibold text-red-100">Preview content mismatch</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">{fidelityDiagnostic.message}</p>
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            Reload the approved project files or regenerate the WEBSITE proposal. Stale content is not shown.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <iframe
@@ -1228,6 +1277,18 @@ export function PreviewPanel() {
   const approvedPreviewMetadata = proposal?.status === "approved"
     ? proposal.livePreviewMetadata ?? proposal.previewMetadata
     : undefined;
+  const expectedWebsiteIdentity = typeof approvedPreviewMetadata?.contentIdentity === "string"
+    ? approvedPreviewMetadata.contentIdentity
+    : null;
+  const expectedWebsiteAssets = useMemo(
+    () => Array.isArray(approvedPreviewMetadata?.expectedAssetPaths)
+      ? approvedPreviewMetadata.expectedAssetPaths.filter((path): path is string => typeof path === "string")
+      : [],
+    [approvedPreviewMetadata]
+  );
+  const websiteServerVerified = typeof approvedPreviewMetadata?.previewContentVerified === "boolean"
+    ? approvedPreviewMetadata.previewContentVerified
+    : null;
   const effectiveManifest = manifestWithCommittedFallback(canonicalManifest, committedFileMap, productMode, approvedPreviewMetadata);
   const unifiedPreviewType = previewTypeFromManifest(effectiveManifest) ?? "none";
   const activePreviewMetadata = effectiveManifest.type === "architecture"
@@ -1509,9 +1570,12 @@ export function PreviewPanel() {
         ) : effectiveManifest.type === "static_website" && hasIndexHtml ? (
           <StaticWebsitePreview
             committedFiles={committedFileMap}
+            expectedAssetPaths={expectedWebsiteAssets}
+            expectedIdentity={expectedWebsiteIdentity}
             key={`static-${localPreviewVersion}`}
             onDiagnostics={setStaticPreviewDiagnostics}
             projectId={projectId}
+            serverVerified={websiteServerVerified}
           />
         ) : isRuntimePreviewType && runtimeStatus === "running" && iframeSource ? (
           <iframe

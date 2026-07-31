@@ -31,6 +31,7 @@ import {
   clearOwnedProjectGeneratedArtifacts,
   synchronizeOwnedProjectWorkspace
 } from "@/lib/server/runtime/owned-workspace-hydration";
+import { verifyWebsitePreviewFidelity } from "@/lib/website-preview-fidelity";
 import { buildMobilePreviewRuntime } from "@/lib/server/preview/mobile-preview-runtime";
 import { buildMobileRuntimeCandidate } from "@/lib/server/runtime/mobile-runtime-manager";
 import {
@@ -935,6 +936,27 @@ export async function POST(request: Request) {
         writtenFiles
       })
     : null;
+  const websitePreviewFidelity = result.ok && workspaceCanonicalizedForRuntime && productMode === "WEBSITE"
+    ? await (async () => {
+        const canonicalFiles = await listUserProjectFiles({
+          externalUserId: userId,
+          projectId: parsed.projectId
+        }).catch(() => null);
+        const expectedAssetPaths = stringArrayValue(proposalMetadata.websitePreviewAssetPaths);
+        const entryRoute = stringValue(proposalMetadata.websitePreviewEntryRoute) || "index.html";
+        const expectedIdentity = stringValue(proposalMetadata.websitePreviewIdentity) || null;
+        return verifyWebsitePreviewFidelity({
+          entryRoute,
+          expectedAssetPaths,
+          expectedIdentity,
+          files: Object.fromEntries(
+            (canonicalFiles ?? []).map((file) => [file.path, file.content])
+          ),
+          filesApplied: true,
+          workspaceMatches: Boolean(canonicalFiles)
+        });
+      })()
+    : null;
   const mobilePreview = liveRuntimePreview
     ? buildMobilePreviewRuntime({
         files: liveRuntimePreview.analysis.generatedFiles
@@ -1068,9 +1090,23 @@ export async function POST(request: Request) {
     nextRuntime,
     ok: fileApprovalSucceeded,
     postApplyPreview: postApplyPreview?.result ?? null,
-    previewMetadata: liveRuntimePreview?.previewRuntime ?? latestApprovalPreviewMetadata,
+    previewMetadata: websitePreviewFidelity && latestApprovalPreviewMetadata
+      ? {
+          ...latestApprovalPreviewMetadata,
+          assetPathsVerified: websitePreviewFidelity.assetPathsVerified,
+          contentIdentity: websitePreviewFidelity.expectedIdentity,
+          generatedRouteVerified: websitePreviewFidelity.generatedRouteVerified,
+          generatedWorkspaceVerified: websitePreviewFidelity.generatedWorkspaceVerified,
+          httpReadiness: websitePreviewFidelity.httpReadiness,
+          previewContentVerified: websitePreviewFidelity.previewContentVerified,
+          previewFailureClass: websitePreviewFidelity.failureClass,
+          previewReady: websitePreviewFidelity.previewReady,
+          status: websitePreviewFidelity.previewReady ? "ready" : "blocked"
+        }
+      : liveRuntimePreview?.previewRuntime ?? latestApprovalPreviewMetadata,
     viteRuntime,
     verificationOk: result.verification?.ok ?? null,
+    websitePreviewFidelity,
     writtenFiles
   };
 
@@ -1091,6 +1127,21 @@ export async function POST(request: Request) {
       recoveryProvided: postApplyPreview.result.recoverySteps.length > 0,
       runtimeKind: postApplyPreview.result.runtimeKind,
       runtimeStatus: postApplyPreview.result.runtimeStatus
+    });
+  }
+  if (websitePreviewFidelity) {
+    await recordBestEffortEvent(workspaceBinding.workspaceRoot, "WEBSITE_PREVIEW_FIDELITY", {
+      assetPathsVerified: websitePreviewFidelity.assetPathsVerified,
+      failureClass: websitePreviewFidelity.failureClass,
+      filesApplied: websitePreviewFidelity.filesApplied,
+      generatedRouteVerified: websitePreviewFidelity.generatedRouteVerified,
+      generatedWorkspaceVerified: websitePreviewFidelity.generatedWorkspaceVerified,
+      httpReadiness: websitePreviewFidelity.httpReadiness,
+      previewContentVerified: websitePreviewFidelity.previewContentVerified,
+      previewReady: websitePreviewFidelity.previewReady,
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId,
+      route: websitePreviewFidelity.route
     });
   }
 

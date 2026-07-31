@@ -691,6 +691,11 @@ type DiffProposal = {
   previewType?: ProposalPreviewType;
   previewWarnings?: string[];
   realPreview?: Record<string, unknown>;
+  websiteCopyFindingCount?: number;
+  websiteCopyValidationStatus?: "blocked" | "passed" | "warning";
+  websitePreviewAssetPaths?: string[];
+  websitePreviewEntryRoute?: string;
+  websitePreviewIdentity?: string;
   projectId: string | null;
   proposalRoutingMode?: ProposalRoutingMode;
   proposalRoutingReasons?: ProposalRoutingReason[];
@@ -2953,6 +2958,8 @@ if ("IntersectionObserver" in window) {
           publicWebsiteFiles.some((content) => content.toLowerCase().includes(term.toLowerCase()))
         )
       : [];
+    const copyValidation = websiteGeneration.qualityBlueprint.copyValidation;
+    const blockingCopyFindings = copyValidation.findings.filter((finding) => finding.severity === "BLOCK");
     const websiteMetadata = {
       designTokenCount: websiteGeneration.designTokenCount,
       designTokenTheme: websiteGeneration.designTokenTheme,
@@ -2984,6 +2991,16 @@ if ("IntersectionObserver" in window) {
       ],
       websiteAssetArchiveStatus: websiteGeneration.qualityBlueprint.assets.archiveStatus,
       websiteAssetCount: websiteGeneration.qualityBlueprint.assets.records.length,
+      websiteBusinessIdentity: websiteGeneration.qualityBlueprint.contentContract.businessIdentity.displayName,
+      websiteBusinessType: websiteGeneration.qualityBlueprint.contentContract.businessType,
+      websiteContentContractCreated: true,
+      websiteConversionGoal: websiteGeneration.qualityBlueprint.contentContract.conversionGoal,
+      websiteCopyFindingCount: copyValidation.findings.length,
+      websiteCopyValidationStatus: copyValidation.blocked
+        ? ("blocked" as const)
+        : copyValidation.findings.length > 0
+          ? ("warning" as const)
+          : ("passed" as const),
       websiteGeneratedActionCount: contractAssertion.generatedFileCount,
       websiteGenerationContractStatus: contractAssertion.passed ? ("passed" as const) : ("blocked" as const),
       websiteGoal: websiteGeneration.plan.goal,
@@ -2992,6 +3009,9 @@ if ("IntersectionObserver" in window) {
       websiteNormalizedActionCount: contractAssertion.normalizedActionCount,
       websiteRepairInputCount: contractAssertion.repairInputCount,
       websiteRequestScope: websiteBrief?.requestScope ?? ("full_generation" as const),
+      websitePreviewAssetPaths: Object.keys(websiteFiles).filter((path) => path !== "HASSALI.md"),
+      websitePreviewEntryRoute: "index.html",
+      websitePreviewIdentity: websiteGeneration.qualityBlueprint.previewIdentity,
       websiteObsoleteOwnedFiles: obsoleteOwnedFiles,
       websiteUnknownFiles: existingWebsiteState.unknownFiles,
       websiteSectionCount: websiteGeneration.plan.requiredSections.length,
@@ -3031,12 +3051,13 @@ if ("IntersectionObserver" in window) {
       };
     }
 
-    if (!normalizedValidation.passed || forbiddenHits.length > 0) {
+    if (!normalizedValidation.passed || forbiddenHits.length > 0 || blockingCopyFindings.length > 0) {
       const blockedReasons = [
         ...normalizedValidation.blockedReasons,
         ...(forbiddenHits.length
           ? [`Generated content still contained forbidden terms: ${forbiddenHits.slice(0, 8).join(", ")}.`]
-          : [])
+          : []),
+        ...blockingCopyFindings.map((finding) => `${finding.code}: ${finding.message} Evidence: ${finding.evidence}`)
       ];
 
       return {
@@ -4031,7 +4052,15 @@ function attachProposalRoutingMetadata(
         ...previewMetadata,
         productPreview: proposal.previewMetadata.productPreview
       }
-    : previewMetadata;
+    : proposalContext?.mode === "WEBSITE" && proposal.websitePreviewIdentity
+      ? {
+          ...previewMetadata,
+          contentIdentity: proposal.websitePreviewIdentity,
+          expectedAssetPaths: proposal.websitePreviewAssetPaths ?? [],
+          entryPoint: proposal.websitePreviewEntryRoute ?? "index.html",
+          previewType: "static_website"
+        }
+      : previewMetadata;
   const criticalRoutingReasons = routing.reasons.filter((reason) =>
     reason.code === "welcome_ts_pollution" ||
     reason.message.toLowerCase().includes("cross-project") ||
@@ -4149,7 +4178,9 @@ function attachProposalRoutingMetadata(
     sourceOfTruthDomain: proposalContext?.domain ?? proposal.sourceOfTruthDomain,
     sourceOfTruthPages: proposalContext?.pages.length ? proposalContext.pages : proposal.sourceOfTruthPages,
     sourceOfTruthPrompt: proposalContext?.sourcePrompt ?? proposal.sourceOfTruthPrompt,
-    publicCopyCleanStatus: "clean",
+    publicCopyCleanStatus: proposal.websiteCopyValidationStatus === "blocked"
+      ? "blocked"
+      : proposal.publicCopyCleanStatus ?? "clean",
     proposalRoutingMode: preservesProposalBlock
       ? "blocked"
       : extraWarnings.length > 0 && routingMode === "normal"
@@ -4158,7 +4189,9 @@ function attachProposalRoutingMetadata(
     requiresExtraReview:
       preservesProposalBlock || routing.shouldRequireExtraReview || extraWarnings.length > 0,
     shouldBlockExecution: preservesProposalBlock || routingShouldBlock,
-    sectionCopyQualityStatus: "clean",
+    sectionCopyQualityStatus: proposal.websiteCopyValidationStatus === "blocked"
+      ? "blocked"
+      : proposal.sectionCopyQualityStatus ?? "clean",
     staleTermScanStatus: "clean",
     suppressedContextCount: contextPriority?.suppressedContext.length,
     translatedBusinessType: translatedIntent?.businessType,

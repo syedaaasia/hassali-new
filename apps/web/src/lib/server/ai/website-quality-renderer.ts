@@ -60,6 +60,11 @@ function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "item";
 }
 
+function visitorHref(target: string) {
+  if (/^(?:#|mailto:|tel:|https?:\/\/)/i.test(target)) return target;
+  return `./${target.replace(/^\.?\//, "")}`;
+}
+
 function nav(blueprint: WebsiteQualityBlueprint, activePage: string) {
   return blueprint.pages.map((page) => `          <a ${page.name === activePage ? 'aria-current="page"' : ""} href="./${page.path}">${escapeHtml(page.name === "home" ? "Home" : page.name.replace(/[-_]/g, " "))}</a>`).join("\n");
 }
@@ -222,8 +227,8 @@ function renderHero(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
           <h1 id="page-title">${escapeVisitorText(page.visitorCopy.heading)}</h1>
           <p class="hero-lede">${escapeVisitorText(page.visitorCopy.body)}</p>
           <div class="hero-actions">
-            <a class="button" href="${blueprint.pages.some((candidate) => candidate.name === "contact") ? "./contact.html" : `#${page.sections[0]?.id ?? "main-content"}`}">${escapeHtml(page.visitorCopy.primaryCta)}</a>
-            ${page.visitorCopy.secondaryCta ? `<a class="text-link" href="${nextPage ? `./${nextPage.path}` : `#${page.sections[0]?.id ?? "main-content"}`}">${escapeHtml(page.visitorCopy.secondaryCta)} <span aria-hidden="true">&#8594;</span></a>` : ""}
+            <a class="button" href="${escapeHtml(visitorHref(page.visitorCopy.primaryTarget))}">${escapeHtml(page.visitorCopy.primaryCta)}</a>
+            ${page.visitorCopy.secondaryCta ? `<a class="text-link" href="${escapeHtml(visitorHref(page.visitorCopy.secondaryTarget ?? nextPage?.path ?? `#${page.sections[0]?.id ?? "main-content"}`))}">${escapeHtml(page.visitorCopy.secondaryCta)} <span aria-hidden="true">&#8594;</span></a>` : ""}
           </div>
            <ul class="hero-points" aria-label="What to expect">${blueprint.business.differentiators.slice(0, 3).map((item) => `<li>${escapeVisitorText(item)}</li>`).join("")}</ul>
         </div>
@@ -266,6 +271,7 @@ function renderPage(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="${escapeHtml(blueprint.brand.palette.background)}" />
+    <meta name="hassali-preview-identity" content="${escapeHtml(blueprint.previewIdentity)}" />
     <title>${escapeHtml(page.title)}</title>
     <meta name="description" content="${escapeHtml(page.description)}" />
     <link rel="canonical" href="./${page.path}" />
@@ -280,14 +286,14 @@ function renderPage(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
     <link rel="stylesheet" href="./styles.css" />
     <script type="application/ld+json">${schemaFor(blueprint, page)}</script>
   </head>
-  <body data-page="${escapeHtml(page.name)}" data-webgl="${page.name === "home" && blueprint.webgl.enabled ? "enabled" : "disabled"}" data-3d-requirement="${page.name === "home" ? escapeHtml(blueprint.scene.requirement) : "not_requested"}" data-scene-recipe="${page.name === "home" ? escapeHtml(blueprint.scene.recipe) : "none"}" data-scene-spec-version="1" data-cinematic="${page.name === "home" && blueprint.cinematic.enabled ? "enabled" : "disabled"}" data-cinematic-requirement="${page.name === "home" ? escapeHtml(blueprint.cinematic.requirement) : "not_requested"}" data-cinematic-spec-version="1" data-experience-density="${blueprint.experience.advancedDensity}">
+  <body data-page="${escapeHtml(page.name)}" data-hassali-preview-identity="${escapeHtml(blueprint.previewIdentity)}" data-webgl="${page.name === "home" && blueprint.webgl.enabled ? "enabled" : "disabled"}" data-3d-requirement="${page.name === "home" ? escapeHtml(blueprint.scene.requirement) : "not_requested"}" data-scene-recipe="${page.name === "home" ? escapeHtml(blueprint.scene.recipe) : "none"}" data-scene-spec-version="1" data-cinematic="${page.name === "home" && blueprint.cinematic.enabled ? "enabled" : "disabled"}" data-cinematic-requirement="${page.name === "home" ? escapeHtml(blueprint.cinematic.requirement) : "not_requested"}" data-cinematic-spec-version="1" data-experience-density="${blueprint.experience.advancedDensity}">
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" data-site-header>
       <a class="brand" href="./index.html">${renderInlineLogo(blueprint, 38)}<span>${escapeHtml(blueprint.brand.generatedName)}</span></a>
       <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation" data-menu-toggle><span class="sr-only">Open menu</span><span></span><span></span><span></span></button>
       <nav class="primary-navigation" id="primary-navigation" aria-label="Primary navigation" data-primary-navigation>
 ${nav(blueprint, page.name)}
-        <a class="nav-cta" href="${blueprint.pages.some((candidate) => candidate.name === "contact") ? "./contact.html" : `#${page.sections[0]?.id ?? "main-content"}`}">${escapeHtml(page.visitorCopy.primaryCta)}</a>
+        <a class="nav-cta" href="${escapeHtml(visitorHref(page.visitorCopy.primaryTarget))}">${escapeHtml(page.visitorCopy.primaryCta)}</a>
       </nav>
     </header>
     <main id="main-content">

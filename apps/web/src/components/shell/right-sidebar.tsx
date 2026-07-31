@@ -1159,6 +1159,12 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   {runtimeApprovalResult.postApplyPreview?.validationWarnings[0]
                     ? ` Note: ${runtimeApprovalResult.postApplyPreview.validationWarnings[0].message}`
                     : null}
+                  {runtimeApprovalResult.websitePreviewFidelity
+                    ? ` ${runtimeApprovalResult.websitePreviewFidelity.summary}`
+                    : null}
+                  {runtimeApprovalResult.websitePreviewFidelity?.recoverySteps[0]
+                    ? ` Next: ${runtimeApprovalResult.websitePreviewFidelity.recoverySteps[0]}`
+                    : null}
                   {runtimeApprovalResult.codeExecution
                     ? ` CODE ${runtimeApprovalResult.codeExecution.completionStatus.toLowerCase().replace(/_/g, " ")}: ${runtimeApprovalResult.codeExecution.metrics.commandsExecuted} command(s), ${runtimeApprovalResult.codeExecution.metrics.repairAttempts} repair attempt(s).`
                     : null}

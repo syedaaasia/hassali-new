@@ -326,8 +326,9 @@ try {
   );
   assert.doesNotMatch(lawHtml, /general-information boundary|no outcome guarantees|secure-intake reminder|accurate and\./i);
   assert.match(lawHtml, /Clear legal information|Honest expectations|Careful initial inquiry/i);
-  assert.match(lawContract, /brandNameProvenance: GENERATED_PLACEHOLDER/);
+  assert.match(lawContract, /brandNameProvenance: SAFE_INFERENCE/);
   assert.match(lawContract, /brandNameConfirmed: false/);
+  assert.doesNotMatch(lawContract, /GENERATED_PLACEHOLDER/);
 
   const lawWorkspaceFiles = Object.fromEntries(
     lawProposal.changes

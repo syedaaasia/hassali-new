@@ -41,6 +41,15 @@ import {
   type Website3DSceneRecipe,
   type Website3DSceneSpec
 } from "@/lib/server/ai/website-webgl-scene-spec";
+import {
+  buildWebsiteContentContract,
+  type WebsiteContentContract
+} from "@/lib/server/ai/website-content-contract";
+import {
+  repairVisitorCopy,
+  validateWebsiteVisitorCopy,
+  type WebsiteCopyValidationResult
+} from "@/lib/server/ai/website-copy-validator";
 
 export type WebsitePalette = {
   accent: string;
@@ -70,7 +79,9 @@ export type WebsiteVisitorCopy = {
   eyebrow: string;
   heading: string;
   primaryCta: string;
+  primaryTarget: string;
   secondaryCta?: string;
+  secondaryTarget?: string;
 };
 
 export type WebsiteSectionKind =
@@ -166,7 +177,7 @@ export type WebsiteQualityBlueprint = {
   assets: WebsiteAssetIntelligence;
   brand: {
     generatedName: string;
-    nameProvenance: "GENERATED_PLACEHOLDER" | "USER_SUPPLIED";
+    nameProvenance: "SAFE_INFERENCE" | "USER_SUPPLIED";
     logo: WebsiteLogoBlueprint;
     logoStrategy: "generated-local-svg";
     palette: WebsitePalette;
@@ -195,7 +206,9 @@ export type WebsiteQualityBlueprint = {
     visualSubjects: string[];
   };
   cinematic: WebsiteCinematicExperience;
+  contentContract: WebsiteContentContract;
   contentEntities: Array<{ description: string; label: string; meta: string }>;
+  copyValidation: WebsiteCopyValidationResult;
   interactions: WebsiteInteractionBlueprint[];
   media: WebsiteMediaAsset[];
   experience: WebsiteExperiencePlan;
@@ -207,6 +220,7 @@ export type WebsiteQualityBlueprint = {
     progressiveEnhancement: boolean;
     remoteDependencies: number;
   };
+  previewIdentity: string;
   seo: {
     canonicalPolicy: "project-relative";
     includeOpenGraph: boolean;
@@ -637,11 +651,6 @@ function cleanBrand(value: string | null | undefined) {
   return cleaned.replace(/\b(?:studio)\b$/i, "").trim() || null;
 }
 
-function generatedBrand(profileValue: DomainProfile, seed: string) {
-  const number = hash(seed);
-  return `${profileValue.brandStems[number % profileValue.brandStems.length]} ${profileValue.brandSuffixes[(number >>> 3) % profileValue.brandSuffixes.length]}`;
-}
-
 function logoBlueprint(brandName: string, profileValue: DomainProfile, domainId: string | null): WebsiteLogoBlueprint {
   const words = brandName.split(/\s+/).filter(Boolean);
   const initials = words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join("") || brandName.slice(0, 2).toUpperCase();
@@ -736,7 +745,7 @@ function isInternalVisitorCopy(value: string) {
 
 function visitorCopy(input: {
   brandName: string;
-  ctas: { primary: string; secondary: string };
+  contract: WebsiteContentContract;
   page: string;
   primaryCta: string;
   profile: DomainProfile;
@@ -763,7 +772,9 @@ function visitorCopy(input: {
     eyebrow: titleCase(input.profile.businessType),
     heading,
     primaryCta: input.primaryCta,
-    secondaryCta: home ? input.ctas.secondary : `Return to ${input.brandName}`
+    primaryTarget: input.contract.primaryCta.target,
+    secondaryCta: home ? input.contract.secondaryCta?.label : `Return to ${input.brandName}`,
+    secondaryTarget: home ? input.contract.secondaryCta?.target : "index.html"
   };
 }
 
@@ -785,11 +796,11 @@ function createSection(input: {
   };
 }
 
-function pageSections(input: { page: string; profile: DomainProfile }) {
+function pageSections(input: { contract: WebsiteContentContract; page: string; profile: DomainProfile }) {
   const entities = itemList(input.profile);
   const processItems = [
     {
-      detail: `Start with the visitor's priorities and the ${input.profile.businessType} outcome they need.`,
+      detail: `Start with your priorities and the ${input.profile.businessType} outcome you need.`,
       title: "Define the need"
     },
     {
@@ -801,12 +812,12 @@ function pageSections(input: { page: string; profile: DomainProfile }) {
       title: "Confirm current information"
     },
     {
-      detail: "Continue through the primary inquiry or purchase path without losing the context gathered so far.",
+      detail: "Use the inquiry or browsing path with the relevant context gathered so far.",
       title: "Take the next step"
     }
   ];
-  const trustItems = input.profile.trustSignals.map((signal) =>
-    visitorTrustSignal(signal, input.profile.businessType)
+  const trustItems = input.contract.trustStrategy.map((signal) =>
+    visitorTrustSignal(signal, input.contract.businessType)
   );
   const core = input.profile.sectionIdeas.map(([title, body, kind], index) => createSection({
     body,
@@ -828,7 +839,40 @@ function pageSections(input: { page: string; profile: DomainProfile }) {
   }));
 
   if (input.page === "home") {
-    return core.filter((section) => section.items.length > 0 || section.kind === "form");
+    const offerItems = input.contract.offerItems.map((item) => ({
+      detail: item.detail,
+      meta: item.meta,
+      title: item.title
+    }));
+    return [
+      createSection({
+        body: `See what is available, who it is for, and which details matter before taking the next step.`,
+        eyebrow: titleCase(input.contract.businessType),
+        id: "home-offer",
+        items: offerItems,
+        kind: input.contract.commerceBehavior === "portfolio_inquiry" ? "gallery" : "entities",
+        title: input.contract.coreOffer
+      }),
+      createSection({
+        body: input.contract.offerMechanism,
+        eyebrow: "How it works",
+        id: "home-process",
+        items: processItems,
+        kind: "process",
+        title: `A clear path for ${input.contract.primaryAudience}`
+      }),
+      createSection({
+        body: "Useful confidence comes from transparent offer details, a clear process, and direct confirmation of current information.",
+        eyebrow: "What to expect",
+        id: "home-trust",
+        items: trustItems,
+        kind: "trust",
+        title: "Practical details before you decide"
+      }),
+      ...(core.find((section) => section.kind === "faq")
+        ? [core.find((section) => section.kind === "faq")!]
+        : [])
+    ];
   }
 
   const pageName = titleCase(input.page);
@@ -881,27 +925,6 @@ function visitorTrustSignal(signal: string, businessType: string) {
     detail: `Ask how this ${businessType} detail applies to the option, service, or project you are considering.`,
     title: titleCase(title)
   };
-}
-
-function domainCtas(profileValue: DomainProfile) {
-  const text = profileValue.businessType.toLowerCase();
-  if (/watch/.test(text)) return { primary: "Explore the movement", secondary: "Review specifications" };
-  if (/television/.test(text)) return { primary: "Compare screen technology", secondary: "Plan your room" };
-  if (/dental/.test(text)) return { primary: "Request an appointment", secondary: "Understand the visit" };
-  if (/crm/.test(text)) return { primary: "Request a product demo", secondary: "See the workflow" };
-  if (/toy/.test(text)) return { primary: "Browse toy categories", secondary: "Find a gift by age" };
-  if (/restaurant/.test(text)) return { primary: "Explore the menu", secondary: "Request a table" };
-  if (/portfolio/.test(text)) return { primary: "View selected work", secondary: "Discuss a project" };
-  if (/real estate/.test(text)) return { primary: "Browse sample properties", secondary: "Request a viewing" };
-  if (/automotive/.test(text)) return { primary: "Compare the models", secondary: "Request a test drive" };
-  if (/beauty/.test(text)) return { primary: "Explore the beauty edit", secondary: "Build a routine" };
-  if (/greeting card/.test(text)) return { primary: "Browse by occasion", secondary: "Personalize a card" };
-  if (/fashion/.test(text)) return { primary: "Browse the collection", secondary: "Review fit guidance" };
-  if (/developer community/.test(text)) return { primary: "Find a community path", secondary: "Meet sample members" };
-  if (/legal/.test(text)) return { primary: "Request a consultation", secondary: "Review practice areas" };
-  if (/technology/.test(text)) return { primary: "Plan a discovery call", secondary: "Review capabilities" };
-  if (/hvac|local service/.test(text)) return { primary: "Request service guidance", secondary: "Review service options" };
-  return { primary: `Explore ${profileValue.businessType}`, secondary: "Review the details" };
 }
 
 export function buildWebsiteSceneBlueprint(input: { cinematicSequenceRequired: boolean; domainId: string | null; palette: WebsitePalette; profile: Pick<DomainProfile, "businessType">; projectName: string; prompt: string; semantic: SemanticDomainEvidence }): WebsiteSceneBlueprint {
@@ -998,7 +1021,25 @@ export function buildWebsiteQualityBlueprint(input: {
   workspaceAssets?: WebsiteCinematicAssetInput[];
 }): WebsiteQualityBlueprint {
   const semantic = inferSemanticDomain(input.prompt);
+  const contentContract = buildWebsiteContentContract({
+    brief: input.brief,
+    intentBrandName: input.intent.brandName,
+    prompt: input.prompt,
+    semantic
+  });
   let selectedProfile = selectProfile({ plan: input.plan, prompt: input.prompt, semantic });
+  if (semantic.source !== "canonical_taxonomy") {
+    selectedProfile = {
+      ...selectedProfile,
+      audience: [contentContract.primaryAudience],
+      businessType: contentContract.businessType,
+      differentiators: contentContract.differentiators,
+      entities: contentContract.offerItems.map((item) => [item.title, item.detail, item.meta]),
+      primaryGoal: contentContract.conversionGoal,
+      tagline: contentContract.hero.headline,
+      trustSignals: contentContract.trustStrategy
+    };
+  }
   const initialConsistency = evaluateWebsiteSemanticConsistency({
     businessType: selectedProfile.businessType,
     entities: selectedProfile.entities.flatMap(([label, description]) => [label, description]),
@@ -1008,26 +1049,33 @@ export function buildWebsiteQualityBlueprint(input: {
   });
   const semanticRepairApplied = initialConsistency.repairRecommended && semantic.source !== "generic_fallback" && semantic.source !== "canonical_taxonomy";
   if (semanticRepairApplied) selectedProfile = genericSemanticProfile(input.prompt, input.plan);
-  const userSuppliedBrand = cleanBrand(input.intent.brandName);
-  const brandName = userSuppliedBrand ?? generatedBrand(selectedProfile, `${input.prompt}:${input.plan.pages.join(",")}`);
-  const contractCta = input.brief?.ctaPatterns[0]?.trim();
-  const ctas = domainCtas(selectedProfile);
+  const userSuppliedBrand = contentContract.businessIdentity.displayName;
+  const brandName = userSuppliedBrand ?? contentContract.businessIdentity.publicLabel;
   const domainId = input.brief?.domainId ?? input.plan.sourceOfTruthDomain;
-  const pages = input.plan.pages.map((page) => {
+  const initialPages = input.plan.pages.map((page) => {
     const label = page === "home" ? "Home" : titleCase(page);
     const path = pagePath(page);
-    const primaryCta = contractCta || (/contact|appointment|booking|reservation/.test(page) ? ctas.secondary : ctas.primary);
-    const publicCopy = visitorCopy({ brandName, ctas, page, primaryCta, profile: selectedProfile });
+    const primaryCta = contentContract.primaryCta.label;
+    const publicCopy = visitorCopy({ brandName, contract: contentContract, page, primaryCta, profile: selectedProfile });
     return {
       description: page === "home" ? publicCopy.body : `${label} at ${brandName}. ${publicCopy.body}`,
       name: page,
       path,
-      sections: pageSections({ page, profile: selectedProfile }),
+      sections: pageSections({ contract: contentContract, page, profile: selectedProfile }),
       structuredDataType: selectedProfile.schema,
       title: page === "home" ? `${brandName} | ${selectedProfile.tagline}` : `${label} | ${brandName}`,
       visitorCopy: publicCopy
     };
   });
+  const pages = initialPages.map((page) => ({
+    ...page,
+    visitorCopy: repairVisitorCopy({
+      contract: contentContract,
+      page: page.name,
+      visitorCopy: page.visitorCopy
+    })
+  }));
+  const copyValidation = validateWebsiteVisitorCopy({ contract: contentContract, pages });
   const sectionKinds = new Set(pages.flatMap((page) => page.sections.map((section) => section.kind)));
   const interactions: WebsiteInteractionBlueprint[] = [
     { id: "mobile-navigation", keyboard: true, reason: "Navigation remains usable on small screens." },
@@ -1129,13 +1177,19 @@ export function buildWebsiteQualityBlueprint(input: {
     visitorCopy: pages.flatMap((page) => [page.visitorCopy.eyebrow, page.visitorCopy.heading, page.visitorCopy.body, ...page.sections.flatMap((section) => [section.title, section.body])]),
     visualSubjects: [selectedProfile.visualArchetype, ...semantic.visualSubjects]
   });
+  const previewIdentity = `website-${hash(JSON.stringify({
+    businessType: contentContract.businessType,
+    headline: contentContract.hero.headline,
+    identity: contentContract.businessIdentity.displayName,
+    pages: pages.map((page) => page.path)
+  })).toString(16).padStart(8, "0")}`;
 
   return {
     accessibility: { landmarks: true, reducedMotion: true, skipLink: true, visibleFocus: true },
     assets,
     brand: {
       generatedName: brandName,
-      nameProvenance: userSuppliedBrand ? "USER_SUPPLIED" : "GENERATED_PLACEHOLDER",
+      nameProvenance: userSuppliedBrand ? "USER_SUPPLIED" : "SAFE_INFERENCE",
       logo: logoBlueprint(brandName, selectedProfile, domainId),
       logoStrategy: "generated-local-svg",
       palette: brandPalette,
@@ -1164,13 +1218,16 @@ export function buildWebsiteQualityBlueprint(input: {
       visualSubjects: semantic.visualSubjects
     },
     cinematic,
+    contentContract,
     contentEntities: selectedProfile.entities.map(([label, description, meta]) => ({ description, label, meta })),
+    copyValidation,
     interactions,
     media,
     experience,
     experienceQuality,
     pages,
     performance: { maxDevicePixelRatio: scene.performanceBudget.maxPixelRatio, pauseWhenHidden: true, progressiveEnhancement: true, remoteDependencies: media.filter((item) => item.provider !== "local_svg" && item.provider !== "workspace").length + externalSceneDependencies },
+    previewIdentity,
     seo: { canonicalPolicy: "project-relative", includeOpenGraph: true, includeRobots: true, includeSitemap: true, structuredData: true },
     scene,
     semanticConsistency: { ...semanticConsistency, repairApplied: semanticRepairApplied },
@@ -1184,6 +1241,7 @@ export function summarizeWebsiteQualityBlueprint(blueprint: WebsiteQualityBluepr
     assets: `${blueprint.assets.records.length} asset(s), ${blueprint.assets.cinematicSequences.length} sequence(s)`,
     brand: blueprint.brand.generatedName,
     cinematic: blueprint.cinematic.enabled ? `${blueprint.cinematic.sequences.length} sequence(s)` : blueprint.cinematic.requirement,
+    copyValidation: `${blueprint.copyValidation.status}:${blueprint.copyValidation.findings.length} finding(s)`,
     components: blueprint.sharedComponents,
     interactions: blueprint.interactions.map((interaction) => interaction.id),
     experience: blueprint.experience.sections.map((section) => `${section.sectionId}:${section.engine}`),
@@ -1191,6 +1249,7 @@ export function summarizeWebsiteQualityBlueprint(blueprint: WebsiteQualityBluepr
     media: blueprint.media.map((item) => `${item.provider}:${item.id}`),
     palette: Object.values(blueprint.brand.palette),
     pages: blueprint.pages.map((page) => page.path),
+    previewIdentity: blueprint.previewIdentity,
     scene: `${blueprint.scene.recipe}:${blueprint.scene.engine}:${blueprint.scene.motionEngine}`,
     semantic: `${blueprint.business.sector ?? "unknown"}:${blueprint.business.industry ?? "unknown"}:${blueprint.business.niche ?? "unknown"}`,
     semanticConsistency: `${blueprint.semanticConsistency.status}:${blueprint.semanticConsistency.coverage}`,

@@ -158,6 +158,25 @@ export type RuntimeApprovalResponse = {
     workspacePath: string | null;
   } | null;
   previewMetadata?: Record<string, unknown> | null;
+  websitePreviewFidelity?: {
+    assetPathsVerified: boolean;
+    expectedIdentity: string | null;
+    failureClass: string;
+    failureDetails: string | null;
+    filesApplied: boolean;
+    generatedRouteVerified: boolean;
+    generatedWorkspaceVerified: boolean;
+    httpReadiness: "NOT_APPLICABLE_SRC_DOC";
+    observedIdentity: string | null;
+    previewAttempted: boolean;
+    previewContentVerified: boolean;
+    previewReady: boolean;
+    previewType: "static_website";
+    previewUrl: null;
+    recoverySteps: string[];
+    route: string;
+    summary: string;
+  } | null;
   mobileRuntime?: {
     candidateCommands: string[];
     capabilities: string[];
@@ -231,6 +250,10 @@ export type RuntimeSyncMetadata = {
   livePreviewWarnings?: string[];
   liveRealPreview?: Record<string, unknown>;
   liveRuntimePreviewSyncedAt?: string | null;
+  websitePreviewContentVerified?: boolean;
+  websitePreviewFailureClass?: string | null;
+  websitePreviewReady?: boolean;
+  websitePreviewRoute?: string | null;
 };
 
 export type RuntimeSyncStatus = "failed" | "partial" | "skipped" | "synced";
@@ -362,6 +385,10 @@ export function syncRuntimeApprovalResult(
     livePreviewWarnings: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.warnings ?? [],
     liveRealPreview: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.realPreview,
     liveRuntimePreviewSyncedAt: input.runtimeResult?.liveRuntimePreview?.liveRuntimePreviewSyncedAt ?? null,
+    websitePreviewContentVerified: input.runtimeResult?.websitePreviewFidelity?.previewContentVerified ?? false,
+    websitePreviewFailureClass: input.runtimeResult?.websitePreviewFidelity?.failureClass ?? null,
+    websitePreviewReady: input.runtimeResult?.websitePreviewFidelity?.previewReady ?? false,
+    websitePreviewRoute: input.runtimeResult?.websitePreviewFidelity?.route ?? null,
     postApplyCommandSource: input.runtimeResult?.postApplyPreview?.commandSource ?? null,
     postApplyFailureClass: input.runtimeResult?.postApplyPreview?.failureClass ?? null,
     postApplyPackageManager: input.runtimeResult?.postApplyPreview?.packageManager ?? null,
