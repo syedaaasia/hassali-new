@@ -253,32 +253,97 @@ textarea {
 
 @keyframes hassali-activity-patrol {
   0% {
-    transform: translate3d(0, 0, 0) scaleX(1);
+    transform: translate3d(0, 0, 0);
   }
-  42% {
-    transform: translate3d(28px, -1px, 0) scaleX(1);
+  47%,
+  49.5% {
+    transform: translate3d(var(--hassali-mascot-travel), 0, 0);
   }
-  48% {
-    transform: translate3d(28px, 0, 0) scaleX(1);
+  97.5%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes hassali-activity-facing {
+  0%,
+  49.4% {
+    transform: scaleX(1);
+  }
+  49.5%,
+  97.4% {
+    transform: scaleX(-1);
+  }
+  97.5%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes hassali-activity-walk-frames {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 100% 0;
+  }
+}
+
+@keyframes hassali-activity-step-bounce {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(-0.3deg);
   }
   50% {
-    transform: translate3d(28px, 0, 0) scaleX(-1);
+    transform: translate3d(0, -1.25px, 0) rotate(0.3deg);
   }
-  92% {
-    transform: translate3d(0, -1px, 0) scaleX(-1);
+}
+
+@keyframes hassali-activity-throw-frames {
+  from {
+    background-position: 0 0;
   }
-  98% {
-    transform: translate3d(0, 0, 0) scaleX(-1);
+  to {
+    background-position: 100% 0;
+  }
+}
+
+@keyframes hassali-activity-coin-arc {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.78);
+  }
+  12% {
+    opacity: 1;
+  }
+  52% {
+    opacity: 1;
+    transform: translate3d(38px, -24px, 0) scale(1);
+  }
+  82% {
+    opacity: 1;
   }
   100% {
-    transform: translate3d(0, 0, 0) scaleX(1);
+    opacity: 0;
+    transform: translate3d(78px, 2px, 0) scale(0.72);
+  }
+}
+
+@keyframes hassali-activity-coin-spin {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 100% 0;
   }
 }
 
 .hassali-activity-stage {
+  --hassali-character-height: 52px;
+  --hassali-character-width: 44px;
   position: relative;
-  width: 56px;
-  height: 28px;
+  width: min(100%, clamp(156px, 46vw, 300px));
+  height: 56px;
   overflow: hidden;
   pointer-events: none;
   user-select: none;
@@ -289,33 +354,106 @@ textarea {
 
 .hassali-activity-mascot {
   position: absolute;
-  bottom: 2px;
-  left: 0;
-  width: 24px;
-  height: 24px;
+  bottom: 1px;
+  left: var(--hassali-mascot-left);
+  width: var(--hassali-character-width);
+  height: var(--hassali-character-height);
   transform-origin: center bottom;
   will-change: transform;
-  animation: hassali-activity-patrol 1.45s steps(14, end) infinite;
+  animation: hassali-activity-patrol 6.8s linear infinite;
 }
 
-.hassali-activity-image {
-  display: block;
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
+.hassali-activity-facing {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-origin: center bottom;
+  will-change: transform;
+  animation: hassali-activity-facing 6.8s linear infinite;
+}
+
+.hassali-activity-walk-sprite,
+.hassali-activity-throw-sprite {
+  position: absolute;
+  inset: 0;
+  width: var(--hassali-character-width);
+  height: var(--hassali-character-height);
+  background-position: 0 0;
+  background-repeat: no-repeat;
   image-rendering: pixelated;
-  pointer-events: none;
-  user-select: none;
-  filter:
-    drop-shadow(0 0 1px rgba(244, 243, 238, 0.72))
-    drop-shadow(0 2px 2px rgba(0, 0, 0, 0.24));
+  filter: drop-shadow(0 0 1px rgba(244, 243, 238, 0.72)) drop-shadow(0 2px 2px rgba(0, 0, 0, 0.24));
+}
+
+.hassali-activity-walk-sprite {
+  background-image: var(--hassali-walk-strip);
+  background-size: 700% 100%;
+  animation:
+    hassali-activity-walk-frames 760ms steps(6, end) infinite,
+    hassali-activity-step-bounce 380ms steps(2, end) infinite;
+}
+
+.hassali-activity-throw-sprite {
+  z-index: 2;
+  background-image: var(--hassali-throw-strip);
+  background-size: 600% 100%;
+  animation: hassali-activity-throw-frames 1.12s steps(5, end) 1 both;
+}
+
+.hassali-activity-coin-flight {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  left: 31px;
+  width: 16px;
+  height: 24px;
+  opacity: 0;
+  will-change: opacity, transform;
+  animation: hassali-activity-coin-arc 760ms cubic-bezier(0.22, 0.72, 0.35, 1) 220ms 1 both;
+}
+
+.hassali-activity-coin-sprite {
+  width: 16px;
+  height: 24px;
+  background-image: var(--hassali-coin-strip);
+  background-position: 0 0;
+  background-repeat: no-repeat;
+  background-size: 500% 100%;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 3px rgba(255, 188, 44, 0.72)) drop-shadow(0 2px 1px rgba(58, 28, 4, 0.42));
+  animation: hassali-activity-coin-spin 420ms steps(4, end) infinite;
+}
+
+.hassali-activity-mascot.is-throwing,
+.hassali-activity-mascot.is-throwing .hassali-activity-facing {
+  animation-play-state: paused;
+}
+
+.hassali-activity-mascot.is-throwing .hassali-activity-walk-sprite {
+  opacity: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .hassali-activity-stage {
+    width: 64px;
+  }
+
   .hassali-activity-mascot {
     animation: none;
-    transform: translate3d(16px, 0, 0);
+    left: 10px;
+    transform: none;
     will-change: auto;
+  }
+
+  .hassali-activity-facing,
+  .hassali-activity-walk-sprite {
+    animation: none;
+    transform: none;
+    will-change: auto;
+  }
+
+  .hassali-activity-throw-sprite,
+  .hassali-activity-coin-flight {
+    display: none;
   }
 }
 
