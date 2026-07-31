@@ -41,11 +41,15 @@ export type NextRuntimeValidation = {
 export type NextRuntimeOperationResult = {
   devServerRuntime?: DevServerRuntimeResult;
   error: string | null;
+  existingProcessReused: boolean;
   framework: "next_app";
+  httpStatus: number | null;
   logs: string[];
   port: number | null;
   previewUrl: string | null;
+  processStarted: boolean;
   projectId: string;
+  readinessVerified: boolean;
   routerKind: NextRouterKind;
   runtimeId: string | null;
   runtimeStatus: NextRuntimeStatus;
@@ -54,8 +58,10 @@ export type NextRuntimeOperationResult = {
 };
 
 export type NextRuntimeStartInput = {
+  abortSignal?: AbortSignal;
   devServerRuntime?: DevServerRuntimeResult | null;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  projectRoot?: string;
   projectId: string;
   workerType: string | null;
   workspaceRoot: string;

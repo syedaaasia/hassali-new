@@ -127,6 +127,36 @@ export type RuntimeApprovalResponse = {
     workspaceRoot: string;
   } | null;
   ok?: boolean;
+  postApplyPreview?: {
+    commandSource: string;
+    existingProcessReused: boolean;
+    failureClass: string;
+    failureDetails: string | null;
+    filesApplied: boolean;
+    filesChanged: string[];
+    httpStatus: number | null;
+    packageManager: string;
+    port: number | null;
+    portSelectionResult: string;
+    previewAttempted: boolean;
+    previewReady: boolean;
+    previewUrl: string | null;
+    processStarted: boolean;
+    readinessVerified: boolean;
+    recoverySteps: string[];
+    runnableTargetDetected: boolean;
+    runtimeKind: string;
+    runtimeStatus: string;
+    selectedCommand: string | null;
+    selectedScript: string | null;
+    summary: string;
+    validationWarnings: Array<{
+      code: string;
+      message: string;
+    }>;
+    verificationStatus: string;
+    workspacePath: string | null;
+  } | null;
   previewMetadata?: Record<string, unknown> | null;
   mobileRuntime?: {
     candidateCommands: string[];
@@ -158,6 +188,18 @@ export type RuntimeSyncedFile = {
 };
 
 export type RuntimeSyncMetadata = {
+  postApplyCommandSource?: string | null;
+  postApplyFailureClass?: string | null;
+  postApplyPackageManager?: string | null;
+  postApplyPortSelectionResult?: string | null;
+  postApplyPreviewAttempted?: boolean;
+  postApplyPreviewReady?: boolean;
+  postApplyPreviewReused?: boolean;
+  postApplyProcessStarted?: boolean;
+  postApplyReadinessVerified?: boolean;
+  postApplyRecoveryProvided?: boolean;
+  postApplyRuntimeKind?: string | null;
+  postApplyRuntimeStatus?: string | null;
   runtimeRunnerId?: string | null;
   runtimeRunnerStatus?: string | null;
   runtimeStartAttempted?: boolean;
@@ -320,6 +362,18 @@ export function syncRuntimeApprovalResult(
     livePreviewWarnings: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.warnings ?? [],
     liveRealPreview: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.realPreview,
     liveRuntimePreviewSyncedAt: input.runtimeResult?.liveRuntimePreview?.liveRuntimePreviewSyncedAt ?? null,
+    postApplyCommandSource: input.runtimeResult?.postApplyPreview?.commandSource ?? null,
+    postApplyFailureClass: input.runtimeResult?.postApplyPreview?.failureClass ?? null,
+    postApplyPackageManager: input.runtimeResult?.postApplyPreview?.packageManager ?? null,
+    postApplyPortSelectionResult: input.runtimeResult?.postApplyPreview?.portSelectionResult ?? null,
+    postApplyPreviewAttempted: input.runtimeResult?.postApplyPreview?.previewAttempted ?? false,
+    postApplyPreviewReady: input.runtimeResult?.postApplyPreview?.previewReady ?? false,
+    postApplyPreviewReused: input.runtimeResult?.postApplyPreview?.existingProcessReused ?? false,
+    postApplyProcessStarted: input.runtimeResult?.postApplyPreview?.processStarted ?? false,
+    postApplyReadinessVerified: input.runtimeResult?.postApplyPreview?.readinessVerified ?? false,
+    postApplyRecoveryProvided: Boolean(input.runtimeResult?.postApplyPreview?.recoverySteps.length),
+    postApplyRuntimeKind: input.runtimeResult?.postApplyPreview?.runtimeKind ?? null,
+    postApplyRuntimeStatus: input.runtimeResult?.postApplyPreview?.runtimeStatus ?? null,
     runtimeRunnerId: input.runtimeResult?.runnerId ?? null,
     runtimeRunnerStatus: input.runtimeResult?.runnerStatus ?? null,
     runtimeStartAttempted: input.runtimeResult?.runtimeStartAttempted ?? false,

@@ -841,8 +841,24 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         const nextRuntimeStarted = nextRuntime?.runtimeStatus === "running" && nextRuntime.previewUrl;
         const backendRuntime = runtimeResult.backendExecutionRuntime;
         const backendRuntimeStarted = backendRuntime?.runtimeStatus === "running" && backendRuntime.previewUrl;
+        const postApplyPreview = runtimeResult.postApplyPreview;
+        const verifiedPostApplyPreview = Boolean(
+          postApplyPreview?.previewReady &&
+          postApplyPreview.readinessVerified &&
+          postApplyPreview.previewUrl
+        );
 
-        if (viteRuntimeStarted) {
+        if (verifiedPostApplyPreview && postApplyPreview) {
+          applyRuntimePayload({
+            error: null,
+            logs: [postApplyPreview.summary],
+            port: postApplyPreview.port,
+            previewUrl: postApplyPreview.previewUrl,
+            projectId: selectedProjectId,
+            status: "running",
+            workspacePath: postApplyPreview.workspacePath
+          });
+        } else if (viteRuntimeStarted) {
           applyRuntimePayload({
             error: viteRuntime.error,
             logs: viteRuntime.logs,
@@ -854,7 +870,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           });
         }
 
-        if (nextRuntimeStarted) {
+        if (!verifiedPostApplyPreview && nextRuntimeStarted) {
           applyRuntimePayload({
             error: nextRuntime.error,
             logs: nextRuntime.logs,
@@ -866,7 +882,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           });
         }
 
-        if (backendRuntimeStarted) {
+        if (!verifiedPostApplyPreview && backendRuntimeStarted) {
           applyRuntimePayload({
             error: backendRuntime.error,
             logs: backendRuntime.logs,
@@ -878,10 +894,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           });
         }
 
-        if (!viteRuntimeStarted && !nextRuntimeStarted && !backendRuntimeStarted && runtimeResult.runtimeStartStatus) {
+        if (!verifiedPostApplyPreview && !viteRuntimeStarted && !nextRuntimeStarted && !backendRuntimeStarted && runtimeResult.runtimeStartStatus) {
           applyRuntimePayload({
-            error: runtimeResult.runtimeStartError ?? runtimeResult.runtimeWarning ?? null,
-            logs: runtimeResult.runtimeWarning ? [runtimeResult.runtimeWarning] : [],
+            error: postApplyPreview?.failureDetails ?? runtimeResult.runtimeStartError ?? runtimeResult.runtimeWarning ?? null,
+            logs: [
+              postApplyPreview?.summary,
+              ...(postApplyPreview?.recoverySteps ?? []),
+              runtimeResult.runtimeWarning
+            ].filter((message): message is string => Boolean(message)),
             port: null,
             previewUrl: null,
             projectId: selectedProjectId,
@@ -895,7 +915,13 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           });
         }
 
-        if (syncResult.refreshedPreview && !viteRuntimeStarted && !nextRuntimeStarted && !backendRuntimeStarted) {
+        if (
+          syncResult.refreshedPreview &&
+          !postApplyPreview &&
+          !viteRuntimeStarted &&
+          !nextRuntimeStarted &&
+          !backendRuntimeStarted
+        ) {
           await syncPreview(selectedProjectId);
         }
 
@@ -1123,6 +1149,15 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                     : null}
                   {runtimeApprovalResult.runtimeWarning
                     ? ` ${runtimeApprovalResult.runtimeWarning}`
+                    : null}
+                  {runtimeApprovalResult.postApplyPreview
+                    ? ` ${runtimeApprovalResult.postApplyPreview.summary}`
+                    : null}
+                  {runtimeApprovalResult.postApplyPreview?.recoverySteps[0]
+                    ? ` Next: ${runtimeApprovalResult.postApplyPreview.recoverySteps[0]}`
+                    : null}
+                  {runtimeApprovalResult.postApplyPreview?.validationWarnings[0]
+                    ? ` Note: ${runtimeApprovalResult.postApplyPreview.validationWarnings[0].message}`
                     : null}
                   {runtimeApprovalResult.codeExecution
                     ? ` CODE ${runtimeApprovalResult.codeExecution.completionStatus.toLowerCase().replace(/_/g, " ")}: ${runtimeApprovalResult.codeExecution.metrics.commandsExecuted} command(s), ${runtimeApprovalResult.codeExecution.metrics.repairAttempts} repair attempt(s).`

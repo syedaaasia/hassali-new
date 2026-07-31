@@ -35,10 +35,14 @@ export type ViteRuntimeValidation = {
 export type ViteRuntimeOperationResult = {
   devServerRuntime?: DevServerRuntimeResult;
   error: string | null;
+  existingProcessReused: boolean;
+  httpStatus: number | null;
   logs: string[];
   port: number | null;
   previewUrl: string | null;
+  processStarted: boolean;
   projectId: string;
+  readinessVerified: boolean;
   runtimeId: string | null;
   runtimeStatus: ViteRuntimeStatus;
   startedAt: string | null;
@@ -46,8 +50,10 @@ export type ViteRuntimeOperationResult = {
 };
 
 export type ViteRuntimeStartInput = {
+  abortSignal?: AbortSignal;
   devServerRuntime?: DevServerRuntimeResult | null;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  projectRoot?: string;
   projectId: string;
   workerType: string | null;
   workspaceRoot: string;

@@ -46,11 +46,15 @@ function blocked(input: NextRuntimeStartInput, reasons: string[], routerKind: Ne
   return {
     devServerRuntime: input.devServerRuntime ?? undefined,
     error: reasons[0] ?? "Next.js runtime startup was blocked.",
+    existingProcessReused: false,
     framework: "next_app",
+    httpStatus: null,
     logs: reasons.map((reason) => `[system] ${reason}`),
     port: null,
     previewUrl: null,
+    processStarted: false,
     projectId: input.projectId,
+    readinessVerified: false,
     routerKind,
     runtimeId,
     runtimeStatus: "blocked",
@@ -59,7 +63,13 @@ function blocked(input: NextRuntimeStartInput, reasons: string[], routerKind: Ne
   };
 }
 
-function failed(input: NextRuntimeStartInput, error: string, logs: string[] = [], routerKind: NextRouterKind = "unknown"): NextRuntimeOperationResult {
+function failed(
+  input: NextRuntimeStartInput,
+  error: string,
+  logs: string[] = [],
+  routerKind: NextRouterKind = "unknown",
+  options?: { httpStatus?: number | null; processStarted?: boolean }
+): NextRuntimeOperationResult {
   const runtimeId = `next-runtime-error-${Date.now()}`;
 
   recordRuntimeStreamEvent({
@@ -76,11 +86,15 @@ function failed(input: NextRuntimeStartInput, error: string, logs: string[] = []
   return {
     devServerRuntime: input.devServerRuntime ?? undefined,
     error,
+    existingProcessReused: false,
     framework: "next_app",
+    httpStatus: options?.httpStatus ?? null,
     logs: logs.length ? logs : [`[system] ${error}`],
     port: null,
     previewUrl: null,
+    processStarted: options?.processStarted ?? false,
     projectId: input.projectId,
+    readinessVerified: false,
     routerKind,
     runtimeId,
     runtimeStatus: "error",
@@ -225,15 +239,74 @@ export async function startNextRuntime(
     return blocked(input, validation.reasons, validation.routerKind);
   }
 
+  const existing = getRuntime(input.projectId);
+  if (
+    (existing?.status === "running" || existing?.status === "starting") &&
+    existing.workspaceRoot === input.workspaceRoot &&
+    existing.previewUrl
+  ) {
+    const existingRuntimeId = existing.runtimeId;
+    const readiness = await waitForOwnedLocalHttp({
+      abortSignal: input.abortSignal,
+      isProcessAlive: () => {
+        const current = getRuntime(input.projectId);
+        return Boolean(
+          current &&
+          current.runtimeId === existingRuntimeId &&
+          (current.status === "running" || current.status === "starting")
+        );
+      },
+      requestTimeoutMs: 800,
+      timeoutMs: 2_500,
+      url: existing.previewUrl
+    });
+    if (readiness.ok) {
+      const healthy = markRuntimeStatus(input.projectId, "running");
+      if (healthy) {
+        appendRuntimeLog(input.projectId, "system", `Reused verified Next.js runtime at ${existing.previewUrl}`);
+        return {
+          ...runtimeRecordToNextPreviewBridge(healthy),
+          devServerRuntime: input.devServerRuntime ?? undefined,
+          existingProcessReused: true,
+          httpStatus: readiness.status,
+          logs: runtimeLogLines(getRuntime(input.projectId)),
+          processStarted: false,
+          readinessVerified: true,
+          runtimeStatus: "running"
+        };
+      }
+    }
+    if (readiness.outcome === "cancelled") {
+      return failed(
+        input,
+        readiness.error ?? "Next.js runtime reuse validation was cancelled.",
+        runtimeLogLines(getRuntime(input.projectId)),
+        validation.routerKind,
+        { httpStatus: readiness.status, processStarted: false }
+      );
+    }
+    await stopRuntime(input.projectId);
+  } else if (existing?.status === "running" || existing?.status === "starting") {
+    await stopRuntime(input.projectId);
+  }
+
+  const invocation = validation.devScript
+    ? resolveSafeProjectScriptInvocation(
+        input.workspaceRoot,
+        validation.devScript,
+        {
+          allowHostFallback: false,
+          dependencyRoots: [input.workspaceRoot, input.projectRoot ?? input.workspaceRoot]
+        }
+      )
+    : null;
+  if (!invocation) {
+    return blocked(input, ["Next.js executable is not available in the approved project dependency tree."], validation.routerKind);
+  }
+
   let port: number;
 
   try {
-    const existing = getRuntime(input.projectId);
-
-    if (existing?.status === "running" || existing?.status === "starting") {
-      await stopRuntime(input.projectId);
-    }
-
     port = await findAvailablePort(input.devServerRuntime?.port ?? 3000);
   } catch (error) {
     return failed(input, error instanceof Error ? error.message : "Unable to prepare Next.js runtime.", [], validation.routerKind);
@@ -241,12 +314,6 @@ export async function startNextRuntime(
 
   const previewUrl = `http://127.0.0.1:${port}/`;
   const runtimeId = `next-runtime-${Date.now()}`;
-  const invocation = validation.devScript
-    ? resolveSafeProjectScriptInvocation(input.workspaceRoot, validation.devScript)
-    : null;
-  if (!invocation) {
-    return blocked(input, ["Next.js executable is not available in the approved project dependency tree."], validation.routerKind);
-  }
   const child = spawn(
     invocation.command,
     [...invocation.args, "-H", "127.0.0.1", "-p", String(port)],
@@ -286,13 +353,28 @@ export async function startNextRuntime(
   });
 
   const readiness = await waitForOwnedLocalHttp({
+    abortSignal: input.abortSignal,
+    isProcessAlive: () => {
+      const current = getRuntime(input.projectId);
+      return Boolean(
+        current &&
+        current.runtimeId === runtimeId &&
+        (current.status === "running" || current.status === "starting")
+      );
+    },
     timeoutMs: Math.max(12_000, startupProbeMs),
     url: previewUrl
   });
   if (!readiness.ok) {
     const logs = runtimeLogLines(getRuntime(input.projectId));
     await stopRuntime(input.projectId);
-    return failed(input, readiness.error ?? "Next.js runtime did not become ready.", logs, validation.routerKind);
+    return failed(
+      input,
+      readiness.error ?? "Next.js runtime did not become ready.",
+      logs,
+      validation.routerKind,
+      { httpStatus: readiness.status, processStarted: true }
+    );
   }
   const current = markRuntimeStatus(input.projectId, "running");
   if (!current) return failed(input, "Next.js runtime registry did not return a running process.", [], validation.routerKind);
@@ -300,7 +382,11 @@ export async function startNextRuntime(
   return {
     ...runtimeRecordToNextPreviewBridge(current),
     devServerRuntime: input.devServerRuntime ?? undefined,
+    existingProcessReused: false,
+    httpStatus: readiness.status,
     logs: runtimeLogLines(getRuntime(input.projectId)),
+    processStarted: true,
+    readinessVerified: true,
     runtimeStatus: "running"
   };
 }

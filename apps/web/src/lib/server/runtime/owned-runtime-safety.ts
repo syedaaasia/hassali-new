@@ -4,6 +4,13 @@ import path from "node:path";
 
 export type RuntimeReadiness = {
   error: string | null;
+  outcome:
+    | "application_error"
+    | "cancelled"
+    | "http_unreachable"
+    | "process_exited"
+    | "ready"
+    | "timeout";
   ok: boolean;
   status: number | null;
 };
@@ -23,34 +30,60 @@ export function isSafeDevelopmentScript(
 }
 
 export async function waitForOwnedLocalHttp(input: {
+  abortSignal?: AbortSignal;
+  isProcessAlive?: () => boolean;
+  pollIntervalMs?: number;
+  requestTimeoutMs?: number;
   timeoutMs: number;
   url: string;
 }): Promise<RuntimeReadiness> {
   const startedAt = Date.now();
   let lastError = "The owned runtime did not become ready.";
+  let lastStatus: number | null = null;
   while (Date.now() - startedAt < input.timeoutMs) {
+    if (input.abortSignal?.aborted) {
+      return {
+        error: "Runtime readiness was cancelled.",
+        outcome: "cancelled",
+        ok: false,
+        status: lastStatus
+      };
+    }
+    if (input.isProcessAlive && !input.isProcessAlive()) {
+      return {
+        error: "The owned runtime process exited before readiness was verified.",
+        outcome: "process_exited",
+        ok: false,
+        status: lastStatus
+      };
+    }
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1_500);
+    const abortProbe = () => controller.abort();
+    input.abortSignal?.addEventListener("abort", abortProbe, { once: true });
+    const timeout = setTimeout(() => controller.abort(), input.requestTimeoutMs ?? 1_500);
     try {
       const response = await fetch(input.url, {
         redirect: "manual",
         signal: controller.signal
       });
+      lastStatus = response.status;
       if (response.status < 500) {
-        return { error: null, ok: true, status: response.status };
+        return { error: null, outcome: "ready", ok: true, status: response.status };
       }
       lastError = `The owned runtime responded with HTTP ${response.status}.`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : "The owned runtime readiness check failed.";
     } finally {
       clearTimeout(timeout);
+      input.abortSignal?.removeEventListener("abort", abortProbe);
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, input.pollIntervalMs ?? 250));
   }
   return {
     error: sanitizeUntrustedToolText(lastError).sanitized,
+    outcome: lastStatus && lastStatus >= 500 ? "application_error" : "timeout",
     ok: false,
-    status: null
+    status: lastStatus
   };
 }
 

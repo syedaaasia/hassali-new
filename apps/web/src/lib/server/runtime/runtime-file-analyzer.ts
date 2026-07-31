@@ -36,7 +36,9 @@ const keyFileNames = new Set([
   "next.config.mjs",
   "next.config.ts",
   "package.json",
+  "package-lock.json",
   "pom.xml",
+  "pnpm-lock.yaml",
   "pubspec.yaml",
   "pyproject.toml",
   "requirements.txt",
@@ -46,7 +48,17 @@ const keyFileNames = new Set([
   "tailwind.config.ts",
   "tsconfig.json",
   "vite.config.js",
-  "vite.config.ts"
+  "vite.config.ts",
+  "yarn.lock",
+  "bun.lock",
+  "bun.lockb"
+]);
+const presenceOnlyFileNames = new Set([
+  "bun.lock",
+  "bun.lockb",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock"
 ]);
 
 function normalizePath(value: string) {
@@ -116,7 +128,12 @@ async function readWorkspaceFiles(root: string, writtenFiles: string[]) {
 
     const fileStat = await stat(absolute).catch(() => null);
 
-    if (!fileStat?.isFile() || fileStat.size > maxFileBytes) continue;
+    if (!fileStat?.isFile()) continue;
+    const fileName = relativePath.split("/").pop()?.toLowerCase() ?? "";
+    if (fileStat.size > maxFileBytes) {
+      if (presenceOnlyFileNames.has(fileName)) files[relativePath] = "";
+      continue;
+    }
 
     files[relativePath] = await readFile(absolute, "utf8").catch(() => "");
   }

@@ -1,3 +1,5 @@
+import type { PostApplyPreviewResult } from "@/lib/server/runtime/post-apply-preview-types";
+
 export type RuntimeAuthorityStatus =
   | "blocked"
   | "failed"
@@ -37,9 +39,50 @@ export function buildRuntimeAuthorityDecision(input: {
   backendRuntime?: RuntimeCandidate;
   mobileRuntime?: RuntimeCandidate;
   nextRuntime?: RuntimeCandidate;
+  postApplyPreview?: PostApplyPreviewResult | null;
   runtimeWarnings?: string[];
   viteRuntime?: RuntimeCandidate;
 }): RuntimeAuthorityDecision {
+  if (input.postApplyPreview) {
+    const result = input.postApplyPreview;
+    if (result.previewReady && result.readinessVerified && result.previewUrl) {
+      return {
+        runtimeOptional: true,
+        runtimeStartAttempted: result.previewAttempted,
+        runtimeStartError: null,
+        runtimeStartStatus: "running",
+        runtimeWarning: result.existingProcessReused
+          ? "A healthy project-owned preview was reused after readiness verification."
+          : null
+      };
+    }
+    if (result.runtimeStatus === "FAILED") {
+      return {
+        runtimeOptional: true,
+        runtimeStartAttempted: result.previewAttempted,
+        runtimeStartError: result.failureDetails,
+        runtimeStartStatus: "failed",
+        runtimeWarning: result.summary
+      };
+    }
+    if (result.runtimeStatus === "AMBIGUOUS_TARGET") {
+      return {
+        runtimeOptional: true,
+        runtimeStartAttempted: false,
+        runtimeStartError: result.failureDetails,
+        runtimeStartStatus: "blocked",
+        runtimeWarning: result.summary
+      };
+    }
+    return {
+      runtimeOptional: true,
+      runtimeStartAttempted: result.previewAttempted,
+      runtimeStartError: null,
+      runtimeStartStatus: "not_started",
+      runtimeWarning: result.summary
+    };
+  }
+
   const candidates = [
     input.viteRuntime,
     input.nextRuntime,

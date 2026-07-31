@@ -106,7 +106,14 @@ const cliEntries: Record<string, string> = {
   vitest: "vitest/vitest.mjs"
 };
 
-export function resolveSafeProjectScriptInvocation(root: string, script: string) {
+export function resolveSafeProjectScriptInvocation(
+  root: string,
+  script: string,
+  options?: {
+    allowHostFallback?: boolean;
+    dependencyRoots?: string[];
+  }
+) {
   const tokens = script.trim().split(/\s+/);
   const executable = tokens.shift()?.toLowerCase() ?? "";
   if (executable === "node") {
@@ -129,9 +136,15 @@ export function resolveSafeProjectScriptInvocation(root: string, script: string)
   if (!moduleId) return null;
   const currentRoot = process.cwd();
   const dependencyRoots = Array.from(new Set([
-    path.resolve(root, "node_modules"),
-    path.resolve(currentRoot, "node_modules"),
-    path.resolve(currentRoot, "apps/web/node_modules")
+    ...(options?.dependencyRoots ?? [root]).map((dependencyRoot) =>
+      path.resolve(dependencyRoot, "node_modules")
+    ),
+    ...(options?.allowHostFallback === false
+      ? []
+      : [
+          path.resolve(currentRoot, "node_modules"),
+          path.resolve(currentRoot, "apps/web/node_modules")
+        ])
   ]));
   for (const dependencyRoot of dependencyRoots) {
     const candidate = path.resolve(dependencyRoot, moduleId);

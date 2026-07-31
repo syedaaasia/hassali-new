@@ -18,6 +18,7 @@ import {
 } from "@/lib/server/runtime/project-workspace-registry";
 import { createGitSnapshotSafety } from "@/lib/server/runtime/git-snapshot-safety";
 import { buildLiveRuntimePreviewMetadata } from "@/lib/server/runtime/live-runtime-sync";
+import { runPostApplyPreview } from "@/lib/server/runtime/post-apply-preview";
 import { buildRuntimeAuthorityDecision } from "@/lib/server/runtime/runtime-authority";
 import { selectRuntimeAdapter } from "@/lib/server/runtime/runtime-adapter-selector";
 import { readApprovedFile } from "@/lib/server/runtime/approved-file-runner";
@@ -26,10 +27,6 @@ import {
   codeExecutionKey,
   runCodeExecutionOnce
 } from "@/lib/server/runtime/code-execution-registry";
-import { buildDevServerRuntime } from "@/lib/server/runtime/dev-server-runtime";
-import { startViteRuntime } from "@/lib/server/runtime/vite-runtime-manager";
-import { startNextRuntime } from "@/lib/server/runtime/next-runtime-manager";
-import { startBackendRuntime } from "@/lib/server/runtime/backend-runtime-manager";
 import {
   clearOwnedProjectGeneratedArtifacts,
   synchronizeOwnedProjectWorkspace
@@ -938,11 +935,6 @@ export async function POST(request: Request) {
         writtenFiles
       })
     : null;
-  const devServerRuntime = liveRuntimePreview
-    ? buildDevServerRuntime({
-        generatedFiles: liveRuntimePreview.analysis.generatedFiles
-      })
-    : null;
   const mobilePreview = liveRuntimePreview
     ? buildMobilePreviewRuntime({
         files: liveRuntimePreview.analysis.generatedFiles
@@ -951,44 +943,46 @@ export async function POST(request: Request) {
   const codeRuntimeExecutionAllowed = Boolean(
     result.ok &&
     productMode === "CODE" &&
+    authorizedProposal.approvalMode === "EXECUTE" &&
     workerRouter.selectedWorkerType === "local" &&
-    codeExecution &&
-    codeExecution.repository.commands.length > 0 &&
-    codeExecution.commandResults.every((command) => command.status === "PASSED") &&
-    codeExecution.scopeExpansionRequired.length === 0
+    result.verification?.ok !== false &&
+    (
+      !codeExecution ||
+      (
+        codeExecution.commandResults.every((command) => command.status === "PASSED") &&
+        codeExecution.scopeExpansionRequired.length === 0
+      )
+    )
   );
-  const viteRuntime = codeRuntimeExecutionAllowed && devServerRuntime?.framework === "react_vite"
-    ? await startViteRuntime({
-        devServerRuntime,
-        productMode,
+  const fileApprovalSucceeded = result.ok;
+  const codeOutcomeSucceeded = !codeExecution ||
+    codeExecution.completionStatus === "COMPLETE_VERIFIED" ||
+    codeExecution.completionStatus === "COMPLETE_WITH_LIMITATIONS";
+  const postApplyPreview = liveRuntimePreview && productMode === "CODE"
+    ? await runPostApplyPreview({
+        abortSignal: request.signal,
+        approvalSatisfied: true,
+        filesApplied: fileApprovalSucceeded,
+        filesChanged: writtenFiles,
+        generatedFiles: liveRuntimePreview.analysis.generatedFiles,
         projectId: parsed.projectId,
+        runtimeStartAllowed: codeRuntimeExecutionAllowed,
+        verificationStatus: result.verification?.ok === false
+          ? "FAILED"
+          : result.verification?.ok === true
+            ? "PASSED"
+            : "NOT_RUN",
         workerType: workerRouter.selectedWorkerType,
         workspaceRoot: workspaceBinding.workspaceRoot
       })
     : null;
-  const nextRuntime = codeRuntimeExecutionAllowed && !viteRuntime && devServerRuntime?.framework === "next_app"
-    ? await startNextRuntime({
-        devServerRuntime,
-        productMode,
-        projectId: parsed.projectId,
-        workerType: workerRouter.selectedWorkerType,
-        workspaceRoot: workspaceBinding.workspaceRoot
-      })
+  const viteRuntime = postApplyPreview?.discovery.selectedTarget?.framework === "react_vite"
+    ? postApplyPreview.operation
     : null;
-  const backendExecutionRuntime =
-    codeRuntimeExecutionAllowed &&
-    !viteRuntime &&
-    !nextRuntime &&
-    liveRuntimePreview?.backendRuntime
-      ? await startBackendRuntime({
-          analysis: liveRuntimePreview.backendRuntime.analysis,
-          match: liveRuntimePreview.backendRuntime.match,
-          productMode,
-          projectId: parsed.projectId,
-          workerType: workerRouter.selectedWorkerType,
-          workspaceRoot: workspaceBinding.workspaceRoot
-        })
-      : null;
+  const nextRuntime = postApplyPreview?.discovery.selectedTarget?.framework === "next_app"
+    ? postApplyPreview.operation
+    : null;
+  const backendExecutionRuntime = null;
   const mobileRuntime =
     result.ok &&
     productMode === "CODE" &&
@@ -1006,19 +1000,13 @@ export async function POST(request: Request) {
     backendRuntime: backendExecutionRuntime,
     mobileRuntime,
     nextRuntime,
+    postApplyPreview: postApplyPreview?.result,
     runtimeWarnings: [
       ...runtimeWarnings,
-      ...(devServerRuntime?.warnings ?? []),
-      ...(!viteRuntime && !nextRuntime && !backendExecutionRuntime
-        ? ["No supported owned CODE runtime was started; verified files remain applied."]
-        : [])
+      ...(postApplyPreview?.discovery.warnings ?? [])
     ],
     viteRuntime
   });
-  const fileApprovalSucceeded = result.ok;
-  const codeOutcomeSucceeded = !codeExecution ||
-    codeExecution.completionStatus === "COMPLETE_VERIFIED" ||
-    codeExecution.completionStatus === "COMPLETE_WITH_LIMITATIONS";
   const intelligencePostflight = runApprovedRuntimePostflight({
     changedFiles: plan.steps
       .filter((change) => change.tool === "write_file" && change.path && typeof change.content === "string")
@@ -1069,17 +1057,42 @@ export async function POST(request: Request) {
     workspaceBindingStatus: workspaceBinding.registryStatus,
     workspaceCreated: workspaceBinding.created,
     workspaceRoot: workspaceBinding.workspaceRoot,
-    workspaceWarnings: [...workspaceWarnings, ...runtimeWarnings],
+    workspaceWarnings: [
+      ...workspaceWarnings,
+      ...runtimeWarnings,
+      ...(postApplyPreview?.discovery.warnings ?? [])
+    ],
     backendExecutionRuntime,
     liveRuntimePreview,
     mobileRuntime,
     nextRuntime,
     ok: fileApprovalSucceeded,
+    postApplyPreview: postApplyPreview?.result ?? null,
     previewMetadata: liveRuntimePreview?.previewRuntime ?? latestApprovalPreviewMetadata,
     viteRuntime,
     verificationOk: result.verification?.ok ?? null,
     writtenFiles
   };
+
+  if (postApplyPreview) {
+    await recordBestEffortEvent(workspaceBinding.workspaceRoot, "CODE_POST_APPLY_PREVIEW", {
+      commandSource: postApplyPreview.result.commandSource,
+      failureClass: postApplyPreview.result.failureClass,
+      filesApplied: postApplyPreview.result.filesApplied,
+      packageManager: postApplyPreview.result.packageManager,
+      portSelectionResult: postApplyPreview.result.portSelectionResult,
+      previewAttempted: postApplyPreview.result.previewAttempted,
+      previewReady: postApplyPreview.result.previewReady,
+      previewReused: postApplyPreview.result.existingProcessReused,
+      processStarted: postApplyPreview.result.processStarted,
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId,
+      readinessVerified: postApplyPreview.result.readinessVerified,
+      recoveryProvided: postApplyPreview.result.recoverySteps.length > 0,
+      runtimeKind: postApplyPreview.result.runtimeKind,
+      runtimeStatus: postApplyPreview.result.runtimeStatus
+    });
+  }
 
   if (fileApprovalSucceeded) {
     completeServerProposalApproval({
