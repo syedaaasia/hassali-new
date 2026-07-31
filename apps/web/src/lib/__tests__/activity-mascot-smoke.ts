@@ -162,7 +162,7 @@ test("visible thinking copy is decorative and bound to the coin throw", () => {
   );
   assert.match(
     css,
-    /\.hassali-activity-coin-label\s*\{[\s\S]*top:\s*18px[\s\S]*color:\s*#ffc755[\s\S]*text-shadow:/
+    /\.hassali-activity-coin-label\s*\{[\s\S]*top:\s*18px[\s\S]*color:\s*#ffc755[\s\S]*font-size:\s*clamp\(0\.78rem,\s*0\.6rem \+ 0\.55vw,\s*1rem\)[\s\S]*text-shadow:/
   );
 });
 

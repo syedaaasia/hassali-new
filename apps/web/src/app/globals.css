@@ -429,7 +429,7 @@ textarea {
   left: 50%;
   transform: translateX(-50%);
   color: #ffc755;
-  font-size: 9px;
+  font-size: clamp(0.78rem, 0.6rem + 0.55vw, 1rem);
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0;
