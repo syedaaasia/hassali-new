@@ -27,6 +27,16 @@ import {
   type AnswerContractValidation,
   type BehavioralDecision
 } from "./behavioral-intelligence";
+import {
+  compactAskFreshnessDecision,
+  compactAskSourceReliability,
+  createAskResearchFailureAnswer,
+  decideAskFreshness,
+  normalizeAskTimeContext,
+  verifyAskSourceReliability,
+  type AskFreshnessDecision,
+  type AskResearchSource
+} from "./ask-source-reliability";
 
 export type AskBrainDecisionPath =
   | "boundary_only"
@@ -76,6 +86,7 @@ export type AskBrainDecision = {
   >;
   fallbackOccurred: boolean;
   fallbackReason: string | null;
+  freshness: ReturnType<typeof compactAskFreshnessDecision>;
   injectionDetected: boolean;
   latencyMs: number;
   modelCallRan: boolean;
@@ -93,6 +104,7 @@ export type AskBrainDecision = {
   executionProvider: string | null;
   credentialSource: "credential_inherited_from_parent_process" | "credential_loaded_from_application_environment" | "credential_missing";
   responseKind: AskResponseKind;
+  sourceReliability: ReturnType<typeof compactAskSourceReliability>;
   priorMessageCount: number;
   actualServedModel: string | null;
   attemptedModels: string[];
@@ -121,6 +133,7 @@ export type AskBrainResult = {
 export type AskBrainInput = {
   abortSignal?: AbortSignal;
   askRuntimeContext: AskRuntimeContext;
+  freshnessDecision?: AskFreshnessDecision;
   behavior?: BehavioralDecision;
   intelligenceContext?: string;
   messages: AskConversationMessage[];
@@ -134,7 +147,13 @@ export type AskBrainInput = {
 };
 
 export type ModelCallResult =
-  | { status: "ok"; content: string; servedModel: string | null }
+  | {
+      status: "ok";
+      content: string;
+      researchAttempted?: boolean;
+      servedModel: string | null;
+      sources?: AskResearchSource[];
+    }
   | { status: "cancelled" | "failed" | "not_configured" | "timeout"; category: string; reason: string; retryAfter?: string | null };
 
 export type AskProviderCall = (input: {
@@ -310,6 +329,7 @@ function isReferenceSummaryRequest(input: AskBrainInput) {
 function chooseDecisionPath(
   classification: AskIntentClassification,
   prompt: string,
+  freshness: AskFreshnessDecision,
   behavior?: BehavioralDecision
 ): {
   path: AskBrainDecisionPath;
@@ -317,6 +337,13 @@ function chooseDecisionPath(
 } {
   if (classification.intent === "auth_or_security_guidance") {
     return { path: "unsafe_refusal", reason: "Dangerous coding or credential-theft intent requires a deterministic refusal." };
+  }
+
+  if (freshness.researchRequired && !freshness.researchProhibited) {
+    return {
+      path: "model_reasoning_preferred",
+      reason: `The authoritative freshness gate requires ${freshness.sourceRequirement} before a current answer can be returned.`
+    };
   }
 
   if (behavior?.answerIntent && !behavior.mutationIntent) {
@@ -342,13 +369,6 @@ function chooseDecisionPath(
 
   if (classification.wantsExecution || classification.intent === "mode_boundary_request" || classification.intent === "wrong_mode_build_request") {
     return { path: "boundary_only", reason: "ASK mode cannot create files, apply changes, install packages, or start runtimes." };
-  }
-
-  if (
-    classification.wouldBenefitFromLiveWeb &&
-    (classification.intent === "direct_question" || classification.intent === "general_answer")
-  ) {
-    return { path: "deterministic_required", reason: "The request may require live/current data, so ASK must not guess without a connected live provider." };
   }
 
   if (deterministicRequiredIntents.has(classification.intent) || classification.safetySensitivity === "high" || isHardLengthOrFormatRequest(prompt)) {
@@ -488,6 +508,7 @@ function categoryUsesHistory(category: AskSemanticCategory, input: AskBrainInput
 
 function buildModelPrompt(input: AskBrainInput, category: AskSemanticCategory) {
   const publicPersonContext = category === "public_person" || input.messages.some((message) => message.role === "user" && /^who (?:is|was|are)\b/i.test(message.content.trim()));
+  const freshness = input.freshnessDecision;
   const expertise = input.productMode === "CODE"
     ? "You are Hassali.ai CODE mode's senior software-engineering expert. Lead with the practical recommendation, then explain material tradeoffs, implementation guidance, assumptions, and risks when they matter. Being in CODE mode does not imply file mutation."
     : input.productMode === "WEBSITE"
@@ -509,6 +530,15 @@ function buildModelPrompt(input: AskBrainInput, category: AskSemanticCategory) {
     publicPersonContext
       ? "Public-person factuality: use only high-confidence general facts. Never claim you checked sources, news, official biographies, or live search unless a tool actually ran. Do not infer clerical status, education, affiliations, travel, family, dates, or media appearances from a person's religious or cultural work."
       : "",
+    freshness?.researchRequired
+      ? [
+          `Current-information rule: live evidence is mandatory (${freshness.sourceRequirement}).`,
+          `Research query: ${freshness.researchQuery ?? "the exact user-provided source"}.`,
+          "Do not assume a remembered person, version, value, status, or event in the discovery query.",
+          "Use only retrieved source material, cite source URLs that were actually returned, and quote only exact retrieved text.",
+          "If suitable evidence is unavailable, say verification failed instead of answering from memory."
+        ].join(" ")
+      : "Do not claim that browsing, retrieval, or source verification occurred. Do not invent citations or source URLs.",
     input.behavior
       ? `Resolved action: ${input.behavior.action}. Satisfy every material field in the bounded answer contract supplied as reference data.`
       : "",
@@ -533,6 +563,12 @@ function buildModelReference(
       safetySensitivity: classification.safetySensitivity,
       userGoal: classification.userGoal
     },
+    freshness: input.freshnessDecision
+      ? compactAskFreshnessDecision(input.freshnessDecision)
+      : null,
+    timeContext: input.freshnessDecision
+      ? normalizeAskTimeContext(input.prompt, input.askRuntimeContext)
+      : null,
     behavioralDecision: input.behavior
       ? {
           action: input.behavior.action,
@@ -585,6 +621,77 @@ function providerConversation(
     },
     ...meaningful
   ];
+}
+
+type OpenRouterUrlCitation = {
+  type?: string;
+  url_citation?: {
+    content?: string;
+    title?: string;
+    url?: string;
+  };
+};
+
+function sourceDateFromText(value: string) {
+  const iso = value.match(/\b(20\d{2}-[01]\d-[0-3]\d)\b/)?.[1];
+  if (iso) return iso;
+  const written = value.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-3]?\d),?\s+(20\d{2})\b/i);
+  if (!written) return null;
+  const parsed = Date.parse(`${written[1]} ${written[2]}, ${written[3]} UTC`);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : null;
+}
+
+function sourceClaimValue(prompt: string, content: string, version: string | null) {
+  if (/\b(?:version|release|sdk|framework|library)\b/i.test(prompt) && version) return version;
+  if (/\b(?:price|rate|value)\b/i.test(prompt)) {
+    return content.match(/(?:[$£€]\s*\d[\d,.]*|\b\d[\d,.]*\s*(?:USD|EUR|GBP|PKR)\b)/i)?.[0] ?? null;
+  }
+  if (/\b(?:ceo|president|prime minister|governor|chairperson)\b/i.test(prompt)) {
+    return content.match(/\b(?:CEO|president|prime minister|governor|chairperson)\b[^.:]{0,45}(?:\bis\b|:)\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,4})/)?.[1] ?? null;
+  }
+  return null;
+}
+
+function isLikelyOfficialSource(urlValue: string, prompt: string) {
+  try {
+    const hostname = new URL(urlValue).hostname.toLowerCase().replace(/^www\./, "");
+    if (/(?:^|\.)gov(?:\.[a-z]{2})?$|(?:^|\.)mil$/.test(hostname)) return true;
+    const organizationToken = hostname.split(".").at(-2)?.replace(/[^a-z0-9]/g, "") ?? "";
+    const promptToken = prompt.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return organizationToken.length >= 4 && promptToken.includes(organizationToken) &&
+      !/medium|substack|wikipedia|reddit|reuters|bloomberg|forbes|techcrunch/.test(hostname);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeOpenRouterSources(input: {
+  annotations?: OpenRouterUrlCitation[];
+  prompt: string;
+  retrievedAt: string;
+}) {
+  return (input.annotations ?? []).flatMap((annotation, index): AskResearchSource[] => {
+    const citation = annotation.type === "url_citation" ? annotation.url_citation : null;
+    const url = citation?.url?.trim();
+    if (!url || !/^https?:\/\//i.test(url)) return [];
+    const title = citation?.title?.trim() || new URL(url).hostname;
+    const content = citation?.content?.trim() ?? "";
+    const isOfficial = isLikelyOfficialSource(url, input.prompt);
+    const version = `${title} ${content}`.match(/\bv?(\d+\.\d+(?:\.\d+)?(?:-[a-z0-9.-]+)?)\b/i)?.[1] ?? null;
+    return [{
+      claimValue: sourceClaimValue(input.prompt, `${title}\n${content}`, version),
+      content,
+      id: `retrieved-source-${index + 1}`,
+      isOfficial,
+      publishedAt: sourceDateFromText(`${title}\n${content}`),
+      retrievedAt: input.retrievedAt,
+      sourceType: isOfficial ? "official" : /github\.com/i.test(url) ? "primary" : "secondary",
+      title,
+      updatedAt: sourceDateFromText(content),
+      url,
+      version
+    }];
+  });
 }
 
 async function fetchOpenRouterText(input: {
@@ -664,13 +771,26 @@ async function fetchOpenRouterText(input: {
     }
 
     const completion = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { annotations?: OpenRouterUrlCitation[]; content?: string } }>;
       model?: string;
     };
-    const content = completion.choices?.[0]?.message?.content?.trim() ?? "";
+    const message = completion.choices?.[0]?.message;
+    const content = message?.content?.trim() ?? "";
+    const prompt = [...input.messages].reverse().find((entry) => entry.role === "user")?.content ?? "";
+    const sources = normalizeOpenRouterSources({
+      annotations: message?.annotations,
+      prompt,
+      retrievedAt: new Date().toISOString()
+    });
 
     return content
-      ? { status: "ok", content, servedModel: completion.model ?? null }
+      ? {
+          status: "ok",
+          content,
+          researchAttempted: Boolean(input.webSearch),
+          servedModel: completion.model ?? null,
+          sources
+        }
       : { status: "failed", category: "provider_response_invalid", reason: "OpenRouter returned an empty ASK answer." };
   } catch (error) {
     const cancelled = error instanceof Error &&
@@ -985,9 +1105,12 @@ function buildDecisionHeadersSafeValue(value: unknown) {
 
 export function createAskBrainDebugHeaders(decision: AskBrainDecision): Record<string, string> {
   const publicResponseHeaders = {
+    "x-hassali-ask-freshness": buildDecisionHeadersSafeValue(decision.freshness.freshnessClass),
     "x-hassali-ask-provider-failure": buildDecisionHeadersSafeValue(decision.providerFailureCategory ?? "none"),
     "x-hassali-ask-response-kind": buildDecisionHeadersSafeValue(decision.responseKind),
-    "x-hassali-ask-model-selection-policy": buildDecisionHeadersSafeValue(decision.modelSelectionPolicy)
+    "x-hassali-ask-model-selection-policy": buildDecisionHeadersSafeValue(decision.modelSelectionPolicy),
+    "x-hassali-ask-source-outcome": buildDecisionHeadersSafeValue(decision.sourceReliability.outcome),
+    "x-hassali-ask-source-requirement": buildDecisionHeadersSafeValue(decision.freshness.sourceRequirement)
   };
 
   if (process.env.NODE_ENV === "production") return publicResponseHeaders;
@@ -1033,8 +1156,15 @@ export function createAskBrainDebugHeaders(decision: AskBrainDecision): Record<s
 
 export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult> {
   const startedAt = nowMs();
+  const freshness = input.freshnessDecision ?? decideAskFreshness({
+    hasPrivateFileContent: Boolean(input.workspace?.activeFileContent?.trim()),
+    prompt: input.prompt,
+    runtime: input.askRuntimeContext
+  });
+  input = { ...input, freshnessDecision: freshness };
+  const timeContext = normalizeAskTimeContext(input.prompt, input.askRuntimeContext);
   const classification = classifyAskIntent(input.prompt);
-  const selected = chooseDecisionPath(classification, input.prompt, input.behavior);
+  const selected = chooseDecisionPath(classification, input.prompt, freshness, input.behavior);
   const workspace = getRelevantWorkspaceText(input);
   const provider = resolveAskProvider(input.model);
   const selectedProviderCooldown = input.providerCall
@@ -1060,12 +1190,67 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   let webSearchRequested = false;
   let fallbackModel: string | null = null;
   let providerCallCount = 0;
+  let researchAttempted = false;
+  const researchSources: AskResearchSource[] = [];
   const attemptedModels: string[] = [];
+
+  if (freshness.sourceRequirement === "private_file_required" && workspace.excerpt) {
+    researchSources.push({
+      content: workspace.excerpt,
+      id: "private-file-current-request",
+      isOfficial: false,
+      retrievedAt: input.askRuntimeContext.currentIsoDatetime,
+      sourceType: "private_file",
+      title: input.workspace?.activePath?.trim() || "Selected private file",
+      url: null
+    });
+  }
 
   const deterministicAnswer = await createAskDirectAnswer(input.prompt, input.askRuntimeContext, input.messages);
   const localConversationalAnswer = createLocalConversationalAnswer(input.prompt);
+  const deterministicLiveSourceAvailable = Boolean(
+    deterministicAnswer?.includes("Source: Open-Meteo live forecast API.")
+  );
+  if (freshness.sourceRequirement === "live_source_required" && /\b(?:weather|forecast|temperature)\b/i.test(input.prompt)) {
+    researchAttempted = true;
+    if (deterministicLiveSourceAvailable && deterministicAnswer) {
+      researchSources.push({
+        content: deterministicAnswer,
+        effectiveDate: timeContext.runtimeDate,
+        id: "open-meteo-current-request",
+        isOfficial: false,
+        retrievedAt: input.askRuntimeContext.currentIsoDatetime,
+        sourceType: "primary",
+        title: "Open-Meteo live forecast API",
+        url: "https://open-meteo.com/"
+      });
+    }
+  }
 
-  if (localConversationalAnswer) {
+  const mustFailBeforeProvider = freshness.researchRequired && (
+    freshness.researchProhibited ||
+    freshness.sourceRequirement === "private_file_required" ||
+    (freshness.sourceRequirement === "user_source_required" && !freshness.referencedUrl)
+  );
+
+  if (mustFailBeforeProvider) {
+    answer = createAskResearchFailureAnswer({
+      decision: freshness,
+      outcome: freshness.sourceRequirement === "private_file_required" ? "USER_SOURCE_UNREADABLE" : "SOURCE_UNAVAILABLE",
+      time: timeContext
+    });
+    fallbackOccurred = true;
+    fallbackReason = freshness.researchProhibited ? "research_prohibited" : "required_source_unavailable";
+    providerStatus = "not_needed";
+  } else if (deterministicLiveSourceAvailable && deterministicAnswer) {
+    answer = deterministicAnswer;
+    providerFailureCategory = null;
+    providerStatus = "not_needed";
+  } else if (freshness.sourceRequirement === "private_file_required" && workspace.excerpt) {
+    answer = summarizeReferenceFile(input);
+    providerFailureCategory = null;
+    providerStatus = "not_needed";
+  } else if (localConversationalAnswer) {
     answer = localConversationalAnswer;
     providerFailureCategory = null;
     providerStatus = "not_needed";
@@ -1105,8 +1290,10 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
         answer = providerFailureAnswer(input, providerFailureCategory);
       } else {
         modelCallRan = true;
-        webSearchRequested = executionProvider.pricingClass !== "free" &&
-          (classification.wouldBenefitFromLiveWeb || /^who (?:is|was|are)\b/i.test(input.prompt.trim()));
+        webSearchRequested = freshness.researchRequired &&
+          !freshness.researchProhibited &&
+          freshness.sourceRequirement !== "private_file_required" &&
+          Boolean(freshness.researchQuery);
         if (cooldownFallbackProvider?.executionModelId) {
           fallbackModel = cooldownFallbackProvider.resolvedModelId ?? cooldownFallbackProvider.executionModelId;
           fallbackOccurred = true;
@@ -1114,6 +1301,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
         }
         attemptedModels.push(executionProvider.executionModelId!);
         providerCallCount += 1;
+        researchAttempted = researchAttempted || webSearchRequested;
         const modelResult = await providerCall({
           abortSignal: input.abortSignal,
           messages: providerMessages,
@@ -1133,6 +1321,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
 
         if (modelResult.status === "ok") {
           answer = modelResult.content;
+          researchAttempted = researchAttempted || Boolean(modelResult.researchAttempted);
+          researchSources.push(...(modelResult.sources ?? []));
           modelCallSucceeded = true;
           actualServedModel = modelResult.servedModel;
           providerFailureCategory = null;
@@ -1161,7 +1351,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
               maxTokens: 4_000,
               model: fallbackProvider.executionModelId,
               timeoutMs: FREE_PRIMARY_TIMEOUT_MS,
-              webSearch: false
+              webSearch: webSearchRequested
             });
             if (!input.providerCall) {
               recordAskProviderHealth({
@@ -1174,6 +1364,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
 
             if (fallbackResult.status === "ok") {
               answer = fallbackResult.content;
+              researchAttempted = researchAttempted || Boolean(fallbackResult.researchAttempted);
+              researchSources.push(...(fallbackResult.sources ?? []));
               modelCallSucceeded = true;
               actualServedModel = fallbackResult.servedModel;
               providerFailureCategory = null;
@@ -1227,7 +1419,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     !fallbackModel &&
     providerStatus === "configured" &&
     selected.path !== "unsafe_refusal" &&
-    selected.path !== "boundary_only"
+    selected.path !== "boundary_only" &&
+    freshness.sourceRequirement === "none_required"
   ) {
     const qualityFallbackProvider = modelSelectionPolicy === "automatic"
       ? resolveAskFallbackProviders(provider.requestedModelId)
@@ -1277,6 +1470,19 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     }
   }
 
+  const sourceReliability = verifyAskSourceReliability({
+    answer: sanitized.value,
+    decision: freshness,
+    researchAttempted,
+    sources: researchSources,
+    time: timeContext
+  });
+  sanitized = sanitizeAskOutput(sourceReliability.answer);
+  if (sourceReliability.outcome !== "VERIFIED") {
+    fallbackOccurred = true;
+    fallbackReason = `source_reliability:${sourceReliability.outcome.toLowerCase()}`;
+  }
+
   const decision: AskBrainDecision = {
     answerValidation: review.contractValidation,
     behaviorAction: input.behavior?.action ?? null,
@@ -1291,6 +1497,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     },
     fallbackOccurred,
     fallbackReason,
+    freshness: compactAskFreshnessDecision(freshness),
     injectionDetected: workspace.injectionDetected,
     latencyMs: nowMs() - startedAt,
     modelCallRan,
@@ -1307,7 +1514,9 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     resolvedModel: provider.resolvedModelId,
     executionProvider: provider.executionProvider,
     credentialSource: provider.credentialSource,
-    responseKind: providerFailureCategory && selected.path === "model_reasoning_preferred"
+    responseKind: sourceReliability.outcome !== "VERIFIED"
+      ? "provider_failure"
+      : providerFailureCategory && selected.path === "model_reasoning_preferred"
       ? "provider_failure"
       : selected.path === "unsafe_refusal"
         ? "safety_response"
@@ -1325,6 +1534,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     providerCallCount,
     secondaryCallCount: Math.max(0, providerCallCount - (modelCallRan ? 1 : 0)),
     secondaryModels: attemptedModels.slice(1),
+    sourceReliability: compactAskSourceReliability(sourceReliability),
     webSearchRequested,
     retryAfter,
     workspaceContextIncluded,

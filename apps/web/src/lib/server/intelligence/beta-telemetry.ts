@@ -20,9 +20,11 @@ export type BetaTelemetryEvent = {
   approvalSatisfied?: boolean;
   completionStatus?: "cancelled" | "completed" | "failed";
   complexityClass: TaskComplexityClass;
+  citationCount?: number;
   contextItemsExcluded?: number;
   contextItemsIncluded?: number;
   contextScope?: string[];
+  currentDateUsed?: boolean;
   durationMs?: number;
   event: BetaTelemetryEventName;
   executionCompleted?: boolean;
@@ -30,12 +32,23 @@ export type BetaTelemetryEvent = {
   failureCategory?: string | null;
   fallbackUsed?: boolean;
   finalDisposition?: FinalActionDisposition;
+  freshnessClass?: string;
   intentClass?: BehavioralIntentClass;
   mode: IntelligenceProductMode;
   mutationRequested?: boolean;
+  officialSourceCount?: number;
   providerId?: string | null;
+  recencySatisfied?: boolean;
   repairAttemptCount?: number;
+  researchAttempted?: boolean;
+  researchCompleted?: boolean;
+  researchFailureClass?: string | null;
+  researchRequired?: boolean;
+  sourceConflict?: boolean;
+  sourceCount?: number;
+  sourceRequirement?: string;
   toolCount?: number;
+  unsupportedClaimCount?: number;
 };
 
 export type BetaTelemetrySink = (event: Readonly<Record<string, unknown>>) => void;
@@ -103,15 +116,28 @@ export function sanitizeBetaTelemetryEvent(input: BetaTelemetryEvent) {
   const failureCategory = completionStatus === "completed"
     ? "none"
     : safeFailureCategory(input.failureCategory);
+  const sourceCount = boundedInteger(input.sourceCount, 20);
+  const officialSourceCount = Math.min(sourceCount, boundedInteger(input.officialSourceCount, 20));
+  const researchAttempted = Boolean(input.researchAttempted);
+  const researchCompleted = researchAttempted && sourceCount > 0 && Boolean(input.researchCompleted);
+  const citationCount = sourceCount > 0 ? boundedInteger(input.citationCount, 20) : 0;
+  const currentDateUsed = Boolean(input.currentDateUsed);
+  const recencySatisfied = Boolean(input.recencySatisfied) && (currentDateUsed || sourceCount > 0);
+  const sourceConflict = Boolean(input.sourceConflict);
+  const researchFailureClass = sourceConflict
+    ? "source_conflict"
+    : safeCategory(input.researchFailureClass);
   return {
     answerOnly,
     approvalRequired,
     approvalSatisfied,
     completionStatus,
     complexityClass: input.complexityClass,
+    citationCount,
     contextItemsExcluded: boundedInteger(input.contextItemsExcluded, 100),
     contextItemsIncluded: boundedInteger(input.contextItemsIncluded, 100),
     contextScope: Array.from(new Set((input.contextScope ?? []).map(safeCategory))).filter(Boolean).slice(0, 8),
+    currentDateUsed,
     durationBucket: durationBucket(durationMs),
     durationMs,
     event: input.event,
@@ -120,12 +146,23 @@ export function sanitizeBetaTelemetryEvent(input: BetaTelemetryEvent) {
     failureCategory,
     fallbackUsed: Boolean(input.fallbackUsed),
     finalDisposition: safeCategory(input.finalDisposition),
+    freshnessClass: safeCategory(input.freshnessClass),
     intentClass: safeCategory(input.intentClass),
     mode: input.mode,
     mutationRequested,
+    officialSourceCount,
     providerId: safeCategory(input.providerId),
+    recencySatisfied,
     repairAttemptCount: boundedInteger(input.repairAttemptCount, 3),
-    toolCount: boundedInteger(input.toolCount, 20)
+    researchAttempted,
+    researchCompleted,
+    researchFailureClass,
+    researchRequired: Boolean(input.researchRequired),
+    sourceConflict,
+    sourceCount,
+    sourceRequirement: safeCategory(input.sourceRequirement),
+    toolCount: boundedInteger(input.toolCount, 20),
+    unsupportedClaimCount: boundedInteger(input.unsupportedClaimCount, 20)
   };
 }
 

@@ -305,7 +305,7 @@ export function buildAskRuntimeContext(now = new Date()): AskRuntimeContext {
       current_time: true,
       file_context: true,
       weather: true,
-      web_search: false
+      web_search: Boolean(process.env.OPENROUTER_API_KEY)
     },
     currentIsoDatetime: now.toISOString(),
     currentReadableDate: dateFormatter.format(now),

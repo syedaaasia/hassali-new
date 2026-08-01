@@ -102,6 +102,11 @@ import {
 import { createHassaliIdentityAnswer } from "@/lib/server/ai/hassali-identity";
 import { routeLiveKnowledgeQuestion } from "@/lib/server/ai/live-knowledge-router";
 import {
+  compactAskFreshnessDecision,
+  decideAskFreshness,
+  type AskFreshnessDecision
+} from "@/lib/server/ai/ask-source-reliability";
+import {
   buildProposalContext,
   decidePromptOwnership,
   enforceGeneratorContractWithProposalContext,
@@ -216,7 +221,10 @@ import {
   runIntelligencePreflight,
   withIntelligenceResponseHeaders
 } from "@/lib/server/intelligence/intelligence-preflight";
-import { recordBetaTelemetry } from "@/lib/server/intelligence/beta-telemetry";
+import {
+  recordBetaTelemetry,
+  type BetaTelemetryEvent
+} from "@/lib/server/intelligence/beta-telemetry";
 
 export const runtime = "nodejs";
 
@@ -5793,6 +5801,18 @@ export async function POST(request: Request) {
   };
   const nonMutatingFinalAction = behavior.answerOnly &&
     ["answer", "clarify", "plan"].includes(behavior.finalDisposition);
+  const askRuntimeContext = buildAskRuntimeContext();
+  const askFreshnessDecision = decideAskFreshness({
+    hasPrivateFileContent: Boolean(requestedWorkspace.activeFileContent?.trim()),
+    prompt: nonMutatingFinalAction ? effectiveUserPrompt : "",
+    runtime: askRuntimeContext
+  });
+  const detectedAskLiveIntent = detectAskLiveIntent(effectiveUserPrompt);
+  const askLiveIntent = ["build_request", "current_time", "weather"].includes(detectedAskLiveIntent)
+    ? detectedAskLiveIntent
+    : askFreshnessDecision.researchRequired
+      ? "live_current_info"
+      : "general";
   const preflightWorkspace = nonMutatingFinalAction && !behavior.relevantWorkspaceContext
     ? emptyWorkspace
     : requestedWorkspace;
@@ -5823,6 +5843,72 @@ export async function POST(request: Request) {
     intentClass: behavior.intentClass,
     mutationRequested: behavior.mutationIntent
   } as const;
+  type AskSourceTelemetry = Pick<
+    BetaTelemetryEvent,
+    | "citationCount"
+    | "currentDateUsed"
+    | "freshnessClass"
+    | "officialSourceCount"
+    | "recencySatisfied"
+    | "researchAttempted"
+    | "researchCompleted"
+    | "researchFailureClass"
+    | "researchRequired"
+    | "sourceConflict"
+    | "sourceCount"
+    | "sourceRequirement"
+    | "unsupportedClaimCount"
+  >;
+  let askSourceTelemetry: AskSourceTelemetry = {
+    citationCount: 0,
+    currentDateUsed: askFreshnessDecision.currentDateRequired,
+    freshnessClass: askFreshnessDecision.freshnessClass,
+    officialSourceCount: 0,
+    recencySatisfied: false,
+    researchAttempted: false,
+    researchCompleted: false,
+    researchFailureClass: null,
+    researchRequired: askFreshnessDecision.researchRequired,
+    sourceConflict: false,
+    sourceCount: 0,
+    sourceRequirement: askFreshnessDecision.sourceRequirement,
+    unsupportedClaimCount: 0
+  };
+  const updateAskSourceTelemetry = (decision: {
+    freshness: Pick<
+      AskFreshnessDecision,
+      "currentDateRequired" | "freshnessClass" | "researchRequired" | "sourceRequirement"
+    >;
+    sourceReliability: {
+      citationCount: number;
+      officialSourceCount: number;
+      outcome: string;
+      recencySatisfied: boolean;
+      researchAttempted: boolean;
+      researchCompleted: boolean;
+      sourceConflict: boolean;
+      sourceCount: number;
+      unsupportedClaimCount: number;
+    };
+  }) => {
+    askSourceTelemetry = {
+      citationCount: decision.sourceReliability.citationCount,
+      currentDateUsed: decision.freshness.currentDateRequired,
+      freshnessClass: decision.freshness.freshnessClass,
+      officialSourceCount: decision.sourceReliability.officialSourceCount,
+      recencySatisfied: decision.sourceReliability.recencySatisfied,
+      researchAttempted: decision.sourceReliability.researchAttempted,
+      researchCompleted: decision.sourceReliability.researchCompleted,
+      researchFailureClass: decision.sourceReliability.outcome === "VERIFIED"
+        ? null
+        : decision.sourceReliability.outcome,
+      researchRequired: decision.freshness.researchRequired,
+      sourceConflict: decision.sourceReliability.sourceConflict,
+      sourceCount: decision.sourceReliability.sourceCount,
+      sourceRequirement: decision.freshness.sourceRequirement,
+      unsupportedClaimCount: decision.sourceReliability.unsupportedClaimCount
+    };
+  };
   let terminalTelemetryRecorded = false;
   const recordTerminalTelemetry = (
     completionStatus: "cancelled" | "completed" | "failed",
@@ -5832,6 +5918,7 @@ export async function POST(request: Request) {
     terminalTelemetryRecorded = true;
     recordBetaTelemetry({
       ...semanticTelemetry,
+      ...askSourceTelemetry,
       completionStatus,
       complexityClass: intelligencePreflight.complexity.class,
       durationMs: Date.now() - routeStartedAt,
@@ -5849,6 +5936,7 @@ export async function POST(request: Request) {
   taskSignal.addEventListener("abort", onRequestAbort, { once: true });
   recordBetaTelemetry({
     ...semanticTelemetry,
+    ...askSourceTelemetry,
     complexityClass: intelligencePreflight.complexity.class,
     event: "task_started",
     mode: productMode,
@@ -5922,8 +6010,6 @@ export async function POST(request: Request) {
   if (taskSignal.aborted) {
     return respond(new Response(null, { status: 499 }));
   }
-  const askRuntimeContext = buildAskRuntimeContext();
-  const askLiveIntent = detectAskLiveIntent(effectiveUserPrompt);
   const requestedSessionId = typeof body?.chatSessionId === "string" ? body.chatSessionId : null;
 
   if (productMode !== "ASK" && nonMutatingFinalAction) {
@@ -5937,6 +6023,7 @@ export async function POST(request: Request) {
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
+      freshnessDecision: askFreshnessDecision,
       intelligenceContext: intelligencePreflight.providerContext,
       messages: relevantMessages,
       model,
@@ -5946,6 +6033,7 @@ export async function POST(request: Request) {
       projectName: workspace.projectName ?? null,
       workspace
     });
+    updateAskSourceTelemetry(expertAnswer.decision);
     if (
       expertAnswer.decision.fallbackModel &&
       expertAnswer.decision.providerFailureCategory !== "request_cancelled" &&
@@ -5953,6 +6041,7 @@ export async function POST(request: Request) {
     ) {
       recordBetaTelemetry({
         ...semanticTelemetry,
+        ...askSourceTelemetry,
         complexityClass: intelligencePreflight.complexity.class,
         event: "provider_fallback",
         failureCategory: expertAnswer.decision.fallbackReason,
@@ -5970,7 +6059,9 @@ export async function POST(request: Request) {
     specialistPersistence = await persistAnswerOnlyExchange({
       assistantContent: expertAnswer.answer,
       assistantMetadata: {
-        activityState: "answer_completed",
+        activityState: expertAnswer.decision.sourceReliability.outcome === "VERIFIED"
+          ? "answer_completed"
+          : "verification_failed",
         askBrain: expertAnswer.decision,
         askBrainIntent: expertAnswer.classification.intent,
         behavioralDecision: compactBehavioralDecision(behavior),
@@ -5984,7 +6075,10 @@ export async function POST(request: Request) {
       signal: taskSignal,
       userContent: latestUserPrompt,
       userMetadata: {
-        activityState: "preparing_answer",
+        activityState: askFreshnessDecision.researchRequired
+          ? "checking_source_requirements"
+          : "preparing_answer",
+        askFreshness: compactAskFreshnessDecision(askFreshnessDecision),
         behavioralDecision: compactBehavioralDecision(behavior),
         intelligencePreflight: compactIntelligencePreflight(intelligencePreflight),
         model,
@@ -6202,6 +6296,10 @@ export async function POST(request: Request) {
   const pendingUserMessage = {
     content: latestUserPrompt,
     metadata: {
+      activityState: askFreshnessDecision.researchRequired
+        ? "checking_source_requirements"
+        : "preparing_answer",
+      askFreshness: compactAskFreshnessDecision(askFreshnessDecision),
       behavioralDecision: compactBehavioralDecision(behavior),
       model,
       askRuntimeContext: mode === "ASK" ? askRuntimeContext : undefined,
@@ -6385,6 +6483,7 @@ export async function POST(request: Request) {
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
+      freshnessDecision: askFreshnessDecision,
       intelligenceContext: askIntelligenceContext,
       messages,
       model,
@@ -6394,6 +6493,7 @@ export async function POST(request: Request) {
       projectName: workspace.projectName ?? null,
       workspace
     });
+    updateAskSourceTelemetry(askBrain.decision);
     if (
       askBrain.decision.fallbackModel &&
       askBrain.decision.providerFailureCategory !== "request_cancelled" &&
@@ -6401,6 +6501,7 @@ export async function POST(request: Request) {
     ) {
       recordBetaTelemetry({
         ...semanticTelemetry,
+        ...askSourceTelemetry,
         complexityClass: intelligencePreflight.complexity.class,
         event: "provider_fallback",
         failureCategory: askBrain.decision.fallbackReason,
@@ -6421,6 +6522,9 @@ export async function POST(request: Request) {
       persistence = await persistRequestMessage(persistence, {
         content: askBrain.answer,
         metadata: {
+          activityState: askBrain.decision.sourceReliability.outcome === "VERIFIED"
+            ? "answer_completed"
+            : "verification_failed",
           askLiveIntent,
           askRuntimeContext,
           askBrain: askBrain.decision,
@@ -6437,7 +6541,10 @@ export async function POST(request: Request) {
       return respond(createTextStream(askBrain.answer, persistence?.sessionId, createAskBrainDebugHeaders(askBrain.decision)));
     }
 
-    const liveKnowledgeAnswer = routeLiveKnowledgeQuestion(effectiveUserPrompt);
+    const liveKnowledgeAnswer = routeLiveKnowledgeQuestion(effectiveUserPrompt, {
+      decision: askFreshnessDecision,
+      runtime: askRuntimeContext
+    });
 
     if (liveKnowledgeAnswer.answer) {
       const selfReview = runSelfReviewForAskAnswer({
@@ -6502,6 +6609,7 @@ export async function POST(request: Request) {
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
+      freshnessDecision: askFreshnessDecision,
       intelligenceContext: askIntelligenceContext,
       messages,
       model,
@@ -6511,6 +6619,7 @@ export async function POST(request: Request) {
       projectName: workspace.projectName ?? null,
       workspace
     });
+    updateAskSourceTelemetry(askBrain.decision);
     if (
       askBrain.decision.fallbackModel &&
       askBrain.decision.providerFailureCategory !== "request_cancelled" &&
@@ -6518,6 +6627,7 @@ export async function POST(request: Request) {
     ) {
       recordBetaTelemetry({
         ...semanticTelemetry,
+        ...askSourceTelemetry,
         complexityClass: intelligencePreflight.complexity.class,
         event: "provider_fallback",
         failureCategory: askBrain.decision.fallbackReason,
@@ -6537,6 +6647,9 @@ export async function POST(request: Request) {
     persistence = await persistRequestMessage(persistence, {
       content: answerOnlyContent,
       metadata: {
+        activityState: askBrain.decision.sourceReliability.outcome === "VERIFIED"
+          ? "answer_completed"
+          : "verification_failed",
         askLiveIntent,
         askRuntimeContext,
         askBrain: askBrain.decision,

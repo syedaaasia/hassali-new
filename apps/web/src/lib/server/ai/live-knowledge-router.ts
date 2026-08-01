@@ -1,3 +1,11 @@
+import { buildAskRuntimeContext, type AskRuntimeContext } from "./ask-context";
+import {
+  createAskResearchFailureAnswer,
+  decideAskFreshness,
+  normalizeAskTimeContext,
+  type AskFreshnessDecision
+} from "./ask-source-reliability";
+
 export type LiveKnowledgeDecision = {
   answer: string | null;
   confidence: number;
@@ -7,20 +15,20 @@ export type LiveKnowledgeDecision = {
   status: "live_search_required" | "not_required";
 };
 
-const livePatterns = [
-  /\b(?:richest|wealthiest)\s+(?:person|man|woman|people)\b/i,
-  /\b(?:current|latest|today'?s|now|right now|real[- ]time)\b/i,
-  /\b(?:latest news|current ceo|current president|stock price|crypto price|exchange rate|current price)\b/i,
-  /\b(?:who is .* now|who currently)\b/i
-];
+export function routeLiveKnowledgeQuestion(
+  prompt: string,
+  options?: {
+    decision?: AskFreshnessDecision;
+    runtime?: AskRuntimeContext;
+  }
+): LiveKnowledgeDecision {
+  const runtime = options?.runtime ?? buildAskRuntimeContext();
+  const decision = options?.decision ?? decideAskFreshness({ prompt, runtime });
 
-export function routeLiveKnowledgeQuestion(prompt: string): LiveKnowledgeDecision {
-  const liveKnowledgeRequired = livePatterns.some((pattern) => pattern.test(prompt));
-
-  if (!liveKnowledgeRequired) {
+  if (!decision.researchRequired) {
     return {
       answer: null,
-      confidence: 0.9,
+      confidence: decision.confidence,
       liveKnowledgeRequired: false,
       reason: null,
       requiresLiveSearch: false,
@@ -29,12 +37,15 @@ export function routeLiveKnowledgeQuestion(prompt: string): LiveKnowledgeDecisio
   }
 
   return {
-    answer:
-      "That changes frequently. Live search is not connected/configured in this Hassali environment yet, so I should not guess from stale knowledge.\n\nWhen live search is configured, Hassali should verify the current source, date, and confidence before answering.",
-    confidence: 0.88,
+    answer: createAskResearchFailureAnswer({
+      decision,
+      outcome: "SOURCE_UNAVAILABLE",
+      time: normalizeAskTimeContext(prompt, runtime)
+    }),
+    confidence: decision.confidence,
     liveKnowledgeRequired: true,
-    reason: "current_or_frequently_changing_fact",
-    requiresLiveSearch: true,
+    reason: decision.reasons.join(" "),
+    requiresLiveSearch: !decision.researchProhibited && decision.sourceRequirement !== "private_file_required",
     status: "live_search_required"
   };
 }
