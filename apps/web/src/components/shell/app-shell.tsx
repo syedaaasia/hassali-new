@@ -4,6 +4,7 @@ import { BottomPanel } from "@/components/shell/bottom-panel";
 import { EditorPanel } from "@/components/shell/editor-panel";
 import { LeftSidebar } from "@/components/shell/left-sidebar";
 import { PreviewPanel } from "@/components/shell/preview-panel";
+import { ProjectNotesPanel } from "@/components/shell/project-notes-panel";
 import { RightSidebar } from "@/components/shell/right-sidebar";
 import { TopBar } from "@/components/shell/top-bar";
 import { WorkspaceHydrator } from "@/components/shell/workspace-hydrator";
@@ -74,6 +75,7 @@ export function AppShell() {
           </div>
         ) : null}
         {shouldShowPreview ? <PreviewPanel /> : null}
+        {productMode === "ASK" ? <ProjectNotesPanel /> : null}
       </div>
     </div>
   );

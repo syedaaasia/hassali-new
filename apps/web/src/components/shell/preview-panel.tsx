@@ -16,6 +16,7 @@ Phase 31 audit before edits:
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "@/components/ui/panel";
+import { ProjectExportButton } from "@/components/shell/project-export-button";
 import { useCanonicalFiles, useCanonicalManifest } from "@/lib/canonical-project-state";
 import { useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
@@ -1460,6 +1461,7 @@ export function PreviewPanel() {
       </div>
 
       <div className="flex items-center gap-2 border-b border-[hsl(var(--premium-border))] p-3">
+        <ProjectExportButton compact mode={productMode} />
         {effectiveManifest.type !== "static_website" ? (
           <button
             className="rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"

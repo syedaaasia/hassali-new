@@ -3,6 +3,8 @@
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { HassaliActivityMascot } from "@/components/ai/hassali-activity-mascot";
+import { ApprovalPolicyControl } from "@/components/shell/approval-policy-control";
+import { ProjectExportButton } from "@/components/shell/project-export-button";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
 import {
@@ -18,7 +20,10 @@ import {
   deriveAssistantActivity,
   hasMeaningfulAssistantOutput
 } from "@/lib/assistant-activity";
+import { canApplyWithProjectApprovalPolicy, projectApprovalPolicyOptions } from "@/lib/approval-policy";
+import { useApprovalPolicyStore } from "@/lib/approval-policy-store";
 import { getHassaliModelOptions } from "@/lib/model-registry";
+import { boundedProjectNotesContext, useProjectNotesStore } from "@/lib/project-notes-store";
 import {
   type RuntimeApprovalResponse,
   syncRuntimeApprovalResult
@@ -73,6 +78,17 @@ type SpeechRecognitionLike = {
 type SpeechGlobal = {
   SpeechRecognition?: new () => SpeechRecognitionLike;
   webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+};
+type ChatScrollBehavior = "auto" | "smooth";
+type ChatScrollContainer = {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop: number;
+  scrollTo: (options: { behavior: ChatScrollBehavior; top: number }) => void;
+};
+type AnimationGlobal = {
+  cancelAnimationFrame: (handle: number) => void;
+  requestAnimationFrame: (callback: () => void) => number;
 };
 const blockedRegenerationLimit = 2;
 const manualReviewNeededMessage =
@@ -646,6 +662,11 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const projectName = useWorkspaceStore((state) => state.projectName);
   const setWorkspaceError = useWorkspaceStore((state) => state.setError);
   const syncRuntimeFiles = useWorkspaceStore((state) => state.syncRuntimeFiles);
+  const approvalPolicy = useApprovalPolicyStore((state) => state.policy);
+  const approvalPolicyProjectId = useApprovalPolicyStore((state) => state.activeProjectId);
+  const notesProjectId = useProjectNotesStore((state) => state.activeProjectId);
+  const projectNotes = useProjectNotesStore((state) => state.notes);
+  const useProjectNotesAsContext = useProjectNotesStore((state) => state.useAsContext);
   const activeFile = files[activePath];
   const visibleFileList = Object.keys(files).filter(
     (path) => !path.endsWith(`/${folderPlaceholderFileName}`)
@@ -655,11 +676,44 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const isProposalApplied = proposal?.status === "approved";
   const regenerationInFlightRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const autoApprovalProposalRef = useRef<string | null>(null);
+  const autoFollowRef = useRef(true);
+  const scrollAnimationFrameRef = useRef<number | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [blockedRegenerationAttempts, setBlockedRegenerationAttempts] = useState(0);
+  const [isAwayFromLatest, setIsAwayFromLatest] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [manualReviewMessage, setManualReviewMessage] = useState<string | null>(null);
   const [runtimeApprovalResult, setRuntimeApprovalResult] =
     useState<RuntimeApprovalResponse | null>(null);
+
+  const scrollToLatest = (behavior: ChatScrollBehavior = "smooth") => {
+    const container = scrollContainerRef.current as unknown as ChatScrollContainer | null;
+    if (!container) return;
+
+    autoFollowRef.current = true;
+    setIsAwayFromLatest(false);
+    container.scrollTo({ behavior, top: container.scrollHeight });
+  };
+
+  const scheduleAutoFollow = (behavior: ChatScrollBehavior = "auto") => {
+    if (!autoFollowRef.current || scrollAnimationFrameRef.current !== null) return;
+
+    scrollAnimationFrameRef.current = (globalThis as unknown as AnimationGlobal).requestAnimationFrame(() => {
+      scrollAnimationFrameRef.current = null;
+      scrollToLatest(behavior);
+    });
+  };
+
+  useEffect(() => () => {
+    if (scrollAnimationFrameRef.current !== null) {
+      (globalThis as unknown as AnimationGlobal).cancelAnimationFrame(scrollAnimationFrameRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    scheduleAutoFollow(isStreaming ? "auto" : "smooth");
+  }, [isStreaming, messages, proposal?.id, proposal?.status, runtimeApprovalResult]);
 
   useEffect(() => {
     if (proposal?.status !== "approved") {
@@ -707,11 +761,23 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
       ),
       fileList: visibleFileList,
       projectId,
-      projectName
+      projectName,
+      projectNotes: productMode === "ASK" && notesProjectId === projectId
+        ? boundedProjectNotesContext(projectNotes)
+        : "",
+      useProjectNotesAsContext: productMode === "ASK" &&
+        notesProjectId === projectId &&
+        useProjectNotesAsContext
     };
   };
 
-  const sendWithContext = () => sendMessage(createWorkspaceContext());
+  const sendWithContext = () => {
+    autoFollowRef.current = true;
+    setIsAwayFromLatest(false);
+    const result = sendMessage(createWorkspaceContext());
+    scheduleAutoFollow("smooth");
+    return result;
+  };
   const activeAssistantMessageId = isStreaming
     ? [...messages].reverse().find((message) => message.role === "assistant")?.id ?? null
     : null;
@@ -940,6 +1006,22 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     }
   };
 
+  useEffect(() => {
+    if (
+      isStreaming ||
+      !proposal ||
+      !projectId ||
+      approvalPolicyProjectId !== projectId ||
+      autoApprovalProposalRef.current === proposal.id ||
+      !canApplyWithProjectApprovalPolicy(approvalPolicy, proposal)
+    ) {
+      return;
+    }
+
+    autoApprovalProposalRef.current = proposal.id;
+    void approveProposal();
+  }, [approvalPolicy, approvalPolicyProjectId, isStreaming, projectId, proposal]);
+
   return (
     <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-transparent">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] bg-black/10 px-4 py-1.5 [.light_&]:bg-white">
@@ -996,6 +1078,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             >
               {isEditorOpen ? "Hide files" : "Files"}
             </button>
+            <ProjectExportButton mode={productMode} />
             <button
               className="rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-[#F4F3EE]/75 hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-[#F4F3EE] [.light_&]:border-[#d8d1c6] [.light_&]:bg-white [.light_&]:text-[#000000] [.light_&]:hover:border-[#DE7356]"
               onClick={togglePreview}
@@ -1006,8 +1089,19 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           </div>
         ) : null}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-smooth px-4 py-4 lg:px-6">
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-smooth px-4 py-4 lg:px-6"
+          data-chat-scroll-container
+          onScroll={(event) => {
+            const container = event.currentTarget as unknown as ChatScrollContainer;
+            const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 96;
+
+            autoFollowRef.current = nearBottom;
+            setIsAwayFromLatest(!nearBottom);
+          }}
+          ref={scrollContainerRef}
+        >
           {messages.map((message) => {
             const activity = deriveAssistantActivity({
               hasVisibleOutput: hasMeaningfulAssistantOutput(message.content),
@@ -1108,34 +1202,39 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   ) : null}
                 </div>
                 <span className="rounded-full border border-[hsl(var(--premium-accent)/0.25)] px-2 py-1 text-[10px] text-[hsl(var(--premium-accent-soft))]">
-                  pending
+                  {proposal.status}
                 </span>
               </div>
-              <ProposalReviewState proposal={proposal} />
+              <details className="mt-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2">
+                <summary className="cursor-pointer text-[11px] font-medium text-foreground/85">
+                  View {proposal.changes.length} proposed change{proposal.changes.length === 1 ? "" : "s"} and safety review
+                </summary>
+                <ProposalReviewState proposal={proposal} />
 
-              <div className="mt-3 space-y-3">
-                {proposal.changes.map((change) => (
-                  <div
-                    className="rounded-xl border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.42)] p-3 [.light_&]:border-[#d8d1c6] [.light_&]:bg-[#F4F3EE]"
-                    key={`${proposal.id}-${change.action}-${change.path ?? change.summary}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-[11px] text-foreground">
-                        {change.path ?? "preview runtime"}
-                      </span>
-                      <span className="rounded-full border border-[hsl(var(--royal-border-soft))] px-2 py-0.5 text-[10px] uppercase text-muted-foreground">
-                        {change.action}
-                      </span>
+                <div className="mt-3 space-y-2">
+                  {proposal.changes.map((change) => (
+                    <div
+                      className="rounded-lg border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-black)/0.42)] p-3 [.light_&]:border-[#d8d1c6] [.light_&]:bg-[#F4F3EE]"
+                      key={`${proposal.id}-${change.action}-${change.path ?? change.summary}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-[11px] text-foreground">
+                          {change.path ?? "preview runtime"}
+                        </span>
+                        <span className="rounded-full border border-[hsl(var(--royal-border-soft))] px-2 py-0.5 text-[10px] uppercase text-muted-foreground">
+                          {change.action}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-muted-foreground">{change.summary}</p>
+                      {change.diffPreview ? (
+                        <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-[hsl(var(--royal-border-soft))] bg-black/35 p-2 font-mono text-[11px] leading-5 text-muted-foreground">
+                          {change.diffPreview}
+                        </pre>
+                      ) : null}
                     </div>
-                    <p className="mt-2 text-muted-foreground">{change.summary}</p>
-                    {change.diffPreview ? (
-                      <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-[hsl(var(--royal-border-soft))] bg-black/35 p-2 font-mono text-[11px] leading-5 text-muted-foreground">
-                        {change.diffPreview}
-                      </pre>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </details>
 
               {manualReviewMessage ? <ManualReviewNotice message={manualReviewMessage} /> : null}
               {runtimeApprovalResult ? (
@@ -1212,7 +1311,19 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               </div>
             </motion.div>
           ) : null}
+          <div aria-hidden="true" className="h-px" data-chat-latest-anchor />
         </div>
+
+        {isAwayFromLatest ? (
+          <button
+            className="absolute bottom-[5.6rem] left-1/2 z-20 -translate-x-1/2 rounded-full border border-[hsl(var(--premium-border))] bg-[#171717] px-3 py-1.5 text-[11px] font-medium text-foreground shadow-[0_12px_34px_rgba(0,0,0,0.4)] hover:border-[hsl(var(--premium-accent)/0.45)] [.light_&]:bg-white"
+            data-jump-to-latest
+            onClick={() => scrollToLatest("smooth")}
+            type="button"
+          >
+            Jump to latest
+          </button>
+        ) : null}
 
         <form
           className="shrink-0 border-t border-white/10 bg-[#0b0b0b] px-4 py-3 [.light_&]:border-slate-200 [.light_&]:bg-[#F4F3EE] lg:px-6"
@@ -1222,6 +1333,18 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             void sendWithContext();
           }}
         >
+          {productMode !== "ASK" ? (
+            <div className="mx-auto mb-1.5 flex w-full max-w-3xl items-center justify-between gap-2 px-1">
+              <ApprovalPolicyControl projectId={projectId} />
+              <span className="hidden max-w-[24rem] truncate text-right text-[9px] text-muted-foreground xl:block">
+                {projectApprovalPolicyOptions.find((option) => option.value === approvalPolicy)?.description}
+              </span>
+            </div>
+          ) : useProjectNotesAsContext && notesProjectId === projectId && projectNotes.trim() ? (
+            <div className="mx-auto mb-1.5 w-full max-w-3xl px-1 text-[9px] text-amber-100/80">
+              Project Notes context is on for this request ({boundedProjectNotesContext(projectNotes).length.toLocaleString()} characters).
+            </div>
+          ) : null}
           <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] border border-white/10 bg-[#161616] px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] focus-within:border-[hsl(var(--premium-accent)/0.55)] focus-within:ring-2 focus-within:ring-[hsl(var(--premium-accent)/0.1)] [.light_&]:border-slate-300 [.light_&]:bg-white [.light_&]:shadow-[0_16px_44px_rgba(0,0,0,0.08)]">
             <button
               aria-label="Add context"

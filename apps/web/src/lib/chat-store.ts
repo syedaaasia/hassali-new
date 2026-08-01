@@ -58,6 +58,8 @@ export type WorkspaceContext = {
   fileList: string[];
   projectId: string | null;
   projectName: string | null;
+  projectNotes?: string;
+  useProjectNotesAsContext?: boolean;
 };
 
 type FileProposalAction = "create" | "modify" | "update" | "write_file";
@@ -1485,6 +1487,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           modelSelectionPolicy: get().modelSelectionPolicy,
           productMode,
           projectId: workspaceContext.projectId,
+          projectNotes: workspaceContext.useProjectNotesAsContext
+            ? workspaceContext.projectNotes
+            : undefined,
           workspace: {
             activeFileContent: requestWorkspace.activeFileContent,
             activePath: requestWorkspace.activePath,
