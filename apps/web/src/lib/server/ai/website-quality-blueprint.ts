@@ -567,6 +567,7 @@ function selectProfile(input: { plan: WebsitePlan; prompt: string; semantic: Web
   if (/\b(?:crm|customer relationship|sales pipeline|financial workflow|invoice workflow|billing workflow)\b/.test(text)) return profiles.crm;
   if (/\b(?:toy|toys|plush|building blocks)\b/.test(text)) return profiles.toy;
   if (/\b(?:greeting card|birthday card|anniversary card|occasion cards?|card shop|card store)\b/.test(text)) return profiles.greetingCard;
+  if (/\b(?:bakery|baker|bakes?|breads?|cakes?|pastry|pastries)\b/.test(text)) return genericSemanticProfile(input.prompt, input.plan);
   if (/\b(?:restaurant|dining|menu|cafe|seafood)\b/.test(text)) return profiles.restaurant;
   if (/\b(?:portfolio|creative director|art director|graphic designer|product designer)\b/.test(text)) return profiles.portfolio;
   if (/\b(?:real estate|realty|property|properties|realtor)\b/.test(text)) return profiles.realEstate;
@@ -867,7 +868,7 @@ function pageSections(input: { contract: WebsiteContentContract; page: string; p
         id: "home-trust",
         items: trustItems,
         kind: "trust",
-        title: "Practical details before you decide"
+        title: "What to confirm before you decide"
       }),
       ...(core.find((section) => section.kind === "faq")
         ? [core.find((section) => section.kind === "faq")!]

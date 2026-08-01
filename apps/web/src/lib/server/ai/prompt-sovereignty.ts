@@ -160,7 +160,11 @@ function contradictoryTermsFor(domain: string, capability: PromptSovereigntyCont
   }
 
   if (!domainText.includes("coffee") && !domainText.includes("cafe")) {
-    contradictions.push("coffee shop", "espresso", "latte", "cold brew", "barista", "pastries", "canadian coffee customers");
+    contradictions.push("coffee shop", "espresso", "latte", "cold brew", "barista", "canadian coffee customers");
+
+    if (!domainText.includes("bakery") && !domainText.includes("bake") && !domainText.includes("pastry")) {
+      contradictions.push("pastries");
+    }
   }
 
   if (!domainText.includes("dentist") && !domainText.includes("dental")) {

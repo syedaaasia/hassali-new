@@ -103,7 +103,11 @@ function sortTreeNodes(left: TreeNode, right: TreeNode) {
 function promptValue(message: string, defaultValue: string) {
   const prompt = (globalThis as DialogGlobal).prompt;
 
-  return prompt?.(message, defaultValue)?.trim() ?? null;
+  try {
+    return prompt?.(message, defaultValue)?.trim() ?? null;
+  } catch {
+    return defaultValue.trim() || null;
+  }
 }
 
 function confirmAction(message: string) {

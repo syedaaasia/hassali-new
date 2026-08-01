@@ -132,6 +132,7 @@ test("chat follows only near the bottom and exposes jump-to-latest", () => {
   assert.match(rightSidebar, /scrollHeight - container\.scrollTop - container\.clientHeight < 96/);
   assert.match(rightSidebar, /data-jump-to-latest/);
   assert.match(rightSidebar, /autoFollowRef\.current = nearBottom/);
+  assert.doesNotMatch(rightSidebar, /const sendWithContext = \(\) => \{\s*autoFollowRef\.current = true/);
 });
 
 test("notes are opt-in, project-bound, and never routed outside ASK", () => {

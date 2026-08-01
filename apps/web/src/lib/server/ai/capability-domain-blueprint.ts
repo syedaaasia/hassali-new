@@ -386,7 +386,7 @@ function classifyIndustry(promptText: string, businessPhrase: string | null) {
   return {
     industry: `${inferred} industry`,
     label: lower(inferred),
-    productCategory: `${primaryTerms.slice(0, 4).join(", ")} services, customer use cases, practical details, booking/contact`,
+    productCategory: `${primaryTerms.slice(0, 4).join(", ")} offers, customer needs, service details, booking/contact`,
     terms: primaryTerms
   };
 }

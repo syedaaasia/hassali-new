@@ -66,6 +66,12 @@ const cases = [
     expected: /lead follow-up|small service businesses|next-action/i,
     name: "saas",
     prompt: "Create a website for software that helps small service businesses follow up with leads."
+  },
+  {
+    absent: /restaurant|reservation|dining|menu items|chef|current prompt website/i,
+    expected: /neighborhood bakery|fresh bread|cakes|pastries|daily bakes/i,
+    name: "bakery",
+    prompt: "Create a simple responsive website for a neighborhood bakery with home, about, and contact pages."
   }
 ];
 

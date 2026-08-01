@@ -68,6 +68,7 @@ export type WebsiteContentContract = {
 
 type OfferFamily =
   | "artwork"
+  | "bakery"
   | "beauty"
   | "floral"
   | "professional_service"
@@ -123,6 +124,7 @@ function offerFamily(prompt: string, semantic: SemanticDomainEvidence): OfferFam
   ].join(" ")).toLowerCase();
 
   if (/\b(?:artist|painter|artwork|painting|paintings|sculptor|illustrator|art portfolio)\b/.test(text)) return "artwork";
+  if (/\b(?:bakery|bake|baked|bread|cake|cakes|pastry|pastries)\b/.test(text)) return "bakery";
   if (/\b(?:flower|flowers|floral|florist|bouquet|wedding flower)\b/.test(text)) return "floral";
   if (/\b(?:beauty|skincare|skin care|cosmetic|makeup|korean beauty)\b/.test(text)) return "beauty";
   if (/\b(?:software|saas|platform|workflow|automation|lead follow[ -]?up)\b/.test(text)) return "software";
@@ -202,6 +204,21 @@ function familyDetails(input: {
         { detail: "Ask directly about availability, dimensions, pricing, or commissions where applicable.", meta: "Collector inquiry", title: "Collecting information" }
       ],
       publicLabel: "Artist Portfolio"
+    };
+  }
+  if (input.family === "bakery") {
+    return {
+      audience: "local customers choosing fresh bread, cakes, and pastries",
+      businessType: "neighborhood bakery",
+      coreOffer: "fresh bread, cakes, pastries, and bakery orders",
+      mechanism: "browse daily bakes, compare celebration options, and contact the bakery about current availability or custom orders",
+      outcome: "choose the right bake and confirm pickup or custom-order details",
+      offerItems: [
+        { detail: "See the breads and pastries prepared for everyday pickup.", meta: "Fresh baking", title: "Daily bakes" },
+        { detail: "Explore cakes and celebration options, then confirm current designs and availability directly.", meta: "Celebrations", title: "Cakes and custom orders" },
+        { detail: "Ask about current availability, pickup timing, dietary needs, or a custom request.", meta: "Order help", title: "Plan an order" }
+      ],
+      publicLabel: "Neighborhood Bakery"
     };
   }
   if (input.family === "beauty") {

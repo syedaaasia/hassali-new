@@ -941,8 +941,6 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   };
 
   const sendWithContext = () => {
-    autoFollowRef.current = true;
-    setIsAwayFromLatest(false);
     const result = sendMessage(createWorkspaceContext());
     if (input.trim() && composerUploads.every((upload) => upload.status === "ready")) {
       setComposerUploads([]);

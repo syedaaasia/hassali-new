@@ -9,7 +9,6 @@ import {
   normalizeAskTimeContext,
   rankAskResearchSources,
   verifyAskSourceReliability,
-  type AskFreshnessDecision,
   type AskResearchSource
 } from "../ask-source-reliability";
 import { sanitizeBetaTelemetryEvent } from "../../intelligence/beta-telemetry";
@@ -80,6 +79,13 @@ test("timeless concepts answer without research or fake citations", async () => 
   assert.equal(provider.calls[0]?.webSearch, false);
   assert.equal(result.decision.sourceReliability.sourceCount, 0);
   assert.doesNotMatch(result.answer, /invented\.example/i);
+});
+
+test("industry labels do not turn design advice into high-stakes research", () => {
+  const freshness = decision("Should I use WebGL for a law firm website?");
+  assert.equal(freshness.freshnessClass, "timeless");
+  assert.equal(freshness.researchRequired, false);
+  assert.equal(freshness.directAnswerAllowed, true);
 });
 
 test("latest technical versions require current official evidence", async () => {

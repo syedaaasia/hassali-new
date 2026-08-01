@@ -115,6 +115,15 @@ test("C Korean beauty copy stays ecommerce-oriented without ingredient or clinic
   assert.doesNotMatch(JSON.stringify(contract.offerItems), /hyaluronic|retinol|clinically proven|dermatologist/i);
 });
 
+test("C2 bakery copy keeps pastries in-domain and avoids forbidden generic fallback copy", () => {
+  const contract = contractFor("Create a simple responsive website for a neighborhood bakery with home, about, and contact pages.");
+  const publicCopy = `${contract.hero.headline} ${contract.hero.supportingCopy} ${contract.offerMechanism} ${JSON.stringify(contract.offerItems)}`;
+
+  assert.match(contract.businessType, /bakery/i);
+  assert.match(publicCopy, /bread|cakes|pastries/i);
+  assert.doesNotMatch(publicCopy, /practical details|customer use cases/i);
+});
+
 test("D SaaS copy explains the lead follow-up workflow and target user", () => {
   const contract = contractFor("Create a website for software that helps small service businesses follow up with leads.");
   assert.match(contract.businessType, /lead follow-up software/i);

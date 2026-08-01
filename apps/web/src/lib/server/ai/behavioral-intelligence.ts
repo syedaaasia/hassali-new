@@ -590,7 +590,7 @@ export function normalizeFinalActionDecision(input: {
   let answerOnly = input.answerOnly;
   let approvalRequired = input.approvalRequired;
   const approvalSatisfied = input.approvalSatisfied;
-  let clarificationRequired = input.clarificationRequired;
+  const clarificationRequired = input.clarificationRequired;
   let disposition = input.disposition;
   let executionAllowed = input.executionAllowed;
   let mutationRequested = input.mutationRequested;
