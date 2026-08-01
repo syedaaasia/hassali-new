@@ -15,6 +15,9 @@ export type BetaTelemetryEventName =
   | "task_started";
 
 export type BetaTelemetryEvent = {
+  attachmentCount?: number;
+  attachmentKinds?: string[];
+  attachmentTotalBytes?: number;
   answerOnly?: boolean;
   approvalRequired?: boolean;
   approvalSatisfied?: boolean;
@@ -49,6 +52,9 @@ export type BetaTelemetryEvent = {
   sourceRequirement?: string;
   toolCount?: number;
   unsupportedClaimCount?: number;
+  visionAttempted?: boolean;
+  visionCompleted?: boolean;
+  visionRequired?: boolean;
 };
 
 export type BetaTelemetrySink = (event: Readonly<Record<string, unknown>>) => void;
@@ -129,6 +135,9 @@ export function sanitizeBetaTelemetryEvent(input: BetaTelemetryEvent) {
     : safeCategory(input.researchFailureClass);
   return {
     answerOnly,
+    attachmentCount: boundedInteger(input.attachmentCount, 5),
+    attachmentKinds: Array.from(new Set((input.attachmentKinds ?? []).map(safeCategory))).filter(Boolean).slice(0, 8),
+    attachmentTotalBytes: boundedInteger(input.attachmentTotalBytes, 20 * 1024 * 1024),
     approvalRequired,
     approvalSatisfied,
     completionStatus,
@@ -162,7 +171,10 @@ export function sanitizeBetaTelemetryEvent(input: BetaTelemetryEvent) {
     sourceCount,
     sourceRequirement: safeCategory(input.sourceRequirement),
     toolCount: boundedInteger(input.toolCount, 20),
-    unsupportedClaimCount: boundedInteger(input.unsupportedClaimCount, 20)
+    unsupportedClaimCount: boundedInteger(input.unsupportedClaimCount, 20),
+    visionAttempted: Boolean(input.visionAttempted),
+    visionCompleted: Boolean(input.visionAttempted) && Boolean(input.visionCompleted),
+    visionRequired: Boolean(input.visionRequired)
   };
 }
 

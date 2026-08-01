@@ -1,5 +1,6 @@
 import {
   deleteOwnedChatMessage,
+  listUserProjectFiles,
   loadOwnedChatHandoff,
   loadOwnedHandoffResponse,
   loadOwnedProjectRevision,
@@ -225,6 +226,21 @@ import {
   recordBetaTelemetry,
   type BetaTelemetryEvent
 } from "@/lib/server/intelligence/beta-telemetry";
+import {
+  AttachmentPipelineError
+} from "@/lib/server/attachments/attachment-pipeline";
+import {
+  generateImageToAttachment,
+  resolveMultimodalAttachmentContext
+} from "@/lib/server/attachments/attachment-context";
+import {
+  createProjectAssetChange,
+  shouldPromoteUploadedImages
+} from "@/lib/server/project-asset-pipeline";
+import {
+  isWorkspaceBindingError,
+  resolveProjectWorkspace
+} from "@/lib/server/runtime/project-workspace-registry";
 
 export const runtime = "nodejs";
 
@@ -5721,6 +5737,7 @@ export async function POST(request: Request) {
   const routeStartedAt = Date.now();
   const taskSignal = request.signal;
   const body = (await request.json().catch(() => null)) as {
+    attachmentIds?: unknown;
     chatSessionId?: unknown;
     handoff?: unknown;
     messages?: unknown;
@@ -5772,6 +5789,7 @@ export async function POST(request: Request) {
       ? body.mode
       : "ASK";
   const productMode = productModeFromRequest(body?.productMode, mode);
+  const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const projectNotesContext = explicitProjectNotesContext(body?.projectNotes, productMode);
   const requestedWorkspace = isWorkspaceContext(body?.workspace)
     ? body.workspace
@@ -5784,14 +5802,133 @@ export async function POST(request: Request) {
       };
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const rawEffectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
+  const attachmentIds = Array.isArray(body?.attachmentIds)
+    ? body.attachmentIds.filter((value): value is string => typeof value === "string")
+    : [];
+  let multimodalContext: Awaited<ReturnType<typeof resolveMultimodalAttachmentContext>> | null = null;
+  const asksForImageGeneration = /\b(?:generate|create|make)\b[\s\S]{0,50}\b(?:image|illustration|artwork|hero visual|picture)\b/i.test(rawEffectiveUserPrompt);
+  if (asksForImageGeneration && productMode === "ASK" && attachmentIds.length === 0) {
+    if (!requestedProjectId) {
+      return createTextStream("Select a project so Hassali can scope the generated image safely. ASK will stage it for this conversation and will not add it to project files.");
+    }
+    const { userId } = await auth();
+    if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    await listUserProjectFiles({ externalUserId: userId, projectId: requestedProjectId });
+    const binding = await resolveProjectWorkspace(requestedProjectId);
+    if (isWorkspaceBindingError(binding)) return Response.json({ error: binding.error }, { status: binding.status });
+    const generated = await generateImageToAttachment({
+      conversationId: typeof body?.chatSessionId === "string" ? body.chatSessionId : `draft-${requestedProjectId}`,
+      ownerId: userId,
+      projectId: requestedProjectId,
+      prompt: rawEffectiveUserPrompt,
+      signal: taskSignal,
+      workspaceRoot: binding.workspaceRoot
+    });
+    if (!generated.attachment) {
+      const reason = generated.capability.failureReason ?? "The configured image provider could not generate an image.";
+      return createTextStream(`Image generation is unavailable: ${reason}`);
+    }
+    return createTextStream(
+      `I generated the image as conversation-scoped output. Nothing was added to project files. To use it in WEBSITE or CODE, switch modes and explicitly ask to use the previous image; the resulting asset change will still require approval.\n\nHASSALI_GENERATED_IMAGE:${JSON.stringify(generated.attachment)}`
+    );
+  }
+  if (attachmentIds.length > 0) {
+    if (!requestedProjectId) {
+      return Response.json({ code: "UPLOAD_FAILED", error: "Select a project before sending attachments." }, { status: 400 });
+    }
+    const { userId } = await auth();
+    if (!userId) return Response.json({ code: "UPLOAD_FAILED", error: "Unauthorized" }, { status: 401 });
+    try {
+      await listUserProjectFiles({ externalUserId: userId, projectId: requestedProjectId });
+      const binding = await resolveProjectWorkspace(requestedProjectId);
+      if (isWorkspaceBindingError(binding)) {
+        return Response.json({ code: "UPLOAD_FAILED", error: binding.error }, { status: binding.status });
+      }
+      multimodalContext = await resolveMultimodalAttachmentContext({
+        attachmentIds,
+        ownerId: userId,
+        projectId: requestedProjectId,
+        prompt: rawEffectiveUserPrompt,
+        selectedModel: model,
+        signal: taskSignal,
+        workspaceRoot: binding.workspaceRoot
+      });
+    } catch (error) {
+      const safe = error instanceof AttachmentPipelineError
+        ? error
+        : new AttachmentPipelineError("UPLOAD_FAILED", "Attachment processing failed safely.", 500);
+      return Response.json({ code: safe.code, error: safe.message }, { status: safe.status });
+    }
+  }
   const behavior = resolveBehavioralDecision({
     messages,
     prompt: rawEffectiveUserPrompt,
     selectedMode: productMode,
     workspace: requestedWorkspace
   });
-  const effectiveUserPrompt = behavior.resolvedRequest;
-  const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
+  const effectiveUserPrompt = [behavior.resolvedRequest, multimodalContext?.contextText]
+    .filter(Boolean)
+    .join("\n\n");
+  if (multimodalContext?.failureMessage && !multimodalContext.contextText) {
+    return createTextStream(multimodalContext.failureMessage, undefined, {
+      "x-hassali-attachment-failure": multimodalContext.failureCode ?? "ATTACHMENT_PROCESSING_FAILED"
+    });
+  }
+  const currentAttachmentAssetChanges = productMode !== "ASK" &&
+    shouldPromoteUploadedImages(rawEffectiveUserPrompt)
+    ? multimodalContext?.records
+      .filter((record) => record.metadata.kind === "image")
+      .reduce<DiffProposal["changes"]>((changes, record) => {
+        const change = createProjectAssetChange({
+          attachment: record.metadata,
+          bytes: record.bytes,
+          existingPaths: [
+            ...requestedWorkspace.fileList,
+            ...changes.flatMap((entry) => entry.path ? [entry.path] : [])
+          ],
+          mode: productMode
+        });
+        changes.push({
+          ...change,
+          diffPreview: `Binary asset ${record.metadata.mimeType}, ${record.metadata.sizeBytes} bytes.`
+        });
+        return changes;
+      }, []) ?? []
+    : [];
+  const withCurrentAttachmentAssets = (proposal: DiffProposal): DiffProposal => {
+    if (!currentAttachmentAssetChanges.length) return proposal;
+    const firstAssetPath = currentAttachmentAssetChanges[0]?.path ?? "";
+    const publicAssetReference = productMode === "CODE"
+      ? `/${firstAssetPath.replace(/^public\//, "")}`
+      : firstAssetPath;
+    let referenceAdded = false;
+    const changes = proposal.changes.map((change) => {
+      if (
+        referenceAdded ||
+        !change.path ||
+        typeof change.proposedContent !== "string" ||
+        !/(?:index\.html|src\/App\.(?:jsx|tsx))$/i.test(change.path) ||
+        !/<main\b/i.test(change.proposedContent) ||
+        !/<\/main>/i.test(change.proposedContent)
+      ) {
+        return change;
+      }
+      const markup = productMode === "WEBSITE"
+        ? `<figure class="hassali-project-asset"><img src="${publicAssetReference}" alt="User-supplied project visual" loading="lazy"></figure>`
+        : `<figure className="hassali-project-asset"><img src="${publicAssetReference}" alt="User-supplied project visual" loading="lazy" /></figure>`;
+      referenceAdded = true;
+      return {
+        ...change,
+        proposedContent: change.proposedContent.replace(/<\/main>/i, `${markup}\n</main>`),
+        summary: `${change.summary} Reference approved project asset ${publicAssetReference}.`
+      };
+    });
+    return {
+      ...proposal,
+      changes: [...changes, ...currentAttachmentAssetChanges],
+      summary: `${proposal.summary}\n\nAttached project assets: ${currentAttachmentAssetChanges.map((change) => change.path).join(", ")}.${referenceAdded ? " A stable project-relative reference was inserted." : " The asset is saved, but no safe insertion point was found; no reference was fabricated."} These files remain approval-first.`
+    };
+  };
   const relevantContext = selectRelevantBehavioralContext({
     messages,
     mode: productMode,
@@ -5816,7 +5953,7 @@ export async function POST(request: Request) {
     ["answer", "clarify", "plan"].includes(behavior.finalDisposition);
   const askRuntimeContext = buildAskRuntimeContext();
   const askFreshnessDecision = decideAskFreshness({
-    hasPrivateFileContent: Boolean(requestedWorkspace.activeFileContent?.trim()),
+    hasPrivateFileContent: Boolean(requestedWorkspace.activeFileContent?.trim() || multimodalContext?.contextText),
     prompt: nonMutatingFinalAction ? effectiveUserPrompt : "",
     runtime: askRuntimeContext
   });
@@ -5845,6 +5982,9 @@ export async function POST(request: Request) {
       : requestedWorkspace;
   const semanticTelemetry = {
     answerOnly: behavior.answerOnly,
+    attachmentCount: multimodalContext?.attachmentCount ?? 0,
+    attachmentKinds: multimodalContext?.attachmentKinds ?? [],
+    attachmentTotalBytes: multimodalContext?.attachmentTotalBytes ?? 0,
     approvalRequired: behavior.approvalRequired,
     approvalSatisfied: behavior.approvalSatisfied,
     contextItemsExcluded: behavior.contextItemsExcluded,
@@ -5854,7 +5994,10 @@ export async function POST(request: Request) {
     executionStarted: false,
     finalDisposition: behavior.finalDisposition,
     intentClass: behavior.intentClass,
-    mutationRequested: behavior.mutationIntent
+    mutationRequested: behavior.mutationIntent,
+    visionAttempted: multimodalContext?.visionAttempted ?? false,
+    visionCompleted: multimodalContext?.visionCompleted ?? false,
+    visionRequired: multimodalContext?.attachmentKinds.includes("image") ?? false
   } as const;
   type AskSourceTelemetry = Pick<
     BetaTelemetryEvent,
@@ -6317,6 +6460,26 @@ export async function POST(request: Request) {
       model,
       askRuntimeContext: mode === "ASK" ? askRuntimeContext : undefined,
       askLiveIntent: mode === "ASK" ? askLiveIntent : undefined,
+      attachments: multimodalContext
+        ? multimodalContext.records.map((record) => ({
+            id: record.metadata.id,
+            kind: record.metadata.kind,
+            mimeType: record.metadata.mimeType,
+            name: record.metadata.safeName,
+            sizeBytes: record.metadata.sizeBytes
+          }))
+        : [],
+      attachmentProcessing: multimodalContext
+        ? {
+            attachmentCount: multimodalContext.attachmentCount,
+            attachmentKinds: multimodalContext.attachmentKinds,
+            attachmentTotalBytes: multimodalContext.attachmentTotalBytes,
+            failureCode: multimodalContext.failureCode,
+            visionAttempted: multimodalContext.visionAttempted,
+            visionCompleted: multimodalContext.visionCompleted,
+            visionModel: multimodalContext.visionModel
+          }
+        : undefined,
       intelligencePreflight: compactIntelligencePreflight(intelligencePreflight),
       workspace: {
         activePath: workspace.activePath,
@@ -6695,7 +6858,7 @@ export async function POST(request: Request) {
     if (websiteEditContext.hasWebsiteFiles) {
       const websiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
       const websiteEditPlan = planWebsiteEdit(websiteEditContext, websiteEditIntent);
-      const proposal = createWebsiteEditProposal({
+      const proposal = withCurrentAttachmentAssets(createWebsiteEditProposal({
         context: websiteEditContext,
         generatorContract,
         intent: websiteEditIntent,
@@ -6704,7 +6867,7 @@ export async function POST(request: Request) {
         projectId: requestedProjectId,
         prompt: effectiveUserPrompt,
         proposalContext
-      });
+      }));
       const visibleSummary =
         websiteEditPlan.mode === "blocked"
           ? "I reviewed the existing website edit request, but it is not safe to apply as-is."
@@ -6768,7 +6931,7 @@ export async function POST(request: Request) {
       targetFiles: []
     };
     const websiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
-    const proposal = createWebsiteEditProposal({
+    const proposal = withCurrentAttachmentAssets(createWebsiteEditProposal({
       context: websiteEditContext,
       generatorContract,
       intent: websiteEditIntent,
@@ -6777,7 +6940,7 @@ export async function POST(request: Request) {
       projectId: requestedProjectId,
       prompt: effectiveUserPrompt,
       proposalContext
-    });
+    }));
 
     persistence = await persistRequestMessage(persistence, {
       content: blockedReason,
@@ -6916,7 +7079,7 @@ export async function POST(request: Request) {
       proposal: routedProposal,
       translatedIntent
     });
-    const proposal = evaluatedProposal.proposal;
+    const proposal = withCurrentAttachmentAssets(evaluatedProposal.proposal);
     const visibleSummary =
       mode === "EXECUTE"
         ? "I prepared an execution proposal for review. Nothing runs until you approve it."
@@ -7304,7 +7467,7 @@ export async function POST(request: Request) {
       proposal: routedProposal,
       translatedIntent
     });
-    const proposal: DiffProposal = evaluatedProposal.proposal;
+    const proposal: DiffProposal = withCurrentAttachmentAssets(evaluatedProposal.proposal);
 
     if (
       proposal.shouldBlockExecution &&

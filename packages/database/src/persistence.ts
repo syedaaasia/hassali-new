@@ -1003,6 +1003,7 @@ export async function loadWorkspaceForExternalUser(
   const messagesResult = session
     ? await db.execute<{
         content: string;
+        attachments: unknown;
         handoff: unknown;
         id: string;
         mode: AiMode;
@@ -1015,6 +1016,7 @@ export async function loadWorkspaceForExternalUser(
           role,
           content,
           mode,
+          metadata -> 'attachments' as attachments,
           metadata -> 'handoff' as handoff,
           coalesce(metadata ->> 'providerFailureCategory', metadata -> 'askBrain' ->> 'providerFailureCategory') as provider_failure_category,
           coalesce(metadata ->> 'responseKind', metadata -> 'askBrain' ->> 'responseKind') as response_kind
@@ -1028,6 +1030,7 @@ export async function loadWorkspaceForExternalUser(
     chat: {
       messages: messagesResult.rows.map((message) => ({
         content: String(message.content),
+        attachments: Array.isArray(message.attachments) ? message.attachments : [],
         handoff: message.handoff ?? null,
         id: String(message.id),
         mode: message.mode,

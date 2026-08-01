@@ -31,6 +31,12 @@ import {
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
+import {
+  attachmentKindLabel,
+  attachmentLimits,
+  type AttachmentFailureCode,
+  type HassaliAttachment
+} from "@/lib/attachments";
 
 const modelOptions = getHassaliModelOptions();
 
@@ -89,6 +95,29 @@ type ChatScrollContainer = {
 type AnimationGlobal = {
   cancelAnimationFrame: (handle: number) => void;
   requestAnimationFrame: (callback: () => void) => number;
+};
+type UploadProgressEvent = { lengthComputable: boolean; loaded: number; total: number };
+type UploadRequest = {
+  abort: () => void;
+  onerror: (() => void) | null;
+  onload: (() => void) | null;
+  open: (method: string, url: string) => void;
+  responseText: string;
+  send: (body: FormData) => void;
+  status: number;
+  upload: { onprogress: ((event: UploadProgressEvent) => void) | null };
+};
+type UploadGlobal = {
+  XMLHttpRequest?: new () => UploadRequest;
+};
+type ComposerUpload = {
+  attachment?: HassaliAttachment;
+  clientId: string;
+  error?: string;
+  errorCode?: AttachmentFailureCode;
+  file: File;
+  progress: number;
+  status: "failed" | "ready" | "uploading";
 };
 const blockedRegenerationLimit = 2;
 const manualReviewNeededMessage =
@@ -680,12 +709,142 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const autoFollowRef = useRef(true);
   const scrollAnimationFrameRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadRequestsRef = useRef(new Map<string, UploadRequest>());
   const [blockedRegenerationAttempts, setBlockedRegenerationAttempts] = useState(0);
   const [isAwayFromLatest, setIsAwayFromLatest] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [manualReviewMessage, setManualReviewMessage] = useState<string | null>(null);
   const [runtimeApprovalResult, setRuntimeApprovalResult] =
     useState<RuntimeApprovalResponse | null>(null);
+  const [composerUploads, setComposerUploads] = useState<ComposerUpload[]>([]);
+  const attachmentUploadPending = composerUploads.some((upload) => upload.status === "uploading");
+  const attachmentUploadFailed = composerUploads.some((upload) => upload.status === "failed");
+
+  useEffect(() => () => {
+    for (const request of uploadRequestsRef.current.values()) request.abort();
+    uploadRequestsRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    for (const request of uploadRequestsRef.current.values()) request.abort();
+    uploadRequestsRef.current.clear();
+    setComposerUploads([]);
+  }, [projectId]);
+
+  const uploadOne = (item: ComposerUpload) => {
+    if (!projectId) {
+      setWorkspaceError("Select a project before adding attachments.");
+      return;
+    }
+    const UploadRequestConstructor = (globalThis as UploadGlobal).XMLHttpRequest;
+    if (!UploadRequestConstructor) {
+      setComposerUploads((uploads) => uploads.map((upload) => upload.clientId === item.clientId
+        ? { ...upload, error: "This browser cannot upload files.", errorCode: "UPLOAD_FAILED", progress: 0, status: "failed" }
+        : upload));
+      return;
+    }
+    const request = new UploadRequestConstructor();
+    const data = new FormData();
+    data.append("file", item.file);
+    data.append("projectId", projectId);
+    data.append("conversationId", chatSessionId ?? `draft-${projectId}`);
+    data.append("storageScope", "conversation");
+    uploadRequestsRef.current.set(item.clientId, request);
+    setComposerUploads((uploads) => uploads.map((upload) => upload.clientId === item.clientId
+      ? { ...upload, error: undefined, errorCode: undefined, progress: 0, status: "uploading" }
+      : upload));
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      const progress = Math.min(99, Math.round((event.loaded / event.total) * 100));
+      setComposerUploads((uploads) => uploads.map((upload) => upload.clientId === item.clientId
+        ? { ...upload, progress }
+        : upload));
+    };
+    request.onload = () => {
+      uploadRequestsRef.current.delete(item.clientId);
+      const payload = (() => {
+        try {
+          return JSON.parse(request.responseText) as { attachment?: HassaliAttachment; code?: AttachmentFailureCode; error?: string };
+        } catch {
+          return null;
+        }
+      })();
+      if (request.status >= 200 && request.status < 300 && payload?.attachment) {
+        setComposerUploads((uploads) => uploads.map((upload) => upload.clientId === item.clientId
+          ? { ...upload, attachment: payload.attachment, progress: 100, status: "ready" }
+          : upload));
+        return;
+      }
+      setComposerUploads((uploads) => uploads.map((upload) => upload.clientId === item.clientId
+        ? {
+            ...upload,
+            error: payload?.error ?? "Attachment upload failed.",
+            errorCode: payload?.code ?? "UPLOAD_FAILED",
+            progress: 0,
+            status: "failed"
+          }
+        : upload));
+    };
+    request.onerror = () => {
+      uploadRequestsRef.current.delete(item.clientId);
+      setComposerUploads((uploads) => uploads.map((upload) => upload.clientId === item.clientId
+        ? { ...upload, error: "Attachment upload failed.", errorCode: "UPLOAD_FAILED", progress: 0, status: "failed" }
+        : upload));
+    };
+    request.open("POST", "/api/attachments");
+    request.send(data);
+  };
+
+  const addAttachments = (selected: File[]) => {
+    if (!projectId) {
+      setWorkspaceError("Select a project before adding attachments.");
+      return;
+    }
+    const remaining = attachmentLimits.filesPerMessage - composerUploads.length;
+    const files = selected.slice(0, Math.max(0, remaining));
+    const existingBytes = composerUploads.reduce((total, upload) => total + upload.file.size, 0);
+    let nextBytes = existingBytes;
+    const accepted: ComposerUpload[] = [];
+    for (const file of files) {
+      if (file.size > attachmentLimits.individualFileBytes) {
+        accepted.push({
+          clientId: crypto.randomUUID(),
+          error: `Files are limited to ${attachmentLimits.individualFileBytes / 1024 / 1024} MB each.`,
+          errorCode: "FILE_TOO_LARGE",
+          file,
+          progress: 0,
+          status: "failed"
+        });
+        continue;
+      }
+      if (nextBytes + file.size > attachmentLimits.totalMessageBytes) {
+        accepted.push({
+          clientId: crypto.randomUUID(),
+          error: "These attachments exceed the 20 MB per-message limit.",
+          errorCode: "TOTAL_LIMIT_EXCEEDED",
+          file,
+          progress: 0,
+          status: "failed"
+        });
+        continue;
+      }
+      nextBytes += file.size;
+      accepted.push({ clientId: crypto.randomUUID(), file, progress: 0, status: "uploading" });
+    }
+    if (selected.length > remaining) setWorkspaceError(`Up to ${attachmentLimits.filesPerMessage} attachments can be sent at once.`);
+    setComposerUploads((uploads) => [...uploads, ...accepted]);
+    accepted.filter((item) => item.status === "uploading").forEach(uploadOne);
+  };
+
+  const removeAttachment = (item: ComposerUpload) => {
+    uploadRequestsRef.current.get(item.clientId)?.abort();
+    uploadRequestsRef.current.delete(item.clientId);
+    setComposerUploads((uploads) => uploads.filter((upload) => upload.clientId !== item.clientId));
+    if (item.attachment && projectId) {
+      void fetch(`/api/attachments/${item.attachment.id}?projectId=${encodeURIComponent(projectId)}`, { method: "DELETE" });
+    }
+  };
 
   const scrollToLatest = (behavior: ChatScrollBehavior = "smooth") => {
     const container = scrollContainerRef.current as unknown as ChatScrollContainer | null;
@@ -753,6 +912,16 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     const activeFileSelected = contentPaths.includes(activePath);
 
     return {
+      attachmentIds: composerUploads.flatMap((upload) => upload.status === "ready" && upload.attachment ? [upload.attachment.id] : []),
+      attachments: composerUploads.flatMap((upload) => upload.status === "ready" && upload.attachment
+        ? [{
+            id: upload.attachment.id,
+            kind: upload.attachment.kind,
+            mimeType: upload.attachment.mimeType,
+            safeName: upload.attachment.safeName,
+            sizeBytes: upload.attachment.sizeBytes
+          }]
+        : []),
       activeFileContent: activeFileSelected ? activeFile?.content ?? "" : "",
       activePath,
       chatSessionId,
@@ -775,6 +944,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     autoFollowRef.current = true;
     setIsAwayFromLatest(false);
     const result = sendMessage(createWorkspaceContext());
+    if (input.trim() && composerUploads.every((upload) => upload.status === "ready")) {
+      setComposerUploads([]);
+    }
     scheduleAutoFollow("smooth");
     return result;
   };
@@ -1124,6 +1296,31 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                 <div className="mb-1 flex items-center justify-between gap-2 font-medium text-foreground">
                   <span>{message.role === "user" ? "You" : "Hassali"}</span>
                 </div>
+                {message.attachments?.length ? (
+                  <div className="mb-2 flex flex-wrap gap-1.5" data-message-attachments>
+                    {message.attachments.map((attachment) => (
+                      <span
+                        className="rounded-md border border-white/10 bg-black/15 px-2 py-0.5 text-[10px] text-muted-foreground [.light_&]:bg-white/70"
+                        key={attachment.id}
+                      >
+                        {attachmentKindLabel(attachment.kind)} · {attachment.safeName}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {message.role === "assistant" && projectId && message.attachments?.some((attachment) => attachment.kind === "image") ? (
+                  <div className="mb-3 grid gap-2 sm:grid-cols-2" data-generated-images>
+                    {message.attachments.filter((attachment) => attachment.kind === "image").map((attachment) => (
+                      <span
+                        aria-label={`Generated image ${attachment.safeName}`}
+                        className="block aspect-[4/3] min-h-36 rounded-md border border-white/10 bg-black/20 bg-contain bg-center bg-no-repeat"
+                        key={attachment.id}
+                        role="img"
+                        style={{ backgroundImage: `url("/api/attachments/${attachment.id}?projectId=${encodeURIComponent(projectId)}")` }}
+                      />
+                    ))}
+                  </div>
+                ) : null}
                 <div className="min-h-7 whitespace-pre-wrap break-words">
                   {activity.visibility === "pre-output" ? (
                     <HassaliActivityMascot
@@ -1328,6 +1525,16 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         <form
           className="shrink-0 border-t border-white/10 bg-[#0b0b0b] px-4 py-3 [.light_&]:border-slate-200 [.light_&]:bg-[#F4F3EE] lg:px-6"
           data-website-composer={productMode === "WEBSITE" ? "true" : undefined}
+          onDragOver={(event) => {
+            const transfer = event.dataTransfer as unknown as { types: { includes: (value: string) => boolean } };
+            if (transfer.types.includes("Files")) event.preventDefault();
+          }}
+          onDrop={(event) => {
+            const transfer = event.dataTransfer as unknown as { files: ArrayLike<File> };
+            if (!transfer.files.length) return;
+            event.preventDefault();
+            addAttachments(Array.from(transfer.files));
+          }}
           onSubmit={(event) => {
             event.preventDefault();
             void sendWithContext();
@@ -1345,10 +1552,84 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               Project Notes context is on for this request ({boundedProjectNotesContext(projectNotes).length.toLocaleString()} characters).
             </div>
           ) : null}
+          <input
+            accept=".png,.jpg,.jpeg,.webp,.pdf,.txt,.md,.markdown,.json,.csv,.js,.jsx,.ts,.tsx,.html,.css,.scss,.py,.java,.cs,.go,.rs,.php,.yaml,.yml,.xml,.sql,.zip"
+            className="sr-only"
+            data-attachment-input
+            multiple
+            onChange={(event) => {
+              const input = event.currentTarget as unknown as { files: ArrayLike<File> | null; value: string };
+              addAttachments(Array.from(input.files ?? []));
+              input.value = "";
+            }}
+            ref={attachmentInputRef}
+            type="file"
+          />
+          {composerUploads.length ? (
+            <div className="mx-auto mb-2 flex w-full max-w-3xl gap-2 overflow-x-auto px-1 pb-0.5" data-composer-attachments>
+              {composerUploads.map((upload) => (
+                <div
+                  className={`relative flex min-w-[10rem] max-w-[15rem] items-center gap-2 rounded-md border px-2 py-1.5 text-[10px] ${
+                    upload.status === "failed"
+                      ? "border-red-400/30 bg-red-500/10 text-red-100"
+                      : "border-white/10 bg-white/[0.035] text-muted-foreground"
+                  }`}
+                  key={upload.clientId}
+                >
+                  {upload.attachment?.kind === "image" && projectId ? (
+                    <span
+                      aria-hidden="true"
+                      className="h-8 w-8 shrink-0 rounded bg-cover bg-center"
+                      style={{ backgroundImage: `url("/api/attachments/${upload.attachment.id}?projectId=${encodeURIComponent(projectId)}")` }}
+                    />
+                  ) : (
+                    <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-white/[0.05] text-[9px] font-semibold">
+                      {upload.attachment ? attachmentKindLabel(upload.attachment.kind) : "FILE"}
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-foreground">{upload.file.name}</span>
+                    <span className="block truncate">
+                      {upload.status === "uploading"
+                        ? `Uploading ${upload.progress}%`
+                        : upload.status === "failed"
+                          ? upload.errorCode ?? "Upload failed"
+                          : `${Math.max(1, Math.round(upload.file.size / 1024))} KB ready`}
+                    </span>
+                  </span>
+                  {upload.status === "failed" ? (
+                    <button
+                      aria-label={`Retry ${upload.file.name}`}
+                      className="shrink-0 underline decoration-white/30 underline-offset-2"
+                      onClick={() => uploadOne(upload)}
+                      type="button"
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                  <button
+                    aria-label={`Remove ${upload.file.name}`}
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-sm hover:bg-white/10"
+                    onClick={() => removeAttachment(upload)}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                  {upload.status === "uploading" ? (
+                    <span className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden rounded-b bg-white/5">
+                      <span className="block h-full bg-[hsl(var(--premium-accent))]" style={{ width: `${upload.progress}%` }} />
+                    </span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] border border-white/10 bg-[#161616] px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] focus-within:border-[hsl(var(--premium-accent)/0.55)] focus-within:ring-2 focus-within:ring-[hsl(var(--premium-accent)/0.1)] [.light_&]:border-slate-300 [.light_&]:bg-white [.light_&]:shadow-[0_16px_44px_rgba(0,0,0,0.08)]">
             <button
-              aria-label="Add context"
+              aria-label="Attach files"
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg leading-none text-muted-foreground hover:bg-white/[0.04] hover:text-foreground [.light_&]:hover:bg-slate-200 [.light_&]:hover:text-slate-950"
+              onClick={() => (attachmentInputRef.current as unknown as { click?: () => void } | null)?.click?.()}
+              title="Attach images, documents, source files, or ZIP archives"
               type="button"
             >
               +
@@ -1397,7 +1678,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             <button
               aria-label={isStreaming ? "Stop response" : "Send message"}
               className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] text-[10px] font-semibold text-white shadow-[0_14px_34px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--premium-accent)/0.2)] disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={!isStreaming && input.trim().length === 0}
+              disabled={!isStreaming && (input.trim().length === 0 || attachmentUploadPending || attachmentUploadFailed)}
               onClick={isStreaming ? cancelMessage : undefined}
               title={isStreaming ? "Stop response" : "Send message"}
               type={isStreaming ? "button" : "submit"}

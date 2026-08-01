@@ -19,6 +19,10 @@ import type {
   RuntimeToolName,
   RuntimeVerificationResult
 } from "@/lib/server/runtime/runtime-types";
+import {
+  canonicalizeWorkspaceFileContent,
+  materializeProjectFileContent
+} from "@/lib/server/project-file-content";
 
 const runnerAllowedTools: RuntimeToolName[] = [
   "apply_patch",
@@ -146,7 +150,7 @@ async function writeApprovedFile(workspaceRoot: string, path: string, content: s
   }
 
   await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, content, "utf8");
+  await writeFile(target, materializeProjectFileContent(content));
 
   return target;
 }
@@ -159,10 +163,10 @@ async function verifyWrittenFiles(writtenFiles: Array<{ content: string; path: s
     try {
       const [stats, content] = await Promise.all([
         stat(file.target),
-        readFile(file.target, "utf8")
+        readFile(file.target)
       ]);
 
-      if (!stats.isFile() || content !== file.content || content.length === 0) {
+      if (!stats.isFile() || !content.equals(materializeProjectFileContent(file.content)) || content.length === 0) {
         ok = false;
         details.push(`${file.path}: verification content mismatch`);
       } else {
@@ -198,25 +202,26 @@ async function verifyDeletedFiles(deletedFiles: Array<{ path: string; target: st
 
 async function captureFileBeforeWrite(target: string) {
   try {
+    const content = await readFile(target);
     return {
-      content: await readFile(target, "utf8"),
+      content,
       existed: true
     };
   } catch {
     return {
-      content: "",
+      content: Buffer.alloc(0),
       existed: false
     };
   }
 }
 
 async function rollbackWrites(
-  backups: Array<{ content: string; existed: boolean; target: string }>
+  backups: Array<{ content: Buffer; existed: boolean; target: string }>
 ) {
   for (const backup of [...backups].reverse()) {
     if (backup.existed) {
       await mkdir(dirname(backup.target), { recursive: true });
-      await writeFile(backup.target, backup.content, "utf8");
+      await writeFile(backup.target, backup.content);
     } else {
       await rm(backup.target, { force: true });
     }
@@ -239,7 +244,7 @@ export async function runApprovedFilePlan(input: ApprovedFileRunnerInput): Promi
   const deletedFiles: string[] = [];
   const writtenTargets: Array<{ content: string; path: string; target: string }> = [];
   const deletedTargets: Array<{ path: string; target: string }> = [];
-  const backups: Array<{ content: string; existed: boolean; target: string }> = [];
+  const backups: Array<{ content: Buffer; existed: boolean; target: string }> = [];
   const errors: string[] = [];
   const snapshotBefore = await createGitSnapshotSafety({
     planId: input.approvedPlan.id,
@@ -444,5 +449,6 @@ export async function readApprovedFile(workspaceRoot: string, path: string) {
     throw new Error(`Refusing to read outside workspace root: ${path}`);
   }
 
-  return readFile(target, "utf8");
+  const content = await readFile(target);
+  return canonicalizeWorkspaceFileContent(path, content);
 }

@@ -34,6 +34,7 @@ type WorkspaceProject = {
 export type WorkspaceLoadResult = {
   chat: {
     messages: Array<{
+      attachments?: unknown;
       content: string;
       handoff?: unknown;
       id: string;

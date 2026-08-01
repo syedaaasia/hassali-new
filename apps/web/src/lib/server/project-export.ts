@@ -1,9 +1,10 @@
 import { normalizeSafeProjectPath } from "../utils/path";
+import { parseProjectBinaryAssetEnvelope } from "@/lib/project-binary-asset";
 
 export type ProjectExportMode = "CODE" | "WEBSITE";
 
 export type ProjectExportFile = {
-  content: string;
+  content: string | Uint8Array;
   path: string;
 };
 
@@ -11,6 +12,7 @@ const maximumExportFiles = 2_500;
 const maximumExportBytes = 25 * 1024 * 1024;
 const excludedDirectoryNames = new Set([
   ".git",
+  ".hassali",
   ".next",
   ".turbo",
   "build",
@@ -48,7 +50,7 @@ function modeEvidence(mode: ProjectExportMode, files: ProjectExportFile[]) {
   const paths = new Set(files.map((file) => file.path.toLowerCase()));
   const contractText = files
     .filter((file) => /(?:^|\/)hassali(?:\.(?:code|website))?\.md$/i.test(file.path))
-    .map((file) => file.content.toLowerCase())
+    .map((file) => typeof file.content === "string" ? file.content.toLowerCase() : "")
     .join("\n");
 
   if (mode === "WEBSITE") {
@@ -78,8 +80,15 @@ export function prepareProjectExportFiles(input: {
 
     if (shouldExcludeProjectExportPath(path)) continue;
 
-    const content = String(file.content);
-    totalBytes += Buffer.byteLength(content, "utf8");
+    const binaryAsset = typeof file.content === "string"
+      ? parseProjectBinaryAssetEnvelope(file.content)
+      : null;
+    const content = binaryAsset
+      ? new Uint8Array(Buffer.from(binaryAsset.base64, "base64"))
+      : typeof file.content === "string"
+        ? file.content
+        : new Uint8Array(file.content);
+    totalBytes += typeof content === "string" ? Buffer.byteLength(content, "utf8") : content.byteLength;
     normalizedFiles.push({ content, path });
   }
 
@@ -134,7 +143,9 @@ export function createStoredZip(files: ProjectExportFile[], generatedAt = new Da
 
   for (const file of files) {
     const name = Buffer.from(file.path, "utf8");
-    const content = Buffer.from(file.content, "utf8");
+    const content = typeof file.content === "string"
+      ? Buffer.from(file.content, "utf8")
+      : Buffer.from(file.content);
     const checksum = crc32(content);
     const localHeader = Buffer.alloc(30);
 

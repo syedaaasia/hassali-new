@@ -18,6 +18,7 @@ import type {
   SelfReviewStatus
 } from "@/lib/self-review-types";
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
+import { shouldRestorePreviousAttachments, type HassaliAttachment } from "@/lib/attachments";
 
 export type ChatRole = "user" | "assistant";
 export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
@@ -42,6 +43,7 @@ export type KernelFrameworkHint =
   | "rag_candidate";
 
 export type ChatMessage = {
+  attachments?: Array<Pick<HassaliAttachment, "id" | "kind" | "mimeType" | "safeName" | "sizeBytes">>;
   id: string;
   role: ChatRole;
   content: string;
@@ -51,6 +53,8 @@ export type ChatMessage = {
 };
 
 export type WorkspaceContext = {
+  attachmentIds?: string[];
+  attachments?: Array<Pick<HassaliAttachment, "id" | "kind" | "mimeType" | "safeName" | "sizeBytes">>;
   activeFileContent: string;
   activePath: string;
   chatSessionId: string | null;
@@ -546,6 +550,7 @@ type ChatState = {
   chatSessionId: string | null;
   hydrateChat: (
     messages: Array<{
+      attachments?: unknown;
       content: string;
       handoff?: unknown;
       id: string;
@@ -571,6 +576,7 @@ type ChatState = {
 const defaultModel = hassaliDefaultModelId;
 const proposalMarker = "HASSALI_DIFF_PROPOSAL:";
 const handoffMarker = "HASSALI_MODE_HANDOFF:";
+const generatedImageMarker = "HASSALI_GENERATED_IMAGE:";
 let activeChatRequest: {
   assistantMessageId: string;
   controller: AbortController;
@@ -592,8 +598,13 @@ function aiModeToProductMode(mode: AiMode): ProductMode {
   return mode === "SUGGEST" ? "WEBSITE" : "CODE";
 }
 
-function createMessage(role: ChatRole, content: string): ChatMessage {
+function createMessage(
+  role: ChatRole,
+  content: string,
+  attachments?: ChatMessage["attachments"]
+): ChatMessage {
   return {
+    attachments,
     id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     role,
     content
@@ -746,6 +757,7 @@ function createGreetingMessage() {
 
 function normalizeHydratedMessages(
   messages: Array<{
+    attachments?: unknown;
     content: string;
     handoff?: unknown;
     id: string;
@@ -764,6 +776,25 @@ function normalizeHydratedMessages(
     )
     .map((message) => ({
       content: message.content,
+      attachments: Array.isArray(message.attachments)
+        ? message.attachments.flatMap((attachment) => {
+            if (!attachment || typeof attachment !== "object") return [];
+            const candidate = attachment as Record<string, unknown>;
+            return typeof candidate.id === "string" &&
+              typeof candidate.kind === "string" &&
+              typeof candidate.mimeType === "string" &&
+              typeof candidate.safeName === "string" &&
+              typeof candidate.sizeBytes === "number"
+              ? [{
+                  id: candidate.id,
+                  kind: candidate.kind as HassaliAttachment["kind"],
+                  mimeType: candidate.mimeType,
+                  safeName: candidate.safeName,
+                  sizeBytes: candidate.sizeBytes
+                }]
+              : [];
+          })
+        : undefined,
       handoff: parseModeHandoff(message.handoff),
       id: message.id,
       role: message.role,
@@ -1444,7 +1475,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    const userMessage = createMessage("user", prompt);
+    const explicitAttachmentContinuity = shouldRestorePreviousAttachments(prompt);
+    const restoredAttachments = explicitAttachmentContinuity && !(workspaceContext.attachments?.length)
+      ? [...get().messages].reverse().flatMap((message) => message.attachments ?? []).slice(0, 5)
+      : [];
+    const selectedAttachments = workspaceContext.attachments?.length
+      ? workspaceContext.attachments
+      : restoredAttachments;
+    const selectedAttachmentIds = workspaceContext.attachmentIds?.length
+      ? workspaceContext.attachmentIds
+      : selectedAttachments.map((attachment) => attachment.id);
+    const userMessage = createMessage("user", prompt, selectedAttachments);
     const assistantMessage = createMessage("assistant", "");
     const nextMessages = [...get().messages, userMessage, assistantMessage];
     const controller = new AbortController();
@@ -1477,6 +1518,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const response = await fetch("/api/ai/chat", {
         body: JSON.stringify({
+          attachmentIds: selectedAttachmentIds,
           messages: nextMessages
             .filter((message) => message.content.trim().length > 0)
             .map(({ role, content, providerFailureCategory, responseKind }) => ({ role, content, providerFailureCategory, responseKind })),
@@ -1579,6 +1621,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
           )
         }));
         assistantContent = visibleContent;
+      }
+
+      const generatedImageIndex = assistantContent.indexOf(generatedImageMarker);
+      if (generatedImageIndex !== -1) {
+        const visibleContent = assistantContent.slice(0, generatedImageIndex).trim();
+        const rawAttachment = assistantContent.slice(generatedImageIndex + generatedImageMarker.length).trim();
+        try {
+          const candidate = JSON.parse(rawAttachment) as Record<string, unknown>;
+          if (
+            typeof candidate.id === "string" &&
+            candidate.kind === "image" &&
+            typeof candidate.mimeType === "string" &&
+            typeof candidate.safeName === "string" &&
+            typeof candidate.sizeBytes === "number"
+          ) {
+            set((state) => ({
+              messages: state.messages.map((message) => message.id === assistantMessage.id
+                ? {
+                    ...message,
+                    attachments: [{
+                      id: candidate.id as string,
+                      kind: "image",
+                      mimeType: candidate.mimeType as string,
+                      safeName: candidate.safeName as string,
+                      sizeBytes: candidate.sizeBytes as number
+                    }],
+                    content: visibleContent
+                  }
+                : message)
+            }));
+            assistantContent = visibleContent;
+          }
+        } catch {
+          // Keep the provider text visible if generated-image metadata is malformed.
+        }
       }
 
       if (mode === "SUGGEST" || mode === "EXECUTE") {

@@ -1,3 +1,5 @@
+import { projectFileDataUrl } from "@/lib/project-binary-asset";
+
 export type StaticPreviewCompilationInput = {
   activeHtmlPath: string;
   files: Record<string, string>;
@@ -163,6 +165,8 @@ function mimeFor(path: string) {
 }
 
 function dataUrl(path: string, content: string) {
+  const binaryAsset = projectFileDataUrl(content);
+  if (binaryAsset) return binaryAsset;
   if (/^data:image\/[a-z0-9.+-]+(?:;[^,]*)?,/i.test(content.trim())) return content.trim();
   return `data:${mimeFor(path)};charset=utf-8,${encodeURIComponent(content)}`;
 }

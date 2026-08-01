@@ -51,7 +51,7 @@ test("CODE export keeps source files and adds a truthful run note", () => {
     projectName: "Tax Dedo"
   });
   assert.deepEqual(files.map((file) => file.path), ["HASSALI_EXPORT_README.md", "package.json", "src/App.tsx"]);
-  assert.match(files[0]?.content ?? "", /approved project source files only/i);
+  assert.match(typeof files[0]?.content === "string" ? files[0].content : "", /approved project source files only/i);
 
   const zip = createStoredZip(files, new Date("2026-01-01T00:00:00Z"));
   const zipText = zip.toString("utf8");

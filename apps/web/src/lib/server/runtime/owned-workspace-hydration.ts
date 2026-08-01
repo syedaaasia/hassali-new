@@ -1,6 +1,10 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { isServerOwnedProjectWorkspaceRoot } from "./workspace-binding";
+import {
+  canonicalizeWorkspaceFileContent,
+  materializeProjectFileContent
+} from "@/lib/server/project-file-content";
 
 const hydrationIgnoredDirectories = new Set([
   ".git",
@@ -89,7 +93,7 @@ async function writeSnapshotFiles(snapshot: OwnedProjectWorkspaceSnapshot) {
     const safe = resolveSafe(snapshot.workspaceRoot, file.path);
     if (!safe) throw new Error(`Workspace snapshot contains an unsafe path: ${file.path}`);
     await mkdir(path.dirname(safe.target), { recursive: true });
-    await writeFile(safe.target, file.content, "utf8");
+    await writeFile(safe.target, materializeProjectFileContent(file.content));
   }
 }
 
@@ -113,7 +117,10 @@ export async function captureOwnedProjectWorkspaceSnapshot(
     throw new Error(`Workspace snapshot found an unsupported symbolic link: ${scan.symlinks[0]}`);
   }
   const files = await Promise.all(scan.files.map(async (relativePath) => ({
-    content: await readFile(path.resolve(workspaceRoot, relativePath), "utf8"),
+    content: canonicalizeWorkspaceFileContent(
+      relativePath,
+      await readFile(path.resolve(workspaceRoot, relativePath))
+    ),
     path: relativePath
   })));
   return {
@@ -152,10 +159,11 @@ export async function restoreOwnedProjectWorkspaceSnapshot(
   for (const [relativePath, content] of expected) {
     const safe = resolveSafe(snapshot.workspaceRoot, relativePath);
     if (!safe) throw new Error(`Workspace snapshot contains an unsafe path: ${relativePath}`);
-    const current = await readFile(safe.target, "utf8").catch(() => null);
-    if (current === content) continue;
+    const expectedBytes = materializeProjectFileContent(content);
+    const current = await readFile(safe.target).catch(() => null);
+    if (current?.equals(expectedBytes)) continue;
     await mkdir(path.dirname(safe.target), { recursive: true });
-    await writeFile(safe.target, content, "utf8");
+    await writeFile(safe.target, expectedBytes);
     restored.add(relativePath);
   }
   return {
@@ -209,10 +217,11 @@ export async function synchronizeOwnedProjectWorkspace(input: {
   let written = 0;
   for (const [relativePath, content] of canonical) {
     const safe = resolveSafe(input.workspaceRoot, relativePath)!;
-    const current = await readFile(safe.target, "utf8").catch(() => null);
-    if (current === content) continue;
+    const expectedBytes = materializeProjectFileContent(content);
+    const current = await readFile(safe.target).catch(() => null);
+    if (current?.equals(expectedBytes)) continue;
     await mkdir(path.dirname(safe.target), { recursive: true });
-    await writeFile(safe.target, content, "utf8");
+    await writeFile(safe.target, expectedBytes);
     written += 1;
   }
   return {
