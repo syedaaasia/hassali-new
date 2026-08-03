@@ -451,6 +451,72 @@ type ReactProductPreviewBlueprint = {
   workflowMap: string[];
 };
 
+function productBlueprintFromApprovedMetadata(value: unknown): ReactProductPreviewBlueprint | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const metadata = value as Record<string, unknown>;
+  const records = Array.isArray(metadata.sampleRecords) ? metadata.sampleRecords : [];
+  const sections = Array.isArray(metadata.sections)
+    ? metadata.sections.filter((item): item is string => typeof item === "string")
+    : [];
+  const metrics = Array.isArray(metadata.metrics)
+    ? metadata.metrics.filter((item): item is string => typeof item === "string")
+    : [];
+
+  if (typeof metadata.appName !== "string" || !sections.length || !metrics.length || !records.length) {
+    return null;
+  }
+
+  const screens = Array.isArray(metadata.screens)
+    ? metadata.screens
+      .filter((screen): screen is Record<string, unknown> => Boolean(screen) && typeof screen === "object" && !Array.isArray(screen))
+      .map((screen) => ({
+        label: typeof screen.label === "string" ? screen.label : "Screen",
+        layoutKind: typeof screen.layoutKind === "string" ? screen.layoutKind : "dashboard",
+        purpose: typeof screen.purpose === "string" ? screen.purpose : "",
+        screenId: typeof screen.screenId === "string" ? screen.screenId : undefined
+      }))
+    : undefined;
+
+  const safeRecords = records
+    .filter((record): record is Record<string, unknown> => Boolean(record) && typeof record === "object" && !Array.isArray(record))
+    .filter((record) =>
+      typeof record.title === "string" &&
+      typeof record.owner === "string" &&
+      typeof record.status === "string"
+    )
+    .map((record) => ({
+      amount: typeof record.amount === "number" ? record.amount : 0,
+      category: typeof record.category === "string" ? record.category : "Record",
+      note: typeof record.note === "string" ? record.note : "",
+      owner: record.owner as string,
+      status: record.status as string,
+      title: record.title as string
+    }));
+
+  if (!safeRecords.length) return null;
+
+  return {
+    appName: metadata.appName,
+    copyLines: Array.isArray(metadata.copyLines)
+      ? metadata.copyLines.filter((item): item is string => typeof item === "string")
+      : [],
+    disclaimer: typeof metadata.disclaimer === "string"
+      ? metadata.disclaimer
+      : "Static product preview. Live runtime requires explicit enablement.",
+    domain: typeof metadata.domain === "string" ? metadata.domain : "React app",
+    excitementGate: typeof metadata.excitementGate === "string" ? metadata.excitementGate : undefined,
+    jobToBeDone: typeof metadata.jobToBeDone === "string" ? metadata.jobToBeDone : "",
+    metricLabels: metrics,
+    records: safeRecords,
+    sections,
+    screens,
+    targetUser: typeof metadata.targetUser === "string" ? metadata.targetUser : "",
+    workflowMap: Array.isArray(metadata.workflowMap)
+      ? metadata.workflowMap.filter((item): item is string => typeof item === "string")
+      : []
+  };
+}
+
 function extractReactProductBlueprint(committedFiles: Map<string, VfsFile>): ReactProductPreviewBlueprint | null {
   const appSource = committedFiles.get("src/App.tsx")?.content ?? committedFiles.get("src/App.jsx")?.content ?? "";
   const match = appSource.match(/const blueprint = ([\s\S]*?);\s+type DemoRecord/);
@@ -1019,16 +1085,18 @@ function buildReactProductPreviewDoc(
 
 function CodeAppSourceSummary({
   committedFiles,
-  manifest
+  manifest,
+  productPreview
 }: {
   committedFiles: Map<string, VfsFile>;
   manifest: PreviewManifest;
+  productPreview?: unknown;
 }) {
   const appName = codeAppName(committedFiles);
   const sourceFiles = [...committedFiles.keys()].filter((path) => /\.(?:tsx|ts|jsx|js)$/.test(path));
   const componentFiles = sourceFiles.filter((path) => path.includes("/components/"));
   const css = committedFiles.get("src/styles.css")?.content ?? committedFiles.get("src/index.css")?.content ?? "";
-  const productBlueprint = extractReactProductBlueprint(committedFiles);
+  const productBlueprint = productBlueprintFromApprovedMetadata(productPreview) ?? extractReactProductBlueprint(committedFiles);
 
   if (css && productBlueprint) {
     const previewDoc = buildReactProductPreviewDoc(productBlueprint, css, manifest.framework);
@@ -1420,7 +1488,7 @@ export function PreviewPanel() {
   }, [effectiveManifest.type, projectId, refreshRuntimeStatus]);
 
   return (
-    <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 hidden w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.82)] shadow-[0_24px_90px_rgba(0,0,0,0.55)] backdrop-blur-xl lg:flex xl:w-[34rem] 2xl:w-[38rem]">
+    <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 flex w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.82)] shadow-[0_24px_90px_rgba(0,0,0,0.55)] backdrop-blur-xl xl:w-[34rem] 2xl:w-[38rem]">
       <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--premium-border))] px-4 py-3.5">
         <div>
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
@@ -1587,7 +1655,11 @@ export function PreviewPanel() {
             title="Hassali local preview"
           />
         ) : isRuntimePreviewType ? (
-          <CodeAppSourceSummary committedFiles={committedFileMap} manifest={effectiveManifest} />
+          <CodeAppSourceSummary
+            committedFiles={committedFileMap}
+            manifest={effectiveManifest}
+            productPreview={approvedPreviewMetadata?.productPreview}
+          />
         ) : effectiveManifest.type === "architecture" && realPreview?.state === "ready" && realPreview.kind === "api_architecture" ? (
           <RealPreviewMock preview={realPreview} />
         ) : effectiveManifest.type === "mobile" && appPreview && isCodePreviewContext ? (

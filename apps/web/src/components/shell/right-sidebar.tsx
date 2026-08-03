@@ -4,7 +4,6 @@ import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { HassaliActivityMascot } from "@/components/ai/hassali-activity-mascot";
 import { ApprovalPolicyControl } from "@/components/shell/approval-policy-control";
-import { ProjectExportButton } from "@/components/shell/project-export-button";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
 import {
@@ -20,7 +19,7 @@ import {
   deriveAssistantActivity,
   hasMeaningfulAssistantOutput
 } from "@/lib/assistant-activity";
-import { canApplyWithProjectApprovalPolicy, projectApprovalPolicyOptions } from "@/lib/approval-policy";
+import { canApplyWithProjectApprovalPolicy } from "@/lib/approval-policy";
 import { useApprovalPolicyStore } from "@/lib/approval-policy-store";
 import { getHassaliModelOptions } from "@/lib/model-registry";
 import { boundedProjectNotesContext, useProjectNotesStore } from "@/lib/project-notes-store";
@@ -225,7 +224,9 @@ function runtimeApprovalMessage(status: number, payload: RuntimeApprovalResponse
 async function approveProposalThroughRuntime(
   proposal: DiffProposal,
   selectedProjectId: string,
-  productMode: ProductMode
+  productMode: ProductMode,
+  approvalPolicy: "approve_for_me" | "ask" | "full_project_access",
+  approvalSource: "inline_approval" | "standing_policy"
 ) {
   const fileChanges = fileProposalChanges(proposal);
 
@@ -235,6 +236,8 @@ async function approveProposalThroughRuntime(
 
   const response = await fetch("/api/runtime/approve", {
     body: JSON.stringify({
+      approvalPolicy,
+      approvalSource,
       productMode,
       projectId: selectedProjectId,
       proposalId: proposal.id
@@ -703,6 +706,11 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const isApprovalBlocked = proposal ? isBlockedProposal(proposal) : false;
   const approvalDecision = proposal ? normalizeApprovalDecision(proposal) : null;
   const isProposalApplied = proposal?.status === "approved";
+  const standingApprovalPending = Boolean(
+    proposal &&
+    approvalPolicyProjectId === projectId &&
+    canApplyWithProjectApprovalPolicy(approvalPolicy, proposal)
+  );
   const regenerationInFlightRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const autoApprovalProposalRef = useRef<string | null>(null);
@@ -924,6 +932,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         : []),
       activeFileContent: activeFileSelected ? activeFile?.content ?? "" : "",
       activePath,
+      approvalPolicy: approvalPolicyProjectId === projectId ? approvalPolicy : "ask",
       chatSessionId,
       fileContents: Object.fromEntries(
         contentPaths.map((path) => [path, files[path]?.content ?? ""])
@@ -945,6 +954,8 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     if (input.trim() && composerUploads.every((upload) => upload.status === "ready")) {
       setComposerUploads([]);
     }
+    autoFollowRef.current = true;
+    setIsAwayFromLatest(false);
     scheduleAutoFollow("smooth");
     return result;
   };
@@ -1021,7 +1032,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     void sendMessage(createWorkspaceContext());
   };
 
-  const approveProposal = async () => {
+  const approveProposal = async (approvalSource: "inline_approval" | "standing_policy" = "inline_approval") => {
     if (!proposal) {
       return;
     }
@@ -1042,7 +1053,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
     try {
       setRuntimeApprovalResult(null);
-      const runtimeResult = await approveProposalThroughRuntime(proposal, selectedProjectId, productMode);
+      const effectiveApprovalPolicy = approvalPolicyProjectId === selectedProjectId ? approvalPolicy : "ask";
+      const runtimeResult = await approveProposalThroughRuntime(
+        proposal,
+        selectedProjectId,
+        productMode,
+        effectiveApprovalPolicy,
+        approvalSource
+      );
 
       if (runtimeResult) {
         if (useWorkspaceStore.getState().projectId !== selectedProjectId) {
@@ -1189,7 +1207,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     }
 
     autoApprovalProposalRef.current = proposal.id;
-    void approveProposal();
+    void approveProposal("standing_policy");
   }, [approvalPolicy, approvalPolicyProjectId, isStreaming, projectId, proposal]);
 
   return (
@@ -1248,7 +1266,6 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             >
               {isEditorOpen ? "Hide files" : "Files"}
             </button>
-            <ProjectExportButton mode={productMode} />
             <button
               className="rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-[#F4F3EE]/75 hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-[#F4F3EE] [.light_&]:border-[#d8d1c6] [.light_&]:bg-white [.light_&]:text-[#000000] [.light_&]:hover:border-[#DE7356]"
               onClick={togglePreview}
@@ -1469,6 +1486,11 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               ) : null}
 
               <div className="mt-3 flex items-center justify-end gap-2">
+                {standingApprovalPending ? (
+                  <span className="text-xs text-muted-foreground" role="status">
+                    Applying with the current project approval policy...
+                  </span>
+                ) : null}
                 {isApprovalBlocked ? (
                   <button
                     className="rounded-xl border border-red-400/25 bg-red-400/10 px-3 py-1.5 text-xs font-medium text-red-100 hover:border-red-300/45 disabled:cursor-not-allowed disabled:opacity-45"
@@ -1479,6 +1501,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                     Reject and ask for safer proposal
                   </button>
                 ) : null}
+                {!standingApprovalPending && !isProposalApplied ? (
                 <button
                   className="rounded-xl border border-[hsl(var(--royal-border-soft))] px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
                   onClick={clearProposal}
@@ -1486,23 +1509,21 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                 >
                   Reject
                 </button>
-                <button
-                  className="rounded-xl border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3 py-1.5 text-xs font-medium text-white shadow-[0_12px_30px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] disabled:cursor-not-allowed disabled:border-red-500/20 disabled:bg-red-500/10 disabled:text-red-200/60 disabled:shadow-none disabled:hover:opacity-100"
-                  disabled={isApprovalBlocked || isProposalApplied}
-                  data-website-approval={productMode === "WEBSITE" ? "true" : undefined}
-                  onClick={() => {
-                    void approveProposal();
-                  }}
-                  type="button"
-                >
-                  {isApprovalBlocked
-                    ? "Approval blocked"
-                    : isProposalApplied
-                      ? "Applied"
-                      : approvalDecision?.hasWarnings
+                ) : null}
+                {!isApprovalBlocked && !standingApprovalPending && !isProposalApplied ? (
+                  <button
+                    className="rounded-xl border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3 py-1.5 text-xs font-medium text-white shadow-[0_12px_30px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] disabled:cursor-not-allowed disabled:opacity-50"
+                    data-website-approval={productMode === "WEBSITE" ? "true" : undefined}
+                    onClick={() => {
+                      void approveProposal("inline_approval");
+                    }}
+                    type="button"
+                  >
+                    {approvalDecision?.hasWarnings
                         ? "Review and approve"
                         : "Approve"}
-                </button>
+                  </button>
+                ) : null}
               </div>
             </motion.div>
           ) : null}
@@ -1538,14 +1559,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             void sendWithContext();
           }}
         >
-          {productMode !== "ASK" ? (
-            <div className="mx-auto mb-1.5 flex w-full max-w-3xl items-center justify-between gap-2 px-1">
-              <ApprovalPolicyControl projectId={projectId} />
-              <span className="hidden max-w-[24rem] truncate text-right text-[9px] text-muted-foreground xl:block">
-                {projectApprovalPolicyOptions.find((option) => option.value === approvalPolicy)?.description}
-              </span>
-            </div>
-          ) : useProjectNotesAsContext && notesProjectId === projectId && projectNotes.trim() ? (
+          {productMode === "ASK" && useProjectNotesAsContext && notesProjectId === projectId && projectNotes.trim() ? (
             <div className="mx-auto mb-1.5 w-full max-w-3xl px-1 text-[9px] text-amber-100/80">
               Project Notes context is on for this request ({boundedProjectNotesContext(projectNotes).length.toLocaleString()} characters).
             </div>
@@ -1622,6 +1636,15 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               ))}
             </div>
           ) : null}
+          <div className="mx-auto mb-1 w-full max-w-3xl sm:hidden">
+            <PremiumSelect
+              compact
+              label="Model"
+              onChange={setModel}
+              options={modelOptions}
+              value={model}
+            />
+          </div>
           <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] border border-white/10 bg-[#161616] px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] focus-within:border-[hsl(var(--premium-accent)/0.55)] focus-within:ring-2 focus-within:ring-[hsl(var(--premium-accent)/0.1)] [.light_&]:border-slate-300 [.light_&]:bg-white [.light_&]:shadow-[0_16px_44px_rgba(0,0,0,0.08)]">
             <button
               aria-label="Attach files"
@@ -1632,6 +1655,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             >
               +
             </button>
+            {productMode !== "ASK" ? <ApprovalPolicyControl projectId={projectId} /> : null}
             <textarea
               className="max-h-28 min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-[14px] leading-5 text-[#f4f1e8] outline-none placeholder:text-muted-foreground [.light_&]:text-slate-950 [.light_&]:placeholder:text-slate-500"
               onChange={(event) =>

@@ -4,6 +4,7 @@ import { POST } from "@/app/api/ai/chat/route";
 type Proposal = {
   changes: Array<{ path?: string; proposedContent?: string }>;
   shouldBlockExecution?: boolean;
+  staleTermScanStatus?: string;
   websiteCopyValidationStatus?: string;
   websitePreviewIdentity?: string;
 };
@@ -72,18 +73,33 @@ const cases = [
     expected: /neighborhood bakery|fresh bread|cakes|pastries|daily bakes/i,
     name: "bakery",
     prompt: "Create a simple responsive website for a neighborhood bakery with home, about, and contact pages."
+  },
+  {
+    absent: /grooming|cleaning|laundry|care options|service packages|current prompt website|explain the offer|show representative products|invite direct confirmation|ask how this/i,
+    expected: /television|electronics|LCD|LED|OLED|QLED|display|home cinema/i,
+    expectedPages: ["about.html", "index.html", "services.html"],
+    expectCleanSovereignty: true,
+    name: "tv-lcd",
+    prompt: "Build me a website for my local TV LCD business with 3 pages."
   }
 ];
 
 for (const item of cases) {
   const proposal = await generate(item.prompt);
   const html = publicHtml(proposal);
+  if (item.expectCleanSovereignty) assert.notEqual(proposal.staleTermScanStatus, "blocked");
   assert.notEqual(proposal.websiteCopyValidationStatus, "blocked");
   assert.match(proposal.websitePreviewIdentity ?? "", /^website-[a-f0-9]{8}$/);
   assert.match(html, item.expected);
-  assert.doesNotMatch(html, item.absent);
+  assert.equal(html.match(item.absent)?.[0] ?? null, null, `${item.name} leaked unrelated or internal visitor copy`);
   assert.doesNotMatch(html, /\[Business Name\]|Lorem ipsum|Your tagline here|Current Prompt Website/i);
   assert.match(html, /hassali-preview-identity/);
+  if (item.expectedPages) {
+    const pages = proposal.changes
+      .flatMap((change) => change.path?.endsWith(".html") ? [change.path] : [])
+      .sort();
+    assert.deepEqual(pages, item.expectedPages);
+  }
   console.log(`PASS route ${item.name}`);
 }
 

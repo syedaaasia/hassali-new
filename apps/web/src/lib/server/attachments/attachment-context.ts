@@ -24,6 +24,7 @@ export type MultimodalAttachmentContext = {
   visionAttempted: boolean;
   visionCompleted: boolean;
   visionModel: string | null;
+  visionText: string;
 };
 
 type ProviderFetch = typeof fetch;
@@ -42,6 +43,17 @@ function parseProviderText(payload: unknown) {
     ).join("\n").trim();
   }
   return "";
+}
+
+function isUnusableVisionResponse(text: string) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const evaluatorOnly = lines.length > 0 && lines.length <= 6 && lines.every((line) =>
+    /^(?:user\s+safety|assistant\s+safety|safety|relevance|correctness|quality|helpfulness|verdict|score|grade)\s*:\s*(?:safe|unsafe|pass(?:ed)?|fail(?:ed)?|ok|acceptable|unacceptable|\d+(?:\.\d+)?(?:\s*(?:\/\s*\d+|%))?)\s*[.!]?$/i.test(line)
+  );
+
+  return evaluatorOnly ||
+    /\bi\s+(?:cannot|can't|am unable to)\s+(?:access|analy[sz]e|inspect|open|see|view)\b[\s\S]{0,120}\b(?:attachment|file|image|screenshot|visual)s?\b/i.test(text) ||
+    /\bno\s+(?:image|attachment|screenshot)\s+(?:is|was)\s+(?:attached|available|provided)\b/i.test(text);
 }
 
 function visionProvider(selectedModel: string) {
@@ -69,7 +81,7 @@ export async function analyzeImagesWithVision(input: {
     return {
       attempted: false,
       completed: false,
-      failureCode: "VISION_PROVIDER_UNAVAILABLE",
+      failureCode: "VISION_CAPABILITY_UNAVAILABLE",
       failureMessage: "The attachment uploaded successfully, but no configured vision-capable model is available to inspect it.",
       model: null,
       text: ""
@@ -94,7 +106,7 @@ export async function analyzeImagesWithVision(input: {
         {
           content: [
             {
-              text: `User request: ${input.prompt}\nAnalyze the supplied visual reference. Report image purpose, layout hierarchy, sections/components, navigation, spacing, alignment, color palette, typography traits, controls, media placement, responsive clues, accessibility concerns, and uncertainty. ${exactTextMatters ? "Exact visible text matters; transcribe only text you can read and mark uncertain text." : "Do not turn this into OCR-only output; visible text may be summarized."}`,
+              text: `User request: ${input.prompt}\nAnalyze the supplied visual reference and follow the user's requested format and scope. When the user does not specify a format, report image purpose, layout hierarchy, sections/components, navigation, spacing, alignment, color palette, typography traits, controls, media placement, responsive clues, accessibility concerns, and uncertainty. ${exactTextMatters ? "Exact visible text matters; transcribe only text you can read and mark uncertain text." : "Do not turn this into OCR-only output; visible text may be summarized."}`,
               type: "text"
             },
             ...imageParts
@@ -123,7 +135,7 @@ export async function analyzeImagesWithVision(input: {
     } as const;
   }
   const text = parseProviderText(await response.json().catch(() => null));
-  return text
+  return text && !isUnusableVisionResponse(text)
     ? {
         attempted: true,
         completed: true,
@@ -211,7 +223,8 @@ export async function resolveMultimodalAttachmentContext(input: {
     records,
     visionAttempted: vision.attempted,
     visionCompleted: vision.completed,
-    visionModel: vision.model
+    visionModel: vision.model,
+    visionText: vision.text
   };
 }
 

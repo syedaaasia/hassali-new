@@ -5,10 +5,6 @@ import type { ProductMode } from "@/lib/chat-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 
 type BrowserGlobal = {
-  URL: {
-    createObjectURL: (blob: Blob) => string;
-    revokeObjectURL: (url: string) => void;
-  };
   document: {
     body: {
       appendChild: (node: unknown) => void;
@@ -36,28 +32,25 @@ export function ProjectExportButton({ compact = false, mode }: { compact?: boole
     setWorkspaceError(null);
 
     try {
-      const response = await fetch(
-        `/api/workspace/export?projectId=${encodeURIComponent(projectId)}&mode=${encodeURIComponent(mode)}`
-      );
+      const exportUrl = `/api/workspace/export?projectId=${encodeURIComponent(projectId)}&mode=${encodeURIComponent(mode)}`;
+      const response = await fetch(exportUrl);
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
         throw new Error(typeof payload?.error === "string" ? payload.error : "Project ZIP export failed.");
       }
 
-      const blob = await response.blob();
+      await response.body?.cancel();
       const disposition = response.headers.get("Content-Disposition") ?? "";
       const fileName = disposition.match(/filename="([^"]+)"/)?.[1] ?? `hassali-${mode.toLowerCase()}-project.zip`;
       const browser = globalThis as unknown as BrowserGlobal;
-      const url = browser.URL.createObjectURL(blob);
       const link = browser.document.createElement("a");
 
-      link.href = url;
+      link.href = exportUrl;
       link.download = fileName;
       browser.document.body.appendChild(link);
       link.click();
       link.remove();
-      browser.URL.revokeObjectURL(url);
     } catch (error) {
       setWorkspaceError(error instanceof Error ? error.message : "Project ZIP export failed.");
     } finally {

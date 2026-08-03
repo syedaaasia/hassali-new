@@ -18,17 +18,19 @@ export function ApprovalPolicyControl({ projectId }: { projectId: string | null 
   }, [hydrateProject, projectId]);
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 shrink-0">
       <button
         aria-expanded={isOpen}
         aria-haspopup="menu"
-        className="flex h-8 max-w-[11rem] items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.035] px-2.5 text-[10px] font-medium text-muted-foreground hover:border-[hsl(var(--premium-accent)/0.35)] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-8 max-w-[8.5rem] items-center gap-1 bg-transparent px-1 text-[10px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-[hsl(var(--premium-accent)/0.45)] disabled:cursor-not-allowed disabled:opacity-50 sm:max-w-[10rem]"
         disabled={!projectId || activeProjectId !== projectId}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setIsOpen(false);
+        }}
         onClick={() => setIsOpen((current) => !current)}
         title="Project approval policy"
         type="button"
       >
-        <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#DE7356]" />
         <span className="truncate">{selected.label}</span>
         <span aria-hidden="true" className="text-[9px]">v</span>
       </button>

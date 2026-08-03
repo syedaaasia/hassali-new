@@ -15,6 +15,8 @@ import {
   projectExportFileName,
   shouldExcludeProjectExportPath
 } from "../project-export";
+import { validateRuntimeApprovalRequest } from "../runtime/runtime-approval-plan";
+import { deriveManifest, type VfsFile } from "../../preview-manifest";
 
 type TestCase = { name: string; run: () => void };
 const tests: TestCase[] = [];
@@ -78,6 +80,21 @@ test("ZIP names are mode-aware and filesystem-safe", () => {
   assert.equal(projectExportFileName("Elite Upholstery", "WEBSITE"), "hassali-website-elite-upholstery.zip");
 });
 
+test("mixed workspaces resolve preview from the explicit product mode", () => {
+  const files = new Map<string, VfsFile>([
+    ["HASSALI.md", { content: "mode: WEBSITE", lastModified: 1, path: "HASSALI.md" }],
+    ["index.html", { content: "<main>Website</main>", lastModified: 1, path: "index.html" }],
+    ["styles.css", { content: "body {}", lastModified: 1, path: "styles.css" }],
+    ["package.json", { content: "{}", lastModified: 1, path: "package.json" }],
+    ["vite.config.ts", { content: "export default {};", lastModified: 1, path: "vite.config.ts" }],
+    ["src/main.tsx", { content: "", lastModified: 1, path: "src/main.tsx" }],
+    ["src/App.tsx", { content: "", lastModified: 1, path: "src/App.tsx" }]
+  ]);
+
+  assert.equal(deriveManifest(files, "WEBSITE").type, "static_website");
+  assert.equal(deriveManifest(files, "CODE").type, "react_vite_app");
+});
+
 const cleanFileProposal = {
   approvalDecision: { approvalAllowed: true, hasCriticalIssues: false, hasWarnings: false },
   changes: [{ action: "create" }],
@@ -117,22 +134,100 @@ test("no approval policy can override a blocked proposal", () => {
   }
 });
 
+test("runtime approval request preserves standing policy source for server verification", () => {
+  const parsed = validateRuntimeApprovalRequest({
+    approvalPolicy: "full_project_access",
+    approvalSource: "standing_policy",
+    projectId: "project-1",
+    proposalId: "proposal-1"
+  });
+  assert.equal("error" in parsed, false);
+  if (!("error" in parsed)) {
+    assert.equal(parsed.approvalPolicy, "full_project_access");
+    assert.equal(parsed.approvalSource, "standing_policy");
+  }
+});
+
 test("project notes context is bounded and remains explicit", () => {
   const notes = boundedProjectNotesContext(`  ${"x".repeat(5_000)}  `);
   assert.equal(notes.length, maximumProjectNotesContextLength);
 });
 
-const root = process.cwd();
+const root = process.cwd().replace(/\\/g, "/").endsWith("/apps/web")
+  ? path.resolve(process.cwd(), "../..")
+  : process.cwd();
 const rightSidebar = readFileSync(path.resolve(root, "apps/web/src/components/shell/right-sidebar.tsx"), "utf8");
+const approvalControl = readFileSync(path.resolve(root, "apps/web/src/components/shell/approval-policy-control.tsx"), "utf8");
 const notesPanel = readFileSync(path.resolve(root, "apps/web/src/components/shell/project-notes-panel.tsx"), "utf8");
 const chatRoute = readFileSync(path.resolve(root, "apps/web/src/app/api/ai/chat/route.ts"), "utf8");
+const chatStore = readFileSync(path.resolve(root, "apps/web/src/lib/chat-store.ts"), "utf8");
 const exportRoute = readFileSync(path.resolve(root, "apps/web/src/app/api/workspace/export/route.ts"), "utf8");
+const exportButton = readFileSync(path.resolve(root, "apps/web/src/components/shell/project-export-button.tsx"), "utf8");
+const previewPanel = readFileSync(path.resolve(root, "apps/web/src/components/shell/preview-panel.tsx"), "utf8");
+const runtimeApprovalRoute = readFileSync(path.resolve(root, "apps/web/src/app/api/runtime/approve/route.ts"), "utf8");
+const persistence = readFileSync(path.resolve(root, "packages/database/src/persistence.ts"), "utf8");
+const domainValidator = readFileSync(path.resolve(root, "apps/web/src/lib/server/ai/domain-validator.ts"), "utf8");
+const generatorContract = readFileSync(path.resolve(root, "apps/web/src/lib/server/ai/generator-contract.ts"), "utf8");
 
 test("chat follows only near the bottom and exposes jump-to-latest", () => {
   assert.match(rightSidebar, /scrollHeight - container\.scrollTop - container\.clientHeight < 96/);
   assert.match(rightSidebar, /data-jump-to-latest/);
   assert.match(rightSidebar, /autoFollowRef\.current = nearBottom/);
-  assert.doesNotMatch(rightSidebar, /const sendWithContext = \(\) => \{\s*autoFollowRef\.current = true/);
+  assert.match(rightSidebar, /const sendWithContext = \(\) => \{[\s\S]*?sendMessage\(createWorkspaceContext\(\)\)[\s\S]*?autoFollowRef\.current = true;[\s\S]*?scheduleAutoFollow\("smooth"\);/);
+});
+
+test("approval selector is plain composer text directly after attachment and reaches the server", () => {
+  const attachmentIndex = rightSidebar.indexOf('aria-label="Attach files"');
+  const policyIndex = rightSidebar.indexOf("<ApprovalPolicyControl", attachmentIndex);
+  const textareaIndex = rightSidebar.indexOf("<textarea", policyIndex);
+  assert(attachmentIndex >= 0 && policyIndex > attachmentIndex && textareaIndex > policyIndex);
+  assert.equal((rightSidebar.match(/<ApprovalPolicyControl/g) ?? []).length, 1);
+  assert.match(approvalControl, /bg-transparent/);
+  assert.doesNotMatch(approvalControl, /rounded-full border border-white\/10 bg-white/);
+  assert.doesNotMatch(rightSidebar, /Only risky actions ask|Always ask before changes|project access without repeated/i);
+  assert.match(chatStore, /approvalPolicy: workspaceContext\.approvalPolicy/);
+  assert.match(chatRoute, /approvalPolicy: persistence\?\.approvalPolicy \?\? approvalPolicy/);
+  assert.match(runtimeApprovalRoute, /approvalSource === "standing_policy"/);
+  assert.match(runtimeApprovalRoute, /Standing approval is not valid for this proposal/);
+  assert.match(rightSidebar, /max-w-3xl sm:hidden[\s\S]*?<PremiumSelect[\s\S]*?label="Model"/);
+});
+
+test("standing approval suppresses manual controls and blocked proposals never expose Approve", () => {
+  assert.match(rightSidebar, /standingApprovalPending/);
+  assert.match(rightSidebar, /Applying with the current project approval policy/);
+  assert.match(rightSidebar, /!isApprovalBlocked && !standingApprovalPending && !isProposalApplied/);
+  assert.match(rightSidebar, /!standingApprovalPending && !isProposalApplied/);
+  assert.match(rightSidebar, /canApplyWithProjectApprovalPolicy\(approvalPolicy, proposal\)/);
+});
+
+test("Preview is the only Download ZIP surface and retains the secure export action", () => {
+  assert.equal((rightSidebar.match(/ProjectExportButton/g) ?? []).length, 0);
+  assert.equal((previewPanel.match(/<ProjectExportButton/g) ?? []).length, 1);
+  assert.match(previewPanel, /projectId=\{projectId\}/);
+  assert.doesNotMatch(previewPanel, /z-30 hidden[^"]*lg:flex/);
+  assert.match(exportButton, /link\.href = exportUrl/);
+  assert.match(exportButton, /await response\.body\?\.cancel\(\)/);
+  assert.doesNotMatch(exportButton, /createObjectURL|revokeObjectURL/);
+});
+
+test("approved React product metadata is consumed before source-code fallback", () => {
+  assert.match(previewPanel, /productBlueprintFromApprovedMetadata\(productPreview\) \?\? extractReactProductBlueprint/);
+  assert.match(previewPanel, /productPreview=\{approvedPreviewMetadata\?\.productPreview\}/);
+  assert.match(chatRoute, /PREVIEW_METADATA_INVALID/);
+});
+
+test("ordinary practical-details language is no longer globally forbidden", () => {
+  const genericDomainTerms = domainValidator.slice(domainValidator.indexOf("const genericForbidden"), domainValidator.indexOf("const profiles"));
+  const genericGeneratorTerms = generatorContract.slice(generatorContract.indexOf("const genericForbiddenTerms"), generatorContract.indexOf("const domainSignals"));
+  assert.doesNotMatch(genericDomainTerms, /practical details/i);
+  assert.doesNotMatch(genericGeneratorTerms, /practical details/i);
+});
+
+test("thread authority is user and project bound with bounded recovery telemetry", () => {
+  assert.match(persistence, /where id = \$\{input\.sessionId\}[\s\S]*project_id = \$\{input\.projectId\}[\s\S]*user_id = \$\{input\.userId\}/);
+  assert.match(persistence, /threadResolution: "created" \| "recovered" \| "reused"/);
+  assert.match(chatRoute, /threadResolution/);
+  assert.doesNotMatch(rightSidebar, /thread not found:\s*\$\{/i);
 });
 
 test("notes are opt-in, project-bound, and never routed outside ASK", () => {

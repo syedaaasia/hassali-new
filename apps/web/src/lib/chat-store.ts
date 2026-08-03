@@ -19,6 +19,7 @@ import type {
 } from "@/lib/self-review-types";
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
 import { shouldRestorePreviousAttachments, type HassaliAttachment } from "@/lib/attachments";
+import type { ProjectApprovalPolicy } from "@/lib/approval-policy";
 
 export type ChatRole = "user" | "assistant";
 export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
@@ -62,6 +63,7 @@ export type WorkspaceContext = {
   fileList: string[];
   projectId: string | null;
   projectName: string | null;
+  approvalPolicy: ProjectApprovalPolicy;
   projectNotes?: string;
   useProjectNotesAsContext?: boolean;
 };
@@ -209,6 +211,7 @@ export type DiffProposal = {
   heroAssetMismatch?: boolean;
   approvalDecision?: ApprovalDecision;
   approvalDisabled?: boolean;
+  approvalPolicy?: ProjectApprovalPolicy;
   approvalRecommendation?: "approve" | "reject" | "review";
   completenessScore?: number;
   contentScore?: number;
@@ -1036,6 +1039,10 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       isApprovalDecision(proposal.approvalDecision)) &&
     (typeof proposal.approvalDisabled === "undefined" ||
       typeof proposal.approvalDisabled === "boolean") &&
+    (typeof proposal.approvalPolicy === "undefined" ||
+      proposal.approvalPolicy === "ask" ||
+      proposal.approvalPolicy === "approve_for_me" ||
+      proposal.approvalPolicy === "full_project_access") &&
     (typeof proposal.approvalRecommendation === "undefined" ||
       proposal.approvalRecommendation === "approve" ||
       proposal.approvalRecommendation === "reject" ||
@@ -1518,6 +1525,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const response = await fetch("/api/ai/chat", {
         body: JSON.stringify({
+          approvalPolicy: workspaceContext.approvalPolicy,
           attachmentIds: selectedAttachmentIds,
           messages: nextMessages
             .filter((message) => message.content.trim().length > 0)

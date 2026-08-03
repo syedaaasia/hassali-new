@@ -201,7 +201,7 @@ function classifyIndustry(promptText: string, businessPhrase: string | null) {
       industry: "electronics retail and home cinema",
       label: "television shop",
       productCategory: "smart TVs, OLED/QLED/LED displays, screen sizes, home cinema, wall mounting, installation, warranty",
-      terms: ["television", "tv", "smart tv", "oled", "qled", "led", "home cinema", "soundbar", "wall mounting", "warranty"]
+      terms: ["television", "tv", "smart tv", "lcd", "oled", "qled", "led", "display", "home cinema", "soundbar", "wall mounting", "warranty"]
     },
     {
       industry: "mobile phone retail and repair",

@@ -56,7 +56,7 @@ const domainProfiles: DomainProfile[] = [
   {
     businessType: "Electronics Retail",
     domain: "electronics_retail",
-    terms: ["television", "tv shop", "tv store", "electronics shop", "home cinema", "oled", "qled"]
+    terms: ["television", "tv shop", "tv store", "tv lcd", "lcd shop", "electronics shop", "home cinema", "lcd", "led", "oled", "qled"]
   },
   {
     businessType: "Mobile Phone Shop",

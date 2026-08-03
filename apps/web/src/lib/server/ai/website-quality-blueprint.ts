@@ -562,7 +562,7 @@ function selectProfile(input: { plan: WebsitePlan; prompt: string; semantic: Web
   if (input.semantic.capabilities.some((value) => value === "interior_design" || value === "architecture")) {
     return genericSemanticProfile(input.prompt, input.plan);
   }
-  if (/\b(?:tv|television|oled|qled|home cinema|electronics)\b/.test(text)) return profiles.television;
+  if (/\b(?:tv|television|lcd|led|oled|qled|display|home cinema|electronics)\b/.test(text)) return profiles.television;
   if (/\b(?:dental|dentist|dentistry)\b/.test(text)) return profiles.dental;
   if (/\b(?:crm|customer relationship|sales pipeline|financial workflow|invoice workflow|billing workflow)\b/.test(text)) return profiles.crm;
   if (/\b(?:toy|toys|plush|building blocks)\b/.test(text)) return profiles.toy;
@@ -898,6 +898,10 @@ function pageSections(input: { contract: WebsiteContentContract; page: string; p
 function visitorTrustSignal(signal: string, businessType: string) {
   const normalized = signal.toLowerCase().trim();
   const exact: Record<string, { detail: string; title: string }> = {
+    "explain the offer and decision process clearly": {
+      detail: `Compare the relevant ${businessType} choices and understand what matters before deciding.`,
+      title: "Clear buying guidance"
+    },
     "general-information boundary": {
       detail: "Understand what the initial information can clarify and when tailored legal advice requires a direct consultation.",
       title: "Clear legal information"
@@ -905,6 +909,14 @@ function visitorTrustSignal(signal: string, businessType: string) {
     "no outcome guarantees": {
       detail: "Receive a realistic explanation of process, options, and uncertainty without promises about a particular result.",
       title: "Honest expectations"
+    },
+    "show representative products, services, or work without claiming availability": {
+      detail: "Explore representative choices, then confirm current models, services, and availability directly.",
+      title: "Representative choices"
+    },
+    "invite direct confirmation of pricing, timing, availability, and terms": {
+      detail: "Confirm current pricing, timing, availability, and terms before making a decision.",
+      title: "Confirm current details"
     },
     "secure-intake reminder": {
       detail: "Start with only the information needed for an initial inquiry, then use the firm's confirmed confidential intake process.",
@@ -923,7 +935,7 @@ function visitorTrustSignal(signal: string, businessType: string) {
     .replace(/-/g, " ");
 
   return {
-    detail: `Ask how this ${businessType} detail applies to the option, service, or project you are considering.`,
+    detail: `See how ${title.toLowerCase()} can shape your options, then confirm the details that matter before choosing.`,
     title: titleCase(title)
   };
 }

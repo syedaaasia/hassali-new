@@ -218,6 +218,11 @@ import type {
 import { getRuntimeStatus } from "@/lib/server/runtime-manager";
 import { registerServerProposal } from "@/lib/server/runtime/server-proposal-registry";
 import {
+  defaultProjectApprovalPolicy,
+  isProjectApprovalPolicy,
+  type ProjectApprovalPolicy
+} from "@/lib/approval-policy";
+import {
   compactIntelligencePreflight,
   runIntelligencePreflight,
   withIntelligenceResponseHeaders
@@ -315,6 +320,8 @@ function isolateCodeContractForMixedWorkspace(files: GeneratedSourceFile[], work
 }
 
 function codeContractPathForWorkspace(workspace: WorkspaceContext) {
+  if (workspaceHasWebsiteFiles(workspace)) return "HASSALI.code.md";
+
   const context = buildWorkspaceContext({
     mode: "CODE",
     projectName: workspace.projectName,
@@ -612,6 +619,7 @@ function cleanCodeAppCollisionSummary(proposal: DiffProposal): DiffProposal {
 }
 
 type ChatPersistenceContext = {
+  approvalPolicy: ProjectApprovalPolicy;
   externalUserId: string;
   mode: PersistedAiMode;
   projectId: string;
@@ -621,6 +629,7 @@ type ChatPersistenceContext = {
   sourceHandoffRequestKey?: string;
   sourceHandoffStale?: boolean;
   taskObjective: string;
+  threadResolution?: "created" | "recovered" | "reused";
   userId: string;
 };
 
@@ -655,6 +664,7 @@ type LegacyPreviewType = "code_app_preview" | "code_plan_preview" | "docs_previe
 type ProposalPreviewType = LegacyPreviewType | PreviewType;
 
 type DiffProposal = {
+  approvalPolicy?: ProjectApprovalPolicy;
   appPreview?: CodeAppPreview;
   assetDriftDetected?: boolean;
   assetScore?: number;
@@ -2255,6 +2265,31 @@ function createLocalProposal(
           brief: codeBrief,
           prompt: effectiveGenerationPrompt
         });
+    const reactPreviewFailures = reactProductPreview
+      ? [
+          !reactProductPreview.productPreviewQuality.hasAppName ? "app name" : null,
+          !reactProductPreview.productPreviewQuality.hasDomainSections ? "domain sections" : null,
+          !reactProductPreview.productPreviewQuality.hasLocalOnlyLimitations ? "local-only limitation" : null,
+          !reactProductPreview.productPreviewQuality.hasMetrics ? "metrics" : null,
+          !reactProductPreview.productPreviewQuality.hasSampleRecords ? "sample records" : null,
+          !reactProductPreview.productPreviewQuality.hasStaticSnapshot ? "static snapshot" : null,
+          !reactProductPreview.productPreviewQuality.screenLayoutGatePassed ? "screen layout" : null
+        ].filter((failure): failure is string => Boolean(failure))
+      : [];
+    if (reactPreviewFailures.length) {
+      return {
+        approvalDisabled: true,
+        approvalRecommendation: "reject",
+        blockedReason: `PREVIEW_METADATA_INVALID: Missing or invalid ${reactPreviewFailures.join(", ")}.`,
+        changes: [],
+        id: `proposal-${Date.now()}`,
+        mode,
+        projectId: diagnostic.projectId,
+        shouldBlockExecution: true,
+        status: "pending",
+        summary: "Hassali rejected a React proposal whose static preview contract was incomplete. No file changes are proposed."
+      };
+    }
 
     return {
       changes: sourceFiles.map((file) => ({
@@ -3250,6 +3285,7 @@ function createHandoffStream(
 }
 
 async function createPersistenceContext(input: {
+  approvalPolicy: ProjectApprovalPolicy;
   mode: AiMode;
   projectId?: string | null;
   sessionId?: string | null;
@@ -3279,19 +3315,26 @@ async function createPersistenceContext(input: {
           projectId: input.projectId
         })
       : null;
+    const threadResolution = context
+      ? (context as typeof context & { threadResolution?: ChatPersistenceContext["threadResolution"] }).threadResolution ??
+        (input.sessionId && context.sessionId !== input.sessionId ? "recovered" : input.sessionId ? "reused" : "created")
+      : null;
 
     console.info("chat persistence context", {
       hasContext: Boolean(context),
       projectId: input.projectId,
-      sessionId: context?.sessionId ?? null
+      sessionId: context?.sessionId ?? null,
+      threadResolution
     });
 
     return context && projectRevision
       ? {
           ...context,
+          approvalPolicy: input.approvalPolicy,
           externalUserId: userId,
           projectRevision,
-          taskObjective: input.taskObjective
+          taskObjective: input.taskObjective,
+          threadResolution: threadResolution ?? undefined
         } satisfies ChatPersistenceContext
       : null;
   } catch (error) {
@@ -3330,15 +3373,30 @@ async function persistChatMessage(
           sourceHandoffStale: context.sourceHandoffStale
         }
       : input.metadata;
+    const proposal = messageMetadata?.proposal &&
+      typeof messageMetadata.proposal === "object" &&
+      !Array.isArray(messageMetadata.proposal)
+      ? messageMetadata.proposal as Record<string, unknown>
+      : null;
+    const policyBoundMetadata = proposal
+      ? {
+          ...messageMetadata,
+          approvalPolicy: context.approvalPolicy,
+          proposal: {
+            ...proposal,
+            approvalPolicy: context.approvalPolicy
+          }
+        }
+      : messageMetadata;
     const saved = await saveChatMessage({
       content: input.content,
-      metadata: messageMetadata?.proposal
+      metadata: proposal
         ? {
-            ...messageMetadata,
+            ...policyBoundMetadata,
             serverProjectRevision: context.projectRevision,
             serverTaskObjective: context.taskObjective
           }
-        : messageMetadata,
+        : policyBoundMetadata,
       mode: context.mode,
       projectId: context.projectId,
       role: input.role,
@@ -3412,6 +3470,7 @@ function createProposalStream(
   sessionId?: string | null,
   authority?: {
     abortSignal?: AbortSignal;
+    approvalPolicy?: ProjectApprovalPolicy;
     projectRevision?: string;
     selectedModel: string;
     taskObjective: string;
@@ -3420,18 +3479,23 @@ function createProposalStream(
   if (authority?.abortSignal?.aborted) {
     return new Response(null, { status: 499 });
   }
+  const approvalPolicy = authority?.approvalPolicy ?? proposal.approvalPolicy ?? defaultProjectApprovalPolicy;
+  const authorizedProposal: DiffProposal = {
+    ...proposal,
+    approvalPolicy
+  };
   registerServerProposal({
-    ...(proposal as unknown as Record<string, unknown>),
+    ...(authorizedProposal as unknown as Record<string, unknown>),
     serverProjectRevision: authority?.projectRevision,
     serverSelectedModel: authority?.selectedModel,
     serverTaskObjective: authority?.taskObjective
   });
   const encoder = new TextEncoder();
   const visibleSummary =
-    proposal.mode === "EXECUTE"
+    authorizedProposal.mode === "EXECUTE"
       ? "I prepared an execution proposal for review. Nothing runs until you approve it.\n\n"
       : "I prepared a diff proposal for review. It will only apply if you approve it.\n\n";
-  const payload = `${proposalMarker}${JSON.stringify(proposal)}`;
+  const payload = `${proposalMarker}${JSON.stringify(authorizedProposal)}`;
 
   return new Response(
     new ReadableStream({
@@ -5603,6 +5667,7 @@ async function createFallbackProposalResponse(input: {
 
   return createProposalStream(evaluatedProposal.proposal, persistence?.sessionId, {
     abortSignal: input.abortSignal,
+    approvalPolicy: persistence?.approvalPolicy ?? defaultProjectApprovalPolicy,
     projectRevision: persistence?.projectRevision,
     selectedModel: input.model,
     taskObjective: input.prompt
@@ -5737,6 +5802,7 @@ export async function POST(request: Request) {
   const routeStartedAt = Date.now();
   const taskSignal = request.signal;
   const body = (await request.json().catch(() => null)) as {
+    approvalPolicy?: unknown;
     attachmentIds?: unknown;
     chatSessionId?: unknown;
     handoff?: unknown;
@@ -5789,6 +5855,9 @@ export async function POST(request: Request) {
       ? body.mode
       : "ASK";
   const productMode = productModeFromRequest(body?.productMode, mode);
+  const approvalPolicy = isProjectApprovalPolicy(body?.approvalPolicy)
+    ? body.approvalPolicy
+    : defaultProjectApprovalPolicy;
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const projectNotesContext = explicitProjectNotesContext(body?.projectNotes, productMode);
   const requestedWorkspace = isWorkspaceContext(body?.workspace)
@@ -6170,6 +6239,7 @@ export async function POST(request: Request) {
 
   if (productMode !== "ASK" && nonMutatingFinalAction) {
     let specialistPersistence = await createPersistenceContext({
+      approvalPolicy,
       mode,
       projectId: requestedProjectId,
       sessionId: requestedSessionId,
@@ -6407,6 +6477,7 @@ export async function POST(request: Request) {
 
   const formattedDiagnostic = redactWorkspaceSecrets(formatDiagnosticContext(diagnostic)).redacted;
   let persistence = await createPersistenceContext({
+    approvalPolicy,
     mode,
     projectId: requestedProjectId,
     sessionId: requestedSessionId,
@@ -6567,6 +6638,7 @@ export async function POST(request: Request) {
       persistence = await persistPendingUserMessage(persistence);
       return respond(createProposalStream(existingProposal as DiffProposal, persistence?.sessionId, {
         abortSignal: taskSignal,
+        approvalPolicy: persistence?.approvalPolicy ?? approvalPolicy,
         projectRevision: persistence?.projectRevision,
         selectedModel: model,
         taskObjective: effectiveUserPrompt
@@ -6624,6 +6696,41 @@ export async function POST(request: Request) {
   }
 
   if (mode === "ASK") {
+    if (
+      multimodalContext?.visionCompleted &&
+      multimodalContext.visionText &&
+      multimodalContext.records.every((record) => record.metadata.kind === "image")
+    ) {
+      const visionAnswer = multimodalContext.visionText;
+      const selfReview = runSelfReviewForAskAnswer({
+        answer: visionAnswer,
+        generator: "vision_attachment_analysis",
+        projectId: requestedProjectId,
+        prompt: rawEffectiveUserPrompt
+      });
+
+      persistence = await persistRequestMessage(persistence, {
+        content: visionAnswer,
+        metadata: {
+          activityState: "answer_completed",
+          attachmentAnswer: {
+            kind: "vision_direct",
+            model: multimodalContext.visionModel
+          },
+          deterministic: false,
+          model,
+          productMode,
+          projectContract: summarizeProjectContract(projectContract),
+          selfReview: compactSelfReview(selfReview)
+        },
+        role: "assistant"
+      });
+
+      return respond(createTextStream(visionAnswer, persistence?.sessionId, {
+        "x-hassali-attachment-answer": "vision_direct"
+      }));
+    }
+
     const identityAnswer = createHassaliIdentityAnswer({
       model,
       prompt: effectiveUserPrompt
@@ -6910,6 +7017,7 @@ export async function POST(request: Request) {
 
       return respond(createProposalStream(proposal, persistence?.sessionId, {
         abortSignal: taskSignal,
+        approvalPolicy: persistence?.approvalPolicy ?? approvalPolicy,
         projectRevision: persistence?.projectRevision,
         selectedModel: model,
         taskObjective: effectiveUserPrompt
@@ -6960,6 +7068,7 @@ export async function POST(request: Request) {
 
     return respond(createProposalStream(proposal, persistence?.sessionId, {
       abortSignal: taskSignal,
+      approvalPolicy: persistence?.approvalPolicy ?? approvalPolicy,
       projectRevision: persistence?.projectRevision,
       selectedModel: model,
       taskObjective: effectiveUserPrompt
@@ -7017,6 +7126,7 @@ export async function POST(request: Request) {
       });
       return respond(createProposalStream(localProposal, persistence?.sessionId, {
         abortSignal: taskSignal,
+        approvalPolicy: persistence?.approvalPolicy ?? approvalPolicy,
         projectRevision: persistence?.projectRevision,
         selectedModel: model,
         taskObjective: effectiveUserPrompt
@@ -7118,6 +7228,7 @@ export async function POST(request: Request) {
 
     return respond(createProposalStream(proposal, persistence?.sessionId, {
       abortSignal: taskSignal,
+      approvalPolicy: persistence?.approvalPolicy ?? approvalPolicy,
       projectRevision: persistence?.projectRevision,
       selectedModel: model,
       taskObjective: effectiveUserPrompt
@@ -7574,6 +7685,7 @@ export async function POST(request: Request) {
 
     return respond(createProposalStream(proposal, persistence?.sessionId, {
       abortSignal: taskSignal,
+      approvalPolicy: persistence?.approvalPolicy ?? approvalPolicy,
       projectRevision: persistence?.projectRevision,
       selectedModel: model,
       taskObjective: effectiveUserPrompt

@@ -70,7 +70,6 @@ const genericForbidden = [
   "request detected",
   "specific offer clarity",
   "domain-specific proof",
-  "practical details",
   "customer use cases",
   "Help users understand",
   "Help gift buyers understand floral, service, gifting",
@@ -96,7 +95,7 @@ const profiles: Record<string, ValidationProfile> = {
   },
   electronics_retail: {
     forbidden: ["dental", "dentist", "doctor", "bouquet", "floral", "coffee", "cafe", "sofa"],
-    required: ["TV", "smart TV", "OLED", "QLED", "LED", "installation", "warranty", "delivery"]
+    required: ["TV", "smart TV", "LCD", "OLED", "QLED", "LED", "display", "installation", "warranty", "delivery"]
   },
   mobile_phone_shop: {
     forbidden: ["dental", "dentist", "coffee", "cafe", "seafood", "car rental", "cycling", "bicycle", "SaaS", "dashboard conversion"],
@@ -242,7 +241,7 @@ function profileFor(domain: string | null) {
   if (normalizedDomain?.includes("furniture")) return profiles.furniture;
   if (normalizedDomain?.includes("floral") || normalizedDomain?.includes("flower")) return profiles.floral;
   if (normalizedDomain?.includes("mobile_phone") || normalizedDomain?.includes("mobile phone") || normalizedDomain?.includes("phone shop") || normalizedDomain?.includes("smartphone")) return profiles.mobile_phone_shop;
-  if (normalizedDomain?.includes("tv") || normalizedDomain?.includes("electronics")) return profiles.electronics_retail;
+  if (normalizedDomain?.includes("tv") || normalizedDomain?.includes("lcd") || normalizedDomain?.includes("electronics")) return profiles.electronics_retail;
 
   return {
     forbidden: ["developer/coder fallback", "keyword-chain copy patterns"],
@@ -418,7 +417,7 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
   const forbiddenSignals = unique([
     ...genericForbidden.filter((term) =>
       !isCodeProposal ||
-      !/\b(?:public marketing website|workflow|dashboard|local service|clear services|detected services|practical details|customer use cases)\b/i.test(term)
+      !/\b(?:public marketing website|workflow|dashboard|local service|clear services|detected services|customer use cases)\b/i.test(term)
     ),
     ...(isCodeProposal ? [] : profile.forbidden),
     ...(isCodeProposal ? [] : input.compositionPlan.forbiddenSections),
@@ -432,9 +431,14 @@ export function validateDomain(input: ValidateDomainInput): DomainValidationResu
       ? visibleWebsiteContentFromFiles(input.proposedFiles)
       : contentFromFiles(input.proposedFiles)
     : input.currentPrompt;
+  const genericCopyContent = isCodeProposal && input.validationMode === "proposal_content" && input.proposedFiles
+    ? contentFromFiles(Object.fromEntries(
+        Object.entries(input.proposedFiles).filter(([path]) => !/\.md$/i.test(path))
+      ))
+    : combinedContent;
   const detectedForbiddenSignals = detectForbidden(combinedContent, forbiddenSignals);
   const strongDomainContradiction = hasStrongDomainContradiction(combinedContent, detectedForbiddenSignals);
-  const detectedGenericCopy = detectGenericCopy(combinedContent);
+  const detectedGenericCopy = detectGenericCopy(genericCopyContent);
   const missingSignals = detectMissing(combinedContent, requiredSignals, input.validationMode);
   const strategyIssues = fileStrategyIssues(input);
   const detectedPreviewDrift = previewIssues(input);

@@ -124,6 +124,15 @@ test("C2 bakery copy keeps pastries in-domain and avoids forbidden generic fallb
   assert.doesNotMatch(publicCopy, /practical details|customer use cases/i);
 });
 
+test("C3 TV LCD copy uses an electronics offer family with natural visitor language", () => {
+  const contract = contractFor("Build me a website for my local TV LCD business with 3 pages: home, about, contact.");
+  const publicCopy = `${contract.businessType} ${contract.hero.headline} ${contract.hero.supportingCopy} ${contract.offerMechanism} ${JSON.stringify(contract.offerItems)}`;
+
+  assert.match(contract.businessType, /television|electronics/i);
+  assert.match(publicCopy, /LCD|LED|OLED|QLED|display|home cinema/i);
+  assert.doesNotMatch(publicCopy, /grooming|cleaning|laundry|care options|service packages/i);
+});
+
 test("D SaaS copy explains the lead follow-up workflow and target user", () => {
   const contract = contractFor("Create a website for software that helps small service businesses follow up with leads.");
   assert.match(contract.businessType, /lead follow-up software/i);

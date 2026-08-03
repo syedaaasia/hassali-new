@@ -111,8 +111,8 @@ function expectedTermsForDomain(domain: string, baseTerms: string[]) {
     "dentist clinic": ["dental", "dentist", "clinic", "appointment", "hygiene", "treatment", "smile"],
     dental: ["dental", "dentist", "clinic", "appointment", "hygiene", "treatment", "smile"],
     perfume: ["perfume", "fragrance", "scent", "bottles", "oud", "floral", "citrus", "musk", "testers", "gift"],
-    television: ["television", "tv", "smart tv", "oled", "qled", "home cinema", "wall mounting", "warranty"],
-    tv: ["television", "tv", "smart tv", "oled", "qled", "home cinema", "wall mounting", "warranty"],
+    television: ["television", "tv", "smart tv", "lcd", "led", "oled", "qled", "display", "home cinema", "wall mounting", "warranty"],
+    tv: ["television", "tv", "smart tv", "lcd", "led", "oled", "qled", "display", "home cinema", "wall mounting", "warranty"],
     bike: ["bike", "rider", "showroom", "service", "gear"],
     bicycle: ["bicycle", "cycling", "tune-up", "accessories", "rider fitting"],
     billing: ["billing", "invoice", "invoices", "payment", "payments", "dashboard"],
@@ -135,6 +135,10 @@ function contradictoryTermsFor(domain: string, capability: PromptSovereigntyCont
   const allowsInventoryTerms =
     domainText.includes("inventory") ||
     domainText.includes("crm") ||
+    domainText.includes("electronics") ||
+    domainText.includes("retail") ||
+    domainText.includes("store") ||
+    domainText.includes("shop") ||
     domainText.includes("mobile_phone_shop") ||
     domainText.includes("mobile phone") ||
     domainText.includes("phone shop");

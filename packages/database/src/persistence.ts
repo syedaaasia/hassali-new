@@ -77,6 +77,7 @@ export type ChatPersistenceContextResult = {
   mode: AiMode;
   projectId: string;
   sessionId: string | null;
+  threadResolution: "created" | "recovered" | "reused";
   userId: string;
 };
 export type ProjectFileListResult = Array<{
@@ -1065,14 +1066,17 @@ async function getOrCreateChatSession(
     const existingSessionResult = await db.execute<{ id: string }>(sql`
       select id
       from chat_sessions
-      where id = ${input.sessionId} and project_id = ${input.projectId}
+      where id = ${input.sessionId}
+        and project_id = ${input.projectId}
+        and user_id = ${input.userId}
       limit 1
     `);
     const existingSession = existingSessionResult.rows[0];
 
     if (existingSession) {
       return {
-        id: String(existingSession.id)
+        id: String(existingSession.id),
+        resolution: "reused" as const
       };
     }
   }
@@ -1088,7 +1092,8 @@ async function getOrCreateChatSession(
 
   if (latestSession) {
     return {
-      id: String(latestSession.id)
+      id: String(latestSession.id),
+      resolution: input.sessionId ? "recovered" as const : "reused" as const
     };
   }
 
@@ -1104,7 +1109,8 @@ async function getOrCreateChatSession(
   }
 
   return {
-    id: String(createdSession.id)
+    id: String(createdSession.id),
+    resolution: input.sessionId ? "recovered" as const : "created" as const
   };
 }
 
@@ -1135,10 +1141,17 @@ export async function resolveChatPersistenceContext(
     return null;
   }
 
+  const session = await getOrCreateChatSession({
+    projectId: String(row.projectId),
+    sessionId: input.sessionId ?? null,
+    userId: String(row.userId)
+  }, db);
+
   return {
     mode: input.mode,
     projectId: String(row.projectId),
-    sessionId: input.sessionId ?? null,
+    sessionId: session.id,
+    threadResolution: session.resolution,
     userId: String(row.userId)
   };
 }

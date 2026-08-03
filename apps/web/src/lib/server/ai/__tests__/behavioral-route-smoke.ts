@@ -48,6 +48,7 @@ function proposalFromText(text: string) {
   return JSON.parse(text.slice(index + marker.length)) as {
     approvalDisabled?: boolean;
     changes: Array<{ path?: string; proposedContent?: string }>;
+    previewMetadata?: Record<string, unknown>;
     proposalRoutingReasons?: Array<{ code?: string; message?: string }>;
     shouldBlockExecution?: boolean;
     summary: string;
@@ -135,13 +136,12 @@ try {
   assert.match(topFiveText, /1\. Cursor[\s\S]*5\. Zed/);
 
   const time = await post({
-    messages: [{ content: "What time is it in London, New York and Amsterdam?", role: "user" }],
+    messages: [{ content: "What is the time in New York and South Africa?", role: "user" }],
     productMode: "ASK"
   });
   const timeText = await time.text();
-  assert.match(timeText, /London:/);
   assert.match(timeText, /New York:/);
-  assert.match(timeText, /Amsterdam:/);
+  assert.match(timeText, /South Africa:/);
 
   let incompleteProviderCalls = 0;
   const incompleteProviderModels: string[] = [];
@@ -309,6 +309,19 @@ try {
     todoProposal.changes.map((change) => change.path),
     ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx", "src/styles.css", "HASSALI.md"]
   );
+
+  const typoBuildResponse = await post({
+    messages: [{ content: "buld me a react mobile app for finace stuff", role: "user" }],
+    productMode: "CODE"
+  });
+  const typoBuildProposal = proposalFromText(await typoBuildResponse.text());
+  assert.equal(typoBuildResponse.headers.get("x-hassali-final-intent-class"), "NEW_CODE_BUILD");
+  assert.equal(typoBuildResponse.headers.get("x-hassali-final-approval-required"), "true");
+  assert.equal(typoBuildResponse.headers.get("x-hassali-final-disposition"), "request_approval");
+  assert.equal(typoBuildProposal.previewMetadata?.previewType, "code_app_preview");
+  assert.equal(typoBuildProposal.previewMetadata?.framework, "react_vite");
+  assert.equal(typeof typoBuildProposal.previewMetadata?.productPreview, "object");
+  assert.doesNotMatch(typoBuildProposal.summary, /current answer|live sources|freshness/i);
 
   const lawResponse = await post({
     messages: [{ content: "Build a premium website for a law firm.", role: "user" }],

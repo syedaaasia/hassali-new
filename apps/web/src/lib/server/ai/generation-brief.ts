@@ -352,6 +352,25 @@ function buildCodeProductBrief(contract: CodeIntentContract): CodeProductBrief {
     };
   }
 
+  if (
+    /\b(?:finance|financial|money)\b/i.test(prompt) &&
+    /\b(?:dashboard|tracker|app|tool)\b/i.test(prompt) &&
+    /\b(?:income|expense|balance|cash flow|transaction)\b/i.test(prompt)
+  ) {
+    return {
+      ...base,
+      complexity: "moderate",
+      coreActions: ["add income", "add expense", "review monthly balance", "filter transactions"],
+      expectedDataModel: ["transaction: id, description, amount, type, category, date, status"],
+      expectedScreens: ["dashboard", "income", "expenses", "monthly overview", "transactions"],
+      nonGoals: ["CRM", "sales pipeline", "inventory", "tax filing authority", "bank integration"],
+      primaryEntity: "transaction",
+      productType: "finance_dashboard",
+      requiredFeatures: ["income total", "expense total", "monthly balance", "transaction form", "transaction list"],
+      userGoal: "Track local income and expenses and understand the current monthly balance."
+    };
+  }
+
   if (/\b(?:expense tracker|spending tracker|track expenses)\b/i.test(prompt)) {
     return {
       ...base,

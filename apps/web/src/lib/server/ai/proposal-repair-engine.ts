@@ -67,7 +67,6 @@ const genericReplacementMap: Array<[RegExp, string]> = [
   [/\bClear Services Studio\b/gi, ""],
   [/\bLocal Service\b/gi, ""],
   [/\bclear services\b/gi, ""],
-  [/\bpractical details\b/gi, ""],
   [/\bcustomer use cases\b/gi, ""],
   [/\bdetected services\b/gi, ""],
   [/\bspecific offer clarity\b/gi, ""],

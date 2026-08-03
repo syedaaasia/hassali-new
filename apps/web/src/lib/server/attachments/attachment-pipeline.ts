@@ -273,7 +273,7 @@ export function extractPdfText(bytes: Uint8Array) {
   }
   const text = textFragments.join(" ").replace(/\s+/g, " ").trim();
   if (!text) {
-    throw new AttachmentPipelineError("DOCUMENT_UNREADABLE", "No usable embedded text was found in this PDF. Scanned PDF OCR is not configured.");
+    throw new AttachmentPipelineError("PDF_OCR_UNAVAILABLE", "No usable embedded text was found in this PDF. Scanned PDF OCR is not configured.");
   }
   return text.slice(0, attachmentLimits.extractedTextBytes);
 }

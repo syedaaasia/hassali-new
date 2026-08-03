@@ -136,7 +136,7 @@ export const canonicalProjectState = {
       ...state,
       projectId: input.projectId ?? "",
       mode: input.mode ?? state.mode,
-      manifest: deriveManifest(committed),
+      manifest: deriveManifest(committed, input.mode),
       vfs: {
         committed,
         staged: new Map()
@@ -164,6 +164,7 @@ export const canonicalProjectState = {
   setMode(mode: HassaliMode) {
     state = {
       ...state,
+      manifest: deriveManifest(state.vfs.committed, mode),
       mode,
       pendingProposal: null,
       vfs: {

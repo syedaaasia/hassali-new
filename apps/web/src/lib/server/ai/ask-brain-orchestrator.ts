@@ -27,6 +27,7 @@ import {
   type AnswerContractValidation,
   type BehavioralDecision
 } from "./behavioral-intelligence";
+import { isHassaliRuntimeStatusQuestion } from "./hassali-identity";
 import {
   compactAskFreshnessDecision,
   compactAskSourceReliability,
@@ -165,6 +166,31 @@ export type AskProviderCall = (input: {
   webSearch?: boolean;
 }) => Promise<ModelCallResult>;
 
+export function normalizeAskProviderResult(result: ModelCallResult): ModelCallResult {
+  if (result.status !== "ok") return result;
+  const content = result.content.trim();
+  const placeholderEnvelope = /^(?:null|undefined|\[object Object\])$/i.test(content);
+  const toolOnlyEnvelope =
+    /^(?:tool_calls?|function_call|tool_result)\s*:/i.test(content) ||
+    ((content.startsWith("{") || content.startsWith("[")) &&
+      /"(?:tool_calls?|function_call)"\s*:/i.test(content) &&
+      !/"content"\s*:\s*"[^"\s]/i.test(content));
+
+  if (!content || placeholderEnvelope || toolOnlyEnvelope) {
+    return {
+      category: "provider_response_invalid",
+      reason: !content
+        ? "The provider returned an empty answer."
+        : toolOnlyEnvelope
+          ? "The provider returned tool metadata without a user-facing answer."
+          : "The provider returned a malformed answer envelope.",
+      status: "failed"
+    };
+  }
+
+  return { ...result, content };
+}
+
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
 const PRIMARY_TIMEOUT_MS = 25_000;
 const FREE_PRIMARY_TIMEOUT_MS = 40_000;
@@ -221,6 +247,15 @@ function createLocalConversationalAnswer(prompt: string) {
 
   if (/^(?:hi|hello|hey|salam|assalam(?:u alaikum)?|good (?:morning|afternoon|evening))$/.test(normalized)) {
     return "Hello! How can I help you today?";
+  }
+  if (/^(?:how are you|how are things|what(?:'s| is) up|are you there)$/.test(normalized)) {
+    return "I am here and ready. What would you like to work through?";
+  }
+  if (/^(?:why are you|why do you keep|you are|you're)\b[\s\S]*\b(?:bad|dumb|wrong|poor|unhelpful|giving bad answers?)\b/.test(normalized) || /^(?:why are you giving bad answers?|why do you give bad answers?)$/.test(normalized)) {
+    return "That is fair feedback. Point me to the answer that missed the mark, and I will address the actual mistake directly without changing files.";
+  }
+  if (/^can you help me (?:plan|think through|work through)(?: something| this)?$/.test(normalized)) {
+    return "Yes. Tell me the outcome you want and any constraints, and I will help turn it into a practical plan.";
   }
   if (/^(?:thanks|thank you|thankyou|much appreciated)$/.test(normalized)) {
     return "You are welcome. What would you like to work through next?";
@@ -441,7 +476,10 @@ function isEvaluatorStyleOutput(answer: string) {
 
 function reviewAnswer(answer: string, classification: AskIntentClassification, input: AskBrainInput) {
   const issues: string[] = [];
-  const contractValidation = input.behavior?.answerIntent
+  const localConversation = Boolean(createLocalConversationalAnswer(
+    input.behavior?.objective ?? input.prompt
+  ));
+  const contractValidation = input.behavior?.answerIntent && !localConversation
     ? validateAnswerAgainstContract(answer, input.behavior.answerContract)
     : null;
 
@@ -484,7 +522,7 @@ function semanticCategory(input: AskBrainInput, classification: AskIntentClassif
 
   if (classification.safetySensitivity === "high") return "urgent_safety";
   if (classification.wantsExecution) return "mutation_request";
-  if (/\b(?:what model|which model|selected model|which ai|using hy3|which provider)\b/i.test(prompt)) return "model_question";
+  if (isHassaliRuntimeStatusQuestion(prompt)) return "model_question";
   if (/\b(?:what project|workspace|current files|this project|active file|repository|repo)\b/i.test(prompt)) return "workspace_analysis";
   if (standaloneGreeting) return "casual_conversation";
   if (classification.intent === "followup_or_continuation") return "rewriting";
@@ -1009,9 +1047,9 @@ function providerFailureAnswer(input: AskBrainInput, category: string | null) {
           : category === "provider_network_error"
             ? "Hassali could not reach the model service. Please try again."
             : category === "provider_response_invalid"
-              ? "The selected model returned an unusable response. Please try again."
+              ? "The selected model returned no usable answer, and no compatible fallback completed the request. Retry shortly or choose another configured model."
               : category === "provider_request_rejected" || category === "provider_model_unavailable"
-                ? "The selected free model is temporarily unavailable."
+                ? "The selected model is temporarily unavailable, and no compatible fallback completed the request. Retry shortly or choose another configured model."
                 : "The selected model could not answer right now. Please try again.";
 
   if (priorFailure && /\b(?:what do you mean|answer my original question|try again)\b/i.test(input.prompt)) {
@@ -1207,7 +1245,9 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   }
 
   const deterministicAnswer = await createAskDirectAnswer(input.prompt, input.askRuntimeContext, input.messages);
-  const localConversationalAnswer = createLocalConversationalAnswer(input.prompt);
+  const localConversationalAnswer = createLocalConversationalAnswer(
+    input.behavior?.objective ?? input.prompt
+  );
   const deterministicLiveSourceAvailable = Boolean(
     deterministicAnswer?.includes("Source: Open-Meteo live forecast API.")
   );
@@ -1302,14 +1342,14 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
         attemptedModels.push(executionProvider.executionModelId!);
         providerCallCount += 1;
         researchAttempted = researchAttempted || webSearchRequested;
-        const modelResult = await providerCall({
+        const modelResult = normalizeAskProviderResult(await providerCall({
           abortSignal: input.abortSignal,
           messages: providerMessages,
           maxTokens: executionProvider.pricingClass === "free" ? 4_000 : 2_000,
           model: executionProvider.executionModelId!,
           timeoutMs: executionProvider.pricingClass === "free" ? FREE_PRIMARY_TIMEOUT_MS : PRIMARY_TIMEOUT_MS,
           webSearch: webSearchRequested
-        });
+        }));
         if (!input.providerCall) {
           recordAskProviderHealth({
             category: modelResult.status === "ok" ? null : modelResult.category,
@@ -1345,14 +1385,14 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
             fallbackModel = fallbackProvider.resolvedModelId ?? fallbackProvider.executionModelId;
             fallbackOccurred = true;
             fallbackReason = modelResult.category;
-            const fallbackResult = await providerCall({
+            const fallbackResult = normalizeAskProviderResult(await providerCall({
               abortSignal: input.abortSignal,
               messages: providerMessages,
               maxTokens: 4_000,
               model: fallbackProvider.executionModelId,
               timeoutMs: FREE_PRIMARY_TIMEOUT_MS,
               webSearch: webSearchRequested
-            });
+            }));
             if (!input.providerCall) {
               recordAskProviderHealth({
                 category: fallbackResult.status === "ok" ? null : fallbackResult.category,

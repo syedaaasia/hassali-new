@@ -5,8 +5,15 @@ function isIdentityQuestion(prompt: string) {
   return /^(?:hi[, ]+)?(?:who are you|what are you|who designed you|who built you|what is your version|how are you running|how can i improve your intelligence)[?.! ]*$/i.test(prompt.trim());
 }
 
-function isProviderQuestion(prompt: string) {
-  return /\b(?:what model|which model|current model|model are you using|provider|advanced models|what ai model)\b/i.test(prompt);
+export function isHassaliRuntimeStatusQuestion(prompt: string) {
+  const text = prompt.trim();
+  return (
+    /^(?:what|which)\s+(?:ai\s+)?model\s+(?:is\s+this|am\s+i\s+using|are\s+you\s+using|is\s+selected|is\s+active)[?.! ]*$/i.test(text) ||
+    /^show\s+(?:me\s+)?(?:the\s+)?selected\s+model[?.! ]*$/i.test(text) ||
+    /^(?:what|which)\s+provider\s+(?:is\s+active|are\s+you\s+using|is\s+selected)[?.! ]*$/i.test(text) ||
+    /^(?:show\s+(?:me\s+)?)?(?:model|provider)\s+status[?.! ]*$/i.test(text) ||
+    /^did\s+(?:hassali|you)\s+use\s+(?:a\s+)?fallback(?:\s+model)?[?.! ]*$/i.test(text)
+  );
 }
 
 export function createHassaliIdentityAnswer(input: {
@@ -18,7 +25,7 @@ export function createHassaliIdentityAnswer(input: {
   });
   const resolvedProvider = resolveAskProvider(input.model ?? "");
 
-  if (isProviderQuestion(input.prompt)) {
+  if (isHassaliRuntimeStatusQuestion(input.prompt)) {
     const model = findHassaliModel(input.model);
     const displayName = model?.displayName ?? resolvedProvider.resolvedModelId ?? "the selected model";
     const providerName = resolvedProvider.executionProvider === "openrouter" ? "OpenRouter" : resolvedProvider.executionProvider;

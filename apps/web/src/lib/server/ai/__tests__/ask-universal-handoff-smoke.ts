@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { buildAskRuntimeContext } from "../ask-context";
 import {
   createAskBrainDebugHeaders,
+  normalizeAskProviderResult,
   runAskBrain,
   type AskProviderCall
 } from "../ask-brain-orchestrator";
-import { createHassaliIdentityAnswer } from "../hassali-identity";
+import { createHassaliIdentityAnswer, isHassaliRuntimeStatusQuestion } from "../hassali-identity";
+import { resolveBehavioralDecision } from "../behavioral-intelligence";
 import { classifyAskIntent } from "../ask-serious-assistant";
 import { resolveWebsiteNiche } from "../website-niche-resolver";
 import { interpretWebsite3DRequirement } from "../website-webgl-scene-spec";
@@ -102,6 +104,62 @@ test("local greeting succeeds without a model call", async () => {
   assert.equal(result.decision.modelCallRan, false);
   assert.equal(result.decision.providerCallCount, 0);
   assert.equal(calls.length, 0);
+});
+
+test("casual conversation and criticism stay local without model-status interception", async () => {
+  for (const prompt of ["How are you?", "Why are you giving bad answers?", "Can you help me plan something?"]) {
+    const { calls, providerCall } = providerSequence([]);
+    const result = await runAskBrain(askInput(prompt, { providerCall }));
+    assert.equal(result.decision.modelCallRan, false, prompt);
+    assert.equal(calls.length, 0, prompt);
+    assert.doesNotMatch(result.answer, /Selected provider:|Selected model:|Execution status:/i);
+  }
+});
+
+test("current-message casual intent outranks assembled ASK context", async () => {
+  const prompt = "How are you?";
+  const behavior = resolveBehavioralDecision({
+    messages: [
+      { role: "user", content: "Read the attached CSV and PDF." },
+      { role: "assistant", content: "The selected model returned no usable answer." },
+      { role: "user", content: prompt }
+    ],
+    prompt,
+    selectedMode: "ASK",
+    workspace: { fileList: [] }
+  });
+  const { calls, providerCall } = providerSequence([]);
+  const result = await runAskBrain(askInput(prompt, {
+    behavior,
+    intelligenceContext: "EXPLICIT PROJECT NOTES CONTEXT:\nBackground notes only.",
+    messages: [
+      { role: "user", content: "Read the attached CSV and PDF." },
+      { role: "assistant", content: "The selected model returned no usable answer." },
+      { role: "user", content: prompt }
+    ],
+    providerCall
+  }));
+  assert.equal(result.answer, "I am here and ready. What would you like to work through?");
+  assert.equal(result.decision.modelCallRan, false);
+  assert.equal(calls.length, 0);
+});
+
+test("runtime status intent is exact and rejects broad AI or criticism phrases", () => {
+  for (const prompt of ["What model is this?", "Which model am I using?", "Show the selected model.", "What provider is active?", "Did Hassali use a fallback?"]) {
+    assert.equal(isHassaliRuntimeStatusQuestion(prompt), true, prompt);
+  }
+  for (const prompt of ["Why are you dumb?", "What is this file?", "What is this image?", "Which AI tool is best?", "How are you?"]) {
+    assert.equal(isHassaliRuntimeStatusQuestion(prompt), false, prompt);
+  }
+});
+
+test("provider normalization rejects empty malformed and tool-only envelopes but keeps short answers", () => {
+  for (const content of ["   ", "[object Object]", '{"tool_calls":[{"name":"search"}]}', "tool_calls: search"]) {
+    assert.equal(normalizeAskProviderResult({ status: "ok", content, servedModel: "selected" }).status, "failed", content);
+  }
+  const greeting = normalizeAskProviderResult({ status: "ok", content: "Hi!", servedModel: "selected" });
+  assert.equal(greeting.status, "ok");
+  if (greeting.status === "ok") assert.equal(greeting.content, "Hi!");
 });
 
 test("production exposes only safe response state for recovery controls", async () => {
@@ -308,6 +366,25 @@ test("automatic provider policy makes one bounded fallback attempt", async () =>
     assert.equal(result.decision.fallbackModel, "openrouter/free");
     assert.equal(result.decision.providerCallCount, 2);
     assert.equal(result.decision.providerFailureCategory, null);
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previousKey;
+  }
+});
+
+test("whitespace selected-model output uses exactly one compatible fallback", async () => {
+  const previousKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = "test-key";
+  try {
+    const { calls, providerCall } = providerSequence([
+      { status: "ok", content: "   ", servedModel: "selected" },
+      { status: "ok", content: "React favors a broad component ecosystem; Vue favors a smaller, approachable core.", servedModel: "fallback-model" }
+    ]);
+    const result = await runAskBrain(askInput("Compare React and Vue.", { providerCall }));
+    assert.equal(calls.length, 2);
+    assert.equal(result.decision.providerCallCount, 2);
+    assert.equal(result.decision.modelCallSucceeded, true);
+    assert.equal(result.decision.actualServedModel, "fallback-model");
   } finally {
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = previousKey;

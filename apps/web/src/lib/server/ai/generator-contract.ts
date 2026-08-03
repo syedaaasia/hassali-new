@@ -61,7 +61,6 @@ const genericForbiddenTerms = [
   "Local Service",
   "Clear Services Studio",
   "clear services",
-  "practical details",
   "customer use cases",
   "detected services",
   "specific offer clarity",

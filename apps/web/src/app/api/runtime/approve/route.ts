@@ -57,6 +57,10 @@ import {
   releaseServerProposalApproval,
   resolveServerProposal
 } from "@/lib/server/runtime/server-proposal-registry";
+import {
+  canApplyWithProjectApprovalPolicy,
+  isProjectApprovalPolicy
+} from "@/lib/approval-policy";
 
 export const runtime = "nodejs";
 
@@ -433,6 +437,27 @@ export async function POST(request: Request) {
 
   const productMode = authorizedProposal.mode;
   const proposalMetadata = authorizedProposal.metadata;
+  const proposalApprovalPolicy = isProjectApprovalPolicy(proposalMetadata.approvalPolicy)
+    ? proposalMetadata.approvalPolicy
+    : "ask";
+  if (
+    parsed.approvalSource === "standing_policy" &&
+    (
+      parsed.approvalPolicy === "ask" ||
+      proposalApprovalPolicy !== parsed.approvalPolicy ||
+      !canApplyWithProjectApprovalPolicy(
+        parsed.approvalPolicy,
+        proposalMetadata as Parameters<typeof canApplyWithProjectApprovalPolicy>[1]
+      )
+    )
+  ) {
+    return errorResponse("Standing approval is not valid for this proposal. Review it inline before applying.", 403, {
+      runnerStatus: "blocked",
+      runtimeStartAttempted: false,
+      runtimeStartStatus: "not_started",
+      writtenFiles: []
+    });
+  }
   const proposalBlockReasons = proposalApplyBlockReasons({
     changes: authorizedProposal.changes,
     metadata: proposalMetadata

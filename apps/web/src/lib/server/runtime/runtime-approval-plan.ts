@@ -5,6 +5,11 @@ import type {
   RuntimeToolName
 } from "@/lib/server/runtime/runtime-types";
 import { normalizePath, validateSafePath } from "@/lib/utils/path";
+import {
+  defaultProjectApprovalPolicy,
+  isProjectApprovalPolicy,
+  type ProjectApprovalPolicy
+} from "@/lib/approval-policy";
 
 export type RuntimeApprovalChange = {
   action?: unknown;
@@ -15,6 +20,8 @@ export type RuntimeApprovalChange = {
 };
 
 export type RuntimeApprovalBody = {
+  approvalPolicy?: unknown;
+  approvalSource?: unknown;
   projectId?: unknown;
   proposalId?: unknown;
   productMode?: unknown;
@@ -29,6 +36,8 @@ export type RuntimeApprovalValidationResult =
       status: 400;
     }
   | {
+      approvalPolicy: ProjectApprovalPolicy;
+      approvalSource: "inline_approval" | "standing_policy";
       projectId: string;
       proposalId: string;
     };
@@ -255,6 +264,10 @@ export function validateRuntimeApprovalRequest(body: RuntimeApprovalBody | null)
   }
 
   return {
+    approvalPolicy: isProjectApprovalPolicy(body?.approvalPolicy)
+      ? body.approvalPolicy
+      : defaultProjectApprovalPolicy,
+    approvalSource: body?.approvalSource === "standing_policy" ? "standing_policy" : "inline_approval",
     projectId,
     proposalId
   };

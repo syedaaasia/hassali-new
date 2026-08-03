@@ -57,6 +57,37 @@ test("classifies supported files by extension, MIME, signature, and text shape",
   );
 });
 
+test("extracts actual bounded CSV TXT and Markdown content", () => {
+  const cases = [
+    { kind: "data" as const, mimeType: "text/csv", name: "clients.csv", text: "Name,Email\nAli,ali@example.com\nSara," },
+    { kind: "text" as const, mimeType: "text/plain", name: "notes.txt", text: "Launch checklist: verify row counts." },
+    { kind: "text" as const, mimeType: "text/markdown", name: "README.md", text: "# Project\nLocal-only demo." }
+  ];
+  for (const item of cases) {
+    const bytes = new TextEncoder().encode(item.text);
+    const evidence = extractAttachmentEvidence({
+      bytes,
+      metadata: {
+        analysisCapabilities: ["text_extract"],
+        conversationId: "c",
+        createdAt: "x",
+        extractedTextAvailable: true,
+        id: item.name,
+        kind: item.kind,
+        mimeType: item.mimeType,
+        originalName: item.name,
+        previewAvailable: false,
+        projectId: "p",
+        safeName: item.name,
+        sizeBytes: bytes.byteLength,
+        status: "ready",
+        storageScope: "conversation"
+      }
+    });
+    assert.match(evidence ?? "", new RegExp(item.text.split("\n")[0]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
 test("stores attachments inside an owned project and rejects another owner", async () => {
   const projectId = `multimodal-test-${Date.now()}`;
   const binding = await resolveProjectWorkspace(projectId);
@@ -133,7 +164,7 @@ test("extracts bounded text PDF evidence and reports scanned documents honestly"
         projectId: "p", safeName: "scan.pdf", sizeBytes: scanned.byteLength, status: "ready", storageScope: "conversation"
       }
     }),
-    (error) => error instanceof AttachmentPipelineError && error.code === "DOCUMENT_UNREADABLE"
+    (error) => error instanceof AttachmentPipelineError && error.code === "PDF_OCR_UNAVAILABLE"
   );
 });
 
@@ -191,6 +222,50 @@ test("vision analysis uses image content parts only with a configured vision pro
   }
 });
 
+test("vision provider refusals are not accepted as completed image analysis", async () => {
+  const previous = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = "test-key";
+  try {
+    const result = await analyzeImagesWithVision({
+      fetchImpl: async () => Response.json({
+        choices: [{ message: { content: "I cannot access or analyze attached files or screenshots." } }]
+      }),
+      images: [{
+        bytes: png,
+        metadata: {
+          analysisCapabilities: ["vision"], conversationId: "c", createdAt: "x", extractedTextAvailable: false,
+          id: "i", kind: "image", mimeType: "image/png", originalName: "ui.png", previewAvailable: true,
+          projectId: "p", safeName: "ui.png", sizeBytes: png.byteLength, status: "ready", storageScope: "conversation"
+        }
+      }],
+      prompt: "What is visible in this screenshot?",
+      selectedModel: "openrouter/free"
+    });
+    assert.equal(result.completed, false);
+    assert.equal(result.failureCode, "VISION_ANALYSIS_FAILED");
+    assert.equal(result.text, "");
+
+    const evaluatorResult = await analyzeImagesWithVision({
+      fetchImpl: async () => Response.json({ choices: [{ message: { content: "User Safety: safe" } }] }),
+      images: [{
+        bytes: png,
+        metadata: {
+          analysisCapabilities: ["vision"], conversationId: "c", createdAt: "x", extractedTextAvailable: false,
+          id: "i", kind: "image", mimeType: "image/png", originalName: "ui.png", previewAvailable: true,
+          projectId: "p", safeName: "ui.png", sizeBytes: png.byteLength, status: "ready", storageScope: "conversation"
+        }
+      }],
+      prompt: "What is visible in this screenshot?",
+      selectedModel: "openrouter/free"
+    });
+    assert.equal(evaluatorResult.completed, false);
+    assert.equal(evaluatorResult.failureCode, "VISION_ANALYSIS_FAILED");
+  } finally {
+    if (previous === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previous;
+  }
+});
+
 test("vision and image generation report unavailable capability without configuration", async () => {
   const openRouter = process.env.OPENROUTER_API_KEY;
   const openAi = process.env.OPENAI_API_KEY;
@@ -201,6 +276,7 @@ test("vision and image generation report unavailable capability without configur
   try {
     const result = await analyzeImagesWithVision({ images: [], prompt: "inspect", selectedModel: "tencent/hy3:free" });
     assert.equal(result.completed, false);
+    assert.equal(result.failureCode, "VISION_CAPABILITY_UNAVAILABLE");
     assert.equal(imageGenerationCapability().available, false);
   } finally {
     if (openRouter !== undefined) process.env.OPENROUTER_API_KEY = openRouter;

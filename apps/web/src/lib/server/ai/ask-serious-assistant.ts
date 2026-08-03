@@ -432,6 +432,7 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (isFileReadingRequest(prompt) || isImageReadingRequest(prompt)) return classify(prompt, "file_unavailable_explanation", 0.97, "The user asked ASK mode to read a file or image that is not available to this layer.");
   if (isWrongModeBuildRequest(prompt)) return classify(prompt, "mode_boundary_request", 0.94, "The user asks ASK to create/apply/run project files.");
   if (detectDangerousCodingRequest(prompt)) return classify(prompt, "auth_or_security_guidance", 0.96, "The user asked for harmful code; ASK should refuse and redirect to defensive security.");
+  if (isDirectDateTimeQuestion(prompt)) return classify(prompt, "date_time_question", 0.9, "The user is directly asking for date or time.");
   if (isWebsiteCodeTextRequest(prompt)) return classify(prompt, "website_code_text_only", 0.92, "The user asks for website code in chat only.");
   if (/\b(?:compare|which is better|recommend|best option|versus|vs)\b/i.test(prompt)) return classify(prompt, "comparison_or_recommendation", 0.9, "The user asks for comparison or recommendation.");
   if (isConceptualTechnicalExplanation(prompt)) return classify(prompt, "explanation_or_teaching", 0.9, "The user asks for a conceptual technical explanation rather than implementation code.");
@@ -455,7 +456,6 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (/\b(?:travel|trip|itinerary|hotel|flight)\b/i.test(prompt)) return classify(prompt, "travel_or_lifestyle_planning", 0.78, "The user asks for travel or lifestyle planning.");
   if (/\b(?:translate|translation|rewrite in|say this in)\b/i.test(prompt)) return classify(prompt, "translation_or_language_help", 0.86, "The user is asking for language help.");
   if (/\b(?:explain|teach|what is|how does|like i am|i am very new|beginner)\b/i.test(prompt)) return classify(prompt, "explanation_or_teaching", 0.84, "The user is asking for a simple explanation.");
-  if (isDirectDateTimeQuestion(prompt)) return classify(prompt, "date_time_question", 0.9, "The user is directly asking for date or time.");
   if (/\b(?:who are you|what are you|what can you do|which mode|ask mode|code mode|website mode)\b/i.test(prompt)) return classify(prompt, "direct_question", 0.86, "The user asks about Hassali or mode behavior.");
 
   return classify(prompt, "general_answer", 0.55, "No stronger ASK-I2 intent matched.");

@@ -215,6 +215,13 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+export function normalizeRoutingIntentText(value: string) {
+  return value
+    .replace(/\b(?:buld|buidl|biuld)\b/gi, "build")
+    .replace(/\bfinace\b/gi, "finance")
+    .replace(/\bdashbaord\b/gi, "dashboard");
+}
+
 function contentTokens(value: string) {
   return unique(
     normalize(value)
@@ -250,7 +257,7 @@ function isEllipticalFollowup(value: string) {
   return (
     /^(?:answer|do|build|fix|try|make|continue|explain|compare)\s+(?:it|that|them|the previous (?:question|answer))(?:\s+correctly)?[.!?]*$/i.test(text) ||
     /^(?:think longer(?: and answer)?|why|which one(?:\s+is\s+[^.!?]+)?|more|continue|go on|try again|make (?:it|that) (?:shorter|longer|simpler))[.!?]*$/i.test(text) ||
-    /^(?:give me\s+)?(?:the\s+)?top\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+[^.!?]+)?[.!?]*$/i.test(text) ||
+    /^(?:give me\s+)?(?:the\s+)?top\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+(?:of them|from those|options?))?[.!?]*$/i.test(text) ||
     /^(?:give|name)(?:\s+me)?\s+(?:(?:an?|one)\s+example|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:benefits?|drawbacks?|examples?|options?|reasons?|tools?|ways?))[.!?]*$/i.test(text) ||
     /^(?:what are (?:the )?(?:benefits?|downsides?|drawbacks?|pros?|cons?)|would you personally [^.!?]*(?:it|here))[.!?]*$/i.test(text) ||
     /\b(?:go back to|return to)\b/i.test(text)
@@ -323,7 +330,7 @@ function selectReferencedObjective(
     if (ranked[0]?.score) return ranked[0].objective;
   }
 
-  if (/\b(?:previous question|answer (?:it|that)|think longer|why|which one|compare them|top \w+)\b/i.test(prompt)) {
+  if (/\b(?:previous question|answer (?:it|that)|think longer|why|which one|compare them)\b/i.test(prompt)) {
     return answerableObjectives.at(-1) ?? priorUserObjectives.at(-1) ?? null;
   }
 
@@ -819,25 +826,26 @@ function buildAnswerContract(
 
 export function resolveBehavioralDecision(input: BehavioralDecisionInput): BehavioralDecision {
   const messages = input.messages ?? [];
-  const objectiveState = buildConversationObjectiveState(messages, input.prompt);
+  const currentPrompt = normalizeRoutingIntentText(input.prompt);
+  const objectiveState = buildConversationObjectiveState(messages, currentPrompt);
   const priorObjectives = objectiveState.recentObjectives;
-  const requestedCountFromPrompt = extractRequestedCount(input.prompt);
+  const requestedCountFromPrompt = extractRequestedCount(currentPrompt);
   const referencedObjective = selectReferencedObjective(
-    input.prompt,
+    currentPrompt,
     priorObjectives,
     priorObjectives.filter(isAnswerableObjective),
     priorObjectives.filter(isActionableObjective)
   );
-  const resolvedRequest = resolveFollowup(input.prompt, referencedObjective, requestedCountFromPrompt);
+  const resolvedRequest = resolveFollowup(currentPrompt, referencedObjective, requestedCountFromPrompt);
   const intent = extractIntentConstraints({
     message: resolvedRequest,
     priorMessages: messages,
     selectedMode: input.selectedMode,
     workspace: input.workspace
   });
-  const inferredAction = inferAction(input.prompt, resolvedRequest);
-  const mixedAction = inferMixedMutationAction(input.prompt);
-  const action = input.selectedMode === "WEBSITE" && isExplicitWebsiteFactUpdate(input.prompt)
+  const inferredAction = inferAction(currentPrompt, resolvedRequest);
+  const mixedAction = inferMixedMutationAction(currentPrompt);
+  const action = input.selectedMode === "WEBSITE" && isExplicitWebsiteFactUpdate(currentPrompt)
     ? "EDIT"
     : mixedAction ?? inferredAction;
   const mixedIntent = Boolean(mixedAction);
@@ -853,7 +861,7 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   const requiredOutputs = extractRequiredOutputs(resolvedRequest);
   const ambiguities = unique([
     ...intent.ambiguity,
-    isEllipticalFollowup(input.prompt) && !referencedObjective
+    isEllipticalFollowup(currentPrompt) && !referencedObjective
       ? "The follow-up refers to earlier context, but no relevant conversation objective is available."
       : null
   ]);
@@ -864,13 +872,13 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   const confidence = ambiguities.length
     ? Math.min(intent.confidence, referencedObjective ? 0.72 : 0.45)
     : Math.max(intent.confidence, 0.88);
-  const objective = referencedObjective && isEllipticalFollowup(input.prompt)
+  const objective = referencedObjective && isEllipticalFollowup(currentPrompt)
     ? referencedObjective
-    : input.prompt.trim();
+    : currentPrompt.trim();
   const persistentConstraints = (
     referencedObjective ||
-    isEllipticalFollowup(input.prompt) ||
-    isConstraintOnly(input.prompt)
+    isEllipticalFollowup(currentPrompt) ||
+    isConstraintOnly(currentPrompt)
   )
     ? objectiveState.acceptedConstraints
     : [];
@@ -882,7 +890,7 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
     clarificationRequired,
     mixedIntent,
     mode: input.selectedMode,
-    prompt: input.prompt
+    prompt: currentPrompt
   });
   const initialDisposition: FinalActionDisposition = clarificationRequired
     ? "clarify"
@@ -906,7 +914,7 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
     messages,
     mode: input.selectedMode,
     mutationRequested: normalizedFinalAction.mutationRequested,
-    prompt: input.prompt,
+    prompt: currentPrompt,
     referencedObjective,
     workspace: input.workspace
   });

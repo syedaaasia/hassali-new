@@ -28,6 +28,7 @@ export type AttachmentFailureCode =
   | "ARCHIVE_TOO_LARGE"
   | "ARCHIVE_UNSAFE"
   | "DOCUMENT_UNREADABLE"
+  | "PDF_OCR_UNAVAILABLE"
   | "FILE_TOO_LARGE"
   | "MIME_MISMATCH"
   | "OCR_UNAVAILABLE"
@@ -35,7 +36,7 @@ export type AttachmentFailureCode =
   | "UNSUPPORTED_FORMAT"
   | "UPLOAD_FAILED"
   | "VISION_ANALYSIS_FAILED"
-  | "VISION_PROVIDER_UNAVAILABLE";
+  | "VISION_CAPABILITY_UNAVAILABLE";
 
 export type HassaliAttachment = {
   analysisCapabilities: string[];

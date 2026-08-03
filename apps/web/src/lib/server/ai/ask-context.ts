@@ -78,6 +78,8 @@ const timezoneAliases: Record<string, string> = {
   london: "Europe/London",
   multan: "Asia/Karachi",
   "new york": "America/New_York",
+  "south africa": "Africa/Johannesburg",
+  johannesburg: "Africa/Johannesburg",
   pakistan: "Asia/Karachi",
   peshawar: "Asia/Karachi",
   quetta: "Asia/Karachi",
@@ -728,7 +730,10 @@ export function createDeterministicAskAnswer(
   if (intent === "current_time" || simpleDateTimeQuestion) {
     if (timezoneMatches.length > 1) {
       const now = new Date(context.currentIsoDatetime);
-      return timezoneMatches.map((match) => {
+      const interpretation = timezoneMatches.some((match) => match.label.toLowerCase() === "south africa")
+        ? "Interpreting South Africa using its standard timezone, Africa/Johannesburg.\n"
+        : "";
+      return `${interpretation}${timezoneMatches.map((match) => {
         if (match.source === "unknown") {
           return `- ${match.label}: I could not map this location to a timezone, so I did not guess.`;
         }
@@ -736,7 +741,7 @@ export function createDeterministicAskAnswer(
           return `- ${match.label}: ${formatTime(now, match.timezone)} on ${formatDate(now, match.timezone)} (${match.timezone}).`;
         }
         return `- ${match.label}: ${formatDate(now, match.timezone)} (${match.timezone}).`;
-      }).join("\n");
+      }).join("\n")}`;
     }
 
     if (asksForTime) {

@@ -66,6 +66,8 @@ export type ReactProductPreviewMetadata = {
   copyLines: string[];
   disclaimer: string;
   domain: string;
+  excitementGate: string;
+  jobToBeDone: string;
   metrics: string[];
   productPreviewQuality: {
     distinctLayoutKinds: number;
@@ -105,6 +107,7 @@ export type ReactProductPreviewMetadata = {
     screenId: string;
   }>;
   targetUser: string;
+  workflowMap: string[];
 };
 
 function focusedTodoApp(appName: string) {
@@ -706,7 +709,7 @@ export function generateCrmViteSource(input: {
 }): CodeAppSourceFile[] {
   if (
     input.brief?.productBrief &&
-    !["crm", "inventory_system"].includes(input.brief.productBrief.productType) &&
+    !["crm", "finance_dashboard", "inventory_system"].includes(input.brief.productBrief.productType) &&
     input.brief.productBrief.productType !== "custom_app"
   ) {
     return generateFocusedReactSource({
@@ -852,6 +855,8 @@ export function createReactProductPreviewMetadata(input: {
       copyLines: [product.userGoal],
       disclaimer: "Local browser demo only. No backend, account, cloud sync, or external service is included.",
       domain: product.productType.replace(/_/g, " "),
+      excitementGate: `The first view makes ${product.primaryEntity} work immediately understandable.`,
+      jobToBeDone: product.userGoal,
       metrics: product.coreActions.slice(0, 4),
       productPreviewQuality: {
         distinctLayoutKinds: 1,
@@ -890,7 +895,8 @@ export function createReactProductPreviewMetadata(input: {
         purpose: product.userGoal,
         screenId: slug(label)
       })),
-      targetUser: "A user completing the requested focused workflow"
+      targetUser: "A user completing the requested focused workflow",
+      workflowMap: product.coreActions
     };
   }
 
@@ -901,6 +907,8 @@ export function createReactProductPreviewMetadata(input: {
     copyLines: blueprint.copyLines,
     disclaimer: blueprint.disclaimer,
     domain: blueprint.domain,
+    excitementGate: blueprint.excitementGate,
+    jobToBeDone: blueprint.jobToBeDone,
     metrics: blueprint.metricLabels,
     productPreviewQuality: {
       distinctLayoutKinds: blueprint.screenQualityGate.distinctLayoutKinds,
@@ -932,7 +940,8 @@ export function createReactProductPreviewMetadata(input: {
       purpose: screen.purpose,
       screenId: screen.screenId
     })),
-    targetUser: blueprint.targetUser
+    targetUser: blueprint.targetUser,
+    workflowMap: blueprint.workflowMap
   };
 }
 
@@ -970,7 +979,7 @@ type ReactProductBlueprint = {
   statusOptions: string[];
   targetUser: string;
   tone: string;
-  type: "afforfix" | "crm" | "generic" | "inventory_system" | "safe_client_check" | "tax_dedo";
+  type: "afforfix" | "crm" | "finance_dashboard" | "generic" | "inventory_system" | "safe_client_check" | "tax_dedo";
   workflowMap: string[];
 };
 
@@ -1521,6 +1530,76 @@ function genericScreens(records: ReactProductBlueprint["records"], statusOptions
   ];
 }
 
+function financeDashboardScreens(records: ReactProductBlueprint["records"], statusOptions: string[]): ReactProductScreen[] {
+  return [
+    screen({
+      actions: ["Review monthly totals", "Check balance", "Open recent transactions"],
+      domainVocabulary: ["income", "expenses", "monthly balance", "cash flow"],
+      emptyState: "No finance activity is visible yet.",
+      fields: ["monthly income", "monthly expenses", "balance", "needs review"],
+      label: "Dashboard",
+      layoutKind: "dashboard_overview",
+      metrics: ["Monthly income", "Monthly expenses", "Current balance", "Needs review"],
+      primaryEntity: "monthly finance snapshot",
+      purpose: "Show income, expenses, and current monthly balance at a glance.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add income", "Filter paid entries", "Review income sources"],
+      domainVocabulary: ["income", "source", "received", "pending"],
+      emptyState: "No income entries match this filter.",
+      fields: ["source", "amount", "date", "status"],
+      label: "Income",
+      layoutKind: "payments_revenue",
+      metrics: ["Income total", "Received", "Pending", "Largest source"],
+      primaryEntity: "income entry",
+      purpose: "Track local income records and payment status.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Add expense", "Filter categories", "Flag an expense"],
+      domainVocabulary: ["expenses", "category", "paid", "review"],
+      emptyState: "No expense entries match this filter.",
+      fields: ["expense", "category", "amount", "date"],
+      label: "Expenses",
+      layoutKind: "records_table",
+      metrics: ["Expense total", "Recurring", "One-time", "Needs review"],
+      primaryEntity: "expense entry",
+      purpose: "Keep outgoing money organized by category and status.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Compare totals", "Review trend", "Check ending balance"],
+      domainVocabulary: ["monthly overview", "cash flow", "income versus expenses", "balance"],
+      emptyState: "Add transactions to build a monthly overview.",
+      fields: ["month", "income", "expenses", "balance"],
+      label: "Monthly Overview",
+      layoutKind: "payments_revenue",
+      metrics: ["Income", "Expenses", "Balance", "Savings rate"],
+      primaryEntity: "monthly summary",
+      purpose: "Compare incoming and outgoing money without claiming bank sync.",
+      sampleRecords: records,
+      statusOptions
+    }),
+    screen({
+      actions: ["Review all transactions", "Filter status", "Reset demo data"],
+      domainVocabulary: ["transactions", "local data", "status", "demo records"],
+      emptyState: "No transactions are available yet.",
+      fields: ["description", "type", "amount", "status"],
+      label: "Transactions",
+      layoutKind: "form_and_queue",
+      metrics: ["Transactions", "Income entries", "Expense entries", "Flagged"],
+      primaryEntity: "transaction",
+      purpose: "Add and review local-only finance records in one queue.",
+      sampleRecords: records,
+      statusOptions
+    })
+  ];
+}
+
 function crmScreens(records: ReactProductBlueprint["records"], statusOptions: string[]): ReactProductScreen[] {
   return [
     screen({
@@ -1611,6 +1690,57 @@ function buildReactProductBlueprint(input: {
 }): ReactProductBlueprint {
   const prompt = input.prompt.toLowerCase();
   const productType = input.brief?.productBrief.productType;
+
+  if (
+    productType === "finance_dashboard" ||
+    (/\b(?:finance|financial|money)\b/.test(prompt) && /\b(?:income|expense|balance|cash flow|transaction)\b/.test(prompt))
+  ) {
+    const records = [
+      { amount: 4200, category: "Income", note: "August design retainer received.", owner: "Northstar Studio", status: "received", title: "Client retainer" },
+      { amount: 680, category: "Expense", note: "Software subscriptions for this month.", owner: "Operations", status: "paid", title: "Tool subscriptions" },
+      { amount: 1250, category: "Income", note: "Invoice due this week; kept as pending local demo data.", owner: "Harbor & Co.", status: "pending", title: "Consulting invoice" },
+      { amount: 310, category: "Expense", note: "Internet and workspace costs marked for review.", owner: "Operations", status: "review", title: "Workspace costs" }
+    ];
+    const statusOptions = ["received", "pending", "paid", "review"];
+    const requestedName = input.appName.trim();
+    const appName = requestedName && !/^(?:software app|custom app|react app|web app)$/i.test(requestedName)
+      ? requestedName
+      : "Finance Flow";
+
+    return finalizeBlueprint({
+      appName,
+      copyLines: [
+        "Income, expenses, and this month's balance in one calm view.",
+        "Add local transactions and see the totals change immediately.",
+        "Local finance organizer only - no bank sync or accounting authority."
+      ],
+      disclaimer: "Local finance demo only. No bank connection, backend, cloud sync, payment processing, tax calculation, or accounting advice is included.",
+      domain: "personal and small-business finance tracking",
+      excitementGate: "A user sees monthly income, expenses, current balance, and recent transactions in the first screen.",
+      jobToBeDone: "Help a user track local income and expenses and understand the current monthly balance.",
+      localStorageKey: "hassali-finance-flow-demo",
+      metricLabels: ["Monthly income", "Monthly expenses", "Current balance", "Needs review"],
+      palette: {
+        accent: "#0f766e",
+        accent2: "#eab308",
+        canvas: "#f7faf9",
+        ink: "#17201e",
+        muted: "#64716e",
+        soft: "#d9f3ec",
+        surface: "rgba(255,255,255,0.9)"
+      },
+      primaryActionLabel: "Add transaction",
+      recordLabel: "transaction",
+      records,
+      sections: ["Dashboard", "Income", "Expenses", "Monthly Overview", "Transactions"],
+      screens: financeDashboardScreens(records, statusOptions),
+      statusOptions,
+      targetUser: "freelancers and small operators tracking monthly money locally",
+      tone: "calm, clear, practical, numbers-first",
+      type: "finance_dashboard",
+      workflowMap: ["Add income", "Add expense", "Review monthly balance", "Filter transactions", "Reset demo data"]
+    }, input.prompt);
+  }
 
   if (/\b(?:anthropic|openai|gemini|claude|ai api|api key|browser api|directly from the browser)\b/i.test(input.prompt)) {
     const records = [

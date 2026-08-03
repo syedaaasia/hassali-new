@@ -70,6 +70,7 @@ type OfferFamily =
   | "artwork"
   | "bakery"
   | "beauty"
+  | "electronics"
   | "floral"
   | "professional_service"
   | "retail"
@@ -127,6 +128,7 @@ function offerFamily(prompt: string, semantic: SemanticDomainEvidence): OfferFam
   if (/\b(?:bakery|bake|baked|bread|cake|cakes|pastry|pastries)\b/.test(text)) return "bakery";
   if (/\b(?:flower|flowers|floral|florist|bouquet|wedding flower)\b/.test(text)) return "floral";
   if (/\b(?:beauty|skincare|skin care|cosmetic|makeup|korean beauty)\b/.test(text)) return "beauty";
+  if (/\b(?:electronics|television|tv shop|tv store|smart tv|lcd|led|oled|qled|display|home cinema|soundbar)\b/.test(text)) return "electronics";
   if (/\b(?:software|saas|platform|workflow|automation|lead follow[ -]?up)\b/.test(text)) return "software";
   if (semantic.businessModels.some((model) => model === "retail" || model === "wholesale") || /\b(?:shop|store|ecommerce|e-commerce|retail)\b/.test(text)) return "retail";
   if (semantic.services.length > 0 || semantic.businessModels.includes("service")) return "professional_service";
@@ -236,6 +238,21 @@ function familyDetails(input: {
       publicLabel: "Korean Beauty Collection"
     };
   }
+  if (input.family === "electronics") {
+    return {
+      audience: "local shoppers comparing televisions and home entertainment options",
+      businessType: "television and electronics retailer",
+      coreOffer: "LCD, LED, OLED, QLED, and smart television guidance",
+      mechanism: "compare display types and screen sizes, then ask about current stock, delivery, installation, and warranty support",
+      outcome: "choose a television that fits the room, viewing needs, and budget",
+      offerItems: [
+        { detail: "Compare LCD, LED, OLED, and QLED displays by viewing environment, size, and everyday use.", meta: "Displays", title: "Find the right screen" },
+        { detail: "Ask about current models, delivery options, wall mounting, setup, and home cinema accessories.", meta: "Setup support", title: "Plan delivery and installation" },
+        { detail: "Confirm current pricing, stock, and warranty details directly before purchase.", meta: "Buying guidance", title: "Check current details" }
+      ],
+      publicLabel: "Television & Electronics Store"
+    };
+  }
   if (input.family === "software") {
     const followsLeads = /\bleads?\b[\s\S]{0,50}\bfollow[ -]?up\b|\bfollow[ -]?up\b[\s\S]{0,50}\bleads?\b/i.test(input.prompt);
     return {
@@ -270,7 +287,7 @@ function familyDetails(input: {
     audience: input.semantic.audiences[0] ?? "people comparing relevant options",
     businessType,
     coreOffer,
-    mechanism: "compare the available offer, understand practical details, and use a direct inquiry path",
+    mechanism: "compare the available options, understand what is included, and use a direct inquiry path",
     outcome: `make a more informed ${businessType} decision`,
     offerItems: offerTerms.slice(0, 4).map((term) => ({
       detail: `Review the available ${term.toLowerCase()} details and confirm current scope, availability, pricing, or terms directly.`,

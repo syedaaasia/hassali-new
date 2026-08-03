@@ -69,6 +69,7 @@ for (const [prompt, mode, expectedAction] of nonMutationCases) {
 
 const mutationCases: Array<[string, Mode, BehavioralAction]> = [
   ["Build a simple React todo app.", "CODE", "BUILD"],
+  ["buld me a react mobile app for finace stuff", "CODE", "BUILD"],
   ["Implement authentication.", "CODE", "BUILD"],
   ["Fix this bug.", "CODE", "FIX"],
   ["Refactor this function.", "CODE", "EDIT"],
@@ -268,6 +269,17 @@ test("top-five follow-up resolves the prior objective and count", () => {
   assert.equal(result.requestedCount, 5);
   assert.match(result.resolvedRequest, /vibe coding/i);
   assert.equal(result.referencedObjective, "What is the best tool for vibe coding?");
+});
+
+test("an explicit top-five subject starts a new topic instead of reusing a naming task", () => {
+  const result = decision("Give me the top five tools for vibe coding.", "ASK", [
+    { content: "Give me five names combining Aasia, Mujtaba and Hassan.", role: "user" },
+    { content: "Muhaasia, AhsanIQ, MuhaTech, Hasia AI, Mujassan", role: "assistant" }
+  ]);
+  assert.equal(result.referencedObjective, null);
+  assert.equal(result.resolvedRequest, "Give me the top five tools for vibe coding.");
+  assert.equal(result.requestedCount, 5);
+  assert.doesNotMatch(result.resolvedRequest, /Muhaasia|AhsanIQ|Mujassan/i);
 });
 
 test("think-longer follow-up retains the answerable objective", () => {
@@ -537,13 +549,14 @@ test("one example for each compared technology requires both examples", () => {
 
 test("multi-location deterministic time answers every requested city", () => {
   const answer = createDeterministicAskAnswer(
-    "What time is it in London, New York and Amsterdam?",
+    "What time is it in New York and South Africa?",
     buildAskRuntimeContext(new Date("2026-07-30T12:00:00.000Z"))
   );
   assert(answer);
-  assert.match(answer, /London:/);
   assert.match(answer, /New York:/);
-  assert.match(answer, /Amsterdam:/);
+  assert.match(answer, /South Africa:/);
+  assert.match(answer, /Africa\/Johannesburg/);
+  assert.match(answer, /Interpreting South Africa using its standard timezone/i);
 });
 
 test("todo Product Brief stays focused", () => {
@@ -607,6 +620,20 @@ test("advanced task managers and scientific calculators retain requested scope",
   }).map((file) => file.content).join("\n");
   assert.match(calculatorSource, /sin|cos|tan/);
   assert.match(calculatorSource, /Calculation history/);
+});
+
+test("React finance dashboards preserve income expense and balance scope", () => {
+  const prompt = "Build me a simple React finance dashboard with income, expense, and monthly balance cards.";
+  const brief = buildCodeGenerationBrief(buildCodeIntentContract({ prompt }));
+  assert.equal(brief.productBrief.productType, "finance_dashboard");
+  const files = generateCrmViteSource({ appName: "Custom App", brief, prompt });
+  const content = files.map((file) => file.content).join("\n");
+  assert.match(content, /Finance Flow/);
+  assert.match(content, /Monthly income/);
+  assert.match(content, /Monthly expenses/);
+  assert.match(content, /Current balance/);
+  assert.doesNotMatch(content, /Local Service|grooming|laundry/i);
+  assert.equal(validateCodeProductFidelity(brief.productBrief, files).passed, true);
 });
 
 test("representative product matrix preserves requested product type", () => {
