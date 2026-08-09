@@ -51,6 +51,15 @@ export type ChatMessage = {
   handoff?: ModeHandoff | null;
   providerFailureCategory?: string | null;
   responseKind?: "deterministic_answer" | "identity_response" | "mode_boundary" | "provider_failure" | "safety_response" | "substantive_answer";
+  visualEvidence?: Array<{
+    creator: string | null;
+    id: string;
+    imageUrl: string;
+    license: string | null;
+    licenseUrl: string | null;
+    sourcePageUrl: string;
+    title: string;
+  }>;
 };
 
 export type WorkspaceContext = {
@@ -580,6 +589,23 @@ const defaultModel = hassaliDefaultModelId;
 const proposalMarker = "HASSALI_DIFF_PROPOSAL:";
 const handoffMarker = "HASSALI_MODE_HANDOFF:";
 const generatedImageMarker = "HASSALI_GENERATED_IMAGE:";
+const visualEvidenceMarker = "HASSALI_VISUAL_EVIDENCE:";
+
+function trustedVisualEvidenceUrl(value: string, kind: "image" | "license" | "source") {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    const trusted = kind === "image"
+      ? url.hostname === "upload.wikimedia.org"
+      : kind === "source"
+        ? url.hostname === "commons.wikimedia.org"
+        : url.hostname === "creativecommons.org" || url.hostname.endsWith(".creativecommons.org") || url.hostname === "commons.wikimedia.org";
+    return trusted ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 let activeChatRequest: {
   assistantMessageId: string;
   controller: AbortController;
@@ -1663,6 +1689,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         } catch {
           // Keep the provider text visible if generated-image metadata is malformed.
+        }
+      }
+
+      const visualEvidenceIndex = assistantContent.indexOf(visualEvidenceMarker);
+      if (visualEvidenceIndex !== -1) {
+        const visibleContent = assistantContent.slice(0, visualEvidenceIndex).trim();
+        const rawEvidence = assistantContent.slice(visualEvidenceIndex + visualEvidenceMarker.length).trim();
+        try {
+          const candidates = JSON.parse(rawEvidence) as unknown;
+          const evidence = Array.isArray(candidates) ? candidates.flatMap((candidate) => {
+            if (!isPlainRecord(candidate)) return [];
+            const imageUrl = typeof candidate.imageUrl === "string" ? candidate.imageUrl : "";
+            const sourcePageUrl = typeof candidate.sourcePageUrl === "string" ? candidate.sourcePageUrl : "";
+            const trustedImageUrl = trustedVisualEvidenceUrl(imageUrl, "image");
+            const trustedSourcePageUrl = trustedVisualEvidenceUrl(sourcePageUrl, "source");
+            if (
+              typeof candidate.id !== "string" ||
+              typeof candidate.title !== "string" ||
+              candidate.provider !== "wikimedia-commons" ||
+              !trustedImageUrl ||
+              !trustedSourcePageUrl
+            ) return [];
+            return [{
+              creator: typeof candidate.creator === "string" ? candidate.creator.slice(0, 160) : null,
+              id: candidate.id.slice(0, 200),
+              imageUrl: trustedImageUrl,
+              license: typeof candidate.license === "string" ? candidate.license.slice(0, 160) : null,
+              licenseUrl: typeof candidate.licenseUrl === "string" ? trustedVisualEvidenceUrl(candidate.licenseUrl, "license") : null,
+              sourcePageUrl: trustedSourcePageUrl,
+              title: candidate.title.slice(0, 200)
+            }];
+          }).slice(0, 4) : [];
+          if (evidence.length) {
+            set((state) => ({
+              messages: state.messages.map((message) => message.id === assistantMessage.id
+                ? { ...message, content: visibleContent, visualEvidence: evidence }
+                : message)
+            }));
+            assistantContent = visibleContent;
+          }
+        } catch {
+          // Keep the response visible if source-backed visual metadata is malformed.
         }
       }
 

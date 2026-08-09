@@ -116,6 +116,17 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Large documents use bounded structure-aware chunks and deterministic lexical retrieval. Document citations map to actual filename/page evidence and remain distinct from public web citations.
 - Document evidence is explicitly untrusted, never instruction authority, and never becomes a public research query merely because it was uploaded.
 
+### Vision and media intelligence
+
+- Images normalize into private user, public web, generated, document-render, or video-frame visual artifacts without losing provenance.
+- Image headers and dimensions are validated before analysis. Pixel, byte, image-count, comparison, search-result, generation, and future frame-selection limits are centralized; private image metadata is stripped before provider submission.
+- General image, screenshot, UI-layout, chart, and bounded multi-image analysis use a provider-neutral `VisionProvider`; the current implementation invokes the existing capability/privacy-aware Auto router rather than a second model router.
+- OCR remains owned by document intelligence. Visual intent composes OCR with spatial/chart reasoning only when both add value.
+- Public visual evidence uses a replaceable search contract and a bounded Wikimedia Commons adapter. Every retained image has a safe source-page URL; creator/license fields remain known, restricted, or unknown truthfully.
+- Deterministic asset decisions keep user-supplied, sourced factual, and generated imagery separate. Private history and portfolio claims never receive synthetic evidence as a substitute.
+- Image generation is replaceable behind `ImageGenerationProvider`. The configured OpenAI path retains explicit generated provenance, blocks private reference upload, honors Local-only fail-closed behavior, and reports unavailable capability without fake artifacts.
+- Video and screen-recording work is contract-only: media metadata, timestamped frames, and bounded frame selection exist, while the absent native decoder/runtime is reported truthfully and nothing is installed.
+
 ## Design
 
 ### Direction
@@ -216,4 +227,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 02 I4 checkpoint: `INTELLIGENCE-I4: add metering budgets and Hassali Local foundation`
 - Run 03 I1 checkpoint: `ASK-I1: add utility research routing and verified citations`
 - Run 03 I2 checkpoint: `ASK-I2: add OCR and document intelligence`
+- Run 03 I3 checkpoint: `ASK-I3: add vision and media intelligence`
 - The repository HEAD is authoritative; confirm it with Git before every task.

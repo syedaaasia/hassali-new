@@ -39,7 +39,7 @@ import {
   resolveProjectWorkspace
 } from "@/lib/server/runtime/project-workspace-registry";
 
-const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+const png = new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
 
 test("classifies supported files by extension, MIME, signature, and text shape", () => {
   assert.deepEqual(classifyAttachment({ bytes: png, mimeType: "image/png", name: "screen.png" }), {
@@ -274,7 +274,15 @@ test("vision and image generation report unavailable capability without configur
   delete process.env.OPENAI_API_KEY;
   delete process.env.HASSALI_IMAGE_MODEL;
   try {
-    const result = await analyzeImagesWithVision({ images: [], prompt: "inspect", selectedModel: "tencent/hy3:free" });
+    const result = await analyzeImagesWithVision({
+      images: [{ bytes: png, metadata: {
+        analysisCapabilities: ["vision"], conversationId: "c", createdAt: "x", extractedTextAvailable: false,
+        id: "i", kind: "image", mimeType: "image/png", originalName: "ui.png", previewAvailable: true,
+        projectId: "p", safeName: "ui.png", sizeBytes: png.byteLength, status: "ready", storageScope: "conversation"
+      } }],
+      prompt: "inspect",
+      selectedModel: "tencent/hy3:free"
+    });
     assert.equal(result.completed, false);
     assert.equal(result.failureCode, "VISION_CAPABILITY_UNAVAILABLE");
     assert.equal(imageGenerationCapability().available, false);

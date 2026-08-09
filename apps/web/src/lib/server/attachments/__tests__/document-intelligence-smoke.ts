@@ -21,6 +21,7 @@ import {
 } from "@/lib/server/attachments/document-contract";
 import { assessNativeTextQuality, parseDelimitedTable } from "@/lib/server/attachments/document-native";
 import { OcrProviderRegistry, type OcrProvider } from "@/lib/server/attachments/document-ocr";
+import type { VisionProvider } from "@/lib/server/attachments/visual-contract";
 import { decideAskFreshness } from "@/lib/server/ai/ask-source-reliability";
 import { resolveMultimodalAttachmentContext } from "@/lib/server/attachments/attachment-context";
 import { storeAttachment } from "@/lib/server/attachments/attachment-pipeline";
@@ -387,21 +388,37 @@ test("configured vision OCR receives a bounded rendered PDF page instead of raw 
       storageScope: "conversation",
       workspaceRoot: binding.workspaceRoot
     });
-    let providerBody = "";
+    let renderedMime = "";
+    let renderedPng = false;
+    const visionProvider: VisionProvider = {
+      id: "fixture-vision",
+      async analyzeImage(input) {
+        renderedMime = input.artifacts[0]?.artifact.mimeType ?? "";
+        const rendered = input.artifacts[0]?.bytes;
+        renderedPng = rendered?.[0] === 0x89 && rendered?.[1] === 0x50;
+        return {
+          analysis: {
+            chartFacts: [], confidence: "unknown", objects: [], provider: "fixture-vision", regions: [], relationships: [], spatialFacts: [],
+            summary: "Receipt total: [uncertain] 125.00", visibleText: ["Receipt total: [uncertain] 125.00"], warnings: []
+          },
+          failure: null
+        };
+      },
+      async health() {
+        return { checkedAt: new Date(0).toISOString(), provider: "fixture-vision", reason: null, retryable: false, status: "ready" };
+      }
+    };
     const context = await resolveMultimodalAttachmentContext({
       attachmentIds: [scan.id],
-      fetchImpl: async (_url, init) => {
-        providerBody = String(init?.body ?? "");
-        return Response.json({ choices: [{ message: { content: "Receipt total: [uncertain] 125.00" } }] });
-      },
       ownerId: "owner",
       projectId,
       prompt: "Read this scanned receipt",
       selectedModel: "openrouter/free",
+      visionProvider,
       workspaceRoot: binding.workspaceRoot
     });
-    assert.match(providerBody, /data:image\/png;base64/);
-    assert.doesNotMatch(providerBody, /data:application\/pdf/);
+    assert.equal(renderedMime, "image/png");
+    assert.equal(renderedPng, true);
     assert.match(context.contextText, /Receipt total/);
     assert.equal(context.documentArtifacts[0]?.pages[0]?.extractionMethod, "ocr");
     assert.equal(context.documentArtifacts[0]?.pages[0]?.confidence, "unknown");

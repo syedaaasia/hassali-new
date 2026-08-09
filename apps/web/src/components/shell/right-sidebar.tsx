@@ -1341,6 +1341,33 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                     ))}
                   </div>
                 ) : null}
+                {message.role === "assistant" && message.visualEvidence?.length ? (
+                  <div className="mb-3 grid gap-3 sm:grid-cols-2" data-public-visual-evidence>
+                    {message.visualEvidence.map((visual) => (
+                      <a
+                        aria-label={`Open source page for ${visual.title}`}
+                        className="group overflow-hidden rounded-lg border border-white/10 bg-black/15 transition-colors hover:border-[hsl(var(--premium-accent)/0.45)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--premium-accent))] [.light_&]:border-slate-200 [.light_&]:bg-slate-50"
+                        href={visual.sourcePageUrl}
+                        key={visual.id}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        <span
+                          aria-label={visual.title}
+                          className="block aspect-[16/10] bg-black/20 bg-contain bg-center bg-no-repeat"
+                          role="img"
+                          style={{ backgroundImage: `url("${visual.imageUrl}")` }}
+                        />
+                        <span className="block px-3 py-2">
+                          <span className="block truncate font-medium text-foreground">{visual.title}</span>
+                          <span className="block truncate text-[10px] text-muted-foreground">
+                            {visual.creator ? `${visual.creator} · ` : ""}License: {visual.license ?? "unknown"}
+                          </span>
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="min-h-7 whitespace-pre-wrap break-words">
                   {activity.visibility === "pre-output" ? (
                     <HassaliActivityMascot

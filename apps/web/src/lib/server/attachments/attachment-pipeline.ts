@@ -9,6 +9,8 @@ import {
   type HassaliAttachmentKind
 } from "@/lib/attachments";
 import { isServerOwnedProjectWorkspaceRoot } from "@/lib/server/runtime/workspace-binding";
+import { inspectVisualImage } from "./visual-image-safety";
+import { VisualIntelligenceError } from "./visual-contract";
 
 const codeExtensions = new Set([
   "c", "cs", "css", "go", "html", "java", "js", "jsx", "php", "py", "rs", "scss", "sql", "ts", "tsx", "xml", "yaml", "yml"
@@ -168,6 +170,17 @@ export async function storeAttachment(input: {
     throw new AttachmentPipelineError("FILE_TOO_LARGE", `Files are limited to ${attachmentLimits.individualFileBytes / 1024 / 1024} MB each.`);
   }
   const classification = classifyAttachment(input);
+  if (classification.kind === "image") {
+    try {
+      inspectVisualImage(input.bytes, classification.mimeType);
+    } catch (error) {
+      if (!(error instanceof VisualIntelligenceError)) throw error;
+      throw new AttachmentPipelineError(
+        error.code === "image-too-large" ? "IMAGE_DIMENSIONS_EXCEEDED" : "IMAGE_MALFORMED",
+        error.message
+      );
+    }
+  }
   const id = randomUUID();
   const directory = attachmentDirectory(input.workspaceRoot, id);
   const metadata: StoredAttachmentMetadata = {

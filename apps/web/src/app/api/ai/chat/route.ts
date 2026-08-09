@@ -234,6 +234,7 @@ import {
 } from "@/lib/server/intelligence/current-provider-adapter";
 import {
   invokeAutoIntelligence,
+  listIntelligenceSources,
   streamAutoIntelligence
 } from "@/lib/server/intelligence/intelligence-source-service";
 import type { IntelligenceStreamEvent } from "@/lib/server/intelligence/intelligence-contract";
@@ -248,6 +249,11 @@ import {
   generateImageToAttachment,
   resolveMultimodalAttachmentContext
 } from "@/lib/server/attachments/attachment-context";
+import {
+  decideVisualAsset,
+  formatPublicVisualAnswer,
+  searchPublicVisualEvidence
+} from "@/lib/server/attachments/visual-intelligence";
 import {
   createProjectAssetChange,
   shouldPromoteUploadedImages
@@ -5814,8 +5820,26 @@ export async function POST(request: Request) {
     ? body.attachmentIds.filter((value): value is string => typeof value === "string")
     : [];
   let multimodalContext: Awaited<ReturnType<typeof resolveMultimodalAttachmentContext>> | null = null;
-  const asksForImageGeneration = /\b(?:generate|create|make)\b[\s\S]{0,50}\b(?:image|illustration|artwork|hero visual|picture)\b/i.test(rawEffectiveUserPrompt);
-  if (asksForImageGeneration && productMode === "ASK" && attachmentIds.length === 0) {
+  const visualAssetDecision = decideVisualAsset({
+    hasUserImages: attachmentIds.length > 0,
+    prompt: rawEffectiveUserPrompt
+  });
+  if (productMode === "ASK" && attachmentIds.length === 0 && visualAssetDecision.reasonCode === "PRIVATE_HISTORY_REQUIRES_EVIDENCE") {
+    return createTextStream("I need real user-provided or source-backed images for private history or previous work. Attach the actual images or provide a public source; I will not generate synthetic portfolio evidence.");
+  }
+  if (productMode === "ASK" && attachmentIds.length === 0 && visualAssetDecision.action === "SOURCE_REAL_IMAGE") {
+    if (researchPolicy === "no-search") {
+      return createTextStream("You asked Hassali not to search the web, so I cannot retrieve a real public image for this request. I will not generate a synthetic substitute and present it as factual evidence.");
+    }
+    const visualSearch = await searchPublicVisualEvidence({
+      prompt: rawEffectiveUserPrompt,
+      signal: taskSignal
+    });
+    return createTextStream(visualSearch.failure
+      ? visualSearch.failure.safeMessage
+      : formatPublicVisualAnswer(visualSearch.results));
+  }
+  if (visualAssetDecision.action === "GENERATE_IMAGE" && productMode === "ASK" && attachmentIds.length === 0) {
     if (!requestedProjectId) {
       return createTextStream("Select a project so Hassali can scope the generated image safely. ASK will stage it for this conversation and will not add it to project files.");
     }
@@ -5824,6 +5848,13 @@ export async function POST(request: Request) {
     await listUserProjectFiles({ externalUserId: userId, projectId: requestedProjectId });
     const binding = await resolveProjectWorkspace(requestedProjectId);
     if (isWorkspaceBindingError(binding)) return Response.json({ error: binding.error }, { status: binding.status });
+    const intelligence = await listIntelligenceSources(userId).catch(() => null);
+    if (!intelligence) {
+      return createTextStream("Image generation is unavailable because Hassali could not verify the current privacy policy. No provider call was made.");
+    }
+    if (intelligence?.routing.privacy === "local-only") {
+      return createTextStream("Image generation is unavailable in Local only mode because no local image-generation provider is configured. Hassali made no cloud call.");
+    }
     const generated = await generateImageToAttachment({
       conversationId: typeof body?.chatSessionId === "string" ? body.chatSessionId : `draft-${requestedProjectId}`,
       ownerId: userId,
@@ -5854,6 +5885,7 @@ export async function POST(request: Request) {
       }
       multimodalContext = await resolveMultimodalAttachmentContext({
         attachmentIds,
+        modelSelectionPolicy,
         ownerId: userId,
         projectId: requestedProjectId,
         prompt: rawEffectiveUserPrompt,
@@ -6498,6 +6530,7 @@ export async function POST(request: Request) {
             documentPageCount: multimodalContext.documentArtifacts.reduce((total, document) => total + document.pageCount, 0),
             failureCode: multimodalContext.failureCode,
             ocrPageCount: multimodalContext.documentArtifacts.reduce((total, document) => total + document.inspection.ocrPages.length, 0),
+            visualArtifactCount: multimodalContext.visualArtifacts.length,
             visionAttempted: multimodalContext.visionAttempted,
             visionCompleted: multimodalContext.visionCompleted,
             visionModel: multimodalContext.visionModel
