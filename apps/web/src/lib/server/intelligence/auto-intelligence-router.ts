@@ -13,6 +13,13 @@ import {
   type IntelligenceResult,
   type IntelligenceStreamResult
 } from "./intelligence-contract";
+import {
+  estimateRequestCostMicros,
+  evaluateBudgetCandidate,
+  intelligenceCostScope,
+  type IntelligenceBudgetContext,
+  type IntelligenceCostScope
+} from "./intelligence-budget";
 
 export type IntelligenceRoutingPrivacy = "allow-cloud" | "local-only" | "prefer-local";
 export type IntelligenceTaskTier = "complex" | "simple" | "specialist" | "standard";
@@ -35,6 +42,7 @@ export type IntelligenceRoutingReasonCode =
 
 export type AutoRoutingPreferences = {
   allowFallback?: boolean;
+  budget?: IntelligenceBudgetContext;
   explicitOverride?: {
     adapterId: string;
     modelId: string;
@@ -47,7 +55,10 @@ export type AutoRoutingPreferences = {
 
 export type IntelligenceRouteCandidate = {
   adapterId: string;
+  budgetWarnings: string[];
   computeSource: IntelligenceAdapter["computeSource"];
+  costScope: IntelligenceCostScope;
+  estimatedRequestCostMicros: number | null;
   health: IntelligenceHealth["status"];
   isLocal: boolean;
   knownCostPerMillion: number | null;
@@ -74,6 +85,7 @@ export type AutoInvocationResult<T extends IntelligenceResult | IntelligenceStre
   attempts: number;
   decision: AutoRoutingDecision | null;
   fallbackUsed: boolean;
+  primaryFailureCategory: IntelligenceFailure["category"] | null;
   result: T;
 };
 
@@ -306,6 +318,7 @@ export class AutoIntelligenceRouter {
       };
     }));
     const rejectedCapabilities = new Set<IntelligenceCapability>();
+    let rejectedByBudget = false;
     const candidates: InternalCandidate[] = [];
 
     for (const source of sources) {
@@ -362,6 +375,17 @@ export class AutoIntelligenceRouter {
         }
         if (source.adapter.defaultModelId?.toLowerCase() === model.modelId.toLowerCase()) score += 20;
         const cost = knownCost(model);
+        const scope = intelligenceCostScope(source.adapter.computeSource);
+        const estimatedRequestCostMicros = estimateRequestCostMicros(request, model);
+        const budget = evaluateBudgetCandidate({
+          context: preferences.budget,
+          estimatedCostMicros: estimatedRequestCostMicros,
+          scope
+        });
+        if (!budget.eligible) {
+          rejectedByBudget = true;
+          continue;
+        }
         const economicScore = costScore(cost);
         score += economicScore;
         if (economicScore) reasons.push("LOWER_KNOWN_COST");
@@ -369,7 +393,10 @@ export class AutoIntelligenceRouter {
         candidates.push({
           adapter: source.adapter,
           adapterId: source.adapter.id,
+          budgetWarnings: budget.warnings,
           computeSource: source.adapter.computeSource,
+          costScope: scope,
+          estimatedRequestCostMicros,
           health: source.health.status,
           isLocal: isLocal(source.adapter),
           knownCostPerMillion: cost,
@@ -392,6 +419,16 @@ export class AutoIntelligenceRouter {
     const primary = candidates[0];
     if (!primary) {
       const required = [...rejectedCapabilities][0];
+      if (rejectedByBudget) {
+        return {
+          ok: false,
+          failure: routingFailure({
+            category: "invalid-request",
+            code: "STRICT_BUDGET_NO_ELIGIBLE_MODEL",
+            message: "No reliably capable managed model can prove it is within the configured strict budget."
+          })
+        };
+      }
       if (preferences.privacy === "local-only") {
         return {
           ok: false,
@@ -423,7 +460,10 @@ export class AutoIntelligenceRouter {
 
     const publicCandidate = (candidate: InternalCandidate): IntelligenceRouteCandidate => ({
       adapterId: candidate.adapterId,
+      budgetWarnings: candidate.budgetWarnings,
       computeSource: candidate.computeSource,
+      costScope: candidate.costScope,
+      estimatedRequestCostMicros: candidate.estimatedRequestCostMicros,
       health: candidate.health,
       isLocal: candidate.isLocal,
       knownCostPerMillion: candidate.knownCostPerMillion,
@@ -465,7 +505,7 @@ export class AutoIntelligenceRouter {
   async invoke(input: IntelligenceRequest, preferences: AutoRoutingPreferences): Promise<AutoInvocationResult<IntelligenceResult>> {
     const request = normalizeIntelligenceRequest(input);
     const resolution = await this.resolve(request, preferences);
-    if (!resolution.ok) return { attempts: 0, decision: null, fallbackUsed: false, result: { ok: false, failure: resolution.failure } };
+    if (!resolution.ok) return { attempts: 0, decision: null, fallbackUsed: false, primaryFailureCategory: null, result: { ok: false, failure: resolution.failure } };
     const scopeId = preferences.scopeId?.trim() || "default";
     const invokeCandidate = (candidate: IntelligenceRouteCandidate) => this.candidate(candidate).invoke({
       ...request,
@@ -478,7 +518,7 @@ export class AutoIntelligenceRouter {
     const primaryResult = await invokeCandidate(resolution.decision.primary);
     if (primaryResult.ok || !retryableFallbackCategories.has(primaryResult.failure.category) || !resolution.decision.fallback) {
       if (!primaryResult.ok) rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
-      return { attempts: 1, decision: resolution.decision, fallbackUsed: false, result: primaryResult };
+      return { attempts: 1, decision: resolution.decision, fallbackUsed: false, primaryFailureCategory: null, result: primaryResult };
     }
     rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
     const fallback = {
@@ -491,6 +531,7 @@ export class AutoIntelligenceRouter {
       attempts: 2,
       decision: { ...resolution.decision, fallback },
       fallbackUsed: true,
+      primaryFailureCategory: primaryResult.failure.category,
       result: fallbackResult
     };
   }
@@ -498,7 +539,7 @@ export class AutoIntelligenceRouter {
   async stream(input: IntelligenceRequest, preferences: AutoRoutingPreferences): Promise<AutoInvocationResult<IntelligenceStreamResult>> {
     const request = normalizeIntelligenceRequest({ ...input, stream: true });
     const resolution = await this.resolve(request, preferences);
-    if (!resolution.ok) return { attempts: 0, decision: null, fallbackUsed: false, result: { ok: false, failure: resolution.failure } };
+    if (!resolution.ok) return { attempts: 0, decision: null, fallbackUsed: false, primaryFailureCategory: null, result: { ok: false, failure: resolution.failure } };
     const scopeId = preferences.scopeId?.trim() || "default";
     const streamCandidate = (candidate: IntelligenceRouteCandidate): Promise<IntelligenceStreamResult> => {
       const adapter = this.candidate(candidate);
@@ -525,7 +566,7 @@ export class AutoIntelligenceRouter {
     const primaryResult = await streamCandidate(resolution.decision.primary);
     if (primaryResult.ok || !retryableFallbackCategories.has(primaryResult.failure.category) || !resolution.decision.fallback) {
       if (!primaryResult.ok) rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
-      return { attempts: 1, decision: resolution.decision, fallbackUsed: false, result: primaryResult };
+      return { attempts: 1, decision: resolution.decision, fallbackUsed: false, primaryFailureCategory: null, result: primaryResult };
     }
     rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
     const fallback = {
@@ -538,6 +579,7 @@ export class AutoIntelligenceRouter {
       attempts: 2,
       decision: { ...resolution.decision, fallback },
       fallbackUsed: true,
+      primaryFailureCategory: primaryResult.failure.category,
       result: fallbackResult
     };
   }

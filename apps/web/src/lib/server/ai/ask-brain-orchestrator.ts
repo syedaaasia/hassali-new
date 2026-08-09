@@ -825,6 +825,7 @@ async function fetchOpenRouterText(input: {
 export function createAutoAskProviderCall(input: {
   modelSelectionPolicy: AskModelSelectionPolicy;
   productMode: "ASK" | "CODE" | "WEBSITE";
+  projectId?: string | null;
   userId: string | null;
 }): AskProviderCall {
   return async (call) => {
@@ -842,6 +843,7 @@ export function createAutoAskProviderCall(input: {
           parts: [{ text: message.content, type: "text" }],
           role: message.role
         })),
+        metadata: { projectId: input.projectId ?? undefined },
         mode: input.productMode,
         requestedModel: call.model,
         requiredCapabilities: call.webSearch ? ["text", "webResearch"] : ["text"],

@@ -6191,6 +6191,7 @@ export async function POST(request: Request) {
       providerCall: createAutoAskProviderCall({
         modelSelectionPolicy,
         productMode,
+        projectId: requestedProjectId,
         userId: specialistPersistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
@@ -6715,6 +6716,7 @@ export async function POST(request: Request) {
       providerCall: createAutoAskProviderCall({
         modelSelectionPolicy,
         productMode,
+        projectId: requestedProjectId,
         userId: persistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
@@ -6847,6 +6849,7 @@ export async function POST(request: Request) {
       providerCall: createAutoAskProviderCall({
         modelSelectionPolicy,
         productMode,
+        projectId: requestedProjectId,
         userId: persistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
@@ -7304,6 +7307,7 @@ export async function POST(request: Request) {
           parts: [{ text: message.content, type: "text" }],
           role: message.role
         })),
+        metadata: { projectId: requestedProjectId ?? undefined },
         mode: productMode,
         requestedModel: model,
         requiredCapabilities: ["text", "structuredOutput"],
@@ -7599,7 +7603,8 @@ export async function POST(request: Request) {
         parts: [{ text: redactWorkspaceSecrets(message.content).redacted, type: "text" as const }],
         role: message.role
       }))
-    ],
+      ],
+      metadata: { projectId: requestedProjectId ?? undefined },
       mode: "ASK",
       requestedModel: model,
       requiredCapabilities: ["text", "streaming"],

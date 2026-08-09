@@ -142,7 +142,7 @@ I-08 | Compatible endpoint | Configure HTTPS or approved loopback endpoint | Saf
 I-09 | Streaming/tools | Normalize SSE text, usage, tool calls, and completion | Provider framing does not escape adapter boundary
 I-10 | Current provider | Run ASK/proposal via current configured provider | Contract path used; response behavior remains intact
 I-11 | Fallback | Primary current provider fails | At most one existing secondary attempt; no loop or unrelated answer
-I-12 | Secret boundary | Save OpenRouter BYOK for user A | Encrypted server-session storage; key absent from API/client/log-safe metadata and user B
+I-12 | Secret boundary | Save OpenRouter BYOK for user A | AES-GCM encrypted durable storage when master key exists, encrypted session-only otherwise; no client/user-B access
 I-13 | Disconnect | Disconnect a BYOK/local source | Hassali config and credential removed; external runtime untouched
 I-14 | Local URL | Configure localhost/127.0.0.1/::1 and remote/private URL | Loopback accepted; credentials, redirects, and non-loopback hosts rejected
 I-15 | OpenRouter discovery | Test valid/invalid BYOK | Models normalize on success; invalid key reports authentication-failed without provider detail
@@ -158,6 +158,20 @@ I-24 | Auto economics | Compare degraded cheap and ready verified models | Relia
 I-25 | Auto fallback | Primary has retryable/non-retryable or streaming failure | At most one eligible fallback; none after output or invalid request
 I-26 | Auto override | Lock valid/incapable source and model | Valid override honored; invalid override fails without substitution
 I-27 | Auto determinism | Resolve identical request/source state twice | Same primary and fallback decision
+I-28 | Meter success | Complete one inference request | One metadata-only request record with normalized source/model/tokens/latency/outcome
+I-29 | Meter fallback | Primary fails and fallback succeeds | One request record, two bounded attempts, final source retained
+I-30 | Meter privacy | Meter prompt/file-bearing request | No prompt, file body, credential, or raw provider payload is stored
+I-31 | Meter resilience | Usage persistence fails after inference | Successful inference remains successful; safe operational warning emitted
+I-32 | Cost truth | Provider omits cost or inference is local | Unknown remains null/unknown; local is not-applicable, never fake zero cost
+I-33 | Budget Off/Warn | Candidate exceeds configured limit | Off preserves behavior; Warn remains eligible and carries a warning
+I-34 | Budget Strict | Managed cost exceeds or cannot prove limit | Candidate excluded with stable strict-budget failure
+I-35 | Budget ordering | Cheap incapable model competes with capable model | Capability and privacy remain hard gates before economics
+I-36 | Durable secret | Persist, restart-hydrate, tamper, and disconnect | Correct user decrypts; tamper/wrong user fails; disconnect deletes ciphertext and session copy
+I-37 | Missing master key | Save BYOK without durable key configuration | No plaintext persistence; UI states encrypted session-only behavior
+I-38 | Hassali Local protocol | Normalize mismatched/unpaired bridge data | Mismatch fails; unpaired bridge exposes no runtimes or models
+I-39 | Hassali Local safety | Validate origin, endpoint, checksum, license, and resource defaults | Exact origin/loopback required; credentials rejected in URLs; unknown proof stays unknown
+I-40 | Hassali Local truth | Open Settings without a native companion | Foundation-only/not installed/not paired; no fake models or install controls
+I-41 | Workspace defaults | Open a project and ASK notes | Project Panel and Project Notes start collapsed; both manual toggles remain
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers

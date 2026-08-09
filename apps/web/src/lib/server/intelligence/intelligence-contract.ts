@@ -173,7 +173,7 @@ export type IntelligenceUsage = {
   cost: {
     amount: number | null;
     currency: string | null;
-    source: "actual" | "estimated" | "unknown";
+    source: "actual" | "estimated" | "not-applicable" | "unknown";
   };
   inputTokens: number | null;
   latencyMs: number;

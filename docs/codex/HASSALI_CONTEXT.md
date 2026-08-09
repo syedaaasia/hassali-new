@@ -88,11 +88,12 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - ASK, proposal generation, and legacy streaming inference use one deterministic Auto router behind this contract. It applies privacy, enabled-source, hard-capability, health, mode-fit, reliability, and known-cost rules before invocation.
 - Auto never treats unknown required capability support as supported. It chooses one primary and at most one independently eligible fallback; the current cloud path preserves its verified `openrouter/free` secondary preference.
 - Health and model discovery are bounded in-memory caches. Recent retryable failures receive short cooldowns, while authentication failures temporarily exclude that source without retry storms.
-- Routing privacy is session-scoped per user: Allow cloud, Prefer local, or Local only. Local only cannot invoke cloud and fails truthfully when no capable local model is ready.
-- Settings -> Intelligence exposes the current environment-managed path, OpenRouter BYOK, Ollama, and llama.cpp connections without changing current chat selection.
-- OpenRouter keys are scoped to the authenticated Clerk user, AES-GCM encrypted in server memory, never returned to the browser, and cleared by disconnect or server restart. Durable encrypted key persistence is intentionally deferred until Hassali has an approved secret store.
+- Routing privacy and the compact Off/Warn/Strict budget policy are persisted per user. Local only cannot invoke cloud; Strict excludes managed candidates whose monetary ceiling cannot be proven.
+- Settings -> Intelligence exposes the environment-managed path, OpenRouter BYOK, Ollama, llama.cpp, separate managed/BYOK/local usage, budget limits, and truthful Hassali Local foundation status.
+- Intelligence metering stores one metadata-only record per request, including at most two attempts, provider/model/source, tokens, latency, outcome, and actual/estimated/unknown/not-applicable cost. It never stores prompts, files, credentials, or provider payloads.
+- OpenRouter keys are user-scoped and AES-256-GCM encrypted. With `HASSALI_INTELLIGENCE_MASTER_KEY`, ciphertext, unique IV, authentication tag, key version, and user/source AAD persist in PostgreSQL; otherwise credentials remain encrypted in server memory for the session only. Disconnect removes both copies.
 - Ollama and llama.cpp connections accept loopback endpoints only, reject redirects, and never install, start, stop, pull, or delete models. Health and discovery are explicit, bounded actions rather than render-time polling.
-- Arbitrary compatible endpoints, durable BYOK storage, metering, budgets, hardware detection, and Hassali Local are not part of this checkpoint.
+- Hassali Local currently provides protocol, pairing/origin, hardware/benchmark, model-pack/license/checksum, and conservative resource-policy contracts only. No native companion, hardware probe, model, installer, download, or routing candidate ships in this checkpoint.
 
 ## Design
 
@@ -191,4 +192,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 02 I1 checkpoint: `INTELLIGENCE-I1: add provider-independent inference contract`
 - Run 02 I2 checkpoint: `INTELLIGENCE-I2: add BYOK and local provider connections`
 - Run 02 I3 checkpoint: `INTELLIGENCE-I3: add capability-aware automatic routing`
+- Run 02 I4 checkpoint: `INTELLIGENCE-I4: add metering budgets and Hassali Local foundation`
 - The repository HEAD is authoritative; confirm it with Git before every task.

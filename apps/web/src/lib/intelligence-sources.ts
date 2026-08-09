@@ -3,6 +3,7 @@ import type {
   IntelligenceHealthStatus
 } from "@/lib/server/intelligence/intelligence-contract";
 import type { IntelligenceRoutingPrivacy } from "@/lib/server/intelligence/auto-intelligence-router";
+import type { IntelligenceBudgetMode } from "@/lib/server/intelligence/intelligence-budget";
 
 export const configurableIntelligenceSourceIds = [
   "openrouter-byok",
@@ -43,16 +44,39 @@ export type IntelligenceSourceSummary = {
   label: string;
   modelCount: number;
   models: IntelligenceSourceModelSummary[];
-  persistence: "environment" | "server-session";
+  persistence: "durable-encrypted" | "environment" | "server-session";
 };
 
 export type IntelligenceSourcesResponse = {
+  budget: {
+    byokMonthlyWarningLimitUsd: number | null;
+    managedMonthlyLimitUsd: number | null;
+    managedPerRequestLimitUsd: number | null;
+    mode: IntelligenceBudgetMode;
+  };
   disclosure: string;
+  local: {
+    companionInstalled: false;
+    companionPaired: false;
+    modelsAvailable: 0;
+    protocolVersion: string;
+    status: "foundation-only";
+  };
   routing: {
     mode: "auto";
     privacy: IntelligenceRoutingPrivacy;
   };
   sources: IntelligenceSourceSummary[];
+  usage: {
+    byokCostUsd: number;
+    byokRequests: number;
+    localRequests: number;
+    managedCostUsd: number;
+    managedUnknownCostRequests: number;
+    periodStart: string;
+    requestCount: number;
+    totalTokens: number;
+  };
 };
 
 export function isConfigurableIntelligenceSourceId(

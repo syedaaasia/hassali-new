@@ -61,7 +61,7 @@ test("session vault encrypts credentials, isolates users, and emits client-safe 
 
 test("OpenRouter BYOK health and model metadata stay normalized without returning the key", async () => {
   intelligenceSourceSessionVault.reset();
-  configureIntelligenceSource({ apiKey: "secret-openrouter-key", enabled: true, sourceId: "openrouter-byok", userId: "route-user" });
+  await configureIntelligenceSource({ apiKey: "secret-openrouter-key", enabled: true, sourceId: "openrouter-byok", userId: "route-user" });
   let calls = 0;
   const fetchImpl: IntelligenceFetch = async (url, init) => {
     calls += 1;
@@ -84,14 +84,14 @@ test("OpenRouter BYOK health and model metadata stay normalized without returnin
   assert.equal(result.models[0]?.contextLimit, 128000);
   assert(result.models[0]?.capabilities.includes("vision"));
   assert(calls >= 2);
-  const clientPayload = JSON.stringify(listIntelligenceSources("route-user"));
+  const clientPayload = JSON.stringify(await listIntelligenceSources("route-user"));
   assert(!clientPayload.includes("secret-openrouter-key"));
   assert(!clientPayload.includes("Authorization"));
 });
 
 test("OpenRouter authentication failure is reported as authentication-failed", async () => {
   intelligenceSourceSessionVault.reset();
-  configureIntelligenceSource({ apiKey: "bad-key", enabled: true, sourceId: "openrouter-byok", userId: "auth-user" });
+  await configureIntelligenceSource({ apiKey: "bad-key", enabled: true, sourceId: "openrouter-byok", userId: "auth-user" });
   const result = await testIntelligenceSourceConnection(
     "auth-user",
     "openrouter-byok",
@@ -103,7 +103,7 @@ test("OpenRouter authentication failure is reported as authentication-failed", a
 
 test("OpenRouter BYOK inference uses the configured adapter without exposing its credential", async () => {
   intelligenceSourceSessionVault.reset();
-  configureIntelligenceSource({ apiKey: "inference-key", enabled: true, sourceId: "openrouter-byok", userId: "inference-user" });
+  await configureIntelligenceSource({ apiKey: "inference-key", enabled: true, sourceId: "openrouter-byok", userId: "inference-user" });
   const source = intelligenceSourceSessionVault.get("inference-user", "openrouter-byok");
   assert(source);
   const adapter = createConfiguredSourceAdapter({
@@ -127,7 +127,7 @@ test("OpenRouter BYOK inference uses the configured adapter without exposing its
 
 test("oversized discovery responses fail closed as degraded without parsing the payload", async () => {
   intelligenceSourceSessionVault.reset();
-  configureIntelligenceSource({ apiKey: "bounded-key", enabled: true, sourceId: "openrouter-byok", userId: "bounded-user" });
+  await configureIntelligenceSource({ apiKey: "bounded-key", enabled: true, sourceId: "openrouter-byok", userId: "bounded-user" });
   const result = await testIntelligenceSourceConnection("bounded-user", "openrouter-byok", async () => new Response("{}", {
     headers: { "content-length": String(5 * 1024 * 1024), "content-type": "application/json" },
     status: 200
@@ -138,7 +138,7 @@ test("oversized discovery responses fail closed as degraded without parsing the 
 
 test("Ollama discovery preserves local format, size, and quantization without installing or starting anything", async () => {
   intelligenceSourceSessionVault.reset();
-  configureIntelligenceSource({
+  await configureIntelligenceSource({
     enabled: true,
     endpointUrl: "http://127.0.0.1:11434",
     sourceId: "ollama",
@@ -164,7 +164,7 @@ test("Ollama discovery preserves local format, size, and quantization without in
 
 test("llama.cpp normalizes loading and discovers models from an endpoint ending in v1", async () => {
   intelligenceSourceSessionVault.reset();
-  configureIntelligenceSource({
+  await configureIntelligenceSource({
     enabled: true,
     endpointUrl: "http://localhost:8080/v1",
     sourceId: "llama-cpp",
@@ -216,23 +216,23 @@ test("local adapters execute text inference through the I1 OpenAI-compatible con
   if (result.ok) assert.equal(result.response.content[0]?.text, "Local answer");
 });
 
-test("disable, reconnect, and disconnect stay deterministic and user-scoped", () => {
+test("disable, reconnect, and disconnect stay deterministic and user-scoped", async () => {
   intelligenceSourceSessionVault.reset();
-  configureIntelligenceSource({ enabled: false, endpointUrl: "http://localhost:11434", sourceId: "ollama", userId: "owner" });
-  assert.equal(listIntelligenceSources("owner").sources.find((source) => source.id === "ollama")?.enabled, false);
-  assert.equal(listIntelligenceSources("other").sources.find((source) => source.id === "ollama")?.configured, false);
-  configureIntelligenceSource({ enabled: true, endpointUrl: "http://localhost:11434", sourceId: "ollama", userId: "owner" });
-  assert.equal(listIntelligenceSources("owner").sources.find((source) => source.id === "ollama")?.enabled, true);
-  disconnectIntelligenceSource("owner", "ollama");
-  assert.equal(listIntelligenceSources("owner").sources.find((source) => source.id === "ollama")?.configured, false);
+  await configureIntelligenceSource({ enabled: false, endpointUrl: "http://localhost:11434", sourceId: "ollama", userId: "owner" });
+  assert.equal((await listIntelligenceSources("owner")).sources.find((source) => source.id === "ollama")?.enabled, false);
+  assert.equal((await listIntelligenceSources("other")).sources.find((source) => source.id === "ollama")?.configured, false);
+  await configureIntelligenceSource({ enabled: true, endpointUrl: "http://localhost:11434", sourceId: "ollama", userId: "owner" });
+  assert.equal((await listIntelligenceSources("owner")).sources.find((source) => source.id === "ollama")?.enabled, true);
+  await disconnectIntelligenceSource("owner", "ollama");
+  assert.equal((await listIntelligenceSources("owner")).sources.find((source) => source.id === "ollama")?.configured, false);
 });
 
-test("enabled connections register beside the unchanged current provider without changing selection", () => {
+test("enabled connections register beside the unchanged current provider without changing selection", async () => {
   intelligenceSourceSessionVault.reset();
-  configureIntelligenceSource({ apiKey: "registry-key", enabled: true, sourceId: "openrouter-byok", userId: "registry-user" });
-  configureIntelligenceSource({ enabled: true, endpointUrl: "http://localhost:11434", sourceId: "ollama", userId: "registry-user" });
-  configureIntelligenceSource({ enabled: false, endpointUrl: "http://localhost:8080", sourceId: "llama-cpp", userId: "registry-user" });
-  const ids = createAvailableIntelligenceRegistryForUser("registry-user").list().map((adapter) => adapter.id).sort();
+  await configureIntelligenceSource({ apiKey: "registry-key", enabled: true, sourceId: "openrouter-byok", userId: "registry-user" });
+  await configureIntelligenceSource({ enabled: true, endpointUrl: "http://localhost:11434", sourceId: "ollama", userId: "registry-user" });
+  await configureIntelligenceSource({ enabled: false, endpointUrl: "http://localhost:8080", sourceId: "llama-cpp", userId: "registry-user" });
+  const ids = (await createAvailableIntelligenceRegistryForUser("registry-user")).list().map((adapter) => adapter.id).sort();
   assert.deepEqual(ids, ["ollama", "openrouter", "openrouter-byok"]);
 });
 

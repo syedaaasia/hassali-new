@@ -15,6 +15,13 @@
       "when": 1779200654860,
       "tag": "0001_easy_franklin_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786245632968,
+      "tag": "0002_zippy_freak",
+      "breakpoints": true
     }
   ]
 }

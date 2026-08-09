@@ -3,6 +3,9 @@ import { aiRequests } from "./ai-requests";
 import { chatMessages } from "./chat-messages";
 import { chatSessions } from "./chat-sessions";
 import { files } from "./files";
+import { intelligencePreferences } from "./intelligence-preferences";
+import { intelligenceSourceConnections } from "./intelligence-source-connections";
+import { intelligenceUsageRecords } from "./intelligence-usage-records";
 import { projects } from "./projects";
 import { prompts } from "./prompts";
 import { snapshots } from "./snapshots";
@@ -10,10 +13,13 @@ import { usageEvents } from "./usage-events";
 import { users } from "./users";
 import { workspaces } from "./workspaces";
 
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ many, one }) => ({
   aiRequests: many(aiRequests),
   chatMessages: many(chatMessages),
   chatSessions: many(chatSessions),
+  intelligencePreferences: one(intelligencePreferences),
+  intelligenceSourceConnections: many(intelligenceSourceConnections),
+  intelligenceUsageRecords: many(intelligenceUsageRecords),
   prompts: many(prompts),
   snapshots: many(snapshots),
   usageEvents: many(usageEvents),
@@ -36,6 +42,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   aiRequests: many(aiRequests),
   chatSessions: many(chatSessions),
   files: many(files),
+  intelligenceUsageRecords: many(intelligenceUsageRecords),
   prompts: many(prompts),
   snapshots: many(snapshots)
 }));
@@ -113,6 +120,31 @@ export const usageEventsRelations = relations(usageEvents, ({ one }) => ({
   }),
   user: one(users, {
     fields: [usageEvents.userId],
+    references: [users.id]
+  })
+}));
+
+export const intelligencePreferencesRelations = relations(intelligencePreferences, ({ one }) => ({
+  user: one(users, {
+    fields: [intelligencePreferences.userId],
+    references: [users.id]
+  })
+}));
+
+export const intelligenceSourceConnectionsRelations = relations(intelligenceSourceConnections, ({ one }) => ({
+  user: one(users, {
+    fields: [intelligenceSourceConnections.userId],
+    references: [users.id]
+  })
+}));
+
+export const intelligenceUsageRecordsRelations = relations(intelligenceUsageRecords, ({ one }) => ({
+  project: one(projects, {
+    fields: [intelligenceUsageRecords.projectId],
+    references: [projects.id]
+  }),
+  user: one(users, {
+    fields: [intelligenceUsageRecords.userId],
     references: [users.id]
   })
 }));

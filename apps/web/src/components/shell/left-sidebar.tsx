@@ -120,7 +120,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set());
   const [expandedSections, setExpandedSections] = useState<Record<SidebarSection, boolean>>({
     git: false,
-    projects: true,
+    projects: false,
     search: false,
     workspace: true
   });

@@ -14,6 +14,13 @@ type Draft = {
   endpointUrl: string;
 };
 
+type BudgetDraft = {
+  byokMonthlyWarningLimitUsd: string;
+  managedMonthlyLimitUsd: string;
+  managedPerRequestLimitUsd: string;
+  mode: IntelligenceSourcesResponse["budget"]["mode"];
+};
+
 type BrowserInputTarget = { checked: boolean; value: string };
 type BrowserGlobal = {
   addEventListener?: (type: string, listener: (event: Event) => void) => void;
@@ -210,11 +217,23 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
   const [drafts, setDrafts] = useState<Partial<Record<ConfigurableIntelligenceSourceId, Draft>>>({});
   const [busySource, setBusySource] = useState<ConfigurableIntelligenceSourceId | null>(null);
   const [routingBusy, setRoutingBusy] = useState(false);
+  const [budgetDraft, setBudgetDraft] = useState<BudgetDraft>({
+    byokMonthlyWarningLimitUsd: "",
+    managedMonthlyLimitUsd: "",
+    managedPerRequestLimitUsd: "",
+    mode: "off"
+  });
   const [error, setError] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const adoptResponse = (response: IntelligenceSourcesResponse) => {
     setData(response);
+    setBudgetDraft({
+      byokMonthlyWarningLimitUsd: response.budget.byokMonthlyWarningLimitUsd?.toString() ?? "",
+      managedMonthlyLimitUsd: response.budget.managedMonthlyLimitUsd?.toString() ?? "",
+      managedPerRequestLimitUsd: response.budget.managedPerRequestLimitUsd?.toString() ?? "",
+      mode: response.budget.mode
+    });
     setDrafts((current) => Object.fromEntries(response.sources.flatMap((source) => {
       if (source.id === "hassali-cloud") return [];
       const previous = current[source.id];
@@ -301,6 +320,32 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
     }
   };
 
+  const updateBudget = async () => {
+    setRoutingBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/settings/intelligence", {
+        body: JSON.stringify({
+          budget: {
+            byokMonthlyWarningLimitUsd: budgetDraft.byokMonthlyWarningLimitUsd || null,
+            managedMonthlyLimitUsd: budgetDraft.managedMonthlyLimitUsd || null,
+            managedPerRequestLimitUsd: budgetDraft.managedPerRequestLimitUsd || null,
+            mode: budgetDraft.mode
+          }
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const payload = await response.json() as IntelligenceSourcesResponse & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "The budget policy could not be saved.");
+      adoptResponse(payload);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The budget policy could not be saved.");
+    } finally {
+      setRoutingBusy(false);
+    }
+  };
+
   return (
     <div
       aria-labelledby="intelligence-settings-title"
@@ -356,6 +401,84 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
             <p className="mb-4 rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-100 [.light_&]:text-amber-900">
               {data.disclosure}
             </p>
+          ) : null}
+          {data ? (
+            <section className="mb-4 border-y border-[hsl(var(--premium-border))] py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-xs font-semibold text-foreground">Usage & limits</h3>
+                  <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                    {data.usage.requestCount} requests this period · {data.usage.totalTokens.toLocaleString()} reported tokens
+                  </p>
+                  <p className="text-[11px] leading-5 text-muted-foreground">
+                    Managed recorded ${data.usage.managedCostUsd.toFixed(4)}
+                    {data.usage.managedUnknownCostRequests ? ` · ${data.usage.managedUnknownCostRequests} unknown-cost request(s)` : ""}
+                    {` · BYOK ${data.usage.byokRequests} request(s) · Local ${data.usage.localRequests} request(s)`}
+                  </p>
+                </div>
+                <label className="grid gap-1 text-[11px] text-muted-foreground">
+                  Budget mode
+                  <select
+                    aria-label="Intelligence budget mode"
+                    className="hassali-focus-ring rounded-md border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel-strong))] px-2.5 py-2 text-xs text-foreground"
+                    disabled={routingBusy}
+                    onChange={(event) => setBudgetDraft((current) => ({
+                      ...current,
+                      mode: (event.currentTarget as unknown as { value: BudgetDraft["mode"] }).value
+                    }))}
+                    value={budgetDraft.mode}
+                  >
+                    <option value="off">Off</option>
+                    <option value="warn">Warn</option>
+                    <option value="strict">Strict</option>
+                  </select>
+                </label>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                {([
+                  ["managedPerRequestLimitUsd", "Managed per request"],
+                  ["managedMonthlyLimitUsd", "Managed monthly"],
+                  ["byokMonthlyWarningLimitUsd", "BYOK monthly warning"]
+                ] as const).map(([key, label]) => (
+                  <label className="grid gap-1 text-[11px] text-muted-foreground" key={key}>
+                    {label} (USD)
+                    <input
+                      className="hassali-focus-ring rounded-md border border-[hsl(var(--premium-border))] bg-black/20 px-2.5 py-2 text-xs text-foreground [.light_&]:bg-white"
+                      disabled={routingBusy}
+                      min="0"
+                      onChange={(event) => setBudgetDraft((current) => ({
+                        ...current,
+                        [key]: (event.currentTarget as unknown as BrowserInputTarget).value
+                      }))}
+                      placeholder="No limit"
+                      step="0.01"
+                      type="number"
+                      value={budgetDraft[key]}
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-[10px] leading-4 text-muted-foreground">Unknown prices stay unknown. Local use has no external token charge but still consumes device resources.</p>
+                <button
+                  className="hassali-focus-ring shrink-0 rounded-md bg-[hsl(var(--premium-accent))] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                  disabled={routingBusy}
+                  onClick={() => void updateBudget()}
+                  type="button"
+                >
+                  Save limits
+                </button>
+              </div>
+            </section>
+          ) : null}
+          {data ? (
+            <section className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[hsl(var(--premium-border))] pb-4">
+              <div>
+                <h3 className="text-xs font-semibold text-foreground">Hassali Local</h3>
+                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">Foundation available · native companion not installed or paired.</p>
+              </div>
+              <span className="text-[10px] uppercase text-muted-foreground">Protocol {data.local.protocolVersion} · Not paired</span>
+            </section>
           ) : null}
           {error ? (
             <p aria-live="polite" className="mb-4 rounded-md border border-rose-400/25 bg-rose-400/[0.07] px-3 py-2 text-xs text-rose-200 [.light_&]:text-rose-800">
