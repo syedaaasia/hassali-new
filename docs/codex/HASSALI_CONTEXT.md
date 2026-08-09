@@ -53,7 +53,7 @@ The conservative default is **Ask for approval**. No policy grants whole-compute
 
 ### Workspace surface
 
-`AppShell` composes the top bar, project/files sidebar, conversation workspace, optional editor, Preview drawer, and ASK Project Notes. `RightSidebar` owns the mode controls, chat stream, inline proposals, composer, attachments, and the project approval selector.
+`AppShell` composes the top bar, project/files sidebar, conversation workspace, optional editor, Preview drawer, and ASK Project Notes. Its actual panel-state initializer starts the Project Panel collapsed and ignores stale persisted expansion state; manual toggles remain lifecycle-local. `RightSidebar` owns the mode controls, chat stream, inline proposals, composer, attachments, and the project approval selector.
 
 Project Notes are project-bound and enter ASK context only when the user enables the context toggle. They do not become implicit global memory.
 
@@ -94,6 +94,17 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - OpenRouter keys are user-scoped and AES-256-GCM encrypted. With `HASSALI_INTELLIGENCE_MASTER_KEY`, ciphertext, unique IV, authentication tag, key version, and user/source AAD persist in PostgreSQL; otherwise credentials remain encrypted in server memory for the session only. Disconnect removes both copies.
 - Ollama and llama.cpp connections accept loopback endpoints only, reject redirects, and never install, start, stop, pull, or delete models. Health and discovery are explicit, bounded actions rather than render-time polling.
 - Hassali Local currently provides protocol, pairing/origin, hardware/benchmark, model-pack/license/checksum, and conservative resource-policy contracts only. No native companion, hardware probe, model, installer, download, or routing candidate ships in this checkpoint.
+
+### ASK research
+
+- The Utility/Research Router chooses deterministic utility, stable internal reasoning, or web research. Explicit `Search web`/`Don't search` policy is normalized server-side; date/time utility still runs before model or web work.
+- Research queries are deterministic, bounded to four, and redact obvious credentials, private paths, emails, and phones before a research provider receives them. Unsafe residue fails closed.
+- `ResearchProviderRegistry` keeps search-provider discovery separate from the I3 Auto model router. ASK continues to use one model-selection system.
+- Search results are discovery only. Hassali retrieves selected original public pages with scheme, credential, DNS/private-address, redirect, content-type, byte, page-count, and timeout limits before they can count as evidence.
+- Retrieved web pages are marked untrusted evidence. They cannot change approval, privacy, mode, tool, credential, or mutation authority.
+- Sources are canonicalized, deduplicated, ranked by transparent relevance/authority/freshness signals, and can represent conflicting claim values without inventing agreement.
+- Citation IDs map to retrieved source pages. Unknown, duplicate, mismatched, or dangling citations fail integrity validation; unavailable evidence produces an unverified answer instead of model-memory freshness claims.
+- Settings -> Intelligence returns structured safe errors for authenticated application failures. Its client parser handles empty/non-JSON/status/network/timeout failures and exposes a bounded user-triggered Retry without leaking internals.
 
 ## Design
 
@@ -193,4 +204,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 02 I2 checkpoint: `INTELLIGENCE-I2: add BYOK and local provider connections`
 - Run 02 I3 checkpoint: `INTELLIGENCE-I3: add capability-aware automatic routing`
 - Run 02 I4 checkpoint: `INTELLIGENCE-I4: add metering budgets and Hassali Local foundation`
+- Run 03 I1 checkpoint: `ASK-I1: add utility research routing and verified citations`
 - The repository HEAD is authoritative; confirm it with Git before every task.

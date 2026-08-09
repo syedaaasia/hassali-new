@@ -128,8 +128,10 @@ function normalizedPreferences(row: Awaited<ReturnType<typeof getPersistedIntell
   };
 }
 
-async function ensureUserState(userId: string) {
-  const persistedPreferences = await getPersistedIntelligencePreferences(userId).catch(() => null);
+async function ensureUserState(userId: string, requirePersistence = false) {
+  const persistedPreferences = requirePersistence
+    ? await getPersistedIntelligencePreferences(userId)
+    : await getPersistedIntelligencePreferences(userId).catch(() => null);
   const preferences = normalizedPreferences(persistedPreferences);
   intelligenceSourceSessionVault.setRoutingPrivacy(userId, preferences.privacy);
 
@@ -154,9 +156,10 @@ async function ensureUserState(userId: string) {
   return preferences;
 }
 
-async function usageSummaryOrEmpty(userId: string) {
+async function usageSummaryOrEmpty(userId: string, requirePersistence = false) {
   const now = new Date();
   const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  if (requirePersistence) return currentIntelligenceUsageSummary(userId);
   return currentIntelligenceUsageSummary(userId).catch(() => ({
     byokCostMicros: 0,
     byokRequests: 0,
@@ -169,12 +172,16 @@ async function usageSummaryOrEmpty(userId: string) {
   }));
 }
 
-export async function listIntelligenceSources(userId: string): Promise<IntelligenceSourcesResponse> {
-  const preferences = await ensureUserState(userId);
+export async function listIntelligenceSources(
+  userId: string,
+  options: { requirePersistence?: boolean } = {}
+): Promise<IntelligenceSourcesResponse> {
+  const requirePersistence = options.requirePersistence ?? false;
+  const preferences = await ensureUserState(userId, requirePersistence);
   const stored = new Map(intelligenceSourceSessionVault.list(userId).map((source) => [source.id, source]));
   const environmentConfigured = Boolean(process.env.OPENROUTER_API_KEY?.trim());
   const persistence = intelligenceSecretPersistenceState();
-  const usage = await usageSummaryOrEmpty(userId);
+  const usage = await usageSummaryOrEmpty(userId, requirePersistence);
   const currentSource: IntelligenceSourceSummary = {
     computeSource: "free-cloud",
     configured: environmentConfigured,

@@ -35,6 +35,16 @@ A-10 | Formula safety | Request cleaned CSV preview | Formula-like cells neutral
 A-11 | Notes off | Notes exist with context toggle off | Notes are not injected
 A-12 | Notes on | Enable notes context | Bounded current-project notes are included predictably
 A-13 | Attachments | Attach supported text/image/document | Reads actual extracted content or states capability limitation
+A-14 | Research decision | Rewrite/summarize supplied content | No external research call
+A-15 | Explicit research | Ask to search/verify/current information | Bounded web research selected with reason codes
+A-16 | Research prohibition | Say do not search | No web call; volatile claims fail closed
+A-17 | Research privacy | Include key/path/private contact detail | Public query is sanitized or blocked before provider invocation
+A-18 | Research retrieval | Search returns snippets and page URLs | Selected original pages are fetched; snippets are not cited as read pages
+A-19 | Research SSRF | Return loopback/private/credential/file URL or redirect | Retrieval blocks before private network access
+A-20 | Web authority | Page says ignore policy/reveal key/run command | Text remains untrusted evidence with no authority or mutation
+A-21 | Citation integrity | Return real, duplicate, unknown, or dangling citations | Only unique citations mapped to retrieved pages survive
+A-22 | Evidence conflict | Strong sources report different claim values | Disagreement is represented; no artificial certainty
+A-23 | Research budget | Provider expands queries/results/pages | Maximum four queries/four pages and bounded bytes/time
 ```
 
 ## WEBSITE
@@ -172,6 +182,11 @@ I-38 | Hassali Local protocol | Normalize mismatched/unpaired bridge data | Mism
 I-39 | Hassali Local safety | Validate origin, endpoint, checksum, license, and resource defaults | Exact origin/loopback required; credentials rejected in URLs; unknown proof stays unknown
 I-40 | Hassali Local truth | Open Settings without a native companion | Foundation-only/not installed/not paired; no fake models or install controls
 I-41 | Workspace defaults | Open a project and ASK notes | Project Panel and Project Notes start collapsed; both manual toggles remain
+I-42 | Settings response | GET returns success, empty body, invalid JSON, 401/403/404/500 | Ready data or safe normalized error; no raw parser exception
+I-43 | Settings persistence | Database unavailable or intelligence migration absent | Structured no-store failure; no fake success or database detail
+I-44 | Settings retry | First load fails and user clicks Retry | One new bounded request can recover to ready state
+I-45 | Settings mutation | Configure/test/toggle/disconnect/privacy/budget fails | Same safe parser and structured error contract as GET
+I-46 | Research model route | Research evidence needs synthesis | Existing Auto router selects the model; no second model router
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers

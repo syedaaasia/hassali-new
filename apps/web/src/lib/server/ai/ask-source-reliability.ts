@@ -60,6 +60,8 @@ export type AskNormalizedTimeContext = {
 };
 
 export type AskResearchSource = {
+  author?: string | null;
+  canonicalUrl?: string | null;
   claimValue?: string | null;
   content: string;
   effectiveDate?: string | null;
@@ -67,9 +69,11 @@ export type AskResearchSource = {
   id: string;
   isOfficial: boolean;
   publishedAt?: string | null;
+  publisher?: string | null;
   retrievedAt: string;
   sourceType: "government" | "official" | "primary" | "private_file" | "secondary" | "user_source";
   title: string;
+  trustBoundary?: "private_user_content" | "untrusted_public_web";
   updatedAt?: string | null;
   url: string | null;
   version?: string | null;
@@ -463,7 +467,7 @@ function overlapStrength(claim: string, source: AskResearchSource) {
 }
 
 function currentClaims(answer: string, decision: AskFreshnessDecision) {
-  if (decision.sourceRequirement === "none_required" || decision.sourceRequirement === "optional_support") return [];
+  if (decision.sourceRequirement === "none_required") return [];
   const evidenceAnswer = decision.freshnessClass === "private_file_source" && answer.includes("Key points:")
     ? answer.slice(answer.indexOf("Key points:") + "Key points:".length)
     : answer;
@@ -564,7 +568,7 @@ export function verifyAskSourceReliability(input: {
   const unknownMarkdown = markdownCitations(input.answer)
     .filter((citation) => !knownUrls.has(normalizedUrl(citation.url)))
     .map((citation) => citation.full);
-  const evidenceRequired = !["none_required", "optional_support"].includes(input.decision.sourceRequirement);
+  const evidenceRequired = input.decision.researchRequired || !["none_required", "optional_support"].includes(input.decision.sourceRequirement);
   const unknownMarkers = evidenceRequired ? unsupportedCitationMarkers(input.answer) : [];
   const unknownCitations = [...unknownMarkdown, ...unknownMarkers];
   const quotes = directQuotes(input.answer);

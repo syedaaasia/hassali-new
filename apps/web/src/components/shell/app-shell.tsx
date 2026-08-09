@@ -8,18 +8,11 @@ import { ProjectNotesPanel } from "@/components/shell/project-notes-panel";
 import { RightSidebar } from "@/components/shell/right-sidebar";
 import { TopBar } from "@/components/shell/top-bar";
 import { WorkspaceHydrator } from "@/components/shell/workspace-hydrator";
+import { createInitialAppShellPanelState, toggleProjectPanelState } from "@/lib/app-shell-state";
 import { useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { useEffect, useState } from "react";
 import styles from "./workspace.module.css";
-
-const sidebarStorageKey = "hassali:left-sidebar-collapsed";
-type BrowserGlobal = {
-  localStorage?: {
-    getItem: (key: string) => string | null;
-    setItem: (key: string, value: string) => void;
-  };
-};
 
 export function AppShell() {
   const productMode = useChatStore((state) => state.productMode);
@@ -27,14 +20,8 @@ export function AppShell() {
   const setPreviewOpen = useRuntimeStore((state) => state.setPreviewOpen);
   const allowsTools = productMode !== "ASK";
   const shouldShowPreview = allowsTools && isPreviewOpen;
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [panelState, setPanelState] = useState(createInitialAppShellPanelState);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-
-  useEffect(() => {
-    const saved = (globalThis as BrowserGlobal).localStorage?.getItem(sidebarStorageKey);
-
-    setIsSidebarCollapsed(saved === "true");
-  }, []);
 
   useEffect(() => {
     if (productMode === "ASK") {
@@ -44,13 +31,7 @@ export function AppShell() {
   }, [productMode, setPreviewOpen]);
 
   const toggleSidebar = () => {
-    setIsSidebarCollapsed((current) => {
-      const next = !current;
-
-      (globalThis as BrowserGlobal).localStorage?.setItem(sidebarStorageKey, String(next));
-
-      return next;
-    });
+    setPanelState(toggleProjectPanelState);
   };
 
   return (
@@ -62,7 +43,7 @@ export function AppShell() {
       <WorkspaceHydrator />
       <TopBar />
       <div className="relative z-10 flex min-h-0 flex-1 gap-2 overflow-hidden p-1.5 pt-0">
-        <LeftSidebar collapsed={isSidebarCollapsed} onToggleCollapsed={toggleSidebar} />
+        <LeftSidebar collapsed={panelState.projectPanelCollapsed} onToggleCollapsed={toggleSidebar} />
         <div className={`${styles.primarySurface} flex min-w-0 flex-[1.8] flex-col overflow-hidden rounded-2xl border backdrop-blur-xl`}>
           <RightSidebar
             isEditorOpen={allowsTools && isEditorOpen}

@@ -109,6 +109,10 @@ import {
   type AskFreshnessDecision
 } from "@/lib/server/ai/ask-source-reliability";
 import {
+  isAskResearchPolicy,
+  retrieveAskResearchSources
+} from "@/lib/server/ai/ask-research-engine";
+import {
   buildProposalContext,
   decidePromptOwnership,
   enforceGeneratorContractWithProposalContext,
@@ -5746,6 +5750,7 @@ export async function POST(request: Request) {
     productMode?: unknown;
     projectId?: unknown;
     projectNotes?: unknown;
+    researchPolicy?: unknown;
     workspace?: unknown;
   } | null;
 
@@ -5783,6 +5788,7 @@ export async function POST(request: Request) {
   }
   const modelSelectionPolicy: AskModelSelectionPolicy =
     body?.modelSelectionPolicy === "locked" ? "locked" : "automatic";
+  const researchPolicy = isAskResearchPolicy(body?.researchPolicy) ? body.researchPolicy : "auto";
   const mode: AiMode =
     body?.mode === "SUGGEST" || body?.mode === "EXECUTE" || body?.mode === "ASK"
       ? body.mode
@@ -6195,6 +6201,8 @@ export async function POST(request: Request) {
         userId: specialistPersistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
+      researchPolicy,
+      researchRetriever: retrieveAskResearchSources,
       prompt: effectiveUserPrompt,
       projectName: workspace.projectName ?? null,
       workspace
@@ -6720,6 +6728,8 @@ export async function POST(request: Request) {
         userId: persistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
+      researchPolicy,
+      researchRetriever: retrieveAskResearchSources,
       prompt: effectiveUserPrompt,
       projectName: workspace.projectName ?? null,
       workspace
@@ -6853,6 +6863,8 @@ export async function POST(request: Request) {
         userId: persistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
+      researchPolicy,
+      researchRetriever: retrieveAskResearchSources,
       prompt: effectiveUserPrompt,
       projectName: workspace.projectName ?? null,
       workspace

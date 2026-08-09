@@ -6,6 +6,7 @@ import type {
   IntelligenceSourceSummary,
   IntelligenceSourcesResponse
 } from "@/lib/intelligence-sources";
+import { requestIntelligenceSettings } from "@/lib/intelligence-settings-response";
 
 type Draft = {
   apiKey: string;
@@ -224,6 +225,7 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
     mode: "off"
   });
   const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const adoptResponse = (response: IntelligenceSourcesResponse) => {
@@ -252,11 +254,10 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
       return;
     }
     const controller = new AbortController();
+    setData(null);
     setError(null);
-    fetch("/api/settings/intelligence", { signal: controller.signal })
-      .then(async (response) => {
-        const payload = await response.json() as IntelligenceSourcesResponse & { error?: string };
-        if (!response.ok) throw new Error(payload.error || "Settings could not be loaded.");
+    requestIntelligenceSettings("/api/settings/intelligence", { signal: controller.signal })
+      .then((payload) => {
         adoptResponse(payload);
         (globalThis as BrowserGlobal).requestAnimationFrame?.(() => {
           (closeButtonRef.current as unknown as { focus?: () => void } | null)?.focus?.();
@@ -266,7 +267,7 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
         if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Settings could not be loaded.");
       });
     return () => controller.abort();
-  }, [props.open]);
+  }, [loadAttempt, props.open]);
 
   useEffect(() => {
     if (!props.open) return;
@@ -286,9 +287,10 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
     setBusySource(sourceId);
     setError(null);
     try {
-      const response = await fetch("/api/settings/intelligence" + (init.method === "DELETE" ? `?sourceId=${encodeURIComponent(sourceId)}` : ""), init);
-      const payload = await response.json() as IntelligenceSourcesResponse & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "The connection action failed.");
+      const payload = await requestIntelligenceSettings(
+        "/api/settings/intelligence" + (init.method === "DELETE" ? `?sourceId=${encodeURIComponent(sourceId)}` : ""),
+        init
+      );
       adoptResponse(payload);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The connection action failed.");
@@ -305,13 +307,11 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
     setRoutingBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/settings/intelligence", {
+      const payload = await requestIntelligenceSettings("/api/settings/intelligence", {
         body: JSON.stringify({ privacy }),
         headers: { "Content-Type": "application/json" },
         method: "PATCH"
       });
-      const payload = await response.json() as IntelligenceSourcesResponse & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "The routing preference could not be saved.");
       adoptResponse(payload);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The routing preference could not be saved.");
@@ -324,7 +324,7 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
     setRoutingBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/settings/intelligence", {
+      const payload = await requestIntelligenceSettings("/api/settings/intelligence", {
         body: JSON.stringify({
           budget: {
             byokMonthlyWarningLimitUsd: budgetDraft.byokMonthlyWarningLimitUsd || null,
@@ -336,8 +336,6 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
         headers: { "Content-Type": "application/json" },
         method: "PATCH"
       });
-      const payload = await response.json() as IntelligenceSourcesResponse & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "The budget policy could not be saved.");
       adoptResponse(payload);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The budget policy could not be saved.");
@@ -481,9 +479,18 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
             </section>
           ) : null}
           {error ? (
-            <p aria-live="polite" className="mb-4 rounded-md border border-rose-400/25 bg-rose-400/[0.07] px-3 py-2 text-xs text-rose-200 [.light_&]:text-rose-800">
-              {error}
-            </p>
+            <div aria-live="polite" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-rose-400/25 bg-rose-400/[0.07] px-3 py-2 text-xs text-rose-200 [.light_&]:text-rose-800" role="alert">
+              <span>{error}</span>
+              {!data ? (
+                <button
+                  className="hassali-focus-ring rounded-md border border-current/25 px-2.5 py-1.5 font-semibold hover:bg-white/[0.05]"
+                  onClick={() => setLoadAttempt((current) => current + 1)}
+                  type="button"
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
           ) : null}
           {!data && !error ? <p className="py-10 text-center text-xs text-muted-foreground">Loading intelligence sources…</p> : null}
           <div className="grid gap-3">
