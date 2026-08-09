@@ -3,6 +3,7 @@
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { IntelligenceSettingsDialog } from "@/components/settings/intelligence-settings-dialog";
 import { useChatStore } from "@/lib/chat-store";
 
 const legacyThemeStorageKey = "hassali:theme";
@@ -50,6 +51,7 @@ function SettingsIcon() {
 
 export function TopBar() {
   const [theme, setTheme] = useState<ThemeMode>("dark");
+  const [intelligenceSettingsOpen, setIntelligenceSettingsOpen] = useState(false);
   const productMode = useChatStore((state) => state.productMode);
 
   useEffect(() => {
@@ -70,6 +72,7 @@ export function TopBar() {
   };
 
   return (
+    <>
     <header className="relative z-20 flex h-11 shrink-0 items-center justify-between border-b border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-void)/0.88)] px-4 backdrop-blur-xl">
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05] p-1.5 shadow-[0_10px_30px_hsl(var(--premium-accent)/0.12)]">
@@ -107,6 +110,19 @@ export function TopBar() {
           <div className="absolute right-0 top-10 z-20 w-48 rounded-2xl border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel-strong))] p-2 shadow-[0_20px_80px_rgba(0,0,0,0.45)] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-950">
             <button
               className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs text-muted-foreground hover:bg-white/[0.05] hover:text-foreground [.light_&]:hover:bg-slate-100 [.light_&]:hover:text-slate-950"
+              onClick={(event) => {
+                (event.currentTarget as unknown as {
+                  closest?: (selector: string) => { removeAttribute: (name: string) => void } | null;
+                }).closest?.("details")?.removeAttribute("open");
+                setIntelligenceSettingsOpen(true);
+              }}
+              type="button"
+            >
+              Intelligence
+              <span aria-hidden="true">›</span>
+            </button>
+            <button
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs text-muted-foreground hover:bg-white/[0.05] hover:text-foreground [.light_&]:hover:bg-slate-100 [.light_&]:hover:text-slate-950"
               onClick={toggleTheme}
               type="button"
             >
@@ -129,5 +145,10 @@ export function TopBar() {
         </details>
       </div>
     </header>
+    <IntelligenceSettingsDialog
+      onClose={() => setIntelligenceSettingsOpen(false)}
+      open={intelligenceSettingsOpen}
+    />
+    </>
   );
 }

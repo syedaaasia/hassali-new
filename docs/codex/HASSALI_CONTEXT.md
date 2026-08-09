@@ -86,7 +86,10 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - `IntelligenceAdapterRegistry` is the single adapter lookup and capability/privacy gate. Unknown adapters fail explicitly.
 - The generic OpenAI-compatible adapter supports configured HTTPS endpoints and explicitly enabled loopback HTTP, bounded timeouts, optional health/model discovery, and normalized non-streaming/streaming results.
 - Current ASK, proposal, and legacy streaming inference use the OpenRouter adapter through this contract. Existing deterministic selection and one-secondary-provider fallback remain unchanged.
-- BYOK persistence, provider settings, local endpoint configuration, and advanced Auto routing are not part of this checkpoint.
+- Settings -> Intelligence exposes the current environment-managed path, OpenRouter BYOK, Ollama, and llama.cpp connections without changing current chat selection.
+- OpenRouter keys are scoped to the authenticated Clerk user, AES-GCM encrypted in server memory, never returned to the browser, and cleared by disconnect or server restart. Durable encrypted key persistence is intentionally deferred until Hassali has an approved secret store.
+- Ollama and llama.cpp connections accept loopback endpoints only, reject redirects, and never install, start, stop, pull, or delete models. Health and discovery are explicit, bounded actions rather than render-time polling.
+- Advanced Auto routing, arbitrary compatible endpoints, metering, budgets, hardware detection, and Hassali Local are not part of this checkpoint.
 
 ## Design
 
@@ -183,4 +186,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Base before Run 01: `012ffb5` - `HOMEPAGE-UI-I1: add premium palette and responsive polish`
 - Run 01 checkpoint: `DASHBOARD-UI-I1: polish workspace and add Codex context capsule`
 - Run 02 I1 checkpoint: `INTELLIGENCE-I1: add provider-independent inference contract`
+- Run 02 I2 checkpoint: `INTELLIGENCE-I2: add BYOK and local provider connections`
 - The repository HEAD is authoritative; confirm it with Git before every task.

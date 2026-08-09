@@ -71,8 +71,13 @@ function isLoopbackHost(hostname: string) {
   return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
 }
 
-function normalizeBaseUrl(value: string, allowInsecureLoopback: boolean) {
-  const url = new URL(value);
+export function normalizeOpenAICompatibleBaseUrl(value: string, allowInsecureLoopback = false) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new IntelligenceContractError("ENDPOINT_URL_INVALID", "The provider endpoint is not a valid URL.");
+  }
   if (url.username || url.password) {
     throw new IntelligenceContractError("ENDPOINT_CREDENTIALS_FORBIDDEN", "Credentials must not be embedded in an endpoint URL.");
   }
@@ -82,6 +87,22 @@ function normalizeBaseUrl(value: string, allowInsecureLoopback: boolean) {
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/+$/, "") + "/";
+}
+
+export function normalizeLocalIntelligenceEndpoint(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new IntelligenceContractError("ENDPOINT_URL_INVALID", "The provider endpoint is not a valid URL.");
+  }
+  if (!isLoopbackHost(url.hostname)) {
+    throw new IntelligenceContractError(
+      "LOCAL_ENDPOINT_LOOPBACK_REQUIRED",
+      "Local provider endpoints must use localhost, 127.0.0.1, or ::1."
+    );
+  }
+  return normalizeOpenAICompatibleBaseUrl(value, true);
 }
 
 function endpoint(baseUrl: string, path: string) {
@@ -297,9 +318,9 @@ async function fetchWithTimeout(input: {
   };
   try {
     const response = await (input.config.fetchImpl ?? fetch)(endpoint(
-      normalizeBaseUrl(input.config.baseUrl, Boolean(input.config.allowInsecureLoopback)),
+      normalizeOpenAICompatibleBaseUrl(input.config.baseUrl, Boolean(input.config.allowInsecureLoopback)),
       input.path
-    ), { ...input.init, signal: controller.signal });
+    ), { ...input.init, redirect: "error", signal: controller.signal });
     return { cleanup, ok: true as const, latencyMs: Date.now() - startedAt, response };
   } catch (error) {
     const cancelled = Boolean(input.requestSignal?.aborted) && !timedOut;
@@ -439,7 +460,7 @@ function healthStatus(category: IntelligenceFailureCategory): IntelligenceHealth
 }
 
 export function createOpenAICompatibleAdapter(config: OpenAICompatibleAdapterConfig): IntelligenceAdapter {
-  const baseUrl = normalizeBaseUrl(config.baseUrl, Boolean(config.allowInsecureLoopback));
+  const baseUrl = normalizeOpenAICompatibleBaseUrl(config.baseUrl, Boolean(config.allowInsecureLoopback));
   const capabilities = createCapabilityProfile(config.capabilities ?? {});
   const timeoutMs = boundedTimeout(config.timeoutMs ?? 30_000);
   const chatPath = config.chatCompletionsPath ?? "chat/completions";

@@ -142,6 +142,14 @@ I-08 | Compatible endpoint | Configure HTTPS or approved loopback endpoint | Saf
 I-09 | Streaming/tools | Normalize SSE text, usage, tool calls, and completion | Provider framing does not escape adapter boundary
 I-10 | Current provider | Run ASK/proposal via current configured provider | Contract path used; response behavior remains intact
 I-11 | Fallback | Primary current provider fails | At most one existing secondary attempt; no loop or unrelated answer
+I-12 | Secret boundary | Save OpenRouter BYOK for user A | Encrypted server-session storage; key absent from API/client/log-safe metadata and user B
+I-13 | Disconnect | Disconnect a BYOK/local source | Hassali config and credential removed; external runtime untouched
+I-14 | Local URL | Configure localhost/127.0.0.1/::1 and remote/private URL | Loopback accepted; credentials, redirects, and non-loopback hosts rejected
+I-15 | OpenRouter discovery | Test valid/invalid BYOK | Models normalize on success; invalid key reports authentication-failed without provider detail
+I-16 | Ollama discovery | Test running Ollama with zero or installed models | Ready with honest count; format/size/quantization shown only when reported
+I-17 | llama.cpp health | Simulate ready/loading/down server | Distinct ready/loading/unavailable status; model discovery remains bounded
+I-18 | Settings UI | Open Intelligence at desktop and 390px | Sources, disclosure, controls, focus names, and safe wrapping remain usable
+I-19 | Default regression | Leave all new connections empty/disabled | Current provider selection and one-secondary fallback remain unchanged
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers
