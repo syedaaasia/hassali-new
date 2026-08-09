@@ -118,7 +118,7 @@ export function classifyAttachment(input: {
         : "unsupported";
 
   if (kind === "unsupported") {
-    throw new AttachmentPipelineError("UNSUPPORTED_FORMAT", "This file format is not supported in Multimodal I1.");
+    throw new AttachmentPipelineError("UNSUPPORTED_FORMAT", "This file format is not supported by the current attachment reader.");
   }
   if (!isProbablyText(input.bytes)) {
     throw new AttachmentPipelineError("MIME_MISMATCH", "This text-based file contains unsupported binary data.");

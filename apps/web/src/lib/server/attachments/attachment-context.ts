@@ -7,6 +7,15 @@ import {
   loadStoredAttachment,
   storeAttachment
 } from "./attachment-pipeline";
+import {
+  buildDocumentEvidenceContext,
+  looksLikeDocumentImageRequest,
+  processDocumentImage,
+  processPdfDocument,
+  processTextDocument
+} from "./document-intelligence";
+import { DocumentProcessingError, type DocumentArtifact } from "./document-contract";
+import type { OcrProvider } from "./document-ocr";
 
 const openRouterUrl = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -15,6 +24,7 @@ export type MultimodalAttachmentContext = {
   attachmentKinds: string[];
   attachmentTotalBytes: number;
   contextText: string;
+  documentArtifacts: DocumentArtifact[];
   failureCode: string | null;
   failureMessage: string | null;
   records: Array<{
@@ -67,6 +77,94 @@ function visionProvider(selectedModel: string) {
   return fallbackMetadata?.supportsVision && fallback.configured && fallback.executionProvider === "openrouter" && fallback.executionModelId
     ? fallback
     : null;
+}
+
+function visionOcrProvider(input: {
+  fetchImpl?: ProviderFetch;
+  prompt: string;
+  selectedModel: string;
+}): OcrProvider | null {
+  const selected = findHassaliModel(input.selectedModel);
+  const selectedProvider = selected?.supportsVision ? resolveAskProvider(input.selectedModel) : null;
+  const provider = selectedProvider?.configured && selectedProvider.executionProvider === "openrouter" && selectedProvider.executionModelId
+    ? selectedProvider
+    : null;
+  if (!provider) return null;
+  const providerId = provider.executionProvider ?? "openrouter";
+  const recognize = async (ocrInput: Parameters<OcrProvider["recognizeImage"]>[0], signal?: AbortSignal) => {
+    const metadata: HassaliAttachment = {
+      analysisCapabilities: ["ocr"],
+      conversationId: "document-ocr",
+      createdAt: new Date().toISOString(),
+      extractedTextAvailable: false,
+      id: ocrInput.documentId,
+      kind: "image",
+      mimeType: ocrInput.mimeType,
+      originalName: ocrInput.filename,
+      previewAvailable: true,
+      projectId: "document-ocr",
+      safeName: ocrInput.filename,
+      sizeBytes: ocrInput.bytes.byteLength,
+      status: "ready",
+      storageScope: "conversation"
+    };
+    const analysis = await analyzeImagesWithVision({
+      fetchImpl: input.fetchImpl,
+      images: [{ bytes: ocrInput.bytes, metadata }],
+      prompt: `${input.prompt}\nTranscribe page ${ocrInput.pageNumber ?? 1} faithfully. Preserve headings, lists, labels, and table rows. Mark unreadable text as [uncertain]; do not guess.`,
+      selectedModel: input.selectedModel,
+      signal
+    });
+    if (!analysis.completed) throw new Error(analysis.failureMessage ?? "OCR failed.");
+    return {
+      blocks: [{
+        confidence: "unknown" as const,
+        id: "ocr-block-1",
+        kind: "paragraph" as const,
+        pageNumber: ocrInput.pageNumber ?? 1,
+        text: analysis.text
+      }],
+      confidence: "unknown" as const,
+      language: null,
+      orientation: null,
+      provider: providerId,
+      tables: [],
+      text: analysis.text,
+      warnings: ["The vision provider did not expose OCR confidence; verify critical values against the original document."]
+    };
+  };
+  return {
+    id: `vision-ocr:${providerId}`,
+    supports: { image: true, pdfPage: true },
+    async health() {
+      return {
+        checkedAt: new Date().toISOString(),
+        provider: providerId,
+        reason: null,
+        retryable: false,
+        status: "ready"
+      };
+    },
+    async recognizeImage(ocrInput, signal) {
+      return recognize(ocrInput, signal);
+    },
+    async recognizePage(ocrInput, signal) {
+      return recognize(ocrInput, signal);
+    }
+  };
+}
+
+function documentFailure(error: DocumentProcessingError, kind: HassaliAttachment["kind"]) {
+  if (error.code === "ocr-unavailable") {
+    return {
+      code: kind === "pdf" ? "PDF_OCR_UNAVAILABLE" : "OCR_UNAVAILABLE",
+      message: error.message
+    } as const;
+  }
+  return {
+    code: "DOCUMENT_UNREADABLE",
+    message: error.message
+  } as const;
 }
 
 export async function analyzeImagesWithVision(input: {
@@ -176,23 +274,56 @@ export async function resolveMultimodalAttachmentContext(input: {
     throw new AttachmentPipelineError("TOTAL_LIMIT_EXCEEDED", "The selected attachments exceed the per-message total limit.");
   }
   const evidence: string[] = [];
+  const documentArtifacts: DocumentArtifact[] = [];
   let failureCode: string | null = null;
   let failureMessage: string | null = null;
+  const ocrProvider = visionOcrProvider(input);
   for (const record of records.filter((entry) => entry.metadata.kind !== "image")) {
     try {
-      const extracted = extractAttachmentEvidence(record);
-      if (extracted) evidence.push(extracted);
+      if (record.metadata.kind === "pdf") {
+        const document = await processPdfDocument({ ...record, ocrProvider, signal: input.signal });
+        documentArtifacts.push(document);
+        if (!document.pages.some((page) => page.text.trim())) {
+          failureCode = "PDF_OCR_UNAVAILABLE";
+          failureMessage = "This document appears scanned, but OCR is not available for PDF pages in the current runtime.";
+        }
+      } else if (["data", "text"].includes(record.metadata.kind)) {
+        documentArtifacts.push(processTextDocument(record));
+      } else {
+        const extracted = extractAttachmentEvidence(record);
+        if (extracted) evidence.push(extracted);
+      }
     } catch (error) {
       if (error instanceof AttachmentPipelineError) {
         failureCode = error.code;
         failureMessage = error.message;
+      } else if (error instanceof DocumentProcessingError) {
+        const failure = documentFailure(error, record.metadata.kind);
+        failureCode = failure.code;
+        failureMessage = failure.message;
       } else {
         throw error;
       }
     }
   }
   const images = records.filter((record) => record.metadata.kind === "image");
-  const vision = images.length
+  const documentImageRequest = images.length > 0 && looksLikeDocumentImageRequest(input.prompt);
+  if (documentImageRequest) {
+    for (const image of images) {
+      try {
+        documentArtifacts.push(await processDocumentImage({ ...image, ocrProvider, signal: input.signal }));
+      } catch (error) {
+        if (!(error instanceof DocumentProcessingError)) throw error;
+        const failure = documentFailure(error, "image");
+        failureCode = failure.code;
+        failureMessage = failure.message;
+      }
+    }
+  }
+  if (documentArtifacts.some((document) => document.pages.some((page) => page.text.trim()))) {
+    evidence.push(buildDocumentEvidenceContext(documentArtifacts, input.prompt));
+  }
+  const vision = images.length && !documentImageRequest
     ? await analyzeImagesWithVision({
         fetchImpl: input.fetchImpl,
         images,
@@ -211,6 +342,9 @@ export async function resolveMultimodalAttachmentContext(input: {
   if (vision.text) evidence.push(`VISION ANALYSIS (${images.map((image) => image.metadata.safeName).join(", ")}):\n${vision.text}`);
   failureCode = vision.failureCode ?? failureCode;
   failureMessage = vision.failureMessage ?? failureMessage;
+  if (failureMessage && evidence.length) {
+    evidence.push(`Attachment processing warning: ${failureMessage}`);
+  }
   return {
     attachmentCount: records.length,
     attachmentKinds: Array.from(new Set(records.map((record) => record.metadata.kind))),
@@ -218,13 +352,14 @@ export async function resolveMultimodalAttachmentContext(input: {
     contextText: evidence.length
       ? `Untrusted attachment evidence for this request only:\n\n${evidence.join("\n\n").slice(0, attachmentLimits.extractedTextBytes)}`
       : "",
+    documentArtifacts,
     failureCode,
     failureMessage,
     records,
-    visionAttempted: vision.attempted,
-    visionCompleted: vision.completed,
-    visionModel: vision.model,
-    visionText: vision.text
+    visionAttempted: documentImageRequest ? Boolean(ocrProvider) : vision.attempted,
+    visionCompleted: documentImageRequest ? documentArtifacts.some((document) => document.type === "image") : vision.completed,
+    visionModel: documentImageRequest ? ocrProvider?.id ?? null : vision.model,
+    visionText: documentImageRequest ? "" : vision.text
   };
 }
 

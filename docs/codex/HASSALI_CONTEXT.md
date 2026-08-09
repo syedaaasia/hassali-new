@@ -106,6 +106,16 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Citation IDs map to retrieved source pages. Unknown, duplicate, mismatched, or dangling citations fail integrity validation; unavailable evidence produces an unverified answer instead of model-memory freshness claims.
 - Settings -> Intelligence returns structured safe errors for authenticated application failures. Its client parser handles empty/non-JSON/status/network/timeout failures and exposes a bounded user-triggered Retry without leaking internals.
 
+### Document intelligence
+
+- PDF, TXT, Markdown, CSV, and document-image inputs normalize into serializable document artifacts with stable pages, blocks, sections, tables, warnings, confidence, and user-provided provenance.
+- PDF.js performs native extraction page by page. Deterministic text-quality checks select only missing or corrupt pages for OCR; native pages are never OCR'd merely because another page is scanned.
+- OCR is replaceable behind `OcrProvider` and a deterministic registry. Selected weak PDF pages render one at a time under a pixel ceiling for the existing vision-capable adapter; unavailable OCR fails truthfully.
+- CSV remains structural and TXT/Markdown remain direct, fast, non-OCR paths. Table uncertainty and suspicious numeric OCR cells remain explicit.
+- Repeated headers/footers are omitted from compact reasoning context while their blocks and provenance remain available.
+- Large documents use bounded structure-aware chunks and deterministic lexical retrieval. Document citations map to actual filename/page evidence and remain distinct from public web citations.
+- Document evidence is explicitly untrusted, never instruction authority, and never becomes a public research query merely because it was uploaded.
+
 ## Design
 
 ### Direction
@@ -205,4 +215,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 02 I3 checkpoint: `INTELLIGENCE-I3: add capability-aware automatic routing`
 - Run 02 I4 checkpoint: `INTELLIGENCE-I4: add metering budgets and Hassali Local foundation`
 - Run 03 I1 checkpoint: `ASK-I1: add utility research routing and verified citations`
+- Run 03 I2 checkpoint: `ASK-I2: add OCR and document intelligence`
 - The repository HEAD is authoritative; confirm it with Git before every task.

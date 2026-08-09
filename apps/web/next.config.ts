@@ -19,7 +19,8 @@ process.env.HASSALI_OPENROUTER_ENV_SOURCE = process.env.OPENROUTER_API_KEY
   : "credential_missing";
 
 const nextConfig: NextConfig = {
-  poweredByHeader: false
+  poweredByHeader: false,
+  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"]
 };
 
 export default nextConfig;

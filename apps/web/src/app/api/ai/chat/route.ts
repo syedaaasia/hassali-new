@@ -5877,6 +5877,7 @@ export async function POST(request: Request) {
   const effectiveUserPrompt = [behavior.resolvedRequest, multimodalContext?.contextText]
     .filter(Boolean)
     .join("\n\n");
+  const askReasoningPrompt = behavior.resolvedRequest;
   if (multimodalContext?.failureMessage && !multimodalContext.contextText) {
     return createTextStream(multimodalContext.failureMessage, undefined, {
       "x-hassali-attachment-failure": multimodalContext.failureCode ?? "ATTACHMENT_PROCESSING_FAILED"
@@ -5962,10 +5963,10 @@ export async function POST(request: Request) {
   const askRuntimeContext = buildAskRuntimeContext();
   const askFreshnessDecision = decideAskFreshness({
     hasPrivateFileContent: Boolean(requestedWorkspace.activeFileContent?.trim() || multimodalContext?.contextText),
-    prompt: nonMutatingFinalAction ? effectiveUserPrompt : "",
+    prompt: nonMutatingFinalAction ? askReasoningPrompt : "",
     runtime: askRuntimeContext
   });
-  const detectedAskLiveIntent = detectAskLiveIntent(effectiveUserPrompt);
+  const detectedAskLiveIntent = detectAskLiveIntent(askReasoningPrompt);
   const askLiveIntent = ["build_request", "current_time", "weather"].includes(detectedAskLiveIntent)
     ? detectedAskLiveIntent
     : askFreshnessDecision.researchRequired
@@ -6189,7 +6190,7 @@ export async function POST(request: Request) {
       askRuntimeContext,
       behavior,
       freshnessDecision: askFreshnessDecision,
-      intelligenceContext: [intelligencePreflight.providerContext, projectNotesContext].filter(Boolean).join("\n\n"),
+      intelligenceContext: [intelligencePreflight.providerContext, multimodalContext?.contextText, projectNotesContext].filter(Boolean).join("\n\n"),
       messages: relevantMessages,
       model,
       modelSelectionPolicy,
@@ -6203,7 +6204,7 @@ export async function POST(request: Request) {
       providerCallOwnsRouting: true,
       researchPolicy,
       researchRetriever: retrieveAskResearchSources,
-      prompt: effectiveUserPrompt,
+      prompt: askReasoningPrompt,
       projectName: workspace.projectName ?? null,
       workspace
     });
@@ -6493,7 +6494,10 @@ export async function POST(request: Request) {
             attachmentCount: multimodalContext.attachmentCount,
             attachmentKinds: multimodalContext.attachmentKinds,
             attachmentTotalBytes: multimodalContext.attachmentTotalBytes,
+            documentCount: multimodalContext.documentArtifacts.length,
+            documentPageCount: multimodalContext.documentArtifacts.reduce((total, document) => total + document.pageCount, 0),
             failureCode: multimodalContext.failureCode,
+            ocrPageCount: multimodalContext.documentArtifacts.reduce((total, document) => total + document.inspection.ocrPages.length, 0),
             visionAttempted: multimodalContext.visionAttempted,
             visionCompleted: multimodalContext.visionCompleted,
             visionModel: multimodalContext.visionModel
@@ -6606,6 +6610,7 @@ export async function POST(request: Request) {
   const askIntelligenceContext = [
     intelligencePreflight.providerContext,
     intelligenceToolProviderContext,
+    multimodalContext?.contextText,
     projectNotesContext
   ].filter(Boolean).join("\n\n");
   const generatedHandoff = buildModeHandoff({
@@ -6730,7 +6735,7 @@ export async function POST(request: Request) {
       providerCallOwnsRouting: true,
       researchPolicy,
       researchRetriever: retrieveAskResearchSources,
-      prompt: effectiveUserPrompt,
+      prompt: askReasoningPrompt,
       projectName: workspace.projectName ?? null,
       workspace
     });
@@ -6865,7 +6870,7 @@ export async function POST(request: Request) {
       providerCallOwnsRouting: true,
       researchPolicy,
       researchRetriever: retrieveAskResearchSources,
-      prompt: effectiveUserPrompt,
+      prompt: askReasoningPrompt,
       projectName: workspace.projectName ?? null,
       workspace
     });
