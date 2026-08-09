@@ -85,11 +85,14 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Models describe provider and compute source separately. Health, failure, and usage metadata use stable internal contracts; unknown pricing and token values remain unknown.
 - `IntelligenceAdapterRegistry` is the single adapter lookup and capability/privacy gate. Unknown adapters fail explicitly.
 - The generic OpenAI-compatible adapter supports configured HTTPS endpoints and explicitly enabled loopback HTTP, bounded timeouts, optional health/model discovery, and normalized non-streaming/streaming results.
-- Current ASK, proposal, and legacy streaming inference use the OpenRouter adapter through this contract. Existing deterministic selection and one-secondary-provider fallback remain unchanged.
+- ASK, proposal generation, and legacy streaming inference use one deterministic Auto router behind this contract. It applies privacy, enabled-source, hard-capability, health, mode-fit, reliability, and known-cost rules before invocation.
+- Auto never treats unknown required capability support as supported. It chooses one primary and at most one independently eligible fallback; the current cloud path preserves its verified `openrouter/free` secondary preference.
+- Health and model discovery are bounded in-memory caches. Recent retryable failures receive short cooldowns, while authentication failures temporarily exclude that source without retry storms.
+- Routing privacy is session-scoped per user: Allow cloud, Prefer local, or Local only. Local only cannot invoke cloud and fails truthfully when no capable local model is ready.
 - Settings -> Intelligence exposes the current environment-managed path, OpenRouter BYOK, Ollama, and llama.cpp connections without changing current chat selection.
 - OpenRouter keys are scoped to the authenticated Clerk user, AES-GCM encrypted in server memory, never returned to the browser, and cleared by disconnect or server restart. Durable encrypted key persistence is intentionally deferred until Hassali has an approved secret store.
 - Ollama and llama.cpp connections accept loopback endpoints only, reject redirects, and never install, start, stop, pull, or delete models. Health and discovery are explicit, bounded actions rather than render-time polling.
-- Advanced Auto routing, arbitrary compatible endpoints, metering, budgets, hardware detection, and Hassali Local are not part of this checkpoint.
+- Arbitrary compatible endpoints, durable BYOK storage, metering, budgets, hardware detection, and Hassali Local are not part of this checkpoint.
 
 ## Design
 
@@ -187,4 +190,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 01 checkpoint: `DASHBOARD-UI-I1: polish workspace and add Codex context capsule`
 - Run 02 I1 checkpoint: `INTELLIGENCE-I1: add provider-independent inference contract`
 - Run 02 I2 checkpoint: `INTELLIGENCE-I2: add BYOK and local provider connections`
+- Run 02 I3 checkpoint: `INTELLIGENCE-I3: add capability-aware automatic routing`
 - The repository HEAD is authoritative; confirm it with Git before every task.

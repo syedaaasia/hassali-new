@@ -2,6 +2,7 @@ import type {
   IntelligenceComputeSource,
   IntelligenceHealthStatus
 } from "@/lib/server/intelligence/intelligence-contract";
+import type { IntelligenceRoutingPrivacy } from "@/lib/server/intelligence/auto-intelligence-router";
 
 export const configurableIntelligenceSourceIds = [
   "openrouter-byok",
@@ -47,6 +48,10 @@ export type IntelligenceSourceSummary = {
 
 export type IntelligenceSourcesResponse = {
   disclosure: string;
+  routing: {
+    mode: "auto";
+    privacy: IntelligenceRoutingPrivacy;
+  };
   sources: IntelligenceSourceSummary[];
 };
 

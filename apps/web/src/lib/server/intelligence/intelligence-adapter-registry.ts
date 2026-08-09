@@ -13,6 +13,7 @@ import {
 export type IntelligenceAdapter = {
   capabilities: IntelligenceCapabilityProfile;
   computeSource: IntelligenceComputeSource;
+  defaultModelId?: string | null;
   discoverModels?: (signal?: AbortSignal) => Promise<IntelligenceModelDescriptor[]>;
   health: (signal?: AbortSignal) => Promise<IntelligenceHealth>;
   id: string;

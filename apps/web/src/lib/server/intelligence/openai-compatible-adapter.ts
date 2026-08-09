@@ -51,6 +51,7 @@ export type OpenAICompatibleAdapterConfig = {
   capabilities?: Partial<IntelligenceCapabilityProfile>;
   chatCompletionsPath?: string;
   computeSource: IntelligenceComputeSource;
+  defaultModelId?: string | null;
   configuredModels?: () => Promise<IntelligenceModelDescriptor[]>;
   extraRequestBody?: (request: IntelligenceRequest) => Record<string, unknown>;
   fetchImpl?: IntelligenceFetch;
@@ -468,6 +469,7 @@ export function createOpenAICompatibleAdapter(config: OpenAICompatibleAdapterCon
   const adapter: IntelligenceAdapter = {
     capabilities,
     computeSource: config.computeSource,
+    defaultModelId: config.defaultModelId ?? null,
     id: config.id,
     providerId: config.providerId,
     async health(signal) {

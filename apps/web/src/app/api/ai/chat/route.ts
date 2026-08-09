@@ -16,6 +16,7 @@ import {
   formatAskRuntimeContext
 } from "@/lib/server/ai/ask-context";
 import {
+  createAutoAskProviderCall,
   createAskBrainDebugHeaders,
   runAskBrain,
   type AskModelSelectionPolicy
@@ -113,10 +114,6 @@ import {
   enforceGeneratorContractWithProposalContext,
   type ProposalContext
 } from "@/lib/server/ai/proposal-context";
-import {
-  resolveAskFallbackProviders,
-  resolveAskProvider
-} from "@/lib/server/ai/provider-router";
 import {
   findHassaliModel,
   getHassaliModelOptions
@@ -229,10 +226,12 @@ import {
 } from "@/lib/server/intelligence/intelligence-preflight";
 import {
   intelligenceResponseText,
-  invokeCurrentIntelligence,
-  legacyProviderFailureCategory,
-  streamCurrentIntelligence
+  legacyProviderFailureCategory
 } from "@/lib/server/intelligence/current-provider-adapter";
+import {
+  invokeAutoIntelligence,
+  streamAutoIntelligence
+} from "@/lib/server/intelligence/intelligence-source-service";
 import type { IntelligenceStreamEvent } from "@/lib/server/intelligence/intelligence-contract";
 import {
   recordBetaTelemetry,
@@ -5732,40 +5731,6 @@ function createIntelligenceTextStream(
   );
 }
 
-function createPlaceholderStream(
-  model: string,
-  options?: {
-    onComplete?: (content: string) => Promise<void>;
-    sessionId?: string | null;
-  }
-) {
-  const encoder = new TextEncoder();
-  const chunks = [
-    `Streaming placeholder active for ${model}.\n\n`,
-    "Add OPENROUTER_API_KEY to enable live OpenRouter responses. ",
-    "Usage tracking hooks are reserved for a later phase."
-  ];
-
-  return new Response(
-    new ReadableStream({
-      async start(controller) {
-        let content = "";
-
-        for (const chunk of chunks) {
-          content += chunk;
-          controller.enqueue(encoder.encode(chunk));
-        }
-
-        await options?.onComplete?.(content);
-        controller.close();
-      }
-    }),
-    {
-      headers: createResponseHeaders(options?.sessionId)
-    }
-  );
-}
-
 export async function POST(request: Request) {
   const routeStartedAt = Date.now();
   const taskSignal = request.signal;
@@ -6223,6 +6188,12 @@ export async function POST(request: Request) {
       model,
       modelSelectionPolicy,
       productMode,
+      providerCall: createAutoAskProviderCall({
+        modelSelectionPolicy,
+        productMode,
+        userId: specialistPersistence?.externalUserId ?? null
+      }),
+      providerCallOwnsRouting: true,
       prompt: effectiveUserPrompt,
       projectName: workspace.projectName ?? null,
       workspace
@@ -6741,6 +6712,12 @@ export async function POST(request: Request) {
       model,
       modelSelectionPolicy,
       productMode,
+      providerCall: createAutoAskProviderCall({
+        modelSelectionPolicy,
+        productMode,
+        userId: persistence?.externalUserId ?? null
+      }),
+      providerCallOwnsRouting: true,
       prompt: effectiveUserPrompt,
       projectName: workspace.projectName ?? null,
       workspace
@@ -6867,6 +6844,12 @@ export async function POST(request: Request) {
       model,
       modelSelectionPolicy,
       productMode,
+      providerCall: createAutoAskProviderCall({
+        modelSelectionPolicy,
+        productMode,
+        userId: persistence?.externalUserId ?? null
+      }),
+      providerCallOwnsRouting: true,
       prompt: effectiveUserPrompt,
       projectName: workspace.projectName ?? null,
       workspace
@@ -7203,31 +7186,6 @@ export async function POST(request: Request) {
     }));
   }
 
-  if (!process.env.OPENROUTER_API_KEY) {
-    return respond(createPlaceholderStream(model, {
-      onComplete: async (content) => {
-        const selfReview = runSelfReviewForAskAnswer({
-          answer: content,
-          generator: "ask_placeholder_stream",
-          projectId: requestedProjectId,
-          prompt: effectiveUserPrompt
-        });
-
-        persistence = await persistRequestMessage(persistence, {
-          content,
-          metadata: {
-            askLiveIntent,
-            askRuntimeContext,
-            model,
-            selfReview: compactSelfReview(selfReview)
-          },
-          role: "assistant"
-        });
-      },
-      sessionId: persistence?.sessionId
-    }));
-  }
-
   if (mode === "SUGGEST" || mode === "EXECUTE") {
     let proposalFallbackUsed = false;
     let servedProposalModel: string | null = null;
@@ -7258,7 +7216,6 @@ export async function POST(request: Request) {
         proposalContext,
         workspace
       });
-    const resolvedProposalProvider = resolveAskProvider(model);
     const requestedModelMetadata = findHassaliModel(model);
     const proposalModelPermitted = Boolean(
       requestedModelMetadata &&
@@ -7272,24 +7229,12 @@ export async function POST(request: Request) {
           ))
     );
     if (
-      !proposalModelPermitted ||
-      !resolvedProposalProvider.configured ||
-      resolvedProposalProvider.executionProvider !== "openrouter" ||
-      !resolvedProposalProvider.executionModelId
+      !proposalModelPermitted
     ) {
       return respond(await createSafeProposalFallback(
-        resolvedProposalProvider.failureCategory ?? "proposal_model_not_permitted"
+        "proposal_model_not_permitted"
       ));
     }
-    const primaryProposalModel = resolvedProposalProvider.executionModelId;
-    const fallbackProposalProvider = modelSelectionPolicy === "automatic"
-      ? resolveAskFallbackProviders(model).find((candidate) =>
-          candidate.configured &&
-          candidate.executionProvider === "openrouter" &&
-          candidate.executionModelId &&
-          candidate.executionModelId !== primaryProposalModel
-        ) ?? null
-      : null;
     const providerReferenceContext = sanitizeUntrustedStructuredReference({
       planning: {
         blueprint,
@@ -7347,33 +7292,36 @@ export async function POST(request: Request) {
       },
       ...providerConversation
     ];
-    const requestProposal = (requestModel: string) => invokeCurrentIntelligence({
-      abortSignal: taskSignal,
-      messages: proposalMessages.map((message) => ({
-        parts: [{ text: message.content, type: "text" }],
-        role: message.role
-      })),
-      mode: productMode,
-      requestedModel: requestModel,
-      requiredCapabilities: ["text", "structuredOutput"],
-      stream: false,
-      timeoutMs: 40_000
+    const proposalOutcome = await invokeAutoIntelligence({
+      allowFallback: modelSelectionPolicy === "automatic",
+      explicitOverride: modelSelectionPolicy === "locked"
+        ? { adapterId: "openrouter", modelId: model }
+        : null,
+      preferredModelId: modelSelectionPolicy === "automatic" ? model : null,
+      request: {
+        abortSignal: taskSignal,
+        messages: proposalMessages.map((message) => ({
+          parts: [{ text: message.content, type: "text" }],
+          role: message.role
+        })),
+        mode: productMode,
+        requestedModel: model,
+        requiredCapabilities: ["text", "structuredOutput"],
+        stream: false,
+        timeoutMs: 40_000
+      },
+      taskTier: intelligencePreflight.complexity.class === "DEEP"
+        ? "complex"
+        : intelligencePreflight.complexity.class === "INSTANT"
+          ? "simple"
+          : "standard",
+      userId: persistence?.externalUserId ?? null
     });
-    const shouldTryProposalFallback = (failureCode: string) =>
-      failureCode !== "PROVIDER_TEXT_EMPTY";
-
-    let proposalResult = await requestProposal(primaryProposalModel);
-    servedProposalModel = primaryProposalModel;
-    if (
-      !proposalResult.ok &&
-      shouldTryProposalFallback(proposalResult.failure.internal?.code ?? "") &&
-      fallbackProposalProvider?.executionModelId &&
-      !taskSignal.aborted
-    ) {
-      proposalResult = await requestProposal(fallbackProposalProvider.executionModelId);
-      proposalFallbackUsed = true;
-      servedProposalModel = fallbackProposalProvider.executionModelId;
-    }
+    const proposalResult = proposalOutcome.result;
+    proposalFallbackUsed = proposalOutcome.fallbackUsed;
+    servedProposalModel = proposalOutcome.fallbackUsed
+      ? proposalOutcome.decision?.fallback?.modelId ?? null
+      : proposalOutcome.decision?.primary.modelId ?? null;
 
     if (taskSignal.aborted || (!proposalResult.ok && proposalResult.failure.category === "cancelled")) {
       return respond(new Response(null, { status: 499 }));
@@ -7594,6 +7542,7 @@ export async function POST(request: Request) {
         )),
         intelligenceKernel: compactIntelligenceKernel(kernel),
         actualServedModel: servedProposalModel,
+        autoRouting: proposalOutcome.decision,
         computeSource: proposalResult.response.computeSource,
         model,
         providerFallbackUsed: proposalFallbackUsed,
@@ -7614,9 +7563,15 @@ export async function POST(request: Request) {
     }));
   }
 
-  const streamResult = await streamCurrentIntelligence({
-    abortSignal: taskSignal,
-    messages: [
+  const streamOutcome = await streamAutoIntelligence({
+    allowFallback: modelSelectionPolicy === "automatic",
+    explicitOverride: modelSelectionPolicy === "locked"
+      ? { adapterId: "openrouter", modelId: model }
+      : null,
+    preferredModelId: modelSelectionPolicy === "automatic" ? model : null,
+    request: {
+      abortSignal: taskSignal,
+      messages: [
       {
         parts: [{
           text:
@@ -7645,12 +7600,20 @@ export async function POST(request: Request) {
         role: message.role
       }))
     ],
-    mode: "ASK",
-    requestedModel: model,
-    requiredCapabilities: ["text", "streaming"],
-    stream: true,
-    timeoutMs: 40_000
+      mode: "ASK",
+      requestedModel: model,
+      requiredCapabilities: ["text", "streaming"],
+      stream: true,
+      timeoutMs: 40_000
+    },
+    taskTier: intelligencePreflight.complexity.class === "DEEP"
+      ? "complex"
+      : intelligencePreflight.complexity.class === "INSTANT"
+        ? "simple"
+        : "standard",
+    userId: persistence?.externalUserId ?? null
   });
+  const streamResult = streamOutcome.result;
 
   if (!streamResult.ok) {
     if (taskSignal.aborted || streamResult.failure.category === "cancelled") {
@@ -7678,6 +7641,7 @@ export async function POST(request: Request) {
           askLiveIntent,
           askRuntimeContext,
           actualServedModel: streamResult.response.model,
+          autoRouting: streamOutcome.decision,
           computeSource: streamResult.response.computeSource,
           model,
           projectContract: summarizeProjectContract(projectContract),

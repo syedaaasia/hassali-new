@@ -209,6 +209,7 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
   const [data, setData] = useState<IntelligenceSourcesResponse | null>(null);
   const [drafts, setDrafts] = useState<Partial<Record<ConfigurableIntelligenceSourceId, Draft>>>({});
   const [busySource, setBusySource] = useState<ConfigurableIntelligenceSourceId | null>(null);
+  const [routingBusy, setRoutingBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -281,6 +282,25 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
     }
   };
 
+  const updateRoutingPrivacy = async (privacy: IntelligenceSourcesResponse["routing"]["privacy"]) => {
+    setRoutingBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/settings/intelligence", {
+        body: JSON.stringify({ privacy }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const payload = await response.json() as IntelligenceSourcesResponse & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "The routing preference could not be saved.");
+      adoptResponse(payload);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The routing preference could not be saved.");
+    } finally {
+      setRoutingBusy(false);
+    }
+  };
+
   return (
     <div
       aria-labelledby="intelligence-settings-title"
@@ -310,6 +330,28 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+          {data ? (
+            <section className="mb-4 flex flex-col gap-3 rounded-lg border border-[hsl(var(--premium-border))] bg-white/[0.025] p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold text-foreground">Routing · Auto</p>
+                <p className="mt-1 text-[11px] leading-5 text-muted-foreground">Hassali selects the best reliably capable enabled source within this privacy boundary.</p>
+              </div>
+              <label className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+                Privacy
+                <select
+                  aria-label="Automatic routing privacy"
+                  className="hassali-focus-ring rounded-md border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel-strong))] px-2.5 py-2 text-xs text-foreground"
+                  disabled={routingBusy}
+                  onChange={(event) => void updateRoutingPrivacy((event.currentTarget as unknown as { value: IntelligenceSourcesResponse["routing"]["privacy"] }).value)}
+                  value={data.routing.privacy}
+                >
+                  <option value="allow-cloud">Allow cloud</option>
+                  <option value="prefer-local">Prefer local</option>
+                  <option value="local-only">Local only</option>
+                </select>
+              </label>
+            </section>
+          ) : null}
           {data ? (
             <p className="mb-4 rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-100 [.light_&]:text-amber-900">
               {data.disclosure}

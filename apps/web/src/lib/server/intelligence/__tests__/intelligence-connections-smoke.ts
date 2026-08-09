@@ -51,6 +51,10 @@ test("session vault encrypts credentials, isolates users, and emits client-safe 
   assert(!serialized.includes("private-user-a-key"));
   assert(!serialized.includes("ciphertext"));
   assert.equal(vault.list("user-a")[0]?.credentialConfigured, true);
+  assert.equal(vault.getRoutingPrivacy("user-a"), "allow-cloud");
+  vault.setRoutingPrivacy("user-a", "local-only");
+  assert.equal(vault.getRoutingPrivacy("user-a"), "local-only");
+  assert.equal(vault.getRoutingPrivacy("user-b"), "allow-cloud");
   assert.equal(vault.disconnect("user-a", "openrouter-byok"), true);
   assert.equal(vault.getCredential("user-a", "openrouter-byok"), null);
 });
@@ -241,9 +245,12 @@ test("settings API and UI keep auth, no-store responses, and secret-safe control
   assert(route.includes("await auth()"));
   assert(route.includes('"Cache-Control": "no-store"'));
   assert(route.includes("sameOrigin(request)"));
+  assert(route.includes("export async function PATCH"));
   assert(dialog.includes('type="password"'));
   assert(dialog.includes('apiKey: ""'));
   assert(dialog.includes("Loopback addresses only"));
+  assert(dialog.includes("Prefer local"));
+  assert(dialog.includes("Local only"));
   assert(!dialog.includes("localStorage"));
 });
 

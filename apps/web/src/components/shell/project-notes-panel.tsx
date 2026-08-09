@@ -8,10 +8,6 @@ import {
 } from "@/lib/project-notes-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
 
-type ResponsiveGlobal = {
-  matchMedia?: (query: string) => { matches: boolean };
-};
-
 export function ProjectNotesPanel() {
   const projectId = useWorkspaceStore((state) => state.projectId);
   const projectName = useWorkspaceStore((state) => state.projectName);
@@ -27,12 +23,6 @@ export function ProjectNotesPanel() {
   useEffect(() => {
     hydrateProject(projectId);
   }, [hydrateProject, projectId]);
-
-  useEffect(() => {
-    const desktop = (globalThis as unknown as ResponsiveGlobal).matchMedia?.("(min-width: 1280px)").matches ?? false;
-
-    setIsOpen(desktop);
-  }, [setIsOpen]);
 
   if (!isOpen) {
     return (

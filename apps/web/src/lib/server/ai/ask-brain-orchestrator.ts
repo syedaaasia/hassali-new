@@ -48,6 +48,7 @@ import type {
   IntelligenceComputeSource,
   IntelligenceUsage
 } from "@/lib/server/intelligence/intelligence-contract";
+import { invokeAutoIntelligence } from "@/lib/server/intelligence/intelligence-source-service";
 
 export type AskBrainDecisionPath =
   | "boundary_only"
@@ -157,6 +158,7 @@ export type AskBrainInput = {
   workspace?: AskBrainWorkspaceContext;
   modelSelectionPolicy?: AskModelSelectionPolicy;
   providerCall?: AskProviderCall;
+  providerCallOwnsRouting?: boolean;
 };
 
 export type ModelCallResult =
@@ -820,6 +822,84 @@ async function fetchOpenRouterText(input: {
   };
 }
 
+export function createAutoAskProviderCall(input: {
+  modelSelectionPolicy: AskModelSelectionPolicy;
+  productMode: "ASK" | "CODE" | "WEBSITE";
+  userId: string | null;
+}): AskProviderCall {
+  return async (call) => {
+    const outcome = await invokeAutoIntelligence({
+      allowFallback: input.modelSelectionPolicy === "automatic",
+      explicitOverride: input.modelSelectionPolicy === "locked"
+        ? { adapterId: "openrouter", modelId: call.model }
+        : null,
+      preferredModelId: input.modelSelectionPolicy === "automatic" ? call.model : null,
+      request: {
+        abortSignal: call.abortSignal,
+        features: call.webSearch ? { webResearch: { maxResults: 3 } } : undefined,
+        generation: { maxOutputTokens: call.maxTokens ?? 2_000 },
+        messages: call.messages.map((message) => ({
+          parts: [{ text: message.content, type: "text" }],
+          role: message.role
+        })),
+        mode: input.productMode,
+        requestedModel: call.model,
+        requiredCapabilities: call.webSearch ? ["text", "webResearch"] : ["text"],
+        stream: false,
+        timeoutMs: call.timeoutMs
+      },
+      userId: input.userId
+    });
+
+    if (!outcome.result.ok) {
+      const category = legacyProviderFailureCategory(outcome.result.failure);
+      return {
+        status: outcome.result.failure.category === "cancelled"
+          ? "cancelled"
+          : outcome.result.failure.category === "timeout"
+            ? "timeout"
+            : outcome.result.failure.category === "unconfigured"
+              ? "not_configured"
+              : "failed",
+        category,
+        reason: outcome.result.failure.safeUserMessage,
+        retryAfter: outcome.result.failure.retryAfterMs
+          ? String(Math.ceil(outcome.result.failure.retryAfterMs / 1_000))
+          : null
+      };
+    }
+
+    const prompt = [...call.messages].reverse().find((entry) => entry.role === "user")?.content ?? "";
+    const decision = outcome.decision;
+    console.info("auto intelligence route", {
+      adapterId: decision?.primary.adapterId ?? outcome.result.response.providerId,
+      computeSource: outcome.result.response.computeSource,
+      fallbackUsed: outcome.fallbackUsed,
+      health: decision?.primary.health ?? null,
+      mode: input.productMode,
+      model: outcome.result.response.model,
+      privacy: decision?.privacy ?? null,
+      requiredCapabilities: decision?.requiredCapabilities ?? [],
+      reasonCodes: outcome.fallbackUsed
+        ? decision?.fallback?.reasonCodes ?? []
+        : decision?.primary.reasonCodes ?? []
+    });
+    return {
+      status: "ok",
+      computeSource: outcome.result.response.computeSource,
+      content: intelligenceResponseText(outcome.result.response.content),
+      researchAttempted: Boolean(call.webSearch),
+      servedModel: outcome.result.response.model,
+      sources: normalizeIntelligenceSources({
+        citations: outcome.result.response.citations,
+        prompt,
+        retrievedAt: new Date().toISOString()
+      }),
+      usage: outcome.result.response.usage
+    };
+  };
+}
+
 function summarizeReferenceFile(input: AskBrainInput) {
   const workspace = getRelevantWorkspaceText(input);
   if (!workspace.excerpt) {
@@ -1178,7 +1258,17 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   const classification = classifyAskIntent(input.prompt);
   const selected = chooseDecisionPath(classification, input.prompt, freshness, input.behavior);
   const workspace = getRelevantWorkspaceText(input);
-  const provider = resolveAskProvider(input.model);
+  const resolvedProvider = resolveAskProvider(input.model);
+  const provider = input.providerCallOwnsRouting
+    ? {
+        ...resolvedProvider,
+        configured: true,
+        executionModelId: input.model,
+        executionProvider: "auto",
+        failureCategory: null,
+        pricingClass: null
+      }
+    : resolvedProvider;
   const selectedProviderCooldown = input.providerCall
     ? { active: false, failureCategory: null, remainingMs: 0 }
     : getAskProviderCooldown(provider);
@@ -1284,7 +1374,11 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     fallbackOccurred = !deterministicAnswer;
     fallbackReason = deterministicAnswer ? null : "deterministic_handler_empty";
   } else if (selected.path === "model_reasoning_preferred") {
-    if (provider.configured && provider.executionProvider === "openrouter" && provider.executionModelId) {
+    if (
+      provider.configured &&
+      (input.providerCallOwnsRouting || provider.executionProvider === "openrouter") &&
+      provider.executionModelId
+    ) {
       providerStatus = "configured";
       const providerMessages = providerConversation(
         input,
@@ -1352,7 +1446,9 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
           answer = "Request stopped.";
         } else {
           primaryTimedOut = modelResult.status === "timeout";
-          const fallbackProvider = modelSelectionPolicy === "automatic" && !cooldownFallbackProvider
+          const fallbackProvider = modelSelectionPolicy === "automatic" &&
+            !input.providerCallOwnsRouting &&
+            !cooldownFallbackProvider
             ? resolveAskFallbackProviders(provider.requestedModelId)
               .find((candidate) => !getAskProviderCooldown(candidate).active) ?? null
             : null;

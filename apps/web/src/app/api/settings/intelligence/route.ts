@@ -3,7 +3,9 @@ import { isConfigurableIntelligenceSourceId } from "@/lib/intelligence-sources";
 import {
   configureIntelligenceSource,
   disconnectIntelligenceSource,
+  isIntelligenceRoutingPrivacy,
   listIntelligenceSources,
+  setIntelligenceRoutingPrivacy,
   testIntelligenceSourceConnection
 } from "@/lib/server/intelligence/intelligence-source-service";
 import { IntelligenceContractError } from "@/lib/server/intelligence/intelligence-contract";
@@ -56,6 +58,20 @@ export async function PUT(request: Request) {
   } catch (error) {
     return Response.json({ error: safeConfigurationError(error) }, { status: 400 });
   }
+}
+
+export async function PATCH(request: Request) {
+  const { userId } = await auth();
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!sameOrigin(request)) return Response.json({ error: "Invalid request origin." }, { status: 403 });
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!isIntelligenceRoutingPrivacy(body?.privacy)) {
+    return Response.json({ error: "Unknown routing privacy preference." }, { status: 400 });
+  }
+  setIntelligenceRoutingPrivacy(userId, body.privacy);
+  return Response.json(listIntelligenceSources(userId), {
+    headers: { "Cache-Control": "no-store" }
+  });
 }
 
 export async function POST(request: Request) {

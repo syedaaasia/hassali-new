@@ -3,6 +3,7 @@ import type {
   ConfigurableIntelligenceSourceId,
   IntelligenceSourceModelSummary
 } from "@/lib/intelligence-sources";
+import type { IntelligenceRoutingPrivacy } from "./auto-intelligence-router";
 import type { IntelligenceHealth } from "./intelligence-contract";
 
 type EncryptedCredential = {
@@ -41,6 +42,7 @@ function cloneSource(source: InternalStoredSource): StoredIntelligenceSource {
 
 export class IntelligenceSourceSessionVault {
   private readonly encryptionKey = randomBytes(32);
+  private readonly routingPreferences = new Map<string, IntelligenceRoutingPrivacy>();
   private readonly users = new Map<string, Map<ConfigurableIntelligenceSourceId, InternalStoredSource>>();
 
   private encrypt(value: string): EncryptedCredential {
@@ -112,6 +114,15 @@ export class IntelligenceSourceSessionVault {
     return credential ? this.decrypt(credential) : null;
   }
 
+  getRoutingPrivacy(userId: string): IntelligenceRoutingPrivacy {
+    return this.routingPreferences.get(userId) ?? "allow-cloud";
+  }
+
+  setRoutingPrivacy(userId: string, privacy: IntelligenceRoutingPrivacy) {
+    this.routingPreferences.set(userId, privacy);
+    return privacy;
+  }
+
   list(userId: string) {
     return Array.from(this.users.get(userId)?.values() ?? [], cloneSource);
   }
@@ -132,6 +143,7 @@ export class IntelligenceSourceSessionVault {
 
   reset() {
     this.users.clear();
+    this.routingPreferences.clear();
   }
 }
 

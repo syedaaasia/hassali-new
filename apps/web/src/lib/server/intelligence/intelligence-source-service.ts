@@ -13,6 +13,12 @@ import { normalizeLocalIntelligenceEndpoint } from "./openai-compatible-adapter"
 import { createConfiguredSourceAdapter, testConfiguredSource } from "./configured-source-adapters";
 import type { IntelligenceFetch } from "./openai-compatible-adapter";
 import { createCurrentIntelligenceRegistry } from "./current-provider-adapter";
+import {
+  AutoIntelligenceRouter,
+  type AutoRoutingPreferences,
+  type IntelligenceRoutingPrivacy
+} from "./auto-intelligence-router";
+import type { IntelligenceRequest } from "./intelligence-contract";
 
 const sourceDetails: Record<ConfigurableIntelligenceSourceId, {
   description: string;
@@ -115,6 +121,10 @@ export function listIntelligenceSources(userId: string): IntelligenceSourcesResp
   };
   return {
     disclosure: "BYOK keys and local connections are encrypted in server memory for this session only. They are cleared on server restart and are never returned to the browser.",
+    routing: {
+      mode: "auto",
+      privacy: intelligenceSourceSessionVault.getRoutingPrivacy(userId)
+    },
     sources: [
       currentSource,
       ...configurableIntelligenceSourceIds.map((sourceId) => sourceSummary(
@@ -123,6 +133,14 @@ export function listIntelligenceSources(userId: string): IntelligenceSourcesResp
       ))
     ]
   };
+}
+
+export function setIntelligenceRoutingPrivacy(userId: string, privacy: IntelligenceRoutingPrivacy) {
+  return intelligenceSourceSessionVault.setRoutingPrivacy(userId, privacy);
+}
+
+export function isIntelligenceRoutingPrivacy(value: unknown): value is IntelligenceRoutingPrivacy {
+  return value === "allow-cloud" || value === "prefer-local" || value === "local-only";
 }
 
 export function configureIntelligenceSource(input: {
@@ -199,4 +217,53 @@ export function createAvailableIntelligenceRegistryForUser(
     }));
   }
   return registry;
+}
+
+function routingPreferences(input: {
+  allowFallback?: boolean;
+  explicitOverride?: AutoRoutingPreferences["explicitOverride"];
+  preferredModelId?: string | null;
+  taskTier?: AutoRoutingPreferences["taskTier"];
+  userId: string | null;
+}): AutoRoutingPreferences {
+  return {
+    allowFallback: input.allowFallback,
+    explicitOverride: input.explicitOverride,
+    preferredModelId: input.preferredModelId,
+    privacy: input.userId
+      ? intelligenceSourceSessionVault.getRoutingPrivacy(input.userId)
+      : "allow-cloud",
+    scopeId: input.userId ?? "environment-default",
+    taskTier: input.taskTier
+  };
+}
+
+export async function invokeAutoIntelligence(input: {
+  allowFallback?: boolean;
+  explicitOverride?: AutoRoutingPreferences["explicitOverride"];
+  fetchImpl?: IntelligenceFetch;
+  preferredModelId?: string | null;
+  request: IntelligenceRequest;
+  taskTier?: AutoRoutingPreferences["taskTier"];
+  userId: string | null;
+}) {
+  const registry = input.userId
+    ? createAvailableIntelligenceRegistryForUser(input.userId, input.fetchImpl)
+    : createCurrentIntelligenceRegistry({ fetchImpl: input.fetchImpl });
+  return new AutoIntelligenceRouter(registry).invoke(input.request, routingPreferences(input));
+}
+
+export async function streamAutoIntelligence(input: {
+  allowFallback?: boolean;
+  explicitOverride?: AutoRoutingPreferences["explicitOverride"];
+  fetchImpl?: IntelligenceFetch;
+  preferredModelId?: string | null;
+  request: IntelligenceRequest;
+  taskTier?: AutoRoutingPreferences["taskTier"];
+  userId: string | null;
+}) {
+  const registry = input.userId
+    ? createAvailableIntelligenceRegistryForUser(input.userId, input.fetchImpl)
+    : createCurrentIntelligenceRegistry({ fetchImpl: input.fetchImpl });
+  return new AutoIntelligenceRouter(registry).stream(input.request, routingPreferences(input));
 }

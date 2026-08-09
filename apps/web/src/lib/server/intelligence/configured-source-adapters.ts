@@ -1,6 +1,7 @@
 import type { IntelligenceSourceModelSummary } from "@/lib/intelligence-sources";
 import {
   createCapabilityProfile,
+  intelligenceCapabilities,
   type IntelligenceCapabilityProfile,
   type IntelligenceHealth,
   type IntelligenceHealthStatus,
@@ -323,6 +324,37 @@ export function summarizeDiscoveredModel(model: IntelligenceModelDescriptor): In
   };
 }
 
+function storedModelDescriptor(
+  source: StoredIntelligenceSource,
+  model: IntelligenceSourceModelSummary
+): IntelligenceModelDescriptor {
+  const supported = new Set(model.capabilities);
+  return modelDescriptor({
+    capabilities: Object.fromEntries(
+      intelligenceCapabilities.map((capability) => [
+        capability,
+        supported.has(capability) ? "supported" : "unknown"
+      ])
+    ) as IntelligenceCapabilityProfile,
+    computeSource: source.id === "openrouter-byok" ? "byok-cloud" : "local-endpoint",
+    contextLimit: model.contextLimit,
+    displayName: model.displayName,
+    inputModalities: [
+      ...(supported.has("text") ? ["text" as const] : []),
+      ...(supported.has("vision") ? ["image" as const] : [])
+    ],
+    modelId: model.modelId,
+    outputModalities: supported.has("text") ? ["text"] : [],
+    providerId: source.id,
+    rawProviderMetadata: {
+      format: model.format,
+      parameterSize: model.parameterSize,
+      quantization: model.quantization,
+      sizeBytes: model.sizeBytes
+    }
+  });
+}
+
 export function createConfiguredSourceAdapter(input: {
   fetchImpl?: IntelligenceFetch;
   getApiKey: () => string | null;
@@ -331,8 +363,10 @@ export function createConfiguredSourceAdapter(input: {
   if (input.source.id === "openrouter-byok") {
     const adapter = createOpenAICompatibleAdapter({
       baseUrl: openRouterBaseUrl,
-      capabilities: { streaming: "supported", text: "supported" },
+      capabilities: { streaming: "supported", structuredOutput: "supported", text: "supported", tools: "supported", vision: "supported" },
       computeSource: "byok-cloud",
+      configuredModels: async () => input.source.models.map((model) => storedModelDescriptor(input.source, model)),
+      defaultModelId: input.source.defaultModel,
       fetchImpl: input.fetchImpl,
       getApiKey: input.getApiKey,
       id: input.source.id,
@@ -381,6 +415,8 @@ export function createConfiguredSourceAdapter(input: {
     baseUrl: inferenceBase,
     capabilities: { streaming: "supported", text: "supported" },
     computeSource: "local-endpoint",
+    configuredModels: async () => input.source.models.map((model) => storedModelDescriptor(input.source, model)),
+    defaultModelId: input.source.defaultModel,
     fetchImpl: input.fetchImpl,
     id: input.source.id,
     providerId: input.source.id,

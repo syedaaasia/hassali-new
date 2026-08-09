@@ -56,8 +56,13 @@ export function normalizeRegisteredModel(model: HassaliModelMetadata): Intellige
     providerId: model.executionProviderId,
     publisherId: model.providerId,
     rawProviderMetadata: {
+      automaticFallback: model.modelId === "openrouter/free",
       availability: model.availability,
+      codingTier: model.codingTier,
+      costTier: model.costTier,
+      designTier: model.designTier,
       pricingClass: model.pricingClass,
+      reasoningTier: model.reasoningTier,
       registryModelId: model.modelId
     }
   };
@@ -103,6 +108,7 @@ export function createCurrentOpenRouterAdapter(options?: {
       webResearch: "supported"
     },
     computeSource: "free-cloud",
+    defaultModelId: process.env.HASSALI_DEFAULT_MODEL ?? "openai/gpt-4o-mini",
     configuredModels: async () => hassaliModelRegistry
       .filter((model) => model.executionProviderId === "openrouter" && !model.isTestOnly)
       .map(normalizeRegisteredModel),

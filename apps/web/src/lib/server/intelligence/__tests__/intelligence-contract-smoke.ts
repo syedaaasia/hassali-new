@@ -452,9 +452,10 @@ test("ASK and proposal entry points no longer parse provider HTTP shapes", async
     : path.resolve(process.cwd(), "apps/web");
   const route = await readFile(path.join(root, "src/app/api/ai/chat/route.ts"), "utf8");
   const ask = await readFile(path.join(root, "src/lib/server/ai/ask-brain-orchestrator.ts"), "utf8");
-  assert(route.includes("invokeCurrentIntelligence"));
-  assert(route.includes("streamCurrentIntelligence"));
-  assert(ask.includes("invokeCurrentIntelligence"));
+  assert(route.includes("invokeAutoIntelligence"));
+  assert(route.includes("streamAutoIntelligence"));
+  assert(ask.includes("createAutoAskProviderCall"));
+  assert(ask.includes("invokeAutoIntelligence"));
   assert(!route.includes("openrouter.ai/api/v1/chat/completions"));
   assert(!ask.includes("openrouter.ai/api/v1/chat/completions"));
   assert(!route.includes("choices?.[0]?.message"));

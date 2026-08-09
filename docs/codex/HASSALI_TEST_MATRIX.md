@@ -150,6 +150,14 @@ I-16 | Ollama discovery | Test running Ollama with zero or installed models | Re
 I-17 | llama.cpp health | Simulate ready/loading/down server | Distinct ready/loading/unavailable status; model discovery remains bounded
 I-18 | Settings UI | Open Intelligence at desktop and 390px | Sources, disclosure, controls, focus names, and safe wrapping remain usable
 I-19 | Default regression | Leave all new connections empty/disabled | Current provider selection and one-secondary fallback remain unchanged
+I-20 | Auto hard gate | Require vision with unsupported or unknown local support | Local candidate rejected; verified capable source selected
+I-21 | Auto privacy | Select Prefer local and Local only | Healthy capable local wins preference; Local only makes zero cloud calls
+I-22 | Auto health | Use degraded/loading/auth-failed and ready sources | Ready reliable candidate wins; failed source is bounded/cached
+I-23 | Auto source state | Disable source or return zero models | Source remains unselected; healthy zero-model service is not called
+I-24 | Auto economics | Compare degraded cheap and ready verified models | Reliability and capability win before known price
+I-25 | Auto fallback | Primary has retryable/non-retryable or streaming failure | At most one eligible fallback; none after output or invalid request
+I-26 | Auto override | Lock valid/incapable source and model | Valid override honored; invalid override fails without substitution
+I-27 | Auto determinism | Resolve identical request/source state twice | Same primary and fallback decision
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers
