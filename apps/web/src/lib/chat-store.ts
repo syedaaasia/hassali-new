@@ -20,6 +20,7 @@ import type {
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
 import { shouldRestorePreviousAttachments, type HassaliAttachment } from "@/lib/attachments";
 import type { ProjectApprovalPolicy } from "@/lib/approval-policy";
+import type { AdaptiveCodePlanSummary } from "@/lib/server/ai/adaptive-code-planner";
 
 export type ChatRole = "user" | "assistant";
 export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
@@ -122,6 +123,8 @@ export type KernelRoutingDecision = {
 };
 
 export type DiffProposal = {
+  adaptiveApprovalRequired?: boolean;
+  adaptiveCodePlan?: AdaptiveCodePlanSummary;
   appPreview?: {
     appKind: string;
     appName: string;
@@ -513,6 +516,24 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function isAdaptiveCodePlanSummary(value: unknown): value is AdaptiveCodePlanSummary {
+  if (!isPlainRecord(value)) return false;
+
+  return (
+    isStringArray(value.acceptanceCriteria) &&
+    typeof value.approvalRequired === "boolean" &&
+    (value.blockingReason === null || typeof value.blockingReason === "string") &&
+    ["tiny", "small", "medium", "large", "system-level"].includes(String(value.complexity)) &&
+    (value.clarificationQuestion === null || typeof value.clarificationQuestion === "string") &&
+    isStringArray(value.planSteps) &&
+    ["LOW", "MODERATE", "HIGH", "CRITICAL"].includes(String(value.risk)) &&
+    ["blocked", "planned", "ready", "requires-approval"].includes(String(value.status)) &&
+    typeof value.taskId === "string" &&
+    ["add-feature", "automate", "configure", "create-project", "debug", "deploy", "explain", "migrate", "modify", "refactor", "repair", "review", "test"].includes(String(value.taskType)) &&
+    isStringArray(value.verificationChecks)
+  );
+}
+
 function isUnifiedPreviewType(value: unknown): value is UnifiedPreviewType {
   return (
     value === "application" ||
@@ -841,6 +862,10 @@ function isDiffProposal(value: unknown): value is DiffProposal {
 
   return (
     typeof proposal.id === "string" &&
+    (typeof proposal.adaptiveApprovalRequired === "undefined" ||
+      typeof proposal.adaptiveApprovalRequired === "boolean") &&
+    (typeof proposal.adaptiveCodePlan === "undefined" ||
+      isAdaptiveCodePlanSummary(proposal.adaptiveCodePlan)) &&
     (typeof proposal.appPreview === "undefined" || isAppPreview(proposal.appPreview)) &&
     (typeof proposal.assetDriftDetected === "undefined" ||
       typeof proposal.assetDriftDetected === "boolean") &&

@@ -1,4 +1,9 @@
 import type { BusinessBlueprint } from "@/lib/server/ai/blueprint-matcher";
+import {
+  summarizeAdaptiveCodePlan,
+  type AdaptiveCodePlan,
+  type AdaptiveCodePlanSummary
+} from "@/lib/server/ai/adaptive-code-planner";
 import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-engine";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
@@ -38,6 +43,7 @@ export type ExecutionStage = {
 };
 
 export type ExecutionPlan = {
+  adaptiveCodePlan?: AdaptiveCodePlanSummary;
   approvalCheckpoints: string[];
   blockers: string[];
   completionChecks: string[];
@@ -56,6 +62,7 @@ export type ExecutionPlan = {
 };
 
 type BuildExecutionPlanInput = {
+  adaptiveCodePlan?: AdaptiveCodePlan | null;
   businessBlueprint: BusinessBlueprint;
   contextPriority: ContextPriorityResult;
   currentPrompt: string;
@@ -64,6 +71,75 @@ type BuildExecutionPlanInput = {
   taskDecomposition: TaskDecomposition;
   translatedIntent: TranslatedIntentSpec;
 };
+
+function adaptiveRisk(risk: AdaptiveCodePlan["risk"]): ExecutionRiskLevel {
+  if (risk === "CRITICAL" || risk === "HIGH") return "high";
+  if (risk === "MODERATE") return "medium";
+  return "low";
+}
+
+function adaptiveCodeExecutionPlan(plan: AdaptiveCodePlan): ExecutionPlan {
+  const riskLevel = adaptiveRisk(plan.risk);
+  const policy: ExecutionPlanStrategy = plan.complexity === "tiny"
+    ? "single_targeted_patch"
+    : plan.complexity === "small" || plan.complexity === "medium"
+      ? "single_proposal"
+      : "docs_first_then_source";
+  const executionStages: ExecutionStage[] = plan.actions.map((action) => ({
+    canRunInParallel: false,
+    dependsOn: action.dependsOn,
+    id: action.id,
+    purpose: action.objective,
+    requiredBeforeExecution: [
+      ...(action.dependsOn.length ? ["dependent plan actions completed"] : ["selected project context"]),
+      ...((action.mutates || (action.kind === "verify" && plan.intent.requiresExecution)) &&
+        plan.approvalRequirements.explicitApprovalRequired
+        ? ["explicit approval"]
+        : [])
+    ],
+    riskLevel,
+    rollbackNote: action.mutates
+      ? plan.reversibility === "reversible"
+        ? "Keep the change bounded and restore only the reviewed attempt if verification fails."
+        : "Stop before mutation unless recovery and explicit approval are proven."
+      : "No rollback is needed for this non-mutating planning action.",
+    stageType: action.kind === "inspect" || action.kind === "diagnose"
+      ? "discovery"
+      : action.kind === "verify" || action.kind === "deliver"
+        ? "validation"
+        : "structure",
+    tasks: [action.objective],
+    title: action.id.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" "),
+    validationChecks: [...action.acceptanceCriteria, ...action.verification]
+  }));
+  const blockers = [
+    ...plan.constraintConflicts.filter((conflict) => conflict.severity === "blocking").map((conflict) => conflict.reason),
+    ...plan.ambiguities.filter((ambiguity) => ambiguity.blocking).map((ambiguity) => ambiguity.reason)
+  ];
+  return {
+    adaptiveCodePlan: summarizeAdaptiveCodePlan(plan),
+    approvalCheckpoints: plan.approvalRequirements.reasons,
+    blockers,
+    completionChecks: plan.acceptanceCriteria,
+    confidence: plan.validation.valid ? 0.94 : 0.5,
+    executionMode: "CODE",
+    executionPlanId: plan.taskId,
+    executionPlanStatus: plan.complexity === "tiny" ? "targeted" : "planned",
+    executionStages,
+    executionStrategy: policy,
+    parallelTasks: [],
+    prerequisites: plan.repositoryInspection.requiredEvidence,
+    recommendedExecutionPolicy: policy,
+    riskLevel,
+    rollbackChecks: [
+      "Preserve unrelated user work.",
+      plan.reversibility === "reversible"
+        ? "Prefer a bounded reversible change."
+        : "Require explicit recovery evidence before irreversible work."
+    ],
+    sequentialTasks: executionStages.map((stage) => stage.title)
+  };
+}
 
 function stage(input: ExecutionStage): ExecutionStage {
   return input;
@@ -384,6 +460,7 @@ export function buildExecutionPlan(input: BuildExecutionPlanInput): ExecutionPla
   }
 
   if (input.contextPriority.authoritativeMode === "CODE") {
+    if (input.adaptiveCodePlan) return adaptiveCodeExecutionPlan(input.adaptiveCodePlan);
     return codePlan(input);
   }
 

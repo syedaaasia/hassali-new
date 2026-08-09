@@ -129,6 +129,22 @@ C-09 | Repair | Verification fails repeatedly | Bounded repairs, repeated-signat
 C-10 | Mixed workspace | Build CODE beside WEBSITE files | CODE contract/Preview used; WEBSITE contract unchanged
 C-11 | Environment | Child runtime starts | Minimal environment excludes Hassali/provider/database/auth secrets
 C-12 | Process stop | Stop Preview/runtime | Stops only Hassali-owned process
+C-13 | Adaptive depth | Compare label edit, feature, migration | Tiny plan stays terse; depth and checks increase with complexity/risk
+C-14 | Intent | Paraphrase repair/debug/review/explain | Compatible task intent without exact-phrase dependence
+C-15 | Hard constraint | Request repair without auth/DB/design change | Constraint stays hard and appears in acceptance
+C-16 | Conflict | Require persistence with no storage | Plan blocks with normalized conflict; no proposal execution
+C-17 | Ambiguity | Compare existing-button icon and production DB deletion | Convention supplies safe default; destructive target asks clarification
+C-18 | Debug truth | Report recurring settings failure | Evidence/diagnosis precede mutation; hypothesis starts unverified
+C-19 | Lifecycle | Report state reopening after reload | Inspection covers authoritative state owner and hydration lifecycle
+C-20 | Validation | Remove criteria/checks or introduce action cycle | Deterministic plan validator rejects the plan
+C-21 | Risk | Plan auth/schema/deploy/destructive task | Risk, reversibility, recovery, and verification boundaries scale appropriately
+C-22 | Standing authority | Use Full access for high-risk mutation | Inline explicit approval still required
+C-23 | Git | Request commit, push, or no push | Commit/push remain separate; push always requires explicit permission
+C-24 | Delivery | Request ZIP/Preview/deploy/report | Requirement recorded without claiming artifact or deployment exists
+C-25 | Research priority | Repository answers task | No public research requested
+C-26 | Research freshness | Current external API behavior matters | Sanitized official technical research marked; no source/path/notes leakage
+C-27 | Inspection handoff | Exact files are not yet proven | RepositoryInspectionRequest asks evidence/symbol/config questions; no invented path
+C-28 | Plan UI | Open actionable CODE proposal | Concise task-specific steps shown; internal graph and private context remain hidden
 ```
 
 ## Approval Policies

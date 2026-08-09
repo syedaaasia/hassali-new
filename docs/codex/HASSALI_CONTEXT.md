@@ -137,6 +137,17 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Intelligence Settings can return a complete ready-degraded snapshot when preference persistence is unavailable. BYOK remains encrypted in server memory and the UI states that session limitation truthfully.
 - Project search is deterministic, Clerk-owner-filtered PostgreSQL search over project names, chat titles, and message content. It never invokes a model or public web provider and can open the exact matched chat session.
 
+### Adaptive CODE planning
+
+- Every actionable CODE request now creates an `AdaptiveCodePlan` before the existing execution-plan/proposal path. ASK and WEBSITE keep their established planners and authority boundaries.
+- The planner normalizes task intent, explicit and inferred constraints, hard conflicts, blocking/non-blocking ambiguity, proportional complexity, risk, reversibility, required capabilities, bounded repair budget, and stop conditions.
+- Read-only explanation and review remain non-mutating. Bug work starts with evidence and an unverified hypothesis rather than claiming a root cause before inspection.
+- Mutation plans require objective acceptance criteria and relevant verification. High-risk, destructive, deployment, and Git-push work cannot use standing project approval; Git push remains separately permissioned.
+- Delivery tracks source, commit, push, Preview, ZIP, deployment, and report requests independently. A requested artifact is never treated as already delivered.
+- Plan actions use stable IDs and a validated acyclic dependency list. Invalid, contradictory, or safety-ambiguous plans block before proposal approval.
+- The normal CODE UI receives only a bounded plan summary. Full constraints, safety boundaries, and private prompts/source remain server-side.
+- `RepositoryInspectionRequest` hands I2 goals, evidence needs, suspected domains, and symbol/dependency/configuration questions without inventing file paths. Repository text remains untrusted evidence, not authority.
+
 ## Design
 
 ### Direction
@@ -239,4 +250,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 03 I2 checkpoint: `ASK-I2: add OCR and document intelligence`
 - Run 03 I3 checkpoint: `ASK-I3: add vision and media intelligence`
 - Run 03 I4 checkpoint: `ASK-I4: verify multimodal intelligence end to end`
+- Run 04 I1 checkpoint: `CODE-I1: add adaptive planning and delivery contracts`
 - The repository HEAD is authoritative; confirm it with Git before every task.

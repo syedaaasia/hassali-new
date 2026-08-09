@@ -25,6 +25,7 @@ export const projectApprovalPolicyOptions: Array<{
 ];
 
 type ApprovalCandidate = {
+  adaptiveApprovalRequired?: boolean;
   approvalDecision?: {
     approvalAllowed: boolean;
     hasCriticalIssues: boolean;
@@ -43,6 +44,7 @@ export function canApplyWithProjectApprovalPolicy(
 ) {
   if (policy === "ask" || proposal.status !== "pending") return false;
   if (
+    proposal.adaptiveApprovalRequired ||
     !proposal.approvalDecision?.approvalAllowed ||
     proposal.approvalDisabled ||
     proposal.shouldBlockExecution ||

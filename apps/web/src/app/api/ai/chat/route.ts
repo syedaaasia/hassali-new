@@ -97,6 +97,10 @@ import {
   type ExecutionPlan
 } from "@/lib/server/ai/execution-planner";
 import {
+  buildAdaptiveCodePlan,
+  type AdaptiveCodePlanSummary
+} from "@/lib/server/ai/adaptive-code-planner";
+import {
   buildGeneratorContract,
   summarizeGeneratorContract,
   type GeneratorContract
@@ -680,6 +684,8 @@ type LegacyPreviewType = "code_app_preview" | "code_plan_preview" | "docs_previe
 type ProposalPreviewType = LegacyPreviewType | PreviewType;
 
 type DiffProposal = {
+  adaptiveApprovalRequired?: boolean;
+  adaptiveCodePlan?: AdaptiveCodePlanSummary;
   approvalPolicy?: ProjectApprovalPolicy;
   appPreview?: CodeAppPreview;
   assetDriftDetected?: boolean;
@@ -3744,6 +3750,7 @@ function compactTaskDecomposition(decomposition: TaskDecomposition) {
 
 function compactExecutionPlan(executionPlan: ExecutionPlan) {
   return {
+    adaptiveCodePlan: executionPlan.adaptiveCodePlan,
     approvalCheckpoints: executionPlan.approvalCheckpoints,
     blockers: executionPlan.blockers,
     completionChecks: executionPlan.completionChecks,
@@ -4203,19 +4210,38 @@ function attachProposalRoutingMetadata(
   const preservesProposalBlock =
     proposal.shouldBlockExecution === true &&
     preservedProposalBlockReasons.length > 0;
+  const adaptiveCodePlan = executionPlan?.adaptiveCodePlan;
+  const adaptivePlanBlocked = adaptiveCodePlan?.status === "blocked";
+  const adaptiveBlockingReason = adaptiveCodePlan?.blockingReason ??
+    adaptiveCodePlan?.clarificationQuestion ??
+    "The adaptive CODE plan is blocked until its safety constraints are resolved.";
+  const adaptiveRoutingReason: ProposalRoutingReason = {
+    code: "adaptive_code_plan_blocked",
+    message: adaptiveBlockingReason,
+    severity: "high"
+  };
+  const routedReasons = adaptivePlanBlocked
+    ? [adaptiveRoutingReason, ...criticalRoutingReasons]
+    : criticalRoutingReasons.length > 0
+      ? routing.reasons
+      : routing.reasons.map((reason) => ({
+          ...reason,
+          severity: reason.severity === "high" ? "medium" as const : reason.severity
+        }));
 
   return {
     ...proposal,
     ...compactProposalRouting(kernel, {
       ...routing,
-      mode: preservesProposalBlock ? "blocked" : routingMode,
-      reasons: criticalRoutingReasons.length > 0 ? routing.reasons : routing.reasons.map((reason) => ({
-        ...reason,
-        severity: reason.severity === "high" ? "medium" : reason.severity
-      })),
-      shouldBlockExecution: routingShouldBlock || preservesProposalBlock,
-      shouldRequireExtraReview: preservesProposalBlock || routing.shouldRequireExtraReview || routing.mode === "blocked"
+      mode: adaptivePlanBlocked || preservesProposalBlock ? "blocked" : routingMode,
+      reasons: routedReasons,
+      shouldBlockExecution: adaptivePlanBlocked || routingShouldBlock || preservesProposalBlock,
+      shouldRequireExtraReview: adaptivePlanBlocked || preservesProposalBlock || routing.shouldRequireExtraReview || routing.mode === "blocked"
     }),
+    adaptiveApprovalRequired: adaptiveCodePlan?.approvalRequired,
+    adaptiveCodePlan,
+    approvalDisabled: adaptivePlanBlocked ? true : proposal.approvalDisabled,
+    blockedReason: adaptivePlanBlocked ? adaptiveBlockingReason : proposal.blockedReason,
     blueprintConfidence: blueprint?.confidence,
     blueprintId: blueprint?.blueprintId,
     blueprintKind: blueprint?.blueprintKind,
@@ -4283,7 +4309,9 @@ function attachProposalRoutingMetadata(
       : previewRuntime.classification.previewType,
     previewWarnings: previewRuntime.warnings,
     realPreview: previewRuntime.realPreview,
-    proposalRoutingReasons: preservesProposalBlock
+    proposalRoutingReasons: adaptivePlanBlocked
+      ? [adaptiveRoutingReason, ...criticalRoutingReasons]
+      : preservesProposalBlock
       ? [...preservedProposalBlockReasons, ...criticalRoutingReasons]
       : routing.reasons,
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
@@ -4296,14 +4324,14 @@ function attachProposalRoutingMetadata(
     publicCopyCleanStatus: proposal.websiteCopyValidationStatus === "blocked"
       ? "blocked"
       : proposal.publicCopyCleanStatus ?? "clean",
-    proposalRoutingMode: preservesProposalBlock
+    proposalRoutingMode: adaptivePlanBlocked || preservesProposalBlock
       ? "blocked"
       : extraWarnings.length > 0 && routingMode === "normal"
         ? "review_required"
         : routingMode,
     requiresExtraReview:
-      preservesProposalBlock || routing.shouldRequireExtraReview || extraWarnings.length > 0,
-    shouldBlockExecution: preservesProposalBlock || routingShouldBlock,
+      adaptivePlanBlocked || preservesProposalBlock || routing.shouldRequireExtraReview || extraWarnings.length > 0,
+    shouldBlockExecution: adaptivePlanBlocked || preservesProposalBlock || routingShouldBlock,
     sectionCopyQualityStatus: proposal.websiteCopyValidationStatus === "blocked"
       ? "blocked"
       : proposal.sectionCopyQualityStatus ?? "clean",
@@ -6361,7 +6389,35 @@ export async function POST(request: Request) {
     projectContract: activeProjectContract,
     translatedIntent
   });
+  const adaptiveCodePlan = productMode === "CODE"
+    ? buildAdaptiveCodePlan({
+        approvalPolicy,
+        projectContext: {
+          fileCount: workspace.fileList.length,
+          packageManager: workspace.fileList.some((path) => path.endsWith("pnpm-lock.yaml"))
+            ? "pnpm"
+            : workspace.fileList.some((path) => path.endsWith("yarn.lock"))
+              ? "yarn"
+              : workspace.fileList.some((path) => path.endsWith("package-lock.json"))
+                ? "npm"
+                : null,
+          projectSelected: Boolean(requestedProjectId),
+          testFramework: workspace.fileList.some((path) => /(?:^|\/)vitest\.config\./i.test(path))
+            ? "Vitest"
+            : workspace.fileList.some((path) => /(?:^|\/)jest\.config\./i.test(path))
+              ? "Jest"
+              : null
+        },
+        prompt: behavior.resolvedRequest,
+        semanticHints: [
+          contextPriority.authoritativeIntentFamily,
+          decomposition.taskKind,
+          ...translatedIntent.requestedFeatures
+        ]
+      })
+    : null;
   const executionPlan = buildExecutionPlan({
+    adaptiveCodePlan,
     businessBlueprint: blueprint,
     contextPriority,
     currentPrompt: effectiveUserPrompt,

@@ -1439,6 +1439,28 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                         : "Review proposal"}
                   </div>
                   <div className="mt-1 text-muted-foreground">{proposal.summary}</div>
+                  {productMode === "CODE" && proposal.adaptiveCodePlan ? (
+                    <div
+                      className="mt-2 border-l-2 border-[hsl(var(--premium-accent)/0.45)] pl-3 text-[11px] text-muted-foreground"
+                      data-adaptive-code-plan
+                    >
+                      <div className="font-medium text-foreground/90">
+                        Plan · {proposal.adaptiveCodePlan.complexity} · {proposal.adaptiveCodePlan.risk.toLowerCase()} risk
+                      </div>
+                      <ol className="mt-1 space-y-0.5">
+                        {proposal.adaptiveCodePlan.planSteps.slice(0, 4).map((step, index) => (
+                          <li key={`${proposal.adaptiveCodePlan?.taskId}-${index}`}>
+                            {index + 1}. {step}
+                          </li>
+                        ))}
+                      </ol>
+                      {proposal.adaptiveCodePlan.clarificationQuestion ? (
+                        <p className="mt-1 text-amber-200/90">
+                          Clarification needed: {proposal.adaptiveCodePlan.clarificationQuestion}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {proposal.mode === "EXECUTE" ? (
                     <div className="mt-1 text-[11px] text-[hsl(var(--premium-accent-soft))]">
                       Approval is required before any file or preview action runs.
