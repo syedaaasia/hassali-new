@@ -38,6 +38,16 @@ import {
   type AskFreshnessDecision,
   type AskResearchSource
 } from "./ask-source-reliability";
+import {
+  intelligenceResponseText,
+  invokeCurrentIntelligence,
+  legacyProviderFailureCategory
+} from "@/lib/server/intelligence/current-provider-adapter";
+import type {
+  IntelligenceCitation,
+  IntelligenceComputeSource,
+  IntelligenceUsage
+} from "@/lib/server/intelligence/intelligence-contract";
 
 export type AskBrainDecisionPath =
   | "boundary_only"
@@ -103,6 +113,7 @@ export type AskBrainDecision = {
   requestedEntityCount: number;
   resolvedModel: string | null;
   executionProvider: string | null;
+  computeSource: IntelligenceComputeSource | null;
   credentialSource: "credential_inherited_from_parent_process" | "credential_loaded_from_application_environment" | "credential_missing";
   responseKind: AskResponseKind;
   sourceReliability: ReturnType<typeof compactAskSourceReliability>;
@@ -113,6 +124,7 @@ export type AskBrainDecision = {
   fallbackModel: string | null;
   modelSelectionPolicy: AskModelSelectionPolicy;
   providerCallCount: number;
+  providerUsage: IntelligenceUsage | null;
   secondaryCallCount: number;
   secondaryModels: string[];
   webSearchRequested: boolean;
@@ -154,6 +166,8 @@ export type ModelCallResult =
       researchAttempted?: boolean;
       servedModel: string | null;
       sources?: AskResearchSource[];
+      computeSource?: IntelligenceComputeSource;
+      usage?: IntelligenceUsage;
     }
   | { status: "cancelled" | "failed" | "not_configured" | "timeout"; category: string; reason: string; retryAfter?: string | null };
 
@@ -191,7 +205,6 @@ export function normalizeAskProviderResult(result: ModelCallResult): ModelCallRe
   return { ...result, content };
 }
 
-const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
 const PRIMARY_TIMEOUT_MS = 25_000;
 const FREE_PRIMARY_TIMEOUT_MS = 40_000;
 const REVISION_TIMEOUT_MS = 15_000;
@@ -661,15 +674,6 @@ function providerConversation(
   ];
 }
 
-type OpenRouterUrlCitation = {
-  type?: string;
-  url_citation?: {
-    content?: string;
-    title?: string;
-    url?: string;
-  };
-};
-
 function sourceDateFromText(value: string) {
   const iso = value.match(/\b(20\d{2}-[01]\d-[0-3]\d)\b/)?.[1];
   if (iso) return iso;
@@ -703,13 +707,12 @@ function isLikelyOfficialSource(urlValue: string, prompt: string) {
   }
 }
 
-function normalizeOpenRouterSources(input: {
-  annotations?: OpenRouterUrlCitation[];
+function normalizeIntelligenceSources(input: {
+  citations?: IntelligenceCitation[];
   prompt: string;
   retrievedAt: string;
 }) {
-  return (input.annotations ?? []).flatMap((annotation, index): AskResearchSource[] => {
-    const citation = annotation.type === "url_citation" ? annotation.url_citation : null;
+  return (input.citations ?? []).flatMap((citation, index): AskResearchSource[] => {
     const url = citation?.url?.trim();
     if (!url || !/^https?:\/\//i.test(url)) return [];
     const title = citation?.title?.trim() || new URL(url).hostname;
@@ -768,82 +771,53 @@ async function fetchOpenRouterText(input: {
     };
   }
 
-  const controller = new AbortController();
-  let timeoutTriggered = false;
-  const abortFromRequest = () => controller.abort(input.abortSignal?.reason);
-  input.abortSignal?.addEventListener("abort", abortFromRequest, { once: true });
-  const timeout = setTimeout(() => {
-    timeoutTriggered = true;
-    controller.abort();
-  }, input.timeoutMs);
+  const result = await invokeCurrentIntelligence({
+    abortSignal: input.abortSignal,
+    features: input.webSearch ? { webResearch: { maxResults: 3 } } : undefined,
+    generation: { maxOutputTokens: input.maxTokens ?? 2_000 },
+    messages: input.messages.map((message) => ({
+      parts: [{ text: message.content, type: "text" }],
+      role: message.role
+    })),
+    mode: "ASK",
+    requestedModel: input.model,
+    requiredCapabilities: input.webSearch ? ["text", "webResearch"] : ["text"],
+    stream: false,
+    timeoutMs: input.timeoutMs
+  });
 
-  try {
-    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
-      body: JSON.stringify({
-        messages: input.messages,
-        model: input.model,
-        max_tokens: input.maxTokens ?? 2_000,
-        ...(input.webSearch ? { plugins: [{ id: "web", max_results: 3 }] } : {}),
-        stream: false
-      }),
-      headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      method: "POST",
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      const retryAfter = response.status === 429
-        ? (response.headers.get("retry-after") ?? "").replace(/[^\d.]/g, "").slice(0, 16) || null
-        : null;
-      const category = response.status === 401 || response.status === 403
-        ? "provider_auth_failed"
-        : response.status === 402
-          ? "provider_insufficient_credits"
-        : response.status === 429
-          ? "provider_rate_limited"
-          : "provider_request_rejected";
-      return { status: "failed", category, reason: `OpenRouter returned ${response.status}.`, retryAfter };
-    }
-
-    const completion = (await response.json()) as {
-      choices?: Array<{ message?: { annotations?: OpenRouterUrlCitation[]; content?: string } }>;
-      model?: string;
+  if (!result.ok) {
+    const category = legacyProviderFailureCategory(result.failure);
+    return {
+      status: result.failure.category === "cancelled"
+        ? "cancelled"
+        : result.failure.category === "timeout"
+          ? "timeout"
+          : result.failure.category === "unconfigured"
+            ? "not_configured"
+            : "failed",
+      category,
+      reason: result.failure.safeUserMessage,
+      retryAfter: result.failure.retryAfterMs
+        ? String(Math.ceil(result.failure.retryAfterMs / 1_000))
+        : null
     };
-    const message = completion.choices?.[0]?.message;
-    const content = message?.content?.trim() ?? "";
-    const prompt = [...input.messages].reverse().find((entry) => entry.role === "user")?.content ?? "";
-    const sources = normalizeOpenRouterSources({
-      annotations: message?.annotations,
+  }
+
+  const prompt = [...input.messages].reverse().find((entry) => entry.role === "user")?.content ?? "";
+  return {
+    status: "ok",
+    computeSource: result.response.computeSource,
+    content: intelligenceResponseText(result.response.content),
+    researchAttempted: Boolean(input.webSearch),
+    servedModel: result.response.model,
+    sources: normalizeIntelligenceSources({
+      citations: result.response.citations,
       prompt,
       retrievedAt: new Date().toISOString()
-    });
-
-    return content
-      ? {
-          status: "ok",
-          content,
-          researchAttempted: Boolean(input.webSearch),
-          servedModel: completion.model ?? null,
-          sources
-        }
-      : { status: "failed", category: "provider_response_invalid", reason: "OpenRouter returned an empty ASK answer." };
-  } catch (error) {
-    const cancelled = error instanceof Error &&
-      error.name === "AbortError" &&
-      Boolean(input.abortSignal?.aborted) &&
-      !timeoutTriggered;
-    return {
-      status: cancelled ? "cancelled" : error instanceof Error && error.name === "AbortError" ? "timeout" : "failed",
-      category: cancelled ? "request_cancelled" : error instanceof Error && error.name === "AbortError" ? "provider_timeout" : "provider_network_error",
-      reason: cancelled ? "ASK request was cancelled." : error instanceof Error && error.name === "AbortError" ? "Provider request timed out." : "Provider network request failed."
-    };
-  } finally {
-    clearTimeout(timeout);
-    input.abortSignal?.removeEventListener("abort", abortFromRequest);
-  }
+    }),
+    usage: result.response.usage
+  };
 }
 
 function summarizeReferenceFile(input: AskBrainInput) {
@@ -1224,6 +1198,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   let revisionFailureCategory: string | null = null;
   let revisionReason: string | null = null;
   let actualServedModel: string | null = null;
+  let computeSource: IntelligenceComputeSource | null = null;
+  let providerUsage: IntelligenceUsage | null = null;
   let retryAfter: string | null = null;
   let webSearchRequested = false;
   let fallbackModel: string | null = null;
@@ -1365,6 +1341,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
           researchSources.push(...(modelResult.sources ?? []));
           modelCallSucceeded = true;
           actualServedModel = modelResult.servedModel;
+          computeSource = modelResult.computeSource ?? computeSource;
+          providerUsage = modelResult.usage ?? providerUsage;
           providerFailureCategory = null;
         } else if (modelResult.status === "cancelled") {
           providerStatus = "failed";
@@ -1408,6 +1386,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
               researchSources.push(...(fallbackResult.sources ?? []));
               modelCallSucceeded = true;
               actualServedModel = fallbackResult.servedModel;
+              computeSource = fallbackResult.computeSource ?? computeSource;
+              providerUsage = fallbackResult.usage ?? providerUsage;
               providerFailureCategory = null;
               providerStatus = "configured";
             } else if (fallbackResult.status === "cancelled") {
@@ -1553,6 +1533,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     requestedEntityCount: input.behavior?.requestedEntities.length ?? 0,
     resolvedModel: provider.resolvedModelId,
     executionProvider: provider.executionProvider,
+    computeSource,
     credentialSource: provider.credentialSource,
     responseKind: sourceReliability.outcome !== "VERIFIED"
       ? "provider_failure"
@@ -1572,6 +1553,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     fallbackModel,
     modelSelectionPolicy,
     providerCallCount,
+    providerUsage,
     secondaryCallCount: Math.max(0, providerCallCount - (modelCallRan ? 1 : 0)),
     secondaryModels: attemptedModels.slice(1),
     sourceReliability: compactAskSourceReliability(sourceReliability),

@@ -46,6 +46,7 @@ The conservative default is **Ask for approval**. No policy grants whole-compute
 - `apps/web/src/app/api/runtime`: approved runtime planning, apply, status, and bounded execution routes.
 - `apps/web/src/app/api/workspace`: owned workspace operations and project ZIP export.
 - `apps/web/src/lib/server/ai`: intent, contracts, generators, validation, review, and provider orchestration.
+- `apps/web/src/lib/server/intelligence`: normalized inference contracts, provider adapters, registry, and runtime intelligence safeguards.
 - `apps/web/src/lib/server/runtime`: allowlisted project-local execution and lifecycle controls.
 - `apps/web/src/lib`: client stores, request context, Preview manifests, attachments, and approval policy state.
 - `packages/database`: canonical PostgreSQL persistence used after Clerk ownership checks.
@@ -78,6 +79,14 @@ Project Notes are project-bound and enter ASK context only when the user enables
 ### Providers
 
 Product behavior must remain provider-independent. A selected OpenAI, Anthropic, Gemini, Qwen, GLM, local, or compatible model cannot bypass Hassali intent, domain, file, review, approval, ownership, or execution contracts. Configured capability is distinct from registry metadata.
+
+- `IntelligenceRequest` and `IntelligenceResponse` carry mode, normalized text/image/file parts, required capabilities, tools, privacy hints, model override, structured/streaming preferences, citations, tool calls, and safe metadata without provider response shapes.
+- Capabilities are `supported`, `unsupported`, or `unknown`; unknown support never silently satisfies a required capability.
+- Models describe provider and compute source separately. Health, failure, and usage metadata use stable internal contracts; unknown pricing and token values remain unknown.
+- `IntelligenceAdapterRegistry` is the single adapter lookup and capability/privacy gate. Unknown adapters fail explicitly.
+- The generic OpenAI-compatible adapter supports configured HTTPS endpoints and explicitly enabled loopback HTTP, bounded timeouts, optional health/model discovery, and normalized non-streaming/streaming results.
+- Current ASK, proposal, and legacy streaming inference use the OpenRouter adapter through this contract. Existing deterministic selection and one-secondary-provider fallback remain unchanged.
+- BYOK persistence, provider settings, local endpoint configuration, and advanced Auto routing are not part of this checkpoint.
 
 ## Design
 
@@ -173,4 +182,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 
 - Base before Run 01: `012ffb5` - `HOMEPAGE-UI-I1: add premium palette and responsive polish`
 - Run 01 checkpoint: `DASHBOARD-UI-I1: polish workspace and add Codex context capsule`
+- Run 02 I1 checkpoint: `INTELLIGENCE-I1: add provider-independent inference contract`
 - The repository HEAD is authoritative; confirm it with Git before every task.

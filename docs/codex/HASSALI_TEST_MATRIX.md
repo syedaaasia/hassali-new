@@ -131,6 +131,17 @@ X-07 | Touch | Use 390px viewport | Primary targets remain practically tappable
 ## Provider and Runtime Failures
 
 ```text
+I-01 | Request contract | Normalize ASK/CODE and text/image/file inputs | Mode, parts, metadata, and implied capabilities survive
+I-02 | Registry | Resolve known, duplicate, and unknown adapters | Known resolves; duplicate/unknown fail deterministically
+I-03 | Capability gate | Require unsupported or unknown capability | Stable unsupported-capability failure; no invocation
+I-04 | Compute privacy | Send local-only request to cloud adapter | Fails before provider invocation
+I-05 | Health | Simulate ready/unconfigured/auth/rate/loading/down | Distinct normalized states and retry semantics
+I-06 | Failure | Simulate provider HTTP/network/malformed responses | Stable categories; no provider text or secrets exposed
+I-07 | Usage | Provider returns tokens but no cost | Tokens normalize; cost remains explicitly unknown
+I-08 | Compatible endpoint | Configure HTTPS or approved loopback endpoint | Safe URL accepted; embedded credentials/insecure remote HTTP rejected
+I-09 | Streaming/tools | Normalize SSE text, usage, tool calls, and completion | Provider framing does not escape adapter boundary
+I-10 | Current provider | Run ASK/proposal via current configured provider | Contract path used; response behavior remains intact
+I-11 | Fallback | Primary current provider fails | At most one existing secondary attempt; no loop or unrelated answer
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers
