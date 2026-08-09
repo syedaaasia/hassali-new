@@ -40,11 +40,11 @@ export function ProjectNotesPanel() {
   const ready = Boolean(projectId && activeProjectId === projectId);
 
   return (
-    <aside className="fixed bottom-2 right-2 top-[3.5rem] z-40 flex w-[min(20rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.96)] shadow-[0_24px_90px_rgba(0,0,0,0.48)] backdrop-blur-xl xl:static xl:z-auto xl:w-[19rem] xl:shrink-0">
+    <aside className="fixed bottom-2 right-2 top-[3.5rem] z-40 flex w-[min(18rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-xl border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.96)] shadow-[0_24px_90px_rgba(0,0,0,0.48)] backdrop-blur-xl xl:static xl:z-auto xl:w-[17rem] xl:shrink-0">
       <div className="flex items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] px-3 py-2.5">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold text-foreground">Project Notes</div>
-          <div className="truncate text-[10px] text-muted-foreground">{projectName ?? "Select a project"}</div>
+          <div className="truncate text-[10px] text-muted-foreground">Persistent scratchpad · {projectName ?? "Select a project"}</div>
         </div>
         <button
           aria-label="Collapse Project Notes"
@@ -63,7 +63,7 @@ export function ProjectNotesPanel() {
           disabled={!ready}
           maxLength={maximumProjectNotesLength}
           onChange={(event) => setNotes((event.currentTarget as unknown as { value: string }).value)}
-          placeholder="Keep decisions, facts, and next steps here. Notes stay in this project."
+          placeholder="Keep project decisions, facts, references, and next steps here. Notes stay with this project and are not sent to ASK unless you enable the context option below."
           value={ready ? notes : ""}
         />
         <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">

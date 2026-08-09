@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   createInitialAppShellPanelState,
   toggleProjectPanelState
@@ -44,6 +45,7 @@ test("SETTINGS-01 valid JSON response loads the established response shape", asy
   }));
   assert.equal(parsed.routing.mode, "auto");
   assert(parsed.sources.length >= 1);
+  assert.ok(["ready", "degraded", "unavailable"].includes(parsed.persistence.status));
 });
 
 test("SETTINGS-02 empty response becomes a normalized UI error", async () => {
@@ -115,6 +117,29 @@ test("SETTINGS-08 a user-triggered retry can recover after one failed request", 
   const recovered = await requestIntelligenceSettings("/api/settings/intelligence", {}, fetchImpl);
   assert.equal(recovered.routing.mode, "auto");
   assert.equal(calls, 2);
+});
+
+test("SETTINGS-RUNTIME-02 settings route does not hard-require canonical preference persistence", async () => {
+  const route = await readFile(new URL("../../../../app/api/settings/intelligence/route.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(route, /getCurrentDatabaseUser|requirePersistence:\s*true/);
+  assert.match(route, /listIntelligenceSources\(userId\)/);
+});
+
+test("SETTINGS-RUNTIME-03 degraded persistence keeps a complete usable snapshot", async () => {
+  const data = await listIntelligenceSources("settings-degraded-snapshot-user");
+  assert.equal(data.routing.mode, "auto");
+  assert.ok(data.sources.some((source) => source.id === "hassali-cloud"));
+  assert.equal(typeof data.persistence.message, "string");
+  assert.ok(data.persistence.message.length > 0);
+});
+
+test("SETTINGS-RUNTIME-04 dialog renders persistence state without replacing controls", async () => {
+  const dialog = await readFile(new URL("../../../../components/settings/intelligence-settings-dialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /Temporary settings mode/);
+  assert.match(dialog, /data\?\.sources\.map/);
+  assert.match(dialog, /data\.persistence\.status/);
+  assert.match(dialog, /setSourceErrors/);
+  assert.match(dialog, /props\.error/);
 });
 
 let passed = 0;

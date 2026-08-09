@@ -65,6 +65,17 @@ const defaultEndpoints: Record<Exclude<ConfigurableIntelligenceSourceId, "openro
 };
 
 const hydratedDurableUsers = new Set<string>();
+const sessionPreferences = new Map<string, ReturnType<typeof normalizedPreferences>>();
+const persistenceWarnings = new Map<string, string[]>();
+
+function recordPersistenceWarning(userId: string, message: string) {
+  const warnings = persistenceWarnings.get(userId) ?? [];
+  persistenceWarnings.set(userId, [...new Set([...warnings, message])].slice(-4));
+}
+
+function clearPersistenceWarnings(userId: string) {
+  persistenceWarnings.delete(userId);
+}
 
 function unconfiguredHealth(providerId: string): IntelligenceHealth {
   return {
@@ -129,30 +140,41 @@ function normalizedPreferences(row: Awaited<ReturnType<typeof getPersistedIntell
 }
 
 async function ensureUserState(userId: string, requirePersistence = false) {
-  const persistedPreferences = requirePersistence
-    ? await getPersistedIntelligencePreferences(userId)
-    : await getPersistedIntelligencePreferences(userId).catch(() => null);
-  const preferences = normalizedPreferences(persistedPreferences);
+  let preferences = sessionPreferences.get(userId) ?? normalizedPreferences(null);
+  try {
+    const persistedPreferences = await getPersistedIntelligencePreferences(userId);
+    preferences = persistedPreferences ? normalizedPreferences(persistedPreferences) : preferences;
+    sessionPreferences.set(userId, preferences);
+    clearPersistenceWarnings(userId);
+  } catch (error) {
+    if (requirePersistence) throw error;
+    recordPersistenceWarning(userId, "Persistent Intelligence preferences are unavailable. Changes are limited to this server session.");
+  }
   intelligenceSourceSessionVault.setRoutingPrivacy(userId, preferences.privacy);
 
   const secretStore = environmentIntelligenceSecretStore();
   if (!secretStore || hydratedDurableUsers.has(userId)) return preferences;
-  const persistedSources = await listPersistedIntelligenceSources(userId);
-  for (const source of persistedSources) {
-    if (!isConfigurableIntelligenceSourceId(source.sourceId)) continue;
-    const apiKey = source.credentialConfigured
-      ? await secretStore.get(userId, source.sourceId)
-      : undefined;
-    intelligenceSourceSessionVault.configure({
-      apiKey: apiKey ?? undefined,
-      defaultModel: source.defaultModel,
-      enabled: source.enabled,
-      endpointUrl: source.endpointUrl,
-      sourceId: source.sourceId,
-      userId
-    });
+  try {
+    const persistedSources = await listPersistedIntelligenceSources(userId);
+    for (const source of persistedSources) {
+      if (!isConfigurableIntelligenceSourceId(source.sourceId)) continue;
+      const apiKey = source.credentialConfigured
+        ? await secretStore.get(userId, source.sourceId)
+        : undefined;
+      intelligenceSourceSessionVault.configure({
+        apiKey: apiKey ?? undefined,
+        defaultModel: source.defaultModel,
+        enabled: source.enabled,
+        endpointUrl: source.endpointUrl,
+        sourceId: source.sourceId,
+        userId
+      });
+    }
+    hydratedDurableUsers.add(userId);
+  } catch (error) {
+    if (requirePersistence) throw error;
+    recordPersistenceWarning(userId, "Durable encrypted source storage is temporarily unavailable. Existing safe session state remains usable.");
   }
-  hydratedDurableUsers.add(userId);
   return preferences;
 }
 
@@ -181,6 +203,12 @@ export async function listIntelligenceSources(
   const stored = new Map(intelligenceSourceSessionVault.list(userId).map((source) => [source.id, source]));
   const environmentConfigured = Boolean(process.env.OPENROUTER_API_KEY?.trim());
   const persistence = intelligenceSecretPersistenceState();
+  const warnings = persistenceWarnings.get(userId) ?? [];
+  const persistenceStatus = warnings.length
+    ? "unavailable" as const
+    : persistence.mode === "server-session"
+      ? "degraded" as const
+      : "ready" as const;
   const usage = await usageSummaryOrEmpty(userId, requirePersistence);
   const currentSource: IntelligenceSourceSummary = {
     computeSource: "free-cloud",
@@ -213,6 +241,12 @@ export async function listIntelligenceSources(
     },
     disclosure: persistence.reason,
     local: localFoundationStatus(),
+    persistence: {
+      message: warnings[0] ?? persistence.reason,
+      mode: persistence.mode,
+      status: persistenceStatus,
+      warnings
+    },
     routing: {
       mode: "auto",
       privacy: preferences.privacy
@@ -239,14 +273,22 @@ export async function listIntelligenceSources(
 }
 
 export async function setIntelligenceRoutingPrivacy(userId: string, privacy: IntelligenceRoutingPrivacy) {
-  const current = normalizedPreferences(await getPersistedIntelligencePreferences(userId));
-  await upsertPersistedIntelligencePreferences({
-    ...current.budget,
-    budgetMode: current.budget.mode,
-    externalUserId: userId,
-    routingPrivacy: privacy
-  });
-  return intelligenceSourceSessionVault.setRoutingPrivacy(userId, privacy);
+  const current = await ensureUserState(userId);
+  const next = { ...current, privacy };
+  sessionPreferences.set(userId, next);
+  intelligenceSourceSessionVault.setRoutingPrivacy(userId, privacy);
+  try {
+    await upsertPersistedIntelligencePreferences({
+      ...current.budget,
+      budgetMode: current.budget.mode,
+      externalUserId: userId,
+      routingPrivacy: privacy
+    });
+    clearPersistenceWarnings(userId);
+  } catch {
+    recordPersistenceWarning(userId, "Routing privacy is active for this server session but could not be saved persistently.");
+  }
+  return privacy;
 }
 
 export async function setIntelligenceBudgetPolicy(input: {
@@ -256,15 +298,27 @@ export async function setIntelligenceBudgetPolicy(input: {
   mode: IntelligenceBudgetMode;
   userId: string;
 }) {
-  const current = normalizedPreferences(await getPersistedIntelligencePreferences(input.userId));
-  await upsertPersistedIntelligencePreferences({
-    budgetMode: input.mode,
+  const current = await ensureUserState(input.userId);
+  const budget = {
     byokMonthlyWarningLimitMicros: dollarsToMicros(input.byokMonthlyWarningLimitUsd),
-    externalUserId: input.userId,
     managedMonthlyLimitMicros: dollarsToMicros(input.managedMonthlyLimitUsd),
     managedPerRequestLimitMicros: dollarsToMicros(input.managedPerRequestLimitUsd),
-    routingPrivacy: current.privacy
-  });
+    mode: input.mode
+  } satisfies IntelligenceBudgetPolicy;
+  sessionPreferences.set(input.userId, { budget, privacy: current.privacy });
+  try {
+    await upsertPersistedIntelligencePreferences({
+      budgetMode: input.mode,
+      byokMonthlyWarningLimitMicros: budget.byokMonthlyWarningLimitMicros,
+      externalUserId: input.userId,
+      managedMonthlyLimitMicros: budget.managedMonthlyLimitMicros,
+      managedPerRequestLimitMicros: budget.managedPerRequestLimitMicros,
+      routingPrivacy: current.privacy
+    });
+    clearPersistenceWarnings(input.userId);
+  } catch {
+    recordPersistenceWarning(input.userId, "Budget preferences are active for this server session but could not be saved persistently.");
+  }
 }
 
 export function isIntelligenceRoutingPrivacy(value: unknown): value is IntelligenceRoutingPrivacy {
@@ -296,19 +350,7 @@ export async function configureIntelligenceSource(input: {
         input.endpointUrl?.trim() || existing?.endpointUrl || defaultEndpoints[input.sourceId]
       );
   const enabled = input.enabled ?? existing?.enabled ?? true;
-  const secretStore = environmentIntelligenceSecretStore();
-  if (secretStore) {
-    await upsertPersistedIntelligenceSourceConfig({
-      defaultModel,
-      enabled,
-      endpointUrl,
-      externalUserId: input.userId,
-      sourceId: input.sourceId
-    });
-    if (apiKey) await secretStore.put(input.userId, input.sourceId, apiKey);
-    hydratedDurableUsers.add(input.userId);
-  }
-  return intelligenceSourceSessionVault.configure({
+  const configured = intelligenceSourceSessionVault.configure({
     apiKey,
     defaultModel,
     enabled,
@@ -316,6 +358,24 @@ export async function configureIntelligenceSource(input: {
     sourceId: input.sourceId,
     userId: input.userId
   });
+  const secretStore = environmentIntelligenceSecretStore();
+  if (secretStore) {
+    try {
+      await upsertPersistedIntelligenceSourceConfig({
+        defaultModel,
+        enabled,
+        endpointUrl,
+        externalUserId: input.userId,
+        sourceId: input.sourceId
+      });
+      if (apiKey) await secretStore.put(input.userId, input.sourceId, apiKey);
+      hydratedDurableUsers.add(input.userId);
+      clearPersistenceWarnings(input.userId);
+    } catch {
+      recordPersistenceWarning(input.userId, "This source is encrypted in server memory for the current session because durable storage is unavailable.");
+    }
+  }
+  return configured;
 }
 
 export async function testIntelligenceSourceConnection(
@@ -341,9 +401,17 @@ export async function testIntelligenceSourceConnection(
 }
 
 export async function disconnectIntelligenceSource(userId: string, sourceId: ConfigurableIntelligenceSourceId) {
+  const removed = intelligenceSourceSessionVault.disconnect(userId, sourceId);
   const secretStore = environmentIntelligenceSecretStore();
-  if (secretStore) await secretStore.delete(userId, sourceId);
-  return intelligenceSourceSessionVault.disconnect(userId, sourceId);
+  if (secretStore) {
+    try {
+      await secretStore.delete(userId, sourceId);
+      clearPersistenceWarnings(userId);
+    } catch {
+      recordPersistenceWarning(userId, "The source was removed from this server session, but durable storage could not be updated.");
+    }
+  }
+  return removed;
 }
 
 export async function createAvailableIntelligenceRegistryForUser(userId: string, fetchImpl?: IntelligenceFetch) {

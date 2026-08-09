@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Panel } from "@/components/ui/panel";
 import { useChatStore } from "@/lib/chat-store";
 import {
@@ -26,7 +26,18 @@ type DialogGlobal = {
   confirm?: (message?: string) => boolean;
   prompt?: (message?: string, defaultValue?: string) => string | null;
 };
-type SidebarSection = "git" | "projects" | "search" | "workspace";
+type SidebarSection = "git" | "projects" | "workspace";
+type ProjectSearchResult = {
+  kind: "chat" | "message" | "project";
+  messageId: string | null;
+  projectId: string;
+  projectName: string;
+  role: "assistant" | "user" | null;
+  sessionId: string | null;
+  sessionTitle: string | null;
+  snippet: string;
+  updatedAt: string;
+};
 type LeftSidebarProps = {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -121,9 +132,13 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
   const [expandedSections, setExpandedSections] = useState<Record<SidebarSection, boolean>>({
     git: false,
     projects: false,
-    search: false,
     workspace: true
   });
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ProjectSearchResult[]>([]);
   const [selectedNode, setSelectedNode] = useState<{
     kind: "file" | "folder";
     path: string;
@@ -155,11 +170,50 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
     }));
   };
 
+  useEffect(() => {
+    if (!searchOpen || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      setSearchError(null);
+      setSearchLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      setSearchLoading(true);
+      setSearchError(null);
+      fetch(`/api/workspace/search?q=${encodeURIComponent(searchQuery.trim())}`, { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("Project search is unavailable.");
+          const payload = await response.json() as { results?: ProjectSearchResult[] };
+          setSearchResults(Array.isArray(payload.results) ? payload.results : []);
+        })
+        .catch((caught) => {
+          if (!controller.signal.aborted) setSearchError(caught instanceof Error ? caught.message : "Project search is unavailable.");
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSearchLoading(false);
+        });
+    }, 220);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [searchOpen, searchQuery]);
+
   const hydrateProjectChat = (payload: Awaited<ReturnType<typeof createProject>>) => {
     if (payload) {
       setSelectedNode(null);
       hydrateChat(payload.chat.messages, payload.chat.sessionId);
     }
+  };
+  const openSearchResult = (result: ProjectSearchResult) => {
+    void switchProject(result.projectId, result.sessionId).then((payload) => {
+      hydrateProjectChat(payload);
+      if (payload) {
+        setSearchOpen(false);
+        setSearchQuery("");
+      }
+    });
   };
   const createProjectFromPrompt = () => {
     const requestedName = promptValue("Project name", "");
@@ -305,9 +359,6 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
           <span className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.035] text-[10px] text-muted-foreground">
             F
           </span>
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.035] text-[10px] text-muted-foreground">
-            /
-          </span>
         </div>
         <button
           aria-label="Expand project sidebar"
@@ -322,11 +373,23 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
   }
 
   return (
-    <Panel className="hidden w-40 shrink-0 flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.74)] shadow-[0_20px_70px_rgba(0,0,0,0.22)] backdrop-blur-xl [.light_&]:bg-white md:flex lg:w-[10.5rem] 2xl:w-44">
-      <div className="border-b border-[hsl(var(--premium-border))] px-3 py-3">
+    <Panel className="hidden w-[17rem] shrink-0 flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.74)] shadow-[0_20px_70px_rgba(0,0,0,0.22)] backdrop-blur-xl [.light_&]:bg-white md:flex">
+      <div className="relative border-b border-[hsl(var(--premium-border))] px-3 py-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground [.light_&]:text-[#4b403a]">
-            Project
+          <div className="flex min-w-0 items-center gap-1">
+            <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground [.light_&]:text-[#4b403a]">
+              Project
+            </div>
+            <button
+              aria-label="Search projects and chats"
+              aria-expanded={searchOpen}
+              className="hassali-focus-ring flex h-7 w-7 items-center justify-center rounded-md text-base text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
+              onClick={() => setSearchOpen((current) => !current)}
+              title="Search projects and chats"
+              type="button"
+            >
+              <span aria-hidden="true">⌕</span>
+            </button>
           </div>
           <button
             aria-label="Collapse sidebar"
@@ -340,9 +403,44 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
         <div className="mt-1 truncate text-xs text-foreground">
           {projectName ?? "No project yet"}
         </div>
+        {searchOpen ? (
+          <div className="mt-3 overflow-hidden rounded-lg border border-white/10 bg-black/25 shadow-xl backdrop-blur-xl [.light_&]:bg-white/90">
+            <input
+              aria-label="Search project names, chat titles, and messages"
+              autoFocus
+              className="hassali-focus-ring h-9 w-full border-0 bg-transparent px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground"
+              onChange={(event) => setSearchQuery((event.currentTarget as unknown as { value: string }).value)}
+              onKeyDown={(event) => {
+                if ((event as unknown as { key: string }).key === "Escape") setSearchOpen(false);
+                if ((event as unknown as { key: string }).key === "Enter" && searchResults[0]) openSearchResult(searchResults[0]);
+              }}
+              placeholder="Search projects and chats..."
+              value={searchQuery}
+            />
+            {searchQuery.trim().length >= 2 ? (
+              <div className="max-h-64 overflow-y-auto border-t border-white/10 p-1.5">
+                {searchLoading ? <p className="px-2 py-3 text-xs text-muted-foreground">Searching...</p> : null}
+                {!searchLoading && searchError ? <p className="px-2 py-3 text-xs text-rose-300">{searchError}</p> : null}
+                {!searchLoading && !searchError && searchResults.length === 0 ? <p className="px-2 py-3 text-xs text-muted-foreground">No matching projects or chats.</p> : null}
+                {searchResults.map((result) => (
+                  <button
+                    className="hassali-focus-ring block w-full rounded-md px-2 py-2 text-left hover:bg-white/[0.06]"
+                    key={`${result.kind}:${result.messageId ?? result.sessionId ?? result.projectId}`}
+                    onClick={() => openSearchResult(result)}
+                    type="button"
+                  >
+                    <span className="block truncate text-xs font-medium text-foreground">{result.projectName}</span>
+                    <span className="mt-0.5 block text-[10px] uppercase text-muted-foreground">{result.kind}{result.sessionTitle ? ` · ${result.sessionTitle}` : ""}</span>
+                    <span className="mt-1 block line-clamp-2 text-[11px] leading-4 text-muted-foreground">{result.snippet}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-        <div className="rounded-2xl border border-white/[0.055] bg-white/[0.025] p-2 [.light_&]:border-slate-200 [.light_&]:bg-slate-50">
+        <section className="border-b border-white/[0.06] px-1 pb-3 pt-1">
           <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium">
             <button
               aria-expanded={expandedSections.projects}
@@ -402,8 +500,8 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
             </div>
           )}
           {error ? <p className="mt-2 px-1 text-xs leading-5 text-destructive">{error}</p> : null}
-        </div>
-        <div className="rounded-2xl border border-white/[0.055] bg-white/[0.025] p-2 [.light_&]:border-slate-200 [.light_&]:bg-slate-50">
+        </section>
+        <section className="border-b border-white/[0.06] px-1 pb-3 pt-1">
           <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium">
             <button
               aria-expanded={expandedSections.workspace}
@@ -466,8 +564,8 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
           </div>
           </>
           ) : null}
-        </div>
-        <div className="mt-auto rounded-2xl border border-white/[0.045] bg-white/[0.018] p-2">
+        </section>
+        <section className="mt-auto border-t border-white/[0.06] px-1 py-3">
           <button
             aria-expanded={expandedSections.git}
             className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-[hsl(var(--premium-accent-soft))]"
@@ -485,28 +583,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
           {expandedSections.git ? (
             <div className="mt-2 px-1 text-xs leading-5 text-muted-foreground">Status placeholder</div>
           ) : null}
-        </div>
-        <div className="rounded-2xl border border-white/[0.045] bg-white/[0.018] p-2">
-          <button
-            aria-expanded={expandedSections.search}
-            className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-[hsl(var(--premium-accent-soft))]"
-            onClick={() => toggleSection("search")}
-            type="button"
-          >
-            <span className="w-2 text-[10px] text-muted-foreground">
-              {expandedSections.search ? "v" : ">"}
-            </span>
-            <span className="flex h-5 w-5 items-center justify-center rounded-md border border-[hsl(var(--royal-border-soft))] bg-[hsl(var(--royal-panel-raised)/0.68)] font-mono text-[10px] text-muted-foreground">
-              /
-            </span>
-            Search
-          </button>
-          {expandedSections.search ? (
-            <div className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
-              Project search placeholder
-            </div>
-          ) : null}
-        </div>
+        </section>
       </div>
     </Panel>
   );

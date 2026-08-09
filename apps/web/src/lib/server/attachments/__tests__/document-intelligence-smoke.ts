@@ -297,7 +297,8 @@ test("DOC-24 supplied-document requests do not trigger public web research", () 
 test("document evidence is private model context and never part of a public research query", async () => {
   const route = await readFile(new URL("../../../../app/api/ai/chat/route.ts", import.meta.url), "utf8");
   assert.match(route, /const askReasoningPrompt = behavior\.resolvedRequest;/);
-  assert.match(route, /multimodalContext\?\.contextText,[\s\S]{0,120}projectNotesContext/);
+  assert.match(route, /multimodalVerification\.contextText,[\s\S]{0,120}outcomeWorkflowContext/);
+  assert.match(route, /productMode === "ASK"\s*\? behavior\.resolvedRequest/);
   assert.match(route, /researchRetriever: retrieveAskResearchSources,[\s\S]{0,80}prompt: askReasoningPrompt/);
 });
 

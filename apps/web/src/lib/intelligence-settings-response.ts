@@ -30,7 +30,9 @@ function isSourcesResponse(value: unknown): value is IntelligenceSourcesResponse
     Boolean(candidate.routing && typeof candidate.routing === "object") &&
     Boolean(candidate.budget && typeof candidate.budget === "object") &&
     Boolean(candidate.usage && typeof candidate.usage === "object") &&
-    Boolean(candidate.local && typeof candidate.local === "object");
+    Boolean(candidate.local && typeof candidate.local === "object") &&
+    Boolean(candidate.persistence && typeof candidate.persistence === "object") &&
+    (candidate.persistence?.status === "ready" || candidate.persistence?.status === "degraded" || candidate.persistence?.status === "unavailable");
 }
 
 function errorFromPayload(payload: IntelligenceSettingsErrorPayload | null) {

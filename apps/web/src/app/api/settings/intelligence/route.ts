@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { isConfigurableIntelligenceSourceId } from "@/lib/intelligence-sources";
-import { getCurrentDatabaseUser } from "@/lib/server/clerk-database-user";
 import {
   configureIntelligenceSource,
   disconnectIntelligenceSource,
@@ -40,8 +39,7 @@ export async function GET() {
   return withSettingsApiErrors("load", async () => {
     const { userId } = await auth();
     if (!userId) return handledSettingsError("UNAUTHORIZED", "Unauthorized", 401);
-    await getCurrentDatabaseUser();
-    return Response.json(await listIntelligenceSources(userId, { requirePersistence: true }), {
+    return Response.json(await listIntelligenceSources(userId), {
       headers: { "Cache-Control": "no-store" }
     });
   });
@@ -52,7 +50,6 @@ export async function PUT(request: Request) {
     const { userId } = await auth();
     if (!userId) return handledSettingsError("UNAUTHORIZED", "Unauthorized", 401);
     if (!sameOrigin(request)) return handledSettingsError("INVALID_ORIGIN", "Invalid request origin.", 403);
-    await getCurrentDatabaseUser();
     const body = await request.json().catch(() => null) as Record<string, unknown> | null;
     if (!isConfigurableIntelligenceSourceId(body?.sourceId)) {
       return handledSettingsError("UNKNOWN_SOURCE", "Unknown intelligence source.", 400);
@@ -65,7 +62,7 @@ export async function PUT(request: Request) {
       sourceId: body.sourceId,
       userId
     });
-    return Response.json(await listIntelligenceSources(userId, { requirePersistence: true }), {
+    return Response.json(await listIntelligenceSources(userId), {
       headers: { "Cache-Control": "no-store" }
     });
   });
@@ -76,7 +73,6 @@ export async function PATCH(request: Request) {
     const { userId } = await auth();
     if (!userId) return handledSettingsError("UNAUTHORIZED", "Unauthorized", 401);
     if (!sameOrigin(request)) return handledSettingsError("INVALID_ORIGIN", "Invalid request origin.", 403);
-    await getCurrentDatabaseUser();
     const body = await request.json().catch(() => null) as Record<string, unknown> | null;
     if (isIntelligenceRoutingPrivacy(body?.privacy)) {
       await setIntelligenceRoutingPrivacy(userId, body.privacy);
@@ -95,7 +91,7 @@ export async function PATCH(request: Request) {
         userId
       });
     }
-    return Response.json(await listIntelligenceSources(userId, { requirePersistence: true }), {
+    return Response.json(await listIntelligenceSources(userId), {
       headers: { "Cache-Control": "no-store" }
     });
   });
@@ -106,13 +102,12 @@ export async function POST(request: Request) {
     const { userId } = await auth();
     if (!userId) return handledSettingsError("UNAUTHORIZED", "Unauthorized", 401);
     if (!sameOrigin(request)) return handledSettingsError("INVALID_ORIGIN", "Invalid request origin.", 403);
-    await getCurrentDatabaseUser();
     const body = await request.json().catch(() => null) as Record<string, unknown> | null;
     if (!isConfigurableIntelligenceSourceId(body?.sourceId) || body.action !== "test") {
       return handledSettingsError("INVALID_TEST_REQUEST", "Invalid connection test request.", 400);
     }
     await testIntelligenceSourceConnection(userId, body.sourceId);
-    return Response.json(await listIntelligenceSources(userId, { requirePersistence: true }), {
+    return Response.json(await listIntelligenceSources(userId), {
       headers: { "Cache-Control": "no-store" }
     });
   });
@@ -123,13 +118,12 @@ export async function DELETE(request: Request) {
     const { userId } = await auth();
     if (!userId) return handledSettingsError("UNAUTHORIZED", "Unauthorized", 401);
     if (!sameOrigin(request)) return handledSettingsError("INVALID_ORIGIN", "Invalid request origin.", 403);
-    await getCurrentDatabaseUser();
     const sourceId = new URL(request.url).searchParams.get("sourceId");
     if (!isConfigurableIntelligenceSourceId(sourceId)) {
       return handledSettingsError("UNKNOWN_SOURCE", "Unknown intelligence source.", 400);
     }
     await disconnectIntelligenceSource(userId, sourceId);
-    return Response.json(await listIntelligenceSources(userId, { requirePersistence: true }), {
+    return Response.json(await listIntelligenceSources(userId), {
       headers: { "Cache-Control": "no-store" }
     });
   });

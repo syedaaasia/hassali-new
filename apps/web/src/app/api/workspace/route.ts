@@ -33,7 +33,8 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const selectedProjectId = url.searchParams.get("projectId");
-  const workspace = await loadWorkspaceForExternalUser(userId, selectedProjectId);
+  const selectedSessionId = url.searchParams.get("sessionId");
+  const workspace = await loadWorkspaceForExternalUser(userId, selectedProjectId, undefined, selectedSessionId);
 
   await recordProjectLoadEvent(workspace.project?.id, Boolean(selectedProjectId));
 

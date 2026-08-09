@@ -62,6 +62,12 @@ export type IntelligenceSourcesResponse = {
     protocolVersion: string;
     status: "foundation-only";
   };
+  persistence: {
+    message: string;
+    mode: "durable-encrypted" | "server-session";
+    status: "degraded" | "ready" | "unavailable";
+    warnings: string[];
+  };
   routing: {
     mode: "auto";
     privacy: IntelligenceRoutingPrivacy;

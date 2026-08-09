@@ -127,6 +127,16 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Image generation is replaceable behind `ImageGenerationProvider`. The configured OpenAI path retains explicit generated provenance, blocks private reference upload, honors Local-only fail-closed behavior, and reports unavailable capability without fake artifacts.
 - Video and screen-recording work is contract-only: media metadata, timestamped frames, and bounded frame selection exist, while the absent native decoder/runtime is reported truthfully and nothing is installed.
 
+### Multimodal verification and decisions
+
+- `MultimodalRequestPlan` and its deterministic capability matrix describe required evidence before model reasoning. Unknown capability is never promoted to available.
+- A bounded in-memory evidence graph keeps document, OCR, user image, public web/image, structured data, and generated origins distinct. Relations expose duplicates and conflicts without installing a graph or vector database.
+- Citation and claim validators reject dangling evidence, invalid document pages, mismatched URLs, and generated imagery used as factual proof.
+- ASK assembles attachment evidence once through a shared untrusted-context boundary. A failed optional modality may produce a truthful partial answer; missing required evidence remains unavailable or unverified.
+- Outcome and workflow contracts reason conservatively from available evidence: observe before automating, preserve unknown actors/times/stages, avoid fabricated ROI, and prefer bounded reversible experiments with measurable success criteria.
+- Intelligence Settings can return a complete ready-degraded snapshot when preference persistence is unavailable. BYOK remains encrypted in server memory and the UI states that session limitation truthfully.
+- Project search is deterministic, Clerk-owner-filtered PostgreSQL search over project names, chat titles, and message content. It never invokes a model or public web provider and can open the exact matched chat session.
+
 ## Design
 
 ### Direction
@@ -228,4 +238,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 03 I1 checkpoint: `ASK-I1: add utility research routing and verified citations`
 - Run 03 I2 checkpoint: `ASK-I2: add OCR and document intelligence`
 - Run 03 I3 checkpoint: `ASK-I3: add vision and media intelligence`
+- Run 03 I4 checkpoint: `ASK-I4: verify multimodal intelligence end to end`
 - The repository HEAD is authoritative; confirm it with Git before every task.

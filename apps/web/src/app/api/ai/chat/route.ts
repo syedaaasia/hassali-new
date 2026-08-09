@@ -249,6 +249,7 @@ import {
   generateImageToAttachment,
   resolveMultimodalAttachmentContext
 } from "@/lib/server/attachments/attachment-context";
+import { buildMultimodalVerification } from "@/lib/server/attachments/multimodal-verification";
 import {
   decideVisualAsset,
   formatPublicVisualAnswer,
@@ -5906,11 +5907,21 @@ export async function POST(request: Request) {
     selectedMode: productMode,
     workspace: requestedWorkspace
   });
-  const effectiveUserPrompt = [behavior.resolvedRequest, multimodalContext?.contextText]
-    .filter(Boolean)
-    .join("\n\n");
+  const multimodalVerification = buildMultimodalVerification({
+    documentArtifacts: multimodalContext?.documentArtifacts,
+    failureMessage: multimodalContext?.failureMessage,
+    prompt: behavior.resolvedRequest,
+    rawEvidenceContext: multimodalContext?.contextText,
+    researchPolicy,
+    visualArtifacts: multimodalContext?.visualArtifacts,
+    visionCompleted: multimodalContext?.visionCompleted,
+    visionText: multimodalContext?.visionText
+  });
+  const effectiveUserPrompt = productMode === "ASK"
+    ? behavior.resolvedRequest
+    : [behavior.resolvedRequest, multimodalVerification.contextText].filter(Boolean).join("\n\n");
   const askReasoningPrompt = behavior.resolvedRequest;
-  if (multimodalContext?.failureMessage && !multimodalContext.contextText) {
+  if (multimodalContext?.failureMessage && !multimodalVerification.contextText) {
     return createTextStream(multimodalContext.failureMessage, undefined, {
       "x-hassali-attachment-failure": multimodalContext.failureCode ?? "ATTACHMENT_PROCESSING_FAILED"
     });
@@ -6222,7 +6233,9 @@ export async function POST(request: Request) {
       askRuntimeContext,
       behavior,
       freshnessDecision: askFreshnessDecision,
-      intelligenceContext: [intelligencePreflight.providerContext, multimodalContext?.contextText, projectNotesContext].filter(Boolean).join("\n\n"),
+      evidenceGraph: multimodalVerification.graph,
+      evidenceVerificationState: multimodalVerification.state,
+      intelligenceContext: [intelligencePreflight.providerContext, projectNotesContext].filter(Boolean).join("\n\n"),
       messages: relevantMessages,
       model,
       modelSelectionPolicy,
@@ -6640,10 +6653,22 @@ export async function POST(request: Request) {
       }).catch(() => [])
     : [];
   const intelligenceToolProviderContext = chatToolContext(intelligenceToolResults);
+  const outcomeWorkflowContext = multimodalVerification.outcome || multimodalVerification.workflow
+    ? [
+        "Bounded decision-support contract:",
+        multimodalVerification.outcome
+          ? `Outcome: determine evidence, baseline, smallest reversible experiment, success metric, and unknowns. Do not fabricate ROI. ${JSON.stringify(multimodalVerification.outcome)}`
+          : "",
+        multimodalVerification.workflow
+          ? `Workflow: distinguish observed events from unknown stages. A screenshot proves only its visible state. ${JSON.stringify(multimodalVerification.workflow)}`
+          : ""
+      ].filter(Boolean).join("\n")
+    : "";
   const askIntelligenceContext = [
     intelligencePreflight.providerContext,
     intelligenceToolProviderContext,
-    multimodalContext?.contextText,
+    multimodalVerification.contextText,
+    outcomeWorkflowContext,
     projectNotesContext
   ].filter(Boolean).join("\n\n");
   const generatedHandoff = buildModeHandoff({
@@ -6701,7 +6726,8 @@ export async function POST(request: Request) {
           activityState: "answer_completed",
           attachmentAnswer: {
             kind: "vision_direct",
-            model: multimodalContext.visionModel
+            model: multimodalContext.visionModel,
+            verificationState: multimodalVerification.state
           },
           deterministic: false,
           model,
@@ -6753,6 +6779,8 @@ export async function POST(request: Request) {
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
+      evidenceGraph: multimodalVerification.graph,
+      evidenceVerificationState: multimodalVerification.state,
       freshnessDecision: askFreshnessDecision,
       intelligenceContext: askIntelligenceContext,
       messages,
@@ -6888,6 +6916,8 @@ export async function POST(request: Request) {
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
+      evidenceGraph: multimodalVerification.graph,
+      evidenceVerificationState: multimodalVerification.state,
       freshnessDecision: askFreshnessDecision,
       intelligenceContext: askIntelligenceContext,
       messages,

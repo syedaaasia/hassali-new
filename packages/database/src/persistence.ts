@@ -73,6 +73,18 @@ export type LoadWorkspaceForExternalUserResult = {
   } | null;
 };
 
+export type ProjectChatSearchResult = {
+  kind: "chat" | "message" | "project";
+  messageId: string | null;
+  projectId: string;
+  projectName: string;
+  role: ChatRole | null;
+  sessionId: string | null;
+  sessionTitle: string | null;
+  snippet: string;
+  updatedAt: string;
+};
+
 export type ChatPersistenceContextResult = {
   mode: AiMode;
   projectId: string;
@@ -898,7 +910,8 @@ export async function deleteUserProjectPath(
 export async function loadWorkspaceForExternalUser(
   externalUserId: string,
   selectedProjectId?: string | null,
-  db: Db = getDatabaseClient()
+  db: Db = getDatabaseClient(),
+  selectedSessionId?: string | null
 ): Promise<LoadWorkspaceForExternalUserResult> {
   const userResult = await db.execute<{ id: string }>(sql`
     select id
@@ -979,6 +992,22 @@ export async function loadWorkspaceForExternalUser(
     };
   }
 
+  const sessionQuery = selectedSessionId
+    ? db.execute<{ id: string }>(sql`
+        select id
+        from chat_sessions
+        where id = ${selectedSessionId}
+          and project_id = ${project.id}
+          and user_id = ${user.id}
+        limit 1
+      `)
+    : db.execute<{ id: string }>(sql`
+        select id
+        from chat_sessions
+        where project_id = ${project.id} and user_id = ${user.id}
+        order by created_at desc
+        limit 1
+      `);
   const [filesResult, sessionResult] = await Promise.all([
     db.execute<{
       content: string;
@@ -990,15 +1019,7 @@ export async function loadWorkspaceForExternalUser(
       where project_id = ${project.id}
       order by path asc
     `),
-    db.execute<{
-      id: string;
-    }>(sql`
-      select id
-      from chat_sessions
-      where project_id = ${project.id} and user_id = ${user.id}
-      order by created_at desc
-      limit 1
-    `)
+    sessionQuery
   ]);
   const session = sessionResult.rows[0];
   const messagesResult = session
@@ -1056,6 +1077,100 @@ export async function loadWorkspaceForExternalUser(
       name: String(workspace.name)
     }
   };
+}
+
+export async function searchProjectsAndChatsForExternalUser(
+  externalUserId: string,
+  query: string,
+  db: Db = getDatabaseClient()
+): Promise<ProjectChatSearchResult[]> {
+  const normalizedQuery = query.replace(/\s+/g, " ").trim().slice(0, 120);
+  if (normalizedQuery.length < 2) return [];
+  const pattern = `%${normalizedQuery}%`;
+  const result = await db.execute<{
+    kind: ProjectChatSearchResult["kind"];
+    matched_at: Date | string;
+    message_id: string | null;
+    project_id: string;
+    project_name: string;
+    role: ChatRole | null;
+    session_id: string | null;
+    session_title: string | null;
+    snippet: string;
+  }>(sql`
+    with owned_projects as (
+      select projects.id, projects.name, projects.updated_at
+      from projects
+      inner join workspaces on workspaces.id = projects.workspace_id
+      inner join users on users.id = workspaces.owner_id
+      where users.external_id = ${externalUserId}
+    ), matches as (
+      select
+        'project'::text as kind,
+        owned_projects.id as project_id,
+        owned_projects.name as project_name,
+        null::uuid as session_id,
+        null::text as session_title,
+        null::uuid as message_id,
+        null::text as role,
+        owned_projects.name::text as snippet,
+        owned_projects.updated_at as matched_at
+      from owned_projects
+      where owned_projects.name ilike ${pattern}
+
+      union all
+
+      select
+        'chat'::text as kind,
+        owned_projects.id as project_id,
+        owned_projects.name as project_name,
+        chat_sessions.id as session_id,
+        chat_sessions.title::text as session_title,
+        null::uuid as message_id,
+        null::text as role,
+        chat_sessions.title::text as snippet,
+        chat_sessions.updated_at as matched_at
+      from owned_projects
+      inner join chat_sessions on chat_sessions.project_id = owned_projects.id
+      inner join users on users.id = chat_sessions.user_id
+      where users.external_id = ${externalUserId}
+        and chat_sessions.title ilike ${pattern}
+
+      union all
+
+      select
+        'message'::text as kind,
+        owned_projects.id as project_id,
+        owned_projects.name as project_name,
+        chat_sessions.id as session_id,
+        chat_sessions.title::text as session_title,
+        chat_messages.id as message_id,
+        chat_messages.role::text as role,
+        left(regexp_replace(chat_messages.content, E'[\\n\\r\\t]+', ' ', 'g'), 240) as snippet,
+        chat_messages.created_at as matched_at
+      from owned_projects
+      inner join chat_sessions on chat_sessions.project_id = owned_projects.id
+      inner join chat_messages on chat_messages.session_id = chat_sessions.id
+      inner join users on users.id = chat_sessions.user_id
+      where users.external_id = ${externalUserId}
+        and chat_messages.content ilike ${pattern}
+    )
+    select *
+    from matches
+    order by matched_at desc
+    limit 30
+  `);
+  return result.rows.map((row) => ({
+    kind: row.kind,
+    messageId: row.message_id ? String(row.message_id) : null,
+    projectId: String(row.project_id),
+    projectName: String(row.project_name),
+    role: row.role === "user" || row.role === "assistant" ? row.role : null,
+    sessionId: row.session_id ? String(row.session_id) : null,
+    sessionTitle: row.session_title ? String(row.session_title) : null,
+    snippet: String(row.snippet),
+    updatedAt: new Date(row.matched_at).toISOString()
+  }));
 }
 
 async function getOrCreateChatSession(

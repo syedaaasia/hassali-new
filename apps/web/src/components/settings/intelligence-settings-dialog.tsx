@@ -55,6 +55,7 @@ function formatBytes(value: number | null) {
 function SourceCard(props: {
   busy: boolean;
   draft: Draft;
+  error?: string | null;
   onChange: (draft: Draft) => void;
   onDisconnect: () => void;
   onSave: () => void;
@@ -189,6 +190,12 @@ function SourceCard(props: {
             ) : null}
           </div>
 
+          {props.error ? (
+            <p className="border-l-2 border-rose-400/60 pl-2 text-[11px] leading-5 text-rose-200 [.light_&]:text-rose-800" role="alert">
+              {props.error}
+            </p>
+          ) : null}
+
           {source.models.length ? (
             <div className="border-t border-[hsl(var(--premium-border))] pt-3">
               <p className="text-[11px] font-medium text-foreground">Discovered models · {source.modelCount}</p>
@@ -217,6 +224,7 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
   const [data, setData] = useState<IntelligenceSourcesResponse | null>(null);
   const [drafts, setDrafts] = useState<Partial<Record<ConfigurableIntelligenceSourceId, Draft>>>({});
   const [busySource, setBusySource] = useState<ConfigurableIntelligenceSourceId | null>(null);
+  const [sourceErrors, setSourceErrors] = useState<Partial<Record<ConfigurableIntelligenceSourceId, string>>>({});
   const [routingBusy, setRoutingBusy] = useState(false);
   const [budgetDraft, setBudgetDraft] = useState<BudgetDraft>({
     byokMonthlyWarningLimitUsd: "",
@@ -251,6 +259,7 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
     if (!props.open) {
       setDrafts({});
       setError(null);
+      setSourceErrors({});
       return;
     }
     const controller = new AbortController();
@@ -285,7 +294,7 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
     init: RequestInit
   ) => {
     setBusySource(sourceId);
-    setError(null);
+    setSourceErrors((current) => ({ ...current, [sourceId]: undefined }));
     try {
       const payload = await requestIntelligenceSettings(
         "/api/settings/intelligence" + (init.method === "DELETE" ? `?sourceId=${encodeURIComponent(sourceId)}` : ""),
@@ -293,7 +302,10 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
       );
       adoptResponse(payload);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The connection action failed.");
+      setSourceErrors((current) => ({
+        ...current,
+        [sourceId]: caught instanceof Error ? caught.message : "The connection action failed."
+      }));
     } finally {
       setDrafts((current) => ({
         ...current,
@@ -395,10 +407,13 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
               </label>
             </section>
           ) : null}
-          {data ? (
-            <p className="mb-4 rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-100 [.light_&]:text-amber-900">
-              {data.disclosure}
-            </p>
+          {data && data.persistence.status !== "ready" ? (
+            <div className="mb-4 border-l-2 border-amber-300/55 bg-amber-300/[0.045] px-3 py-2 text-[11px] leading-5 text-amber-100 [.light_&]:text-amber-900" role="status">
+              <p className="font-semibold">
+                {data.persistence.status === "unavailable" ? "Temporary settings mode" : "Session-only credential storage"}
+              </p>
+              <p>{data.persistence.message}</p>
+            </div>
           ) : null}
           {data ? (
             <section className="mb-4 border-y border-[hsl(var(--premium-border))] py-4">
@@ -501,6 +516,7 @@ export function IntelligenceSettingsDialog(props: { onClose: () => void; open: b
                 <SourceCard
                   busy={configurableId === busySource}
                   draft={draft}
+                  error={configurableId ? sourceErrors[configurableId] : null}
                   key={source.id}
                   onChange={(next) => configurableId && setDrafts((current) => ({ ...current, [configurableId]: next }))}
                   onDisconnect={() => configurableId && request(configurableId, { method: "DELETE" })}

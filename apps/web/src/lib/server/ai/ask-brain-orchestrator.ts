@@ -55,6 +55,14 @@ import type {
   IntelligenceUsage
 } from "@/lib/server/intelligence/intelligence-contract";
 import { invokeAutoIntelligence } from "@/lib/server/intelligence/intelligence-source-service";
+import {
+  buildEvidenceGraph,
+  mergeEvidenceGraphs,
+  publicResearchEvidenceNodes,
+  validateRenderedEvidenceReferences,
+  type EvidenceGraph,
+  type VerificationState
+} from "@/lib/server/attachments/multimodal-verification";
 
 export type AskBrainDecisionPath =
   | "boundary_only"
@@ -111,6 +119,11 @@ export type AskBrainDecision = {
   modelCallRan: boolean;
   modelCallSucceeded: boolean;
   modelPublisher: string | null;
+  multimodalVerification: {
+    conflictCount: number;
+    evidenceCount: number;
+    state: VerificationState;
+  };
   path: AskBrainDecisionPath;
   primaryTimedOut: boolean;
   providerStatus: "configured" | "failed" | "not_configured" | "not_needed";
@@ -157,6 +170,8 @@ export type AskBrainInput = {
   freshnessDecision?: AskFreshnessDecision;
   behavior?: BehavioralDecision;
   intelligenceContext?: string;
+  evidenceGraph?: EvidenceGraph;
+  evidenceVerificationState?: VerificationState;
   messages: AskConversationMessage[];
   model: string;
   productMode: "ASK" | "CODE" | "WEBSITE";
@@ -1648,6 +1663,34 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     fallbackOccurred = true;
     fallbackReason = `source_reliability:${sourceReliability.outcome.toLowerCase()}`;
   }
+  const combinedEvidenceGraph = mergeEvidenceGraphs(
+    input.evidenceGraph ?? buildEvidenceGraph([]),
+    buildEvidenceGraph(publicResearchEvidenceNodes(researchSources))
+  );
+  const evidenceConflicts = combinedEvidenceGraph.relations.filter((relation) => relation.kind === "contradicts");
+  const renderedEvidenceValidation = validateRenderedEvidenceReferences(sanitized.value, combinedEvidenceGraph);
+  if (!renderedEvidenceValidation.valid) {
+    for (const reference of renderedEvidenceValidation.invalid) {
+      sanitized = sanitizeAskOutput(sanitized.value.replaceAll(reference, "[unverified evidence reference]"));
+    }
+    fallbackOccurred = true;
+    fallbackReason = "evidence_reference_invalid";
+  }
+  if (evidenceConflicts.length > 0 && !/\b(?:conflict|contradict|disagree|different evidence)\b/i.test(sanitized.value)) {
+    const relation = evidenceConflicts[0]!;
+    const left = combinedEvidenceGraph.nodes.find((node) => node.id === relation.from);
+    const right = combinedEvidenceGraph.nodes.find((node) => node.id === relation.to);
+    sanitized = sanitizeAskOutput([
+      "I found conflicting evidence and will not silently merge it.",
+      left && right ? `${left.sourceId ?? left.origin}: ${left.contentSummary}\n${right.sourceId ?? right.origin}: ${right.contentSummary}` : "The retained sources disagree on a material claim.",
+      sanitized.value
+    ].join("\n\n"));
+    fallbackOccurred = true;
+    fallbackReason = "multimodal_evidence_conflict";
+  }
+  const multimodalState: VerificationState = evidenceConflicts.length
+    ? "CONFLICTING"
+    : input.evidenceVerificationState ?? (combinedEvidenceGraph.nodes.length ? "FULLY_VERIFIED" : "UNVERIFIED");
 
   const decision: AskBrainDecision = {
     answerValidation: review.contractValidation,
@@ -1676,6 +1719,11 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     modelCallRan,
     modelCallSucceeded,
     modelPublisher: provider.modelPublisher,
+    multimodalVerification: {
+      conflictCount: evidenceConflicts.length,
+      evidenceCount: combinedEvidenceGraph.nodes.length,
+      state: multimodalState
+    },
     path: selected.path,
     primaryTimedOut,
     providerStatus,

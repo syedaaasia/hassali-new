@@ -81,11 +81,11 @@ type WorkspaceState = {
   createProject: (name: string) => Promise<WorkspaceLoadResult | null>;
   deletePath: (path: string, kind: "file" | "folder") => Promise<void>;
   hydrateWorkspace: (payload: WorkspaceLoadResult) => void;
-  loadWorkspace: (projectId?: string | null) => Promise<WorkspaceLoadResult | null>;
+  loadWorkspace: (projectId?: string | null, sessionId?: string | null) => Promise<WorkspaceLoadResult | null>;
   renamePath: (path: string, newPath: string, kind: "file" | "folder") => Promise<void>;
   setError: (error: string | null) => void;
   syncRuntimeFiles: (updates: RuntimeSyncedFile[], deletedPaths?: string[]) => void;
-  switchProject: (projectId: string) => Promise<WorkspaceLoadResult | null>;
+  switchProject: (projectId: string, sessionId?: string | null) => Promise<WorkspaceLoadResult | null>;
   updateActiveFile: (content: string) => void;
   saveActiveFile: () => Promise<void>;
 };
@@ -593,13 +593,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       });
     }
   },
-  loadWorkspace: async (projectId) => {
+  loadWorkspace: async (projectId, sessionId) => {
     canonicalProjectState.resetForProjectSwitch(projectId ?? readSelectedProjectId());
     set({ error: null, isLoading: true });
 
     try {
       const selectedProjectId = projectId ?? readSelectedProjectId();
-      const query = selectedProjectId ? `?projectId=${encodeURIComponent(selectedProjectId)}` : "";
+      const params = new URLSearchParams();
+      if (selectedProjectId) params.set("projectId", selectedProjectId);
+      if (sessionId) params.set("sessionId", sessionId);
+      const query = params.size ? `?${params.toString()}` : "";
       const response = await fetch(`/api/workspace${query}`);
 
       if (!response.ok) {
@@ -724,7 +727,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       projectId: get().projectId
     });
   },
-  switchProject: async (projectId) => {
+  switchProject: async (projectId, sessionId) => {
     canonicalProjectState.resetForProjectSwitch(projectId);
     useRuntimeStore.getState().applyRuntimePayload({
       error: null,
@@ -736,7 +739,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       workspacePath: null
     });
 
-    return get().loadWorkspace(projectId);
+    return get().loadWorkspace(projectId, sessionId);
   },
   updateActiveFile: (content) =>
     set((state) => ({

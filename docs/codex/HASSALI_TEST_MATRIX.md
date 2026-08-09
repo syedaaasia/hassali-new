@@ -84,6 +84,21 @@ M-11 | Private reference | Request cloud edit of private image without permissio
 M-12 | Media | Supply future video metadata/frames without decoder | Contracts and bounded frame selection work; runtime remains truthfully unavailable
 ```
 
+## Multimodal Verification and Decisions
+
+```text
+MV-01 | Capability plan | Combine text, document, screenshot, and current-fact request | Required modalities/capabilities are explicit; unknown is not available
+MV-02 | Evidence origins | Combine document, OCR, screenshot, web, and generated visual | Origins remain distinct and private flags survive
+MV-03 | Conflict | Document/web or native/OCR values disagree | Contradiction is retained; no silent merge
+MV-04 | Generated proof | Generated asset is cited for a real-world fact | Claim validation rejects it
+MV-05 | Citation | Cite real/fake document page or dangling source | Real mapping passes; fake/dangling mapping fails
+MV-06 | Partial failure | Document succeeds while vision fails | Useful document answer may continue with explicit limitation
+MV-07 | Context budget | Supply many large artifacts | One bounded untrusted context; no duplicate ASK injection
+MV-08 | Outcome | Ask to improve costly work without baseline | Missing metrics stated; no fabricated ROI; reversible pilot preferred
+MV-09 | Workflow | Supply one screenshot only | Visible state reported; before/after stages remain unknown
+MV-10 | Privacy | Combine private evidence with public research | Public query contains no private document/image content
+```
+
 ## WEBSITE
 
 ```text
@@ -220,10 +235,12 @@ I-39 | Hassali Local safety | Validate origin, endpoint, checksum, license, and 
 I-40 | Hassali Local truth | Open Settings without a native companion | Foundation-only/not installed/not paired; no fake models or install controls
 I-41 | Workspace defaults | Open a project and ASK notes | Project Panel and Project Notes start collapsed; both manual toggles remain
 I-42 | Settings response | GET returns success, empty body, invalid JSON, 401/403/404/500 | Ready data or safe normalized error; no raw parser exception
-I-43 | Settings persistence | Database unavailable or intelligence migration absent | Structured no-store failure; no fake success or database detail
+I-43 | Settings persistence | Database unavailable or intelligence migration absent | Full ready-degraded snapshot; session limitation stated; no database detail
 I-44 | Settings retry | First load fails and user clicks Retry | One new bounded request can recover to ready state
 I-45 | Settings mutation | Configure/test/toggle/disconnect/privacy/budget fails | Same safe parser and structured error contract as GET
 I-46 | Research model route | Research evidence needs synthesis | Existing Auto router selects the model; no second model router
+I-47 | Project search | Search project name, chat title, and message keyword | Case-insensitive owned results; exact project/session opens; zero model/web calls
+I-48 | Project panel | Open collapsed panel | Width 260-280px; Projects/Workspace/Git are plain sections; old Search card absent
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers
