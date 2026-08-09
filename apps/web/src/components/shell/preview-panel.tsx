@@ -1488,13 +1488,13 @@ export function PreviewPanel() {
   }, [effectiveManifest.type, projectId, refreshRuntimeStatus]);
 
   return (
-    <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 flex w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-[24px] border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.82)] shadow-[0_24px_90px_rgba(0,0,0,0.55)] backdrop-blur-xl xl:w-[34rem] 2xl:w-[38rem]">
-      <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--premium-border))] px-4 py-3.5">
-        <div>
+    <Panel className="fixed bottom-2 right-2 top-[3.5rem] z-30 flex w-[30rem] max-w-[calc(100vw-1rem)] flex-col rounded-2xl border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.94)] shadow-[0_24px_80px_rgba(0,0,0,0.48)] backdrop-blur-xl xl:w-[34rem] 2xl:w-[38rem]">
+      <div className="flex items-center justify-between gap-3 border-b border-[hsl(var(--premium-border))] px-3 py-3 sm:px-4 sm:py-3.5">
+        <div className="min-w-0">
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             Preview
           </div>
-          <div className="mt-1 text-xs text-foreground">
+          <div className="mt-1 truncate text-xs text-foreground">
             {status === "running" && isRuntimePreviewType ? "Local runtime" : panelPreviewLabel}
           </div>
         </div>
@@ -1519,7 +1519,8 @@ export function PreviewPanel() {
                 : status}
           </span>
           <button
-            className="rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[10px] uppercase text-muted-foreground hover:text-foreground"
+            aria-label="Close preview"
+            className="min-h-8 rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[10px] uppercase text-muted-foreground hover:text-foreground"
             onClick={() => setPreviewOpen(false)}
             type="button"
           >
@@ -1528,11 +1529,11 @@ export function PreviewPanel() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-[hsl(var(--premium-border))] p-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-[hsl(var(--premium-border))] p-3" data-preview-actions>
         <ProjectExportButton compact mode={productMode} />
         {effectiveManifest.type !== "static_website" ? (
           <button
-            className="rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-9 rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
             disabled={Boolean(startDisabledReason)}
             onClick={() => {
               void startPreview(projectId);
@@ -1544,7 +1545,7 @@ export function PreviewPanel() {
           </button>
         ) : null}
         <button
-          className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-9 rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           disabled={isLoading || (effectiveManifest.type !== "static_website" && !projectId)}
           onClick={() => {
             reloadPreview();
@@ -1556,7 +1557,7 @@ export function PreviewPanel() {
         </button>
         {effectiveManifest.type !== "static_website" ? (
           <button
-            className="rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-9 rounded-full border border-white/10 px-3.5 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             disabled={isLoading}
             onClick={() => {
               stopActivePreview();

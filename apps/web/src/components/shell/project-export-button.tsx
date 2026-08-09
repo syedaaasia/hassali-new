@@ -61,7 +61,7 @@ export function ProjectExportButton({ compact = false, mode }: { compact?: boole
   return (
     <button
       className={compact
-        ? "rounded-full border border-white/10 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        ? "min-h-9 rounded-full border border-white/10 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         : "rounded-full border border-[hsl(var(--premium-border))] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-[#F4F3EE]/75 hover:border-[hsl(var(--premium-accent)/0.5)] hover:text-[#F4F3EE] disabled:cursor-not-allowed disabled:opacity-50 [.light_&]:border-[#d8d1c6] [.light_&]:bg-white [.light_&]:text-[#000000]"}
       disabled={!projectId || isDownloading}
       onClick={() => void download()}

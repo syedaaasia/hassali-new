@@ -84,6 +84,11 @@ type SpeechGlobal = {
   SpeechRecognition?: new () => SpeechRecognitionLike;
   webkitSpeechRecognition?: new () => SpeechRecognitionLike;
 };
+const activeModeClasses: Record<ProductMode, string> = {
+  ASK: "bg-[#57A8FF] text-[#0B0D10] shadow-[0_8px_22px_rgba(87,168,255,0.2)]",
+  WEBSITE: "bg-[#9D7BFF] text-[#0B0D10] shadow-[0_8px_22px_rgba(157,123,255,0.2)]",
+  CODE: "bg-[#FF7A3C] text-[#0B0D10] shadow-[0_8px_22px_rgba(255,122,60,0.2)]"
+};
 type ChatScrollBehavior = "auto" | "smooth";
 type ChatScrollContainer = {
   clientHeight: number;
@@ -1212,7 +1217,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
   return (
     <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-transparent">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] bg-black/10 px-4 py-1.5 [.light_&]:bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] bg-[#12161C]/80 px-3 py-2 [.light_&]:bg-white sm:px-4">
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             {productMode === "ASK" ? "Ask" : productMode === "WEBSITE" ? "Website" : "Code"}
@@ -1221,16 +1226,16 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             {modeHints[productMode]}
           </div>
         </div>
-        <div className="order-3 grid w-full grid-cols-3 gap-1 rounded-full border border-[hsl(var(--premium-border))] bg-black/35 p-0.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)] [.light_&]:border-[#d8d1c6] [.light_&]:bg-[#F4F3EE] [.light_&]:shadow-[0_10px_30px_rgba(0,0,0,0.08)] md:order-none md:w-[29rem]">
+        <div className="order-3 grid w-full grid-cols-3 gap-1 rounded-lg border border-[hsl(var(--premium-border))] bg-black/25 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] [.light_&]:border-[#d8d1c6] [.light_&]:bg-[#F4F3EE] md:order-none md:w-[29rem]">
           {productModes.map((item) => {
             const isActive = item.label === productMode;
 
             return (
               <button
                 aria-pressed={isActive}
-                className={`rounded-full px-3 py-1 text-center transition ${
+                className={`min-h-8 rounded-md px-3 py-1 text-center transition ${
                   isActive
-                    ? "bg-[#DE7356] text-[#000000] shadow-[0_0_0_1px_rgba(0,0,0,0.12),0_10px_24px_rgba(222,115,86,0.26)]"
+                    ? activeModeClasses[item.label]
                     : "text-[#F4F3EE]/80 hover:bg-white/[0.06] hover:text-[#F4F3EE] [.light_&]:text-[#000000] [.light_&]:hover:bg-white [.light_&]:hover:text-[#000000]"
                 }`}
                 data-mode-option={item.label}
@@ -1532,7 +1537,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
         {isAwayFromLatest ? (
           <button
-            className="absolute bottom-[5.6rem] left-1/2 z-20 -translate-x-1/2 rounded-full border border-[hsl(var(--premium-border))] bg-[#171717] px-3 py-1.5 text-[11px] font-medium text-foreground shadow-[0_12px_34px_rgba(0,0,0,0.4)] hover:border-[hsl(var(--premium-accent)/0.45)] [.light_&]:bg-white"
+            className="absolute bottom-[7.4rem] left-1/2 z-20 -translate-x-1/2 rounded-full border border-[hsl(var(--premium-border))] bg-[#1A2029] px-3 py-1.5 text-[11px] font-medium text-foreground shadow-[0_12px_34px_rgba(0,0,0,0.4)] hover:border-[hsl(var(--premium-accent)/0.45)] [.light_&]:bg-white"
             data-jump-to-latest
             onClick={() => scrollToLatest("smooth")}
             type="button"
@@ -1542,7 +1547,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         ) : null}
 
         <form
-          className="shrink-0 border-t border-white/10 bg-[#0b0b0b] px-4 py-3 [.light_&]:border-slate-200 [.light_&]:bg-[#F4F3EE] lg:px-6"
+          className="shrink-0 border-t border-[hsl(var(--premium-border))] bg-[#0B0D10]/95 px-3 py-2.5 [.light_&]:border-slate-200 [.light_&]:bg-[#F4F3EE] sm:px-4 lg:px-6"
           data-website-composer={productMode === "WEBSITE" ? "true" : undefined}
           onDragOver={(event) => {
             const transfer = event.dataTransfer as unknown as { types: { includes: (value: string) => boolean } };
@@ -1560,7 +1565,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           }}
         >
           {productMode === "ASK" && useProjectNotesAsContext && notesProjectId === projectId && projectNotes.trim() ? (
-            <div className="mx-auto mb-1.5 w-full max-w-3xl px-1 text-[9px] text-amber-100/80">
+            <div className="mx-auto mb-1.5 w-full max-w-4xl px-1 text-[9px] text-amber-100/80">
               Project Notes context is on for this request ({boundedProjectNotesContext(projectNotes).length.toLocaleString()} characters).
             </div>
           ) : null}
@@ -1578,7 +1583,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             type="file"
           />
           {composerUploads.length ? (
-            <div className="mx-auto mb-2 flex w-full max-w-3xl gap-2 overflow-x-auto px-1 pb-0.5" data-composer-attachments>
+            <div className="mx-auto mb-2 flex w-full max-w-4xl gap-2 overflow-x-auto px-1 pb-0.5" data-composer-attachments>
               {composerUploads.map((upload) => (
                 <div
                   className={`relative flex min-w-[10rem] max-w-[15rem] items-center gap-2 rounded-md border px-2 py-1.5 text-[10px] ${
@@ -1636,7 +1641,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               ))}
             </div>
           ) : null}
-          <div className="mx-auto mb-1 w-full max-w-3xl sm:hidden">
+          <div className="mx-auto mb-1 w-full max-w-4xl sm:hidden">
             <PremiumSelect
               compact
               label="Model"
@@ -1645,7 +1650,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               value={model}
             />
           </div>
-          <div className="mx-auto flex w-full max-w-3xl items-center gap-2 rounded-[28px] border border-white/10 bg-[#161616] px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] focus-within:border-[hsl(var(--premium-accent)/0.55)] focus-within:ring-2 focus-within:ring-[hsl(var(--premium-accent)/0.1)] [.light_&]:border-slate-300 [.light_&]:bg-white [.light_&]:shadow-[0_16px_44px_rgba(0,0,0,0.08)]">
+          <div className="mx-auto flex w-full max-w-4xl items-center gap-2 rounded-2xl border border-[hsl(var(--premium-border))] bg-[#1A2029] px-2.5 py-2 shadow-[0_10px_32px_rgba(0,0,0,0.2)] focus-within:border-[hsl(var(--premium-accent)/0.55)] focus-within:ring-2 focus-within:ring-[hsl(var(--premium-accent)/0.1)] [.light_&]:border-slate-300 [.light_&]:bg-white [.light_&]:shadow-[0_16px_44px_rgba(0,0,0,0.08)] sm:px-3">
             <button
               aria-label="Attach files"
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg leading-none text-muted-foreground hover:bg-white/[0.04] hover:text-foreground [.light_&]:hover:bg-slate-200 [.light_&]:hover:text-slate-950"
@@ -1655,7 +1660,6 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             >
               +
             </button>
-            {productMode !== "ASK" ? <ApprovalPolicyControl projectId={projectId} /> : null}
             <textarea
               className="max-h-28 min-h-[40px] flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-[14px] leading-5 text-[#f4f1e8] outline-none placeholder:text-muted-foreground [.light_&]:text-slate-950 [.light_&]:placeholder:text-slate-500"
               onChange={(event) =>
@@ -1710,6 +1714,11 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               ) : "Go"}
             </button>
           </div>
+          {productMode !== "ASK" ? (
+            <div className="mx-auto mt-1 flex min-h-8 w-full max-w-4xl items-center px-1" data-approval-control-row>
+              <ApprovalPolicyControl projectId={projectId} />
+            </div>
+          ) : null}
         </form>
       </div>
     </Panel>

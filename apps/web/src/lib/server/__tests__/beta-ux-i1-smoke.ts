@@ -176,20 +176,24 @@ test("chat follows only near the bottom and exposes jump-to-latest", () => {
   assert.match(rightSidebar, /const sendWithContext = \(\) => \{[\s\S]*?sendMessage\(createWorkspaceContext\(\)\)[\s\S]*?autoFollowRef\.current = true;[\s\S]*?scheduleAutoFollow\("smooth"\);/);
 });
 
-test("approval selector is plain composer text directly after attachment and reaches the server", () => {
-  const attachmentIndex = rightSidebar.indexOf('aria-label="Attach files"');
-  const policyIndex = rightSidebar.indexOf("<ApprovalPolicyControl", attachmentIndex);
-  const textareaIndex = rightSidebar.indexOf("<textarea", policyIndex);
-  assert(attachmentIndex >= 0 && policyIndex > attachmentIndex && textareaIndex > policyIndex);
+test("approval selector is plain text below the full-width composer and reaches the server", () => {
+  const composerIndex = rightSidebar.indexOf('className="mx-auto flex w-full max-w-4xl items-center');
+  const textareaIndex = rightSidebar.indexOf("<textarea", composerIndex);
+  const approvalRowIndex = rightSidebar.indexOf("data-approval-control-row", textareaIndex);
+  const policyIndex = rightSidebar.indexOf("<ApprovalPolicyControl", approvalRowIndex);
+  assert(composerIndex >= 0 && textareaIndex > composerIndex && approvalRowIndex > textareaIndex && policyIndex > approvalRowIndex);
+  assert.doesNotMatch(rightSidebar.slice(composerIndex, textareaIndex), /ApprovalPolicyControl/);
   assert.equal((rightSidebar.match(/<ApprovalPolicyControl/g) ?? []).length, 1);
-  assert.match(approvalControl, /bg-transparent/);
-  assert.doesNotMatch(approvalControl, /rounded-full border border-white\/10 bg-white/);
+  const collapsedControl = approvalControl.slice(approvalControl.indexOf("<button"), approvalControl.indexOf("</button>"));
+  assert.match(collapsedControl, /bg-transparent/);
+  assert.doesNotMatch(collapsedControl, /rounded-full|border-white|shadow|aria-hidden|>v</);
+  assert.match(approvalControl, /aria-label=\{`Project approval policy:/);
   assert.doesNotMatch(rightSidebar, /Only risky actions ask|Always ask before changes|project access without repeated/i);
   assert.match(chatStore, /approvalPolicy: workspaceContext\.approvalPolicy/);
   assert.match(chatRoute, /approvalPolicy: persistence\?\.approvalPolicy \?\? approvalPolicy/);
   assert.match(runtimeApprovalRoute, /approvalSource === "standing_policy"/);
   assert.match(runtimeApprovalRoute, /Standing approval is not valid for this proposal/);
-  assert.match(rightSidebar, /max-w-3xl sm:hidden[\s\S]*?<PremiumSelect[\s\S]*?label="Model"/);
+  assert.match(rightSidebar, /max-w-4xl sm:hidden[\s\S]*?<PremiumSelect[\s\S]*?label="Model"/);
 });
 
 test("standing approval suppresses manual controls and blocked proposals never expose Approve", () => {
@@ -204,6 +208,8 @@ test("Preview is the only Download ZIP surface and retains the secure export act
   assert.equal((rightSidebar.match(/ProjectExportButton/g) ?? []).length, 0);
   assert.equal((previewPanel.match(/<ProjectExportButton/g) ?? []).length, 1);
   assert.match(previewPanel, /projectId=\{projectId\}/);
+  assert.match(previewPanel, /data-preview-actions/);
+  assert.match(previewPanel, /flex flex-wrap items-center/);
   assert.doesNotMatch(previewPanel, /z-30 hidden[^"]*lg:flex/);
   assert.match(exportButton, /link\.href = exportUrl/);
   assert.match(exportButton, /await response\.body\?\.cancel\(\)/);
