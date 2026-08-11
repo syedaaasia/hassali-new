@@ -269,6 +269,16 @@ I-45 | Settings mutation | Configure/test/toggle/disconnect/privacy/budget fails
 I-46 | Research model route | Research evidence needs synthesis | Existing Auto router selects the model; no second model router
 I-47 | Project search | Search project name, chat title, and message keyword | Case-insensitive owned results; exact project/session opens; zero model/web calls
 I-48 | Project panel | Open collapsed panel | Width 260-280px; Projects/Workspace/Git are plain sections; old Search card absent
+I-49 | Capability registry | Register valid, duplicate, invalid, and unknown packs | Stable order; duplicates/invalid IDs fail deterministically
+I-50 | Language packs | Inspect TS/JS, Python, Rust, Go, JVM, .NET, C/C++, PHP, Ruby, shell, SQL | Ecosystems detected from files/manifests; deep support stated truthfully
+I-51 | Python runtime | Probe Windows python, py -3, and python3 | First healthy candidate recorded; missing/degraded states remain explicit
+I-52 | Local media/OCR | Probe FFmpeg, ffprobe, and Tesseract independently | Version-only bounded probes; no media/OCR work or installation
+I-53 | Toolchain truth | Repository declares pnpm or language manifest without local probe | Declaration recorded; local health remains unknown
+I-54 | Command intelligence | Classify build/test/typecheck/lint/dev/migration/generate | Purpose, mutation, duration, network, and risk metadata; zero execution
+I-55 | Capability matching | Require available, degraded, missing, or unsupported capability | Deterministic match and truthful missing prerequisites
+I-56 | Execution handoff | Refine an approved CODE plan with capability evidence | Requirements remain permission-not-granted and approval-bound
+I-57 | Missing runtime | Plan execution with unavailable runtime | Execution blocks; source-only generation does not fabricate a runnable step
+I-58 | Real repository trace | Analyze Hassali repository and current process | TS/JS, pnpm, scripts, and actual local statuses are evidence-backed
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers

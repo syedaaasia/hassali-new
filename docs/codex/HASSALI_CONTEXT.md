@@ -158,7 +158,18 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Imports are not treated as calls. Call/render/test relationships require additional source evidence and carry confidence/provenance.
 - Snapshot fingerprints include revision, dirty/untracked state, and relevant file metadata/content fingerprints. Ordinary source changes use targeted incremental refresh; manifest/workspace changes use a full bounded refresh.
 - The adaptive CODE planner can replace unresolved implementation assumptions with proven files, symbols, routes, and tests while preserving intent, constraints, acceptance criteria, approval policy, and stop conditions.
-- Deep symbol parsing is currently strongest for TypeScript/JavaScript. Broader language capability packs remain Run 04 I3 work.
+- Deep symbol parsing remains strongest for TypeScript/JavaScript. Metadata-level packs detect Python, Rust, Go, JVM, .NET, C/C++, PHP, Ruby, shell, and SQL repositories without claiming deep language intelligence.
+
+### Capability Packs
+
+- `lib/server/capabilities/` owns provider-neutral capability types, the deterministic pack registry, local-tool evidence, command classification, matching, and the non-executing I4 handoff.
+- Repository evidence and machine availability remain distinct. A manifest can detect a project ecosystem while its local runtime or package-manager health remains unknown or unavailable.
+- Python detection recognizes common manifests and files. Bounded direct version probes check `python`, `py -3`, and `python3` in platform-appropriate order; a virtual environment is never described as a sandbox.
+- Node, FFmpeg, ffprobe, and Tesseract use independent, timeout/output-bounded version probes with a minimal environment and short cache. Detection never processes user media, runs OCR, installs software, or executes project code.
+- Declared repository scripts are classified as build/test/typecheck/lint/dev/format/generate/migration/other with duration, side-effect, network, and risk metadata. Targeted verification is preferred, but commands are not run in I3.
+- `ExecutionRequirement` records capability, working scope, filesystem/network needs, duration, mutation, risk, missing prerequisites, and approval requirement. Every I3 requirement carries `permission: not-granted`.
+- The adaptive CODE planner consumes owned repository and capability evidence after ownership verification. Missing tools block only work that actually requires execution; generation can proceed with truthful prerequisite metadata.
+- Secure execution, package installation, sandbox/resource enforcement, media/OCR processing, and command approval lifecycle remain Run 04 I4 work.
 
 ## Design
 
@@ -264,4 +275,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 03 I4 checkpoint: `ASK-I4: verify multimodal intelligence end to end`
 - Run 04 I1 checkpoint: `CODE-I1: add adaptive planning and delivery contracts`
 - Run 04 I2 checkpoint: `CODE-I2: add repository intelligence and impact mapping`
+- Run 04 I3 checkpoint: `CODE-I3: add multi-language capability packs and runtime detection`
 - The repository HEAD is authoritative; confirm it with Git before every task.

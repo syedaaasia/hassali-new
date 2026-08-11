@@ -107,6 +107,11 @@ import {
 } from "@/lib/server/repository-intelligence/repository-intelligence";
 import { refineAdaptiveCodePlanWithRepository } from "@/lib/server/repository-intelligence/planner-repository-bridge";
 import {
+  analyzeRepositoryCapabilities,
+  matchRepositoryCapabilities
+} from "@/lib/server/capabilities/repository-capability-analyzer";
+import { refineAdaptiveCodePlanWithCapabilities } from "@/lib/server/capabilities/planner-capability-bridge";
+import {
   buildGeneratorContract,
   summarizeGeneratorContract,
   type GeneratorContract
@@ -296,7 +301,17 @@ async function refineOwnedCodePlanWithRepository(
     if (isWorkspaceBindingError(binding)) return plan;
     const snapshot = await inspectRepository(binding.workspaceRoot, { signal });
     const result = await inspectRepositoryForRequest(snapshot, plan.repositoryInspection, signal);
-    return refineAdaptiveCodePlanWithRepository(plan, result);
+    const repositoryPlan = refineAdaptiveCodePlanWithRepository(plan, result);
+    const profile = await analyzeRepositoryCapabilities(snapshot);
+    const match = matchRepositoryCapabilities(profile, {
+      approvalRequired: repositoryPlan.approvalRequirements.explicitApprovalRequired,
+      prompt: repositoryPlan.intent.goal,
+      requiredCapabilities: repositoryPlan.intent.requiredCapabilities,
+      requiresExecution: repositoryPlan.intent.requiresExecution,
+      taskId: repositoryPlan.taskId,
+      workspaceHints: repositoryPlan.repositoryEvidence?.exactPaths ?? []
+    });
+    return refineAdaptiveCodePlanWithCapabilities(repositoryPlan, profile, match);
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw error;
     // Repository evidence is an optional read-only refinement. Existing ownership,

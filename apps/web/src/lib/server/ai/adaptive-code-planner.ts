@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ProjectApprovalPolicy } from "@/lib/approval-policy";
+import type { ExecutionRequirement } from "../capabilities/capability-types";
 
 export type CodeTaskType =
   | "add-feature"
@@ -150,9 +151,17 @@ export type AdaptiveCodePlan = {
   approvalRequirements: ApprovalRequirements;
   assumptions: string[];
   complexity: CodeTaskComplexity;
+  capabilityEvidence: {
+    available: string[];
+    degraded: string[];
+    fingerprint: string;
+    missing: string[];
+    packs: string[];
+  } | null;
   constraintConflicts: ConstraintConflict[];
   constraints: CodeConstraint[];
   deliveryRequirements: DeliveryRequirements;
+  executionRequirements: ExecutionRequirement[];
   failure: { code: PlannerFailureCode; safeMessage: string } | null;
   hypotheses: DebugHypothesis[];
   intent: CodeTaskIntent;
@@ -690,9 +699,11 @@ export function buildAdaptiveCodePlan(input: BuildAdaptiveCodePlanInput): Adapti
       input.projectContext?.framework ? "The existing " + compact(input.projectContext.framework, 80) + " architecture remains authoritative after inspection." : ""
     ]),
     complexity,
+    capabilityEvidence: null,
     constraintConflicts,
     constraints,
     deliveryRequirements: delivery,
+    executionRequirements: [],
     failure: blockingConflict
       ? { code: "CONSTRAINT_CONFLICT" as const, safeMessage: "The request contains contradictory hard constraints that must be resolved before execution." }
       : blockingAmbiguity

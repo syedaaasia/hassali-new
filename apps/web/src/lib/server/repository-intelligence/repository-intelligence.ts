@@ -42,10 +42,13 @@ const skippedDirectories = new Set([
 const buildDirectories = new Set([".next", ".turbo", "build", "coverage", "dist", "out"]);
 const vendorDirectories = new Set(["node_modules", "vendor", "third_party"]);
 const generatedDirectoryPattern = /(?:^|\/)(?:generated|__generated__|gen)(?:\/|$)/i;
-const sourceExtensions = new Set([".cjs", ".css", ".go", ".html", ".java", ".js", ".jsx", ".mjs", ".php", ".py", ".rs", ".scss", ".sql", ".ts", ".tsx", ".vue"]);
+const sourceExtensions = new Set([
+  ".c", ".cc", ".cjs", ".cpp", ".cs", ".css", ".go", ".h", ".hpp", ".html", ".java", ".js", ".jsx",
+  ".kt", ".kts", ".mjs", ".php", ".ps1", ".py", ".rb", ".rs", ".scss", ".sh", ".sql", ".ts", ".tsx", ".vue"
+]);
 const assetExtensions = new Set([".avif", ".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".mp3", ".mp4", ".ogg", ".pdf", ".png", ".svg", ".webm", ".webp", ".woff", ".woff2", ".zip"]);
 const textExtensions = new Set([...sourceExtensions, ".json", ".jsonc", ".md", ".mdx", ".toml", ".txt", ".yaml", ".yml"]);
-const configNames = /(?:^|\/)(?:package\.json|pnpm-workspace\.yaml|turbo\.json|nx\.json|tsconfig(?:\.[^/]+)?\.json|next\.config\.[^/]+|vite\.config\.[^/]+|vitest\.config\.[^/]+|jest\.config\.[^/]+|eslint\.config\.[^/]+|\.eslintrc[^/]*|pyproject\.toml|requirements[^/]*\.txt|go\.mod|cargo\.toml|composer\.json|dockerfile|docker-compose[^/]*|\.github\/workflows\/[^/]+|prisma\/schema\.prisma)$/i;
+const configNames = /(?:^|\/)(?:package\.json|pnpm-workspace\.yaml|turbo\.json|nx\.json|tsconfig(?:\.[^/]+)?\.json|next\.config\.[^/]+|vite\.config\.[^/]+|vitest\.config\.[^/]+|jest\.config\.[^/]+|eslint\.config\.[^/]+|\.eslintrc[^/]*|pyproject\.toml|requirements[^/]*\.txt|setup\.py|setup\.cfg|pipfile|poetry\.lock|uv\.lock|pytest\.ini|tox\.ini|mypy\.ini|ruff\.toml|go\.mod|cargo\.toml|pom\.xml|(?:build|settings)\.gradle(?:\.kts)?|[^/]+\.csproj|[^/]+\.sln|composer\.json|gemfile|cmakelists\.txt|makefile|dockerfile|docker-compose[^/]*|\.github\/workflows\/[^/]+|prisma\/schema\.prisma)$/i;
 
 type ParsedImport = {
   exported: boolean;
@@ -99,9 +102,11 @@ function privateSearchTokenHashes(text: string | null) {
 
 function languageFor(extension: string) {
   const languages: Record<string, string> = {
-    ".cjs": "JavaScript", ".css": "CSS", ".go": "Go", ".html": "HTML", ".java": "Java",
+    ".c": "C", ".cc": "C++", ".cjs": "JavaScript", ".cpp": "C++", ".cs": "C#", ".css": "CSS",
+    ".go": "Go", ".h": "C/C++ Header", ".hpp": "C++ Header", ".html": "HTML", ".java": "Java",
     ".js": "JavaScript", ".jsx": "JavaScript JSX", ".mjs": "JavaScript", ".php": "PHP",
-    ".py": "Python", ".rs": "Rust", ".scss": "SCSS", ".sql": "SQL", ".ts": "TypeScript",
+    ".kt": "Kotlin", ".kts": "Kotlin", ".ps1": "PowerShell", ".py": "Python", ".rb": "Ruby",
+    ".rs": "Rust", ".scss": "SCSS", ".sh": "Shell", ".sql": "SQL", ".ts": "TypeScript",
     ".tsx": "TypeScript JSX", ".vue": "Vue"
   };
   return languages[extension] ?? null;
@@ -336,6 +341,14 @@ function manifestKind(relativePath: string) {
   if (/eslint/.test(name)) return "lint";
   if (/vitest|jest/.test(name)) return "test";
   if (/schema\.prisma/.test(relativePath)) return "database-schema";
+  if (/pyproject|requirements|setup\.(?:py|cfg)|pipfile|poetry|uv\.lock|pytest|tox|mypy|ruff/i.test(name)) return "python";
+  if (name === "cargo.toml") return "rust";
+  if (name === "go.mod") return "go";
+  if (/pom\.xml|gradle/.test(name)) return "jvm";
+  if (/\.csproj$|\.sln$/.test(name)) return "dotnet";
+  if (name === "composer.json") return "php";
+  if (name === "gemfile") return "ruby";
+  if (/cmakelists|makefile/.test(name)) return "native-build";
   if (/docker/.test(name)) return "container";
   if (/workflow/.test(relativePath) || /^\.github\//.test(relativePath)) return "ci";
   return "configuration";
@@ -809,6 +822,11 @@ export async function searchRepository(
     .sort((left, right) => right.score - left.score || left.file.localeCompare(right.file))
     .filter((result, index, values) => values.findIndex((candidate) => candidate.file === result.file) === index)
     .slice(0, limit);
+}
+
+export function repositoryFileHasPrivateToken(file: RepositoryFile, token: string) {
+  const normalized = token.trim().toLowerCase();
+  return normalized.length >= 2 && file.searchTokenHashes.includes(hash(normalized));
 }
 
 export async function mapImplementationSurface(
