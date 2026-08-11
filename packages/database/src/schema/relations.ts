@@ -6,10 +6,12 @@ import { files } from "./files";
 import { intelligencePreferences } from "./intelligence-preferences";
 import { intelligenceSourceConnections } from "./intelligence-source-connections";
 import { intelligenceUsageRecords } from "./intelligence-usage-records";
+import { memoryPeople } from "./memory-people";
 import { projects } from "./projects";
 import { prompts } from "./prompts";
 import { snapshots } from "./snapshots";
 import { usageEvents } from "./usage-events";
+import { userMemoryRecords } from "./user-memory-records";
 import { users } from "./users";
 import { workspaces } from "./workspaces";
 
@@ -20,10 +22,35 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   intelligencePreferences: one(intelligencePreferences),
   intelligenceSourceConnections: many(intelligenceSourceConnections),
   intelligenceUsageRecords: many(intelligenceUsageRecords),
+  memoryPeople: many(memoryPeople),
   prompts: many(prompts),
   snapshots: many(snapshots),
   usageEvents: many(usageEvents),
+  userMemoryRecords: many(userMemoryRecords),
   workspaces: many(workspaces)
+}));
+
+export const memoryPeopleRelations = relations(memoryPeople, ({ one, many }) => ({
+  memories: many(userMemoryRecords),
+  user: one(users, {
+    fields: [memoryPeople.userId],
+    references: [users.id]
+  })
+}));
+
+export const userMemoryRecordsRelations = relations(userMemoryRecords, ({ one }) => ({
+  person: one(memoryPeople, {
+    fields: [userMemoryRecords.personId],
+    references: [memoryPeople.id]
+  }),
+  sourceMessage: one(chatMessages, {
+    fields: [userMemoryRecords.sourceMessageId],
+    references: [chatMessages.id]
+  }),
+  user: one(users, {
+    fields: [userMemoryRecords.userId],
+    references: [users.id]
+  })
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({

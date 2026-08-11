@@ -21,6 +21,8 @@ import {
   runAskBrain,
   type AskModelSelectionPolicy
 } from "@/lib/server/ai/ask-brain-orchestrator";
+import { createDatabaseUserMemoryStore } from "@/lib/server/user-memory/database-user-memory-store";
+import { handleAskUserMemory } from "@/lib/server/user-memory/user-memory";
 import {
   buildModeHandoff,
   handoffRequestKey,
@@ -6769,7 +6771,7 @@ export async function POST(request: Request) {
           : ""
       ].filter(Boolean).join("\n")
     : "";
-  const askIntelligenceContext = [
+  let askIntelligenceContext = [
     intelligencePreflight.providerContext,
     intelligenceToolProviderContext,
     multimodalVerification.contextText,
@@ -6809,6 +6811,47 @@ export async function POST(request: Request) {
       "x-hassali-ask-provider-failure": "none",
       "x-hassali-ask-response-kind": generatedHandoff.targetMode === "ASK" ? "deterministic_answer" : "mode_boundary"
     }));
+  }
+
+  if (productMode === "ASK") {
+    const memoryOwnerId = persistence?.externalUserId ?? (await auth()).userId;
+    if (memoryOwnerId) {
+      persistence = await persistPendingUserMessage(persistence);
+      const userMemory = await handleAskUserMemory({
+        prompt: effectiveUserPrompt,
+        publicResearch: askFreshnessDecision.researchRequired,
+        sourceMessageId: pendingUserMessageId,
+        store: createDatabaseUserMemoryStore(memoryOwnerId)
+      });
+
+      if (userMemory.directAnswer) {
+        const selfReview = runSelfReviewForAskAnswer({
+          answer: userMemory.directAnswer,
+          generator: "user_memory",
+          projectId: requestedProjectId,
+          prompt: effectiveUserPrompt
+        });
+        persistence = await persistRequestMessage(persistence, {
+          content: userMemory.directAnswer,
+          metadata: {
+            deterministic: true,
+            model,
+            projectContract: summarizeProjectContract(projectContract),
+            selfReview: compactSelfReview(selfReview),
+            userMemory: { intent: userMemory.intent }
+          },
+          role: "assistant"
+        });
+        return respond(createTextStream(userMemory.directAnswer, persistence?.sessionId, {
+          "x-hassali-ask-provider-failure": "none",
+          "x-hassali-ask-response-kind": "user_memory_response"
+        }));
+      }
+
+      if (userMemory.context) {
+        askIntelligenceContext = [askIntelligenceContext, userMemory.context].filter(Boolean).join("\n\n");
+      }
+    }
   }
 
   if (mode === "ASK") {
