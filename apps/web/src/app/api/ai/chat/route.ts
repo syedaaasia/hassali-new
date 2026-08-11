@@ -26,6 +26,10 @@ import { handleAskUserMemory } from "@/lib/server/user-memory/user-memory";
 import { createDatabaseProjectMemoryStore } from "@/lib/server/project-memory/database-project-memory-store";
 import { extractProjectMemoryCandidates, handleAskProjectMemory } from "@/lib/server/project-memory/project-memory";
 import {
+  buildProjectPlanningMemoryAmbiguities,
+  handleAskTemporalMemory
+} from "@/lib/server/memory-intelligence/temporal-memory";
+import {
   buildModeHandoff,
   handoffRequestKey,
   handoffVisibleAnswer
@@ -5884,6 +5888,9 @@ export async function POST(request: Request) {
     : defaultProjectApprovalPolicy;
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const projectNotesContext = explicitProjectNotesContext(body?.projectNotes, productMode);
+  const boundedProjectNotes = typeof body?.projectNotes === "string"
+    ? body.projectNotes.trim().slice(0, maximumExplicitProjectNotesContextLength)
+    : "";
   const requestedWorkspace = isWorkspaceContext(body?.workspace)
     ? body.workspace
     : {
@@ -6439,9 +6446,25 @@ export async function POST(request: Request) {
     projectContract: activeProjectContract,
     translatedIntent
   });
+  const planningMemoryAmbiguities = productMode === "CODE" && requestedProjectId
+    ? await (async () => {
+        const memoryOwnerId = (await auth()).userId;
+        if (!memoryOwnerId) return [];
+        try {
+          return await buildProjectPlanningMemoryAmbiguities({
+            projectNotes: boundedProjectNotes,
+            prompt: behavior.resolvedRequest,
+            store: createDatabaseProjectMemoryStore(memoryOwnerId, requestedProjectId)
+          });
+        } catch {
+          return [];
+        }
+      })()
+    : [];
   const adaptiveCodePlan = productMode === "CODE"
     ? buildAdaptiveCodePlan({
         approvalPolicy,
+        memoryAmbiguities: planningMemoryAmbiguities,
         projectContext: {
           fileCount: workspace.fileList.length,
           packageManager: workspace.fileList.some((path) => path.endsWith("pnpm-lock.yaml"))
@@ -6821,12 +6844,48 @@ export async function POST(request: Request) {
       persistence = await persistPendingUserMessage(persistence);
       if (persistence?.sessionId) {
         try {
+          const projectStore = createDatabaseProjectMemoryStore(memoryOwnerId, persistence.projectId);
+          const temporalMemory = await handleAskTemporalMemory({
+            projectId: persistence.projectId,
+            projectNotes: boundedProjectNotes,
+            projectStore,
+            prompt: effectiveUserPrompt,
+            userStore: createDatabaseUserMemoryStore(memoryOwnerId)
+          });
+          if (temporalMemory) {
+            const selfReview = runSelfReviewForAskAnswer({
+              answer: temporalMemory.answer,
+              generator: "temporal_memory",
+              projectId: requestedProjectId,
+              prompt: effectiveUserPrompt
+            });
+            persistence = await persistRequestMessage(persistence, {
+              content: temporalMemory.answer,
+              metadata: {
+                deterministic: true,
+                model,
+                responseKind: "temporal_memory_response",
+                selfReview: compactSelfReview(selfReview),
+                temporalMemory: {
+                  conflict: temporalMemory.resolution.conflict?.kind ?? null,
+                  intent: temporalMemory.plan.query.intent,
+                  resolution: temporalMemory.resolution.status,
+                  sources: temporalMemory.plan.sources
+                }
+              },
+              role: "assistant"
+            });
+            return respond(createTextStream(temporalMemory.answer, persistence?.sessionId, {
+              "x-hassali-ask-provider-failure": "none",
+              "x-hassali-ask-response-kind": "temporal_memory_response"
+            }));
+          }
           const projectMemory = await handleAskProjectMemory({
             conversationId: persistence.sessionId,
             projectNotes: projectNotesContext,
             prompt: effectiveUserPrompt,
             sourceMessageId: pendingUserMessageId,
-            store: createDatabaseProjectMemoryStore(memoryOwnerId, persistence.projectId)
+            store: projectStore
           });
           if (projectMemory.directAnswer) {
             const selfReview = runSelfReviewForAskAnswer({

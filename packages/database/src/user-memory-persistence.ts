@@ -24,6 +24,7 @@ export type PersistedUserMemoryRecord = {
   sensitivity: string;
   sourceMessageId: string | null;
   sourceType: string;
+  status: "active" | "superseded";
   updatedAt: Date;
   value: string;
 };
@@ -64,6 +65,7 @@ function mapMemoryRow(row: {
   sensitivity: string;
   sourceMessageId: string | null;
   sourceType: string;
+  status: "active" | "superseded";
   updatedAt: Date;
   value: string;
 }): PersistedUserMemoryRecord {
@@ -71,7 +73,7 @@ function mapMemoryRow(row: {
     captureMethod: row.captureMethod,
     category: row.category,
     confidenceBps: Number(row.confidenceBps),
-    createdAt: row.createdAt,
+    createdAt: new Date(row.createdAt),
     id: row.id,
     key: row.key,
     normalizedKey: row.normalizedKey,
@@ -87,7 +89,8 @@ function mapMemoryRow(row: {
     sensitivity: row.sensitivity,
     sourceMessageId: row.sourceMessageId,
     sourceType: row.sourceType,
-    updatedAt: row.updatedAt,
+    status: row.status,
+    updatedAt: new Date(row.updatedAt),
     value: row.value
   };
 }
@@ -109,6 +112,7 @@ export async function listOwnedUserMemories(
       records.confidence_bps as "confidenceBps",
       records.capture_method as "captureMethod",
       records.source_type as "sourceType",
+      records.status,
       records.source_message_id as "sourceMessageId",
       records.created_at as "createdAt",
       records.updated_at as "updatedAt",
@@ -124,6 +128,44 @@ export async function listOwnedUserMemories(
       and records.status = 'active'
       and (records.expires_at is null or records.expires_at > now())
     order by records.updated_at desc, records.id asc
+    limit ${safeLimit}
+  `);
+  return result.rows.map(mapMemoryRow);
+}
+
+export async function listOwnedUserMemoryHistory(
+  externalUserId: string,
+  limit = 120,
+  db: QueryDb = getDatabaseClient()
+): Promise<PersistedUserMemoryRecord[]> {
+  const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
+  const result = await db.execute<Parameters<typeof mapMemoryRow>[0]>(sql`
+    select
+      records.id,
+      records.category,
+      records.key,
+      records.normalized_key as "normalizedKey",
+      records.value,
+      records.sensitivity,
+      records.confidence_bps as "confidenceBps",
+      records.capture_method as "captureMethod",
+      records.source_type as "sourceType",
+      records.source_message_id as "sourceMessageId",
+      records.status,
+      records.created_at as "createdAt",
+      records.updated_at as "updatedAt",
+      people.id as "personId",
+      people.canonical_name as "canonicalName",
+      people.normalized_name as "normalizedName",
+      people.aliases,
+      people.relationship
+    from user_memory_records records
+    inner join users on users.id = records.user_id
+    left join memory_people people on people.id = records.person_id
+    where users.external_id = ${externalUserId}
+      and records.status in ('active', 'superseded')
+      and (records.expires_at is null or records.expires_at > now())
+    order by records.created_at desc, records.id asc
     limit ${safeLimit}
   `);
   return result.rows.map(mapMemoryRow);

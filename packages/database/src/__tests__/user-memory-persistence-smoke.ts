@@ -6,6 +6,7 @@ import { getDatabaseClient } from "../client";
 import {
   forgetOwnedUserMemory,
   listOwnedMemoryPeople,
+  listOwnedUserMemoryHistory,
   listOwnedUserMemories,
   persistOwnedUserMemory
 } from "../user-memory-persistence";
@@ -92,6 +93,35 @@ test("PERSIST-DB-01 write/read/dedupe/update/forget remain owner scoped", async 
     assert.doesNotMatch(JSON.stringify(scrubbed.rows), /cardamom|coffee/i);
   } finally {
     await db.execute(sql`delete from users where external_id in (${ownerA}, ${ownerB})`);
+  }
+});
+
+test("PERSIST-DB-03 temporal history retains superseded values but forget prevents resurrection", async () => {
+  const db = getDatabaseClient();
+  const suffix = randomUUID();
+  const owner = `memory-history-${suffix}`;
+  await db.execute(sql`insert into users (external_id, email) values (${owner}, ${`${owner}@example.invalid`})`);
+  try {
+    const base = {
+      captureMethod: "explicit" as const,
+      category: "preference",
+      confidenceBps: 9900,
+      externalUserId: owner,
+      key: "workspace density",
+      normalizedKey: "workspace density",
+      person: null,
+      sensitivity: "standard" as const,
+      sourceMessageId: null
+    };
+    await persistOwnedUserMemory({ ...base, normalizedValue: "compact", value: "compact" });
+    await persistOwnedUserMemory({ ...base, normalizedValue: "spacious", value: "spacious" });
+    const history = await listOwnedUserMemoryHistory(owner);
+    assert.deepEqual(history.map((record) => record.status).sort(), ["active", "superseded"]);
+    assert.deepEqual(new Set(history.map((record) => record.value)), new Set(["compact", "spacious"]));
+    await forgetOwnedUserMemory({ externalUserId: owner, mode: "key", normalizedTarget: "workspace density" });
+    assert.equal((await listOwnedUserMemoryHistory(owner)).length, 0);
+  } finally {
+    await db.execute(sql`delete from users where external_id = ${owner}`);
   }
 });
 

@@ -151,7 +151,9 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Provider context receives at most five relevant standard-sensitivity records and 1,400 characters, labeled as untrusted user data. Public research receives no personal-memory context. WEBSITE and CODE have the shared service foundation but no broad M2 injection.
 - `lib/server/project-memory/` provides M3 durable, owner/project-scoped project records, incremental conversation summaries with source fingerprints, truthful project episodes, checkpoints/issues/decisions, current-state views, and bounded original-message recall built on Project Search.
 - M3 context is capped, lexical, and explicitly untrusted. It defaults to the current project, uses current Project Notes ahead of stale automatic summaries, excludes secrets, and never grants approval, execution, network, deployment, or Git authority.
-- Advanced temporal/conflict reasoning, full Memory Controls and Privacy UI, and broad automatic cross-mode memory policy remain planned for M4-M6. No vector database is used.
+- `lib/server/memory-intelligence/` provides M4 deterministic temporal intent parsing, bounded evidence retrieval, effective/source-time comparison, history/timeline answers, source-aware conflict resolution, and explicit ambiguity. Superseded evidence is retained for history while forgotten or expired evidence is excluded.
+- M4 keeps future plans separate from current facts, prevents future evidence from leaking into earlier point-in-time answers, and passes unresolved material project conflicts into CODE planning as blocking ambiguities. Project Notes are strong context but do not silently override structured evidence.
+- Full Memory Controls and Privacy UI and broad automatic cross-mode memory policy remain planned for M5-M6. No vector database is used.
 
 ### Adaptive CODE planning
 
@@ -301,7 +303,7 @@ The reusable acceptance scenarios live in `docs/codex/HASSALI_TEST_MATRIX.md`.
 
 Roadmap names describe intended bounded runs, not completed implementation claims.
 
-The current pre-launch Memory sequence has completed M1 Hassali Self Knowledge, M2 User and People Memory, and M3 Project and Conversation Memory. M4 Temporal/Conflict/Retrieval Intelligence, M5 Memory Controls and Privacy, and M6 Cross-Mode Shared Memory remain planned. Growth and Runs 5-6 remain planned rather than implemented.
+The current pre-launch Memory sequence has completed M1 Hassali Self Knowledge, M2 User and People Memory, M3 Project and Conversation Memory, and M4 Temporal/Conflict/Retrieval Intelligence. M5 Memory Controls and Privacy and M6 Cross-Mode Shared Memory remain planned. Growth and Runs 5-6 remain planned rather than implemented.
 
 1. **Premium Workspace and Codex Efficiency Foundation** - polish the creation workspace and establish concise engineering context.
 2. **Live Execution Timeline, Git Workflow and Verified Delivery** - make approved work, evidence, and delivery state easy to inspect.
@@ -333,4 +335,5 @@ The current pre-launch Memory sequence has completed M1 Hassali Self Knowledge, 
 - Memory M1 checkpoint: `MEMORY-M1: add Hassali self-knowledge foundation`
 - Memory M2 checkpoint: `MEMORY-M2: add user and people memory foundation`
 - Memory M3 checkpoint: `MEMORY-M3: add project and conversation memory`
+- Memory M4 checkpoint: `MEMORY-M4: add temporal retrieval and conflict resolution`
 - The repository HEAD is authoritative; confirm it with Git before every task.

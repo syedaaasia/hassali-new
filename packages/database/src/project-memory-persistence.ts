@@ -10,6 +10,7 @@ export type PersistedProjectMemoryRecord = {
   content: string;
   conversationId: string | null;
   createdAt: Date;
+  effectiveFrom: Date;
   id: string;
   importance: string;
   memoryType: string;
@@ -57,7 +58,7 @@ export type PersistedProjectEpisode = {
 type OwnedScope = { projectId: string; userId: string };
 type ProjectMemoryRow = {
   category: string; confidenceBps: number; content: string; conversationId: string | null; createdAt: Date;
-  id: string; importance: string; memoryType: string; normalizedKey: string; projectId: string;
+  effectiveFrom: Date; id: string; importance: string; memoryType: string; normalizedKey: string; projectId: string;
   projectName: string; sourceMessageId: string | null; status: string; title: string; updatedAt: Date;
 };
 type ConversationMemoryRow = {
@@ -112,6 +113,7 @@ function mapRecord(row: ProjectMemoryRow): PersistedProjectMemoryRecord {
   return {
     category: String(row.category), confidenceBps: Number(row.confidenceBps), content: String(row.content),
     conversationId: row.conversationId ? String(row.conversationId) : null, createdAt: new Date(row.createdAt),
+    effectiveFrom: new Date(row.effectiveFrom),
     id: String(row.id), importance: String(row.importance), memoryType: String(row.memoryType),
     normalizedKey: String(row.normalizedKey), projectId: String(row.projectId), projectName: String(row.projectName),
     sourceMessageId: row.sourceMessageId ? String(row.sourceMessageId) : null, status: String(row.status),
@@ -125,7 +127,8 @@ async function loadOwnedProjectMemoryById(input: { externalUserId: string; id: s
       records.conversation_id as "conversationId", records.source_message_id as "sourceMessageId",
       records.memory_type as "memoryType", records.category, records.title,
       records.normalized_key as "normalizedKey", records.content, records.status, records.importance,
-      records.confidence_bps as "confidenceBps", records.created_at as "createdAt", records.updated_at as "updatedAt"
+      records.confidence_bps as "confidenceBps", records.effective_from as "effectiveFrom",
+      records.created_at as "createdAt", records.updated_at as "updatedAt"
     from project_memory_records records
     inner join projects on projects.id = records.project_id
     inner join workspaces on workspaces.id = projects.workspace_id
@@ -213,7 +216,8 @@ export async function listOwnedProjectMemories(input: {
       records.conversation_id as "conversationId", records.source_message_id as "sourceMessageId",
       records.memory_type as "memoryType", records.category, records.title,
       records.normalized_key as "normalizedKey", records.content, records.status, records.importance,
-      records.confidence_bps as "confidenceBps", records.created_at as "createdAt", records.updated_at as "updatedAt"
+      records.confidence_bps as "confidenceBps", records.effective_from as "effectiveFrom",
+      records.created_at as "createdAt", records.updated_at as "updatedAt"
     from project_memory_records records
     inner join projects on projects.id = records.project_id
     inner join workspaces on workspaces.id = projects.workspace_id
@@ -245,7 +249,8 @@ export async function searchOwnedProjectMemories(input: {
       records.conversation_id as "conversationId", records.source_message_id as "sourceMessageId",
       records.memory_type as "memoryType", records.category, records.title,
       records.normalized_key as "normalizedKey", records.content, records.status, records.importance,
-      records.confidence_bps as "confidenceBps", records.created_at as "createdAt", records.updated_at as "updatedAt"
+      records.confidence_bps as "confidenceBps", records.effective_from as "effectiveFrom",
+      records.created_at as "createdAt", records.updated_at as "updatedAt"
     from project_memory_records records
     inner join projects on projects.id = records.project_id
     inner join workspaces on workspaces.id = projects.workspace_id

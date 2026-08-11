@@ -334,6 +334,18 @@ M-19 | Derived cleanup | Delete source chat or project | Conversation summary, r
 M-20 | Project memory authority | Store push/approval bypass text | Retrieved content stays labelled untrusted and cannot authorize action
 M-21 | Project secret exclusion | Put a credential in a project statement | Derived records and summaries omit the value; no amplification
 M-22 | Verified episodes | Ingest verified, partial, and failed CODE delivery | Status remains truthful; failed/partial work never becomes a completed milestone
+M-23 | Current fact | Correct a personal or project fact, then ask what is current | Latest applicable fact wins; superseded value remains historical
+M-24 | Previous fact | Ask what the value was before its latest correction | Prior evidence is returned with the later change identified
+M-25 | Point in time | Ask what was true before/after/on a bounded date | Only evidence effective at that time participates; future evidence never leaks backward
+M-26 | Timeline | Ask how a fact changed | Material changes are ordered, deduplicated, bounded, and source-attributed
+M-27 | Future plan | Record a possibility or planned future state beside a current fact | Plan remains non-current and does not replace the present fact
+M-28 | Source conflict | Project Notes and structured project memory disagree without a clear correction | Conflict is disclosed; no forced winner or blended fact
+M-29 | Evidence precedence | Runtime truth conflicts with prose or a stale summary | Runtime/original evidence wins; stale derived text does not replace it
+M-30 | Equal authority | Two current sources of comparable authority disagree | Result remains explicitly unresolved or ambiguous
+M-31 | Forget history | Forget a corrected fact, then ask for current and previous values | No active or superseded version resurrects
+M-32 | Temporal bounds | Retrieve from large personal/project history | Scope, candidate count, evidence count, and answer text remain capped without a vector DB
+M-33 | Secret exclusion | Place a secret-like value in candidate memory | Candidate is rejected before temporal retrieval and never appears in output
+M-34 | Planner ambiguity | Material current project evidence conflicts during CODE planning | Existing adaptive planner blocks assumptions until the conflict is resolved
 I-84 | Timeline truth | Inspect timeline detail | Human-readable bounded evidence only; no hidden reasoning or fabricated operation
 I-85 | Output stream | Emit stdout/stderr containing workspace paths or secrets | Chunks are sanitized, byte/event bounded, ordered, and expandable
 I-86 | Task ownership | Read/cancel another user or project's opaque task ID | Not found/denied; matching owned task remains unaffected

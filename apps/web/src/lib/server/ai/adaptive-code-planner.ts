@@ -210,6 +210,7 @@ export type AdaptiveCodePlanSummary = {
 
 export type BuildAdaptiveCodePlanInput = {
   approvalPolicy: ProjectApprovalPolicy;
+  memoryAmbiguities?: CodeAmbiguity[];
   projectContext?: {
     fileCount?: number;
     framework?: string | null;
@@ -634,7 +635,10 @@ export function buildAdaptiveCodePlan(input: BuildAdaptiveCodePlanInput): Adapti
   const intent = classifyCodeTaskIntent(input);
   const constraints = extractConstraints(input);
   const constraintConflicts = findConstraintConflicts(input.prompt, constraints, intent);
-  const ambiguities = detectAmbiguities(input.prompt, intent, input.projectContext);
+  const ambiguities = [
+    ...detectAmbiguities(input.prompt, intent, input.projectContext),
+    ...(input.memoryAmbiguities ?? [])
+  ].filter((ambiguity, index, all) => all.findIndex((item) => item.reason === ambiguity.reason && item.question === ambiguity.question) === index);
   const complexity = complexityFor(input.prompt, intent);
   const risk = riskFor(input.prompt, intent);
   const destructiveProjectChange = /\b(?:delete|destroy|remove)\b.*\b(?:directory|file|repository|workspace)\b/i.test(input.prompt);

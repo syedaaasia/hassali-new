@@ -10,6 +10,8 @@ export type ProjectMemoryRecord = {
   confidence: number;
   content: string;
   conversationId: string | null;
+  createdAt: Date;
+  effectiveFrom: Date;
   id: string;
   importance: ProjectMemoryImportance;
   normalizedKey: string;
@@ -206,7 +208,7 @@ function historicalIntent(prompt: string) {
 }
 
 function sourceIntent(prompt: string) {
-  return /\b(?:what exactly did i say|which earlier (?:chat|message)|where did (?:i|we) (?:say|discuss|mention)|source (?:message|conversation)|where .* came from)\b/i.test(prompt);
+  return /\b(?:what exactly did i (?:say|tell you)|which earlier (?:chat|message)|where did (?:i|we) (?:say|discuss|mention)|source (?:message|conversation)|where .* came from)\b/i.test(prompt);
 }
 
 export function isExplicitCrossProjectQuery(prompt: string) {
@@ -375,8 +377,12 @@ export class InMemoryProjectMemoryStore implements ProjectMemoryStore {
   saveRecord(candidate: ProjectMemoryCandidate, sourceMessageId: string | null, conversationId: string) {
     const current = this.records.find((item) => item.normalizedKey === candidate.normalizedKey && item.status === "active");
     if (current && normalize(current.content) === normalize(candidate.content)) return Promise.resolve({ action: "deduplicated" as const, record: current });
-    if (current) current.status = "superseded";
-    const record: ProjectMemoryRecord = { ...candidate, id: randomUUID(), conversationId, projectId: this.projectId, projectName: this.projectName, sourceMessageId, status: "active", updatedAt: new Date() };
+    const now = new Date();
+    if (current) {
+      current.status = "superseded";
+      current.updatedAt = now;
+    }
+    const record: ProjectMemoryRecord = { ...candidate, createdAt: now, effectiveFrom: now, id: randomUUID(), conversationId, projectId: this.projectId, projectName: this.projectName, sourceMessageId, status: "active", updatedAt: now };
     this.records.unshift(record);
     return Promise.resolve({ action: current ? "updated" as const : "created" as const, record });
   }

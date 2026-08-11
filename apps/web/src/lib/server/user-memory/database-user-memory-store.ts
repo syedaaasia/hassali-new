@@ -1,6 +1,7 @@
 import {
   forgetOwnedUserMemory,
   listOwnedMemoryPeople,
+  listOwnedUserMemoryHistory,
   listOwnedUserMemories,
   persistOwnedUserMemory
 } from "@hassali/database";
@@ -23,6 +24,7 @@ function mapRecord(record: Awaited<ReturnType<typeof listOwnedUserMemories>>[num
     captureMethod: record.captureMethod === "explicit" ? "explicit" : "automatic",
     category: category(record.category),
     confidence: record.confidenceBps / 10_000,
+    createdAt: record.createdAt,
     id: record.id,
     key: record.key,
     normalizedKey: record.normalizedKey,
@@ -30,6 +32,7 @@ function mapRecord(record: Awaited<ReturnType<typeof listOwnedUserMemories>>[num
     sensitivity: record.sensitivity === "sensitive" ? "sensitive" : "standard",
     sourceMessageId: record.sourceMessageId,
     sourceType: "user_message",
+    status: record.status,
     updatedAt: record.updatedAt,
     value: record.value
   };
@@ -43,6 +46,7 @@ export function createDatabaseUserMemoryStore(externalUserId: string): UserMemor
       normalizedTarget: input.target
     }),
     list: async (limit) => (await listOwnedUserMemories(externalUserId, limit)).map(mapRecord),
+    listHistory: async (limit) => (await listOwnedUserMemoryHistory(externalUserId, limit)).map(mapRecord),
     listPeople: async (limit) => (await listOwnedMemoryPeople(externalUserId, limit)) as PersonRecord[],
     save: async (candidate, sourceMessageId) => {
       const result = await persistOwnedUserMemory({

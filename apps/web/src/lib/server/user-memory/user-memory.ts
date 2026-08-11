@@ -19,6 +19,7 @@ export type UserMemoryRecord = {
   captureMethod: "automatic" | "explicit";
   category: UserMemoryCategory;
   confidence: number;
+  createdAt: Date;
   id: string;
   key: string;
   normalizedKey: string;
@@ -26,11 +27,12 @@ export type UserMemoryRecord = {
   sensitivity: "sensitive" | "standard";
   sourceMessageId: string | null;
   sourceType: "user_message";
+  status: "active" | "superseded";
   updatedAt: Date;
   value: string;
 };
 
-export type UserMemoryCandidate = Omit<UserMemoryRecord, "id" | "person" | "sourceMessageId" | "updatedAt"> & {
+export type UserMemoryCandidate = Omit<UserMemoryRecord, "createdAt" | "id" | "person" | "sourceMessageId" | "status" | "updatedAt"> & {
   person?: {
     aliases: string[];
     canonicalName: string;
@@ -43,6 +45,7 @@ export type UserMemoryCandidate = Omit<UserMemoryRecord, "id" | "person" | "sour
 export type UserMemoryStore = {
   forget(input: { mode: "all" | "key" | "person"; target?: string }): Promise<number>;
   list(limit?: number): Promise<UserMemoryRecord[]>;
+  listHistory?(limit?: number): Promise<UserMemoryRecord[]>;
   listPeople(limit?: number): Promise<PersonRecord[]>;
   save(candidate: UserMemoryCandidate, sourceMessageId: string | null): Promise<{
     action: "created" | "deduplicated" | "updated";
@@ -358,6 +361,10 @@ export class InMemoryUserMemoryStore implements UserMemoryStore {
   }
 
   async list(limit = 100) {
+    return this.records.filter((record) => record.status === "active").slice(0, Math.max(1, Math.min(200, limit)));
+  }
+
+  async listHistory(limit = 120) {
     return this.records.slice(0, Math.max(1, Math.min(200, limit)));
   }
 
@@ -384,20 +391,26 @@ export class InMemoryUserMemoryStore implements UserMemoryStore {
       }
     }
     const normalizedValue = normalizeMemoryText(candidate.value);
-    const existingIndex = this.records.findIndex((record) =>
+    const existingIndex = this.records.findIndex((record) => record.status === "active" &&
       record.normalizedKey === candidate.normalizedKey && (record.person?.id ?? null) === (person?.id ?? null)
     );
     if (existingIndex >= 0 && normalizeMemoryText(this.records[existingIndex].value) === normalizedValue) {
       return { action: "deduplicated" as const, record: this.records[existingIndex] };
     }
+    const changedAt = new Date((this.sequence + 1) * 1_000);
     const record: UserMemoryRecord = {
       ...candidate,
+      createdAt: changedAt,
       id: `memory-${++this.sequence}`,
       person,
       sourceMessageId,
-      updatedAt: new Date(this.sequence * 1_000)
+      status: "active",
+      updatedAt: changedAt
     };
-    if (existingIndex >= 0) this.records.splice(existingIndex, 1);
+    if (existingIndex >= 0) {
+      this.records[existingIndex].status = "superseded";
+      this.records[existingIndex].updatedAt = changedAt;
+    }
     this.records.unshift(record);
     return { action: existingIndex >= 0 ? "updated" as const : "created" as const, record };
   }
