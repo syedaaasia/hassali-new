@@ -45,6 +45,10 @@ export type ExecutionRequest = {
   mode: ExecutionMode;
   mutation: "none" | "project" | "temporary";
   network: "external" | "loopback" | "none";
+  onOutput?: (chunk: {
+    stream: "stderr" | "stdout";
+    text: string;
+  }) => void;
   risk: ExecutionRisk;
   scope: ExecutionScope;
   timeoutMs: number;

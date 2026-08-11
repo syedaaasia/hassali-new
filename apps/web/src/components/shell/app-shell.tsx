@@ -59,6 +59,13 @@ export function AppShell() {
         {shouldShowPreview ? <PreviewPanel /> : null}
         {productMode === "ASK" ? <ProjectNotesPanel /> : null}
       </div>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-0.5 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-[clamp(0.52rem,0.45rem+0.16vw,0.64rem)] font-medium tracking-normal text-white/25 [.light_&]:text-black/30"
+        data-hassali-signature
+      >
+        Build in <span className="inline-block text-[1.08em] drop-shadow-[0_1px_2px_rgba(255,255,255,0.2)]">🇵🇰</span> for <span className="inline-block text-[1.08em] drop-shadow-[0_1px_2px_rgba(255,255,255,0.2)]">🌍</span>
+      </div>
     </div>
   );
 }

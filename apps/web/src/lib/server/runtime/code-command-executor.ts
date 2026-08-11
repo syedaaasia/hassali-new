@@ -43,6 +43,7 @@ export async function runBoundedCodeCommand(input: {
   executionGrantId: string;
   expectedWorkspaceFingerprint: string;
   externalUserId: string;
+  onOutput?: (chunk: { commandId: string; stream: "stderr" | "stdout"; text: string }) => void;
   projectId: string;
   workspaceRoot: string;
 }): Promise<CodeCommandResult> {
@@ -73,6 +74,9 @@ export async function runBoundedCodeCommand(input: {
     mode: "CODE",
     mutation: input.command.effect === "REVERSIBLE_LOCAL" ? "project" : "none",
     network: "none",
+    onOutput: input.onOutput
+      ? (chunk) => input.onOutput?.({ ...chunk, commandId: input.command.id })
+      : undefined,
     risk: input.command.effect === "READ_ONLY" ? "low" : "medium",
     scope: { allowedInputs: ["."], allowedOutputs: [], kind: "project", root: input.workspaceRoot },
     timeoutMs: input.command.timeoutMs
@@ -104,6 +108,8 @@ export async function runCodeCommandSuite(input: {
   executionGrantId: string;
   expectedWorkspaceFingerprint: string;
   externalUserId: string;
+  onOutput?: (chunk: { commandId: string; stream: "stderr" | "stdout"; text: string }) => void;
+  onResult?: (result: CodeCommandResult, command: CodeCommandSpec) => void;
   projectId: string;
   workspaceRoot: string;
 }) {
@@ -116,10 +122,12 @@ export async function runCodeCommandSuite(input: {
       executionGrantId: input.executionGrantId,
       expectedWorkspaceFingerprint,
       externalUserId: input.externalUserId,
+      onOutput: input.onOutput,
       projectId: input.projectId,
       workspaceRoot: input.workspaceRoot
     });
     results.push(result);
+    input.onResult?.(result, command);
     if (result.status === "CANCELLED" || result.failureType === "PROCESS_TEARDOWN_ERROR") break;
     if (result.mutationState === "unexpected") break;
     if (result.mutationState === "expected") {

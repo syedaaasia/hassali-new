@@ -5,6 +5,11 @@ import type {
   TaskVerification,
   VerificationPlan
 } from "./verification-recovery/verification-types";
+import type {
+  ExecutionTimelineEvent,
+  GitDeliveryState,
+  VerifiedDeliveryProjection
+} from "./live-execution/live-execution-types";
 
 export type CodeExecutionPolicy = "AUTOPILOT_EXPERIMENTAL" | "CALM" | "FLOW";
 
@@ -177,10 +182,12 @@ export type CodeExecutionReport = {
   approvedScope: string[];
   commandResults: CodeCommandResult[];
   completionStatus: "BLOCKED" | "CANCELLED" | "COMPLETE_VERIFIED" | "COMPLETE_WITH_LIMITATIONS" | "FAILED";
+  deliverySummary?: VerifiedDeliveryProjection | null;
   executionPolicy: CodeExecutionPolicy;
   finalFileContents: Record<string, string>;
   finishedAt: string;
   limitations: string[];
+  git?: GitDeliveryState | null;
   metrics: CodeExecutionMetrics;
   modifiedFiles: string[];
   objective: string;
@@ -202,6 +209,7 @@ export type CodeExecutionReport = {
   startedAt: string;
   state: CodeExecutionState;
   taskId: string;
+  timeline?: ExecutionTimelineEvent[];
 };
 
 export function normalizeCodeExecutionPolicy(value: unknown): CodeExecutionPolicy {

@@ -96,9 +96,12 @@ function progress(
   events: CodeProgressEvent[],
   state: CodeProgressEvent["state"],
   label: string,
-  status: CodeProgressEvent["status"]
+  status: CodeProgressEvent["status"],
+  onProgress?: (event: CodeProgressEvent) => void
 ) {
-  events.push({ at: now(), label, state, status });
+  const event = { at: now(), label, state, status };
+  events.push(event);
+  onProgress?.(event);
 }
 
 function normalizeEvidence(value: string) {
@@ -192,6 +195,8 @@ async function runScopedCodeCommandSuite(input: {
   executionGrantId: string;
   expectedWorkspaceFingerprint: string;
   externalUserId: string;
+  onOutput?: Parameters<typeof runCodeCommandSuite>[0]["onOutput"];
+  onResult?: Parameters<typeof runCodeCommandSuite>[0]["onResult"];
   projectId: string;
   workspaceRoot: string;
 }) {
@@ -242,10 +247,14 @@ export async function runCodeAutonomousExecution(input: {
   repairProvider?: CodeRepairProvider;
   selectedModel: string;
   initiallyModifiedPaths?: string[];
+  onCommandResult?: Parameters<typeof runCodeCommandSuite>[0]["onResult"];
+  onOutput?: Parameters<typeof runCodeCommandSuite>[0]["onOutput"];
+  onProgress?: (event: CodeProgressEvent) => void;
   workspaceRoot: string;
+  taskId?: string;
 }): Promise<CodeExecutionReport> {
   const startedAt = now();
-  const taskId = `code-execution-${randomUUID()}`;
+  const taskId = input.taskId ?? `code-execution-${randomUUID()}`;
   const policy = normalizeCodeExecutionPolicy(input.executionPolicy);
   const progressEvents: CodeProgressEvent[] = [];
   const repairAttempts: CodeRepairAttempt[] = [];
@@ -255,7 +264,12 @@ export async function runCodeAutonomousExecution(input: {
   const approvedScope = Array.from(new Set(
     input.approvedPaths.map(safePath).filter((value): value is string => Boolean(value))
   ));
-  progress(progressEvents, "INSPECTING", "Inspecting the approved project", "active");
+  const emitProgress = (
+    state: CodeProgressEvent["state"],
+    label: string,
+    status: CodeProgressEvent["status"]
+  ) => progress(progressEvents, state, label, status, input.onProgress);
+  emitProgress("INSPECTING", "Inspecting the approved project", "active");
 
   if (!(await isServerOwnedProjectWorkspaceRoot(input.workspaceRoot)) || approvedScope.length !== input.approvedPaths.length) {
     const repository = await inspectCodeRepository(input.workspaceRoot).catch(() => ({
@@ -271,15 +285,17 @@ export async function runCodeAutonomousExecution(input: {
       sourceFileCount: 0,
       warnings: ["Repository inspection was blocked by project scope."]
     }));
-    progress(progressEvents, "BLOCKED", "Project scope verification failed", "failed");
+    emitProgress("BLOCKED", "Project scope verification failed", "failed");
     return {
       approvedScope,
       commandResults: [],
       completionStatus: "BLOCKED",
+      deliverySummary: null,
       executionPolicy: policy,
       finalFileContents: {},
       finishedAt: now(),
       limitations: ["CODE execution requires safe approved paths in a server-owned project workspace."],
+      git: null,
       metrics: {
         commandsExecuted: 0,
         repairAttempts: 0,
@@ -307,19 +323,22 @@ export async function runCodeAutonomousExecution(input: {
       scopeExpansionRequired: [],
       startedAt,
       state: "BLOCKED",
-      taskId
+      taskId,
+      timeline: []
     };
   }
 
   let repository = await inspectCodeRepository(input.workspaceRoot);
   progressEvents[progressEvents.length - 1]!.status = "complete";
-  progress(progressEvents, "VERIFYING", "Running bounded project verification", "active");
+  emitProgress("VERIFYING", "Running bounded project verification", "active");
   let commandResults = await runScopedCodeCommandSuite({
     abortSignal: input.abortSignal,
     commands: repository.commands,
     executionGrantId: input.executionGrantId,
     expectedWorkspaceFingerprint: repository.fingerprint,
     externalUserId: input.externalUserId,
+    onOutput: input.onOutput,
+    onResult: input.onCommandResult,
     projectId: input.projectId,
     workspaceRoot: input.workspaceRoot
   });
@@ -343,7 +362,7 @@ export async function runCodeAutonomousExecution(input: {
     }
     const failure = failureEvidence(failures[0]!);
     progressEvents[progressEvents.length - 1]!.status = "failed";
-    progress(progressEvents, "DIAGNOSING", `Diagnosing ${failure.failureType.toLowerCase().replace(/_/g, " ")}`, "active");
+    emitProgress("DIAGNOSING", `Diagnosing ${failure.failureType.toLowerCase().replace(/_/g, " ")}`, "active");
     const beforeFiles = await readApprovedFiles(input.workspaceRoot, approvedScope);
     const providerResult = await repairProvider.proposeRepair({
       approvedPaths: approvedScope,
@@ -448,7 +467,7 @@ export async function runCodeAutonomousExecution(input: {
     }
     repairSignatures.add(signature);
     const attemptStartedAt = now();
-    progress(progressEvents, "REPAIRING", `Applying bounded repair ${attempt}/${repairBudget}`, "active");
+    emitProgress("REPAIRING", `Applying bounded repair ${attempt}/${repairBudget}`, "active");
     const snapshot = await applyCodeRepairAttempt({
       changes: normalizedChanges,
       expectedContents: beforeFiles,
@@ -462,6 +481,8 @@ export async function runCodeAutonomousExecution(input: {
       executionGrantId: input.executionGrantId,
       expectedWorkspaceFingerprint: repository.fingerprint,
       externalUserId: input.externalUserId,
+      onOutput: input.onOutput,
+      onResult: input.onCommandResult,
       projectId: input.projectId,
       workspaceRoot: input.workspaceRoot
     });
@@ -522,6 +543,8 @@ export async function runCodeAutonomousExecution(input: {
         executionGrantId: input.executionGrantId,
         expectedWorkspaceFingerprint: repository.fingerprint,
         externalUserId: input.externalUserId,
+        onOutput: input.onOutput,
+        onResult: input.onCommandResult,
         projectId: input.projectId,
         workspaceRoot: input.workspaceRoot
       });
@@ -533,7 +556,7 @@ export async function runCodeAutonomousExecution(input: {
   }
 
   failures = commandResults.filter((result) => result.status === "FAILED");
-  progress(progressEvents, "REVIEWING", "Reviewing verified CODE outcome", "active");
+  emitProgress("REVIEWING", "Reviewing verified CODE outcome", "active");
   progressEvents[progressEvents.length - 1]!.status = "complete";
   const isUiProject = repository.framework === "react" ||
     repository.framework === "react_vite" ||
@@ -648,7 +671,7 @@ export async function runCodeAutonomousExecution(input: {
           : state === "COMPLETE_WITH_LIMITATIONS"
             ? "COMPLETE_WITH_LIMITATIONS"
             : "COMPLETE_VERIFIED";
-  progress(progressEvents, state, completionStatus.replace(/_/g, " ").toLowerCase(), state === "COMPLETE" || state === "COMPLETE_WITH_LIMITATIONS" ? "complete" : state === "CANCELLED" ? "pending" : "failed");
+  emitProgress(state, completionStatus.replace(/_/g, " ").toLowerCase(), state === "COMPLETE" || state === "COMPLETE_WITH_LIMITATIONS" ? "complete" : state === "CANCELLED" ? "pending" : "failed");
   const metrics = {
     commandsExecuted: commandResults.length + repairAttempts.reduce((count, attempt) => count + attempt.verificationAfter.length, 0),
     repairAttempts: repairAttempts.length,
@@ -665,10 +688,12 @@ export async function runCodeAutonomousExecution(input: {
     approvedScope,
     commandResults,
     completionStatus,
+    deliverySummary: null,
     executionPolicy: policy,
     finalFileContents,
     finishedAt: now(),
     limitations: Array.from(new Set(limitations)),
+    git: null,
     metrics,
     modifiedFiles: [...modifiedFiles],
     objective: input.objective,
@@ -696,6 +721,7 @@ export async function runCodeAutonomousExecution(input: {
     scopeExpansionRequired: [...scopeExpansionRequired],
     startedAt,
     state,
-    taskId
+    taskId,
+    timeline: []
   };
 }

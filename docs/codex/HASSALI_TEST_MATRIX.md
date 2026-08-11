@@ -303,6 +303,20 @@ I-79 | Recovery conflict | User changes the same file after Hassali | Blind over
 I-80 | Repair eligibility | Attempt new, repeated, expanded, stale, and third repair | New evidence and current permission required; expansion reapproves; third cycle denied
 I-81 | Artifact verification | Validate JSON, CSV header, ZIP structure/expected path, and corrupt outputs | Valid structure passes; corrupt/missing contract fails independent of producer exit
 I-82 | Delivery claim | Compare verified, partial, blocked, and failed evidence | Wording and Git eligibility match evidence; push authority always separate
+I-83 | Live timeline | Approve a CODE execution | Ordered approval, inspection, command, verification, review, delivery, and Git events reflect actual work
+I-84 | Timeline truth | Inspect timeline detail | Human-readable bounded evidence only; no hidden reasoning or fabricated operation
+I-85 | Output stream | Emit stdout/stderr containing workspace paths or secrets | Chunks are sanitized, byte/event bounded, ordered, and expandable
+I-86 | Task ownership | Read/cancel another user or project's opaque task ID | Not found/denied; matching owned task remains unaffected
+I-87 | Task lifecycle | Complete, fail, cancel, disconnect, and expire tasks | Terminal state retained briefly; owned signal/process cleanup; no orphan polling loop
+I-88 | Task concurrency | Start more than the per-project limit | Extra task blocked without affecting active owned work
+I-89 | Reconnect | Reload while an approved task runs | Latest project/proposal task resumes without duplicate events or execution
+I-90 | Git separation | Combine Hassali changes with pre-existing user work | Ledger-backed task paths and user paths remain distinct; unrelated files excluded
+I-91 | Git stale check | Change branch, HEAD, or diff after verification | Local commit blocks and asks for refreshed review
+I-92 | Local commit | Explicitly commit verified tracked task paths | One local path-scoped commit; no force, remote mutation, or push
+I-93 | Git unsafe state | Include sensitive, staged, untracked, unrelated, or outer-repository paths | Commit ineligible with a truthful reason
+I-94 | Delivery projection | Inspect verified, warnings, partial, blocked, failed, and cancelled outcomes | UI and API use matching evidence-backed state and limitations
+I-95 | CODE timeline UI | Expand/collapse timeline and command output on desktop/mobile | Current operation visible, detail accessible, controls contained, no approval takeover
+I-96 | Dashboard signature | Inspect dashboard themes and narrow layout | Exact `Build in 🇵🇰 for 🌍` signature is tiny, bottom-centered, non-interactive, and contained
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers

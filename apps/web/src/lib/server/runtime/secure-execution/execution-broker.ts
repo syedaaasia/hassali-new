@@ -351,8 +351,24 @@ export async function executeWithBroker(request: ExecutionRequest): Promise<Exec
         .catch((error) => finish({ code: null, processError: `Timed-out process teardown failed: ${error instanceof Error ? error.message : "unknown error"}`, signal: "TEARDOWN_FAILED", teardownFailed: true }));
     }, timeoutMs);
     request.abortSignal?.addEventListener("abort", abort, { once: true });
-    child.stdout.on("data", (chunk) => { stdout = `${stdout}${String(chunk)}`.slice(-maxOutputBytes * 2); });
-    child.stderr.on("data", (chunk) => { stderr = `${stderr}${String(chunk)}`.slice(-maxOutputBytes * 2); });
+    child.stdout.on("data", (chunk) => {
+      const text = String(chunk);
+      stdout = `${stdout}${text}`.slice(-maxOutputBytes * 2);
+      try {
+        request.onOutput?.({ stream: "stdout", text: boundedSanitized(text, 4_000).text });
+      } catch {
+        // Output observers are advisory and must never interrupt the owned process.
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = String(chunk);
+      stderr = `${stderr}${text}`.slice(-maxOutputBytes * 2);
+      try {
+        request.onOutput?.({ stream: "stderr", text: boundedSanitized(text, 4_000).text });
+      } catch {
+        // Output observers are advisory and must never interrupt the owned process.
+      }
+    });
     child.once("error", (error) => { void finish({ code: null, processError: error.message, signal: null }); });
     child.once("exit", (code, signal) => { void finish({ code, signal }); });
   });

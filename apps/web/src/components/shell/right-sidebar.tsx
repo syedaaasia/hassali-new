@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { HassaliActivityMascot } from "@/components/ai/hassali-activity-mascot";
 import { ApprovalPolicyControl } from "@/components/shell/approval-policy-control";
+import { CodeExecutionTimeline } from "@/components/shell/code-execution-timeline";
 import { Panel } from "@/components/ui/panel";
 import { PremiumSelect } from "@/components/ui/premium-select";
 import {
@@ -730,6 +731,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const [manualReviewMessage, setManualReviewMessage] = useState<string | null>(null);
   const [runtimeApprovalResult, setRuntimeApprovalResult] =
     useState<RuntimeApprovalResponse | null>(null);
+  const [isApprovingProposal, setIsApprovingProposal] = useState(false);
   const [composerUploads, setComposerUploads] = useState<ComposerUpload[]>([]);
   const attachmentUploadPending = composerUploads.some((upload) => upload.status === "uploading");
   const attachmentUploadFailed = composerUploads.some((upload) => upload.status === "failed");
@@ -1057,6 +1059,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     }
 
     try {
+      setIsApprovingProposal(true);
       setRuntimeApprovalResult(null);
       const effectiveApprovalPolicy = approvalPolicyProjectId === selectedProjectId ? approvalPolicy : "ask";
       const runtimeResult = await approveProposalThroughRuntime(
@@ -1196,6 +1199,8 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
           ? error.message
           : "Proposal apply failed. The proposal was not applied."
       );
+    } finally {
+      setIsApprovingProposal(false);
     }
   };
 
@@ -1537,6 +1542,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                     ? ` ${runtimeApprovalResult.codeExecution.limitations[0]}`
                     : null}
                 </div>
+              ) : null}
+              {productMode === "CODE" && projectId && (isApprovingProposal || runtimeApprovalResult?.codeExecution) ? (
+                <CodeExecutionTimeline active={isApprovingProposal} projectId={projectId} proposalId={proposal.id} />
               ) : null}
 
               <div className="mt-3 flex items-center justify-end gap-2">

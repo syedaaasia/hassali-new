@@ -173,7 +173,7 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 
 ### Secure execution
 
-- `lib/server/runtime/secure-execution/` owns structured execution requests/results, mode policy, server-side grants, task artifacts, deterministic tool adapters, and the only new command-process launcher.
+- `lib/server/runtime/secure-execution/` owns structured execution requests/results, mode policy, server-side grants, task artifacts, deterministic tool adapters, and the general approved command-process launcher. I6 adds only a specialized fixed-argv Git read/local-commit helper with separate explicit authority.
 - The authenticated approval route issues short-lived CODE grants bound to user, project, mode, capability, root, risk ceiling, approval source, expiry, and a bounded use count. Client/model/project text cannot mint authority.
 - Existing repository-derived typecheck, test, build, and lint commands now run through the broker with direct executable/argv spawning. Shell interpreters, inline dynamic code, installs, deployment, Git mutation/push, destructive database operations, and unapproved network use are denied.
 - ASK deterministic Python uses a fixed Hassali-owned script in a random task directory, never arbitrary user code or project mutation. CODE project Python uses an evidence-backed file entry point, project grant, direct argv, and the same broker. FFmpeg, ffprobe, and Tesseract expose structured operations and return unavailable without installation.
@@ -182,7 +182,16 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Execution has bounded timeout/output, owned process-tree cancellation, sanitized untrusted output, lightweight audit events, truthful resource metadata, and no uncontrolled polling.
 - Repository fingerprints are rechecked immediately before execution. Read-only commands that mutate project evidence fail and stop; evidence is preserved. Declared build artifacts are tracked as expected mutation. Only a failed Hassali-authored repair may roll back its own unchanged attempt.
 - Current Windows isolation is truthfully `process-bounded`: path and network rules are policy-enforced, with no claim of kernel filesystem/network isolation, containerization, CPU quota, or memory quota.
-- Timeline/background jobs and local Git delivery remain `Live Execution Timeline, Git Workflow and Verified Delivery` in Run 04 I6.
+
+### Live execution and verified delivery
+
+- `lib/server/runtime/live-execution/` owns bounded in-memory CODE tasks, ordered structured timeline events, capped sanitized stdout/stderr, cancellation, expiration, delivery projection, and task-scoped Git evidence. It adds no daemon, queue, database, or package dependency.
+- The approval route starts one owned task for actual approved CODE execution. Secure command chunks, command results, repair/review stages, and I5 delivery evidence feed the same timeline; polling is project-, proposal-, and Clerk-user-bound.
+- The compact CODE timeline shows the current operation, recent stages, expandable bounded output, delivery status, Git state, and cancellation. Reconnect reads the latest matching owned task; sequence IDs keep polling updates deterministic.
+- Background task concurrency is bounded per user/project. Cancellation aborts only the matching owned signal, and the existing broker remains responsible for owned child-process teardown. Dev-server tasks have a typed lifecycle seam but no server is auto-started.
+- Git inspection uses fixed read-only commands, bounded secret-sanitized diffs, and the I5 change ledger to separate task-owned paths from pre-existing user work. Repositories outside the owned project root, sensitive paths, staged work, unrelated work, and untracked task files are ineligible.
+- A verified tracked task can create one explicit local commit with a fresh branch/HEAD/diff check. Git push has no action or authority in I6 and remains a separate future approval boundary.
+- Delivery states are evidence-backed: verified-ready, verified-with-warnings, partial, blocked, failed, or cancelled. Preview/ZIP/deployment claims remain separate and are never inferred from command success.
 
 ### Verification, review, and recovery
 
@@ -302,4 +311,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 04 I3 checkpoint: `CODE-I3: add multi-language capability packs and runtime detection`
 - Run 04 I4 checkpoint: `CODE-I4: add secure execution and permission enforcement`
 - Run 04 I5 checkpoint: `CODE-I5: add verification review and safe recovery`
+- Run 04 I6 checkpoint: `CODE-I6: add live execution timeline git workflow and verified delivery`
 - The repository HEAD is authoritative; confirm it with Git before every task.

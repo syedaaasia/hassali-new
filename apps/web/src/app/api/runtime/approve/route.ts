@@ -29,6 +29,16 @@ import {
   runCodeExecutionOnce
 } from "@/lib/server/runtime/code-execution-registry";
 import {
+  createLiveExecutionTask,
+  runLiveExecutionTask
+} from "@/lib/server/runtime/live-execution/live-execution-manager";
+import {
+  finalizeCodeLiveExecution,
+  recordCodeCommandResult,
+  recordCodeOutput,
+  recordCodeProgress
+} from "@/lib/server/runtime/live-execution/code-live-execution";
+import {
   clearOwnedProjectGeneratedArtifacts,
   synchronizeOwnedProjectWorkspace
 } from "@/lib/server/runtime/owned-workspace-hydration";
@@ -349,6 +359,21 @@ const blockedWorkerExecutionMetadata = {
   workerExecutionStderr: "",
   workerExecutionStdout: ""
 };
+
+function combineAbortSignals(signals: AbortSignal[]) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  for (const signal of signals) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener("abort", abort, { once: true });
+  }
+  return {
+    cleanup: () => {
+      for (const signal of signals) signal.removeEventListener("abort", abort);
+    },
+    signal: controller.signal
+  };
+}
 
 export async function POST(request: Request) {
   const { userId } = await auth();
@@ -769,39 +794,88 @@ export async function POST(request: Request) {
       authorizedProposal.approvalMode === "EXECUTE"
       ? await runCodeExecutionOnce({
           execute: async (abortSignal) => {
-            const executionGrantId = issueExecutionGrant({
-              approvalPolicy: parsed.approvalPolicy,
-              approvalSource: parsed.approvalSource,
-              capabilities: ["repository.verify"],
+            const liveTask = createLiveExecutionTask({
               externalUserId: userId,
-              maxUses: 32,
-              mode: "CODE",
+              objective: taskObjective,
               projectId: parsed.projectId,
-              riskCeiling: "medium",
-              scopeKind: "project",
-              scopeRoot: workspaceBinding.workspaceRoot
+              proposalId: parsed.proposalId,
+              workspaceRoot: workspaceBinding.workspaceRoot
             });
-            try {
-              return await runCodeAutonomousExecution({
-                acceptanceCriteria,
-                abortSignal,
-                approvedPaths: plan.steps
-                  .filter((step) => (step.tool === "write_file" || step.tool === "delete_file") && step.path)
-                  .map((step) => step.path!),
-                baselineFileContents,
-                executionGrantId,
-                executionPolicy,
-                externalUserId: userId,
-                initiallyModifiedPaths: [...writtenFiles, ...deletedFiles],
-                objective: taskObjective,
-                projectId: parsed.projectId,
-                proposalId: parsed.proposalId,
-                selectedModel,
-                workspaceRoot: workspaceBinding.workspaceRoot
-              });
-            } finally {
-              revokeExecutionGrant(executionGrantId);
-            }
+            return runLiveExecutionTask({
+              execute: async (liveSignal) => {
+                const combinedAbort = combineAbortSignals([abortSignal, liveSignal]);
+                const executionGrantId = issueExecutionGrant({
+                  approvalPolicy: parsed.approvalPolicy,
+                  approvalSource: parsed.approvalSource,
+                  capabilities: ["repository.verify"],
+                  externalUserId: userId,
+                  maxUses: 32,
+                  mode: "CODE",
+                  projectId: parsed.projectId,
+                  riskCeiling: "medium",
+                  scopeKind: "project",
+                  scopeRoot: workspaceBinding.workspaceRoot
+                });
+                try {
+                  const report = await runCodeAutonomousExecution({
+                    acceptanceCriteria,
+                    abortSignal: combinedAbort.signal,
+                    approvedPaths: plan.steps
+                      .filter((step) => (step.tool === "write_file" || step.tool === "delete_file") && step.path)
+                      .map((step) => step.path!),
+                    baselineFileContents,
+                    executionGrantId,
+                    executionPolicy,
+                    externalUserId: userId,
+                    initiallyModifiedPaths: [...writtenFiles, ...deletedFiles],
+                    objective: taskObjective,
+                    onCommandResult: (commandResult, command) => {
+                      recordCodeCommandResult({
+                        command,
+                        externalUserId: userId,
+                        projectId: parsed.projectId,
+                        result: commandResult,
+                        taskId: liveTask.taskId
+                      });
+                    },
+                    onOutput: (chunk) => {
+                      recordCodeOutput({
+                        ...chunk,
+                        externalUserId: userId,
+                        projectId: parsed.projectId,
+                        taskId: liveTask.taskId
+                      });
+                    },
+                    onProgress: (event) => {
+                      recordCodeProgress({
+                        event,
+                        externalUserId: userId,
+                        projectId: parsed.projectId,
+                        taskId: liveTask.taskId
+                      });
+                    },
+                    projectId: parsed.projectId,
+                    proposalId: parsed.proposalId,
+                    selectedModel,
+                    taskId: liveTask.taskId,
+                    workspaceRoot: workspaceBinding.workspaceRoot
+                  });
+                  return await finalizeCodeLiveExecution({
+                    externalUserId: userId,
+                    projectId: parsed.projectId,
+                    report,
+                    taskId: liveTask.taskId,
+                    workspaceRoot: workspaceBinding.workspaceRoot
+                  });
+                } finally {
+                  combinedAbort.cleanup();
+                  revokeExecutionGrant(executionGrantId);
+                }
+              },
+              externalUserId: userId,
+              projectId: parsed.projectId,
+              taskId: liveTask.taskId
+            });
           },
           key: codeExecutionKey(parsed.projectId, parsed.proposalId)
         })
