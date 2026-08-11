@@ -25,6 +25,16 @@ import {
   type CodeRepairProvider
 } from "./code-execution-types";
 import { isServerOwnedProjectWorkspaceRoot } from "./workspace-binding";
+import { buildChangeLedger, fingerprintFileContents } from "./verification-recovery/change-safety";
+import {
+  buildDeliveryReadiness,
+  buildVerificationPlan,
+  commandResultsToEvidence,
+  decideRepairEligibility,
+  evaluateVerificationPlan,
+  reviewImplementation,
+  successClaim
+} from "./verification-recovery/verification-engine";
 
 const nonRepairableFailures = new Set<CodeFailureType>([
   "AUTH_ERROR",
@@ -219,8 +229,10 @@ function compactResumableState(input: {
 }
 
 export async function runCodeAutonomousExecution(input: {
+  acceptanceCriteria?: string[];
   abortSignal?: AbortSignal;
   approvedPaths: string[];
+  baselineFileContents?: Record<string, string | null>;
   executionGrantId: string;
   executionPolicy?: CodeExecutionPolicy | string;
   externalUserId: string;
@@ -229,6 +241,7 @@ export async function runCodeAutonomousExecution(input: {
   proposalId: string;
   repairProvider?: CodeRepairProvider;
   selectedModel: string;
+  initiallyModifiedPaths?: string[];
   workspaceRoot: string;
 }): Promise<CodeExecutionReport> {
   const startedAt = now();
@@ -280,6 +293,7 @@ export async function runCodeAutonomousExecution(input: {
       progress: progressEvents,
       projectId: input.projectId,
       proposalId: input.proposalId,
+      postExecution: null,
       repairAttempts,
       repository,
       resumableState: compactResumableState({
@@ -318,6 +332,7 @@ export async function runCodeAutonomousExecution(input: {
   const repairProvider = input.repairProvider ?? createOpenRouterCodeRepairProvider();
   const repairBudget = repairBudgetForPolicy(policy);
   const repairSignatures = new Set<string>();
+  const repairEvidenceSignatures = new Set<string>();
 
   for (let attempt = 1; !cancelled && failures.length > 0 && attempt <= repairBudget; attempt += 1) {
     const hardFailure = findNonRepairableCodeFailure(failures);
@@ -396,6 +411,24 @@ export async function runCodeAutonomousExecution(input: {
       limitations.push(`${reason} Hassali paused for expanded approval.`);
       break;
     }
+    const currentRepairEvidenceSignature = createHash("sha256")
+      .update(`${failure.signature}:${repairAttempts.at(-1)?.repairSignature ?? "initial"}`)
+      .digest("hex")
+      .slice(0, 20);
+    const repairEligibility = decideRepairEligibility({
+      approvedPaths: approvedScope,
+      attemptedCycles: attempt - 1,
+      currentEvidenceSignature: currentRepairEvidenceSignature,
+      permissionValid: true,
+      previousEvidenceSignatures: [...repairEvidenceSignatures],
+      proposedPaths: normalizedChanges.map((change) => change.path),
+      repositoryStale: false
+    });
+    if (!repairEligibility.eligible) {
+      limitations.push(repairEligibility.reason);
+      break;
+    }
+    repairEvidenceSignatures.add(currentRepairEvidenceSignature);
     const signature = repairSignature(normalizedChanges);
     if (repairSignatures.has(signature)) {
       repairAttempts.push({
@@ -512,13 +545,97 @@ export async function runCodeAutonomousExecution(input: {
     limitations.push(`The ${policy} repair budget was exhausted after ${repairBudget} attempt(s).`);
   }
   const finalFileContents = await readApprovedFiles(input.workspaceRoot, approvedScope);
+  const acceptanceCriteria = input.acceptanceCriteria ?? [];
+  const verificationPlan = buildVerificationPlan({ acceptanceCriteria, taskId });
+  const evidence = commandResultsToEvidence({ results: commandResults });
+  if (!acceptanceCriteria.length && verificationPlan.criteria[0]) {
+    evidence.push({
+      criterionIds: [verificationPlan.criteria[0].id],
+      id: `command-suite-${taskId}`,
+      observed: commandResults.length
+        ? `${commandResults.length} bounded verification command(s) completed.`
+        : "No bounded verification command was available.",
+      provenance: "secure-execution-command-suite",
+      status: commandResults.length === 0
+        ? "unavailable"
+        : commandResults.every((result) => result.status === "PASSED") ? "passed" : "failed",
+      type: "static"
+    });
+  }
+  const repositoryCriterionIds = verificationPlan.criteria
+    .filter((criterion) => criterion.requiredEvidence.includes("repository-state"))
+    .map((criterion) => criterion.id);
+  const unexpectedMutationPaths = commandResults
+    .filter((result) => result.mutationState === "unexpected")
+    .flatMap((result) => result.mutationPaths ?? []);
+  const observedModifiedPaths = [...new Set([...(input.initiallyModifiedPaths ?? []), ...modifiedFiles, ...unexpectedMutationPaths])];
+  if (repositoryCriterionIds.length) {
+    evidence.push({
+      criterionIds: repositoryCriterionIds,
+      id: `scope-evidence-${taskId}`,
+      observed: observedModifiedPaths.every((filePath) => approvedScope.includes(filePath))
+        ? "All observed task changes remained inside the approved path set."
+        : "One or more observed task changes fell outside the approved path set.",
+      provenance: "execution-change-scope",
+      status: observedModifiedPaths.every((filePath) => approvedScope.includes(filePath)) ? "passed" : "failed",
+      type: "repository-state"
+    });
+  }
+  for (const criterion of verificationPlan.criteria.filter((candidate) => candidate.requiredEvidence.includes("browser"))) {
+    evidence.push({
+      criterionIds: [criterion.id],
+      id: `browser-unavailable-${criterion.id}`,
+      observed: "Owned browser acceptance did not run during this server-side command verification.",
+      provenance: "browser-verification-contract",
+      status: "unavailable",
+      type: "browser"
+    });
+  }
+  const verification = evaluateVerificationPlan(verificationPlan, evidence);
+  const baseline = Object.fromEntries(approvedScope.map((filePath) => [
+    filePath,
+    input.baselineFileContents
+      ? input.baselineFileContents[filePath] ?? null
+      : finalFileContents[filePath] ?? null
+  ]));
+  const after = Object.fromEntries(approvedScope.map((filePath) => [filePath, finalFileContents[filePath] ?? null]));
+  const changeLedger = buildChangeLedger({
+    after,
+    baseline,
+    baselineRepositoryFingerprint: fingerprintFileContents(baseline),
+    explicitUnexpectedPaths: unexpectedMutationPaths,
+    plannedPaths: approvedScope,
+    taskId
+  });
+  const review = reviewImplementation({
+    changes: [...approvedScope, ...unexpectedMutationPaths.filter((filePath) => !approvedScope.includes(filePath))].map((filePath) => ({
+      after: after[filePath] ?? null,
+      before: baseline[filePath] ?? null,
+      path: filePath,
+      planned: approvedScope.includes(filePath)
+    })),
+    securityEvidencePresent: commandResults.some((result) => /security|approval|secure/i.test(result.commandId) && result.status === "PASSED"),
+    taskId
+  });
+  const manualChecks = verification.results
+    .filter((result) => result.status === "inconclusive" || result.status === "partial" || result.status === "unavailable")
+    .map((result) => result.criterion);
+  const delivery = buildDeliveryReadiness({
+    changedFiles: observedModifiedPaths,
+    implementationComplete: !cancelled && !failures.length && scopeExpansionRequired.size === 0,
+    manualChecks,
+    review,
+    verification
+  });
+  limitations.push(...verification.warnings);
+  if (review.status === "blocked") limitations.push("Independent deterministic review found a blocking issue.");
   const state = cancelled
     ? "CANCELLED"
     : scopeExpansionRequired.size
       ? "BLOCKED"
-      : failures.length
+      : failures.length || verification.state === "failed" || review.status === "blocked"
         ? "FAILED"
-        : limitations.length
+        : limitations.length || !delivery.readyForDelivery
           ? "COMPLETE_WITH_LIMITATIONS"
           : "COMPLETE";
   const completionStatus: CodeExecutionReport["completionStatus"] =
@@ -538,7 +655,7 @@ export async function runCodeAutonomousExecution(input: {
     repairsApplied: repairAttempts.filter((attempt) => attempt.outcome === "SUCCEEDED").length,
     rollbackUsed: repairAttempts.some((attempt) => attempt.rollbackUsed),
     successfulAttempt: repairAttempts.find((attempt) => attempt.outcome === "SUCCEEDED")?.attempt ?? null,
-    verificationOutcome: failures.length
+    verificationOutcome: failures.length || verification.state === "failed" || review.status === "blocked"
       ? "FAILED" as const
       : limitations.length
         ? "LIMITED" as const
@@ -558,6 +675,14 @@ export async function runCodeAutonomousExecution(input: {
     progress: progressEvents,
     projectId: input.projectId,
     proposalId: input.proposalId,
+    postExecution: {
+      changeLedger,
+      delivery,
+      review,
+      successClaim: successClaim({ delivery, attempted: true }),
+      verification,
+      verificationPlan
+    },
     repairAttempts,
     repository,
     resumableState: compactResumableState({

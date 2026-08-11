@@ -301,8 +301,14 @@ test("existing repository dependencies and scoped feature conventions are reused
     const repository = await inspectCodeRepository(root);
     assert.ok(repository.dependencies.includes("zod"));
     const report = await runCodeAutonomousExecution({
+      acceptanceCriteria: [
+        "Focused regression tests pass.",
+        "Unrelated project behavior and user work remain unchanged."
+      ],
       approvedPaths: Object.keys(files),
+      baselineFileContents: Object.fromEntries(Object.keys(files).map((filePath) => [filePath, null])),
       executionPolicy: "FLOW",
+      initiallyModifiedPaths: Object.keys(files),
       objective: "Add signup validation using the repository's existing validation dependency.",
       projectId,
       proposalId: "proposal-existing-feature",
@@ -317,6 +323,9 @@ test("existing repository dependencies and scoped feature conventions are reused
     assert.equal(report.completionStatus, "COMPLETE_VERIFIED");
     assert.equal(report.metrics.repairAttempts, 0);
     assert.equal(report.commandResults.length, 1);
+    assert.equal(report.postExecution?.verification.state, "verified");
+    assert.equal(report.postExecution?.delivery.readyForDelivery, true);
+    assert.equal(report.postExecution?.successClaim, "Fixed and verified.");
   } finally {
     clearCodeRepositoryInspectionCache(root);
     await rm(root, { recursive: true, force: true });
@@ -1052,6 +1061,7 @@ test("execution registry suppresses duplicate task work", async () => {
     progress: [],
     projectId: "p",
     proposalId: "q",
+    postExecution: null,
     repairAttempts: [],
     repository: {
       architectureFacts: [],
@@ -1094,7 +1104,7 @@ test("execution registry suppresses duplicate task work", async () => {
 test("execution policies change bounded attempts without weakening environment safety", () => {
   assert.equal(repairBudgetForPolicy("CALM"), 1);
   assert.equal(repairBudgetForPolicy("FLOW"), 2);
-  assert.equal(repairBudgetForPolicy("AUTOPILOT_EXPERIMENTAL"), 3);
+  assert.equal(repairBudgetForPolicy("AUTOPILOT_EXPERIMENTAL"), 2);
   const environment = createCodeExecutionEnvironment() as Record<string, string | undefined>;
   assert.equal(environment.OPENROUTER_API_KEY, undefined);
   assert.equal(environment.DATABASE_URL, undefined);

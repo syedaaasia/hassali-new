@@ -752,6 +752,15 @@ export async function POST(request: Request) {
     : /\bcalm mode\b/i.test(taskObjective)
       ? "CALM"
       : "FLOW";
+  const adaptiveCodePlanMetadata = proposalMetadata.adaptiveCodePlan &&
+      typeof proposalMetadata.adaptiveCodePlan === "object" &&
+      !Array.isArray(proposalMetadata.adaptiveCodePlan)
+    ? proposalMetadata.adaptiveCodePlan as Record<string, unknown>
+    : null;
+  const acceptanceCriteria = stringArrayValue(adaptiveCodePlanMetadata?.acceptanceCriteria);
+  const baselineFileContents = Object.fromEntries(
+    ownedProjectFiles.map((file) => [file.path, file.content])
+  );
   let codeExecutionResult = null;
   try {
     codeExecutionResult =
@@ -774,13 +783,16 @@ export async function POST(request: Request) {
             });
             try {
               return await runCodeAutonomousExecution({
+                acceptanceCriteria,
                 abortSignal,
                 approvedPaths: plan.steps
-                  .filter((step) => step.tool === "write_file" && step.path)
+                  .filter((step) => (step.tool === "write_file" || step.tool === "delete_file") && step.path)
                   .map((step) => step.path!),
+                baselineFileContents,
                 executionGrantId,
                 executionPolicy,
                 externalUserId: userId,
+                initiallyModifiedPaths: [...writtenFiles, ...deletedFiles],
                 objective: taskObjective,
                 projectId: parsed.projectId,
                 proposalId: parsed.proposalId,

@@ -90,6 +90,7 @@ export async function runBoundedCodeCommand(input: {
     durationMs: execution.durationMs,
     exitCode: execution.exitCode,
     failureType,
+    mutationPaths: execution.mutation.changedPaths,
     mutationState: execution.mutation.state,
     outputExcerpt: execution.failure ? `${output}\n${execution.failure.message}`.trim() : output,
     signal: execution.signal,

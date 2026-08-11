@@ -1,3 +1,11 @@
+import type {
+  ChangeLedger,
+  DeliveryReadiness,
+  ImplementationReview,
+  TaskVerification,
+  VerificationPlan
+} from "./verification-recovery/verification-types";
+
 export type CodeExecutionPolicy = "AUTOPILOT_EXPERIMENTAL" | "CALM" | "FLOW";
 
 export type CodeExecutionState =
@@ -58,6 +66,7 @@ export type CodeCommandResult = {
   signal: string | null;
   status: "CANCELLED" | "FAILED" | "PASSED";
   mutationState?: "expected" | "none" | "unexpected" | "unknown";
+  mutationPaths?: string[];
 };
 
 export type CodeRepositoryUnderstanding = {
@@ -178,6 +187,14 @@ export type CodeExecutionReport = {
   progress: CodeProgressEvent[];
   projectId: string;
   proposalId: string;
+  postExecution: {
+    changeLedger: ChangeLedger;
+    delivery: DeliveryReadiness;
+    review: ImplementationReview;
+    successClaim: string;
+    verification: TaskVerification;
+    verificationPlan: VerificationPlan;
+  } | null;
   repairAttempts: CodeRepairAttempt[];
   repository: CodeRepositoryUnderstanding;
   resumableState: string;
@@ -194,6 +211,6 @@ export function normalizeCodeExecutionPolicy(value: unknown): CodeExecutionPolic
 
 export function repairBudgetForPolicy(policy: CodeExecutionPolicy) {
   if (policy === "CALM") return 1;
-  if (policy === "AUTOPILOT_EXPERIMENTAL") return 3;
+  if (policy === "AUTOPILOT_EXPERIMENTAL") return 2;
   return 2;
 }

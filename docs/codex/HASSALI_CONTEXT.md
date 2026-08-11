@@ -182,7 +182,18 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Execution has bounded timeout/output, owned process-tree cancellation, sanitized untrusted output, lightweight audit events, truthful resource metadata, and no uncontrolled polling.
 - Repository fingerprints are rechecked immediately before execution. Read-only commands that mutate project evidence fail and stop; evidence is preserved. Declared build artifacts are tracked as expected mutation. Only a failed Hassali-authored repair may roll back its own unchanged attempt.
 - Current Windows isolation is truthfully `process-bounded`: path and network rules are policy-enforced, with no claim of kernel filesystem/network isolation, containerization, CPU quota, or memory quota.
-- Full verification judging/recovery remains Run 04 I5. Timeline/background jobs and local Git delivery remain `Live Execution Timeline, Git Workflow and Verified Delivery` in Run 04 I6.
+- Timeline/background jobs and local Git delivery remain `Live Execution Timeline, Git Workflow and Verified Delivery` in Run 04 I6.
+
+### Verification, review, and recovery
+
+- `lib/server/runtime/verification-recovery/` owns criterion-level verification plans/results, deterministic implementation review, change ownership ledgers, task checkpoints, safe recovery, repair eligibility, artifact checks, evidence-bound success claims, and delivery readiness.
+- A passing command proves only its matching test/type/build/lint surface. It does not automatically prove user-visible behavior or an unrelated acceptance criterion.
+- Every blocking acceptance criterion needs matching objective evidence. Missing browser/runtime evidence remains unavailable or inconclusive and produces a limited result rather than fake success.
+- Deterministic review is bounded to changed files and flags unexpected paths, generated/vendor edits, environment files, test `.skip`/`.only`, removed assertions, new suppression, dependency-ledger mismatch, and security-sensitive changes without regression evidence.
+- Change ledgers distinguish planned Hassali changes, unexpected mutations, and known pre-existing user work. Checkpoints are bounded task artifacts outside the repository, never hidden Git commits.
+- Recovery restores a file only while its content still matches the known Hassali mutation. Same-file divergence is a conflict; unrelated user files stay untouched. File recovery does not claim to reverse database or external-system state.
+- Repair is evidence-driven, scope-bound, permission-bound, staleness-aware, and capped at two cycles for every execution policy.
+- Delivery readiness keeps commit eligibility separate from push authority. Push remains false until an explicit later delivery action grants it.
 
 ## Design
 
@@ -290,4 +301,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 04 I2 checkpoint: `CODE-I2: add repository intelligence and impact mapping`
 - Run 04 I3 checkpoint: `CODE-I3: add multi-language capability packs and runtime detection`
 - Run 04 I4 checkpoint: `CODE-I4: add secure execution and permission enforcement`
+- Run 04 I5 checkpoint: `CODE-I5: add verification review and safe recovery`
 - The repository HEAD is authoritative; confirm it with Git before every task.

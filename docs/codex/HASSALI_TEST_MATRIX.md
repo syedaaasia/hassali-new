@@ -290,6 +290,19 @@ I-66 | Staleness | Change repository after planning and before command | Fresh f
 I-67 | Python utility | Calculate known value from fixed ASK transform | Random task root, controlled script, no project write/install/network, cleaned after use
 I-68 | Media/OCR adapters | Build ffprobe/FFmpeg/Tesseract requests or remove binary from PATH | Fixed argv and explicit artifacts; unavailable is structured and truthful
 I-69 | Isolation truth | Inspect execution result on Windows | Process-bounded/policy-only metadata; no OS sandbox or network-enforcement claim
+I-70 | Criterion mapping | Map tests, typecheck, build, browser, security, repository, and artifact criteria | Each criterion requests the matching evidence surface
+I-71 | Verification truth | Pass build while user behavior lacks evidence | Build passes; task remains inconclusive rather than verified
+I-72 | Blocking aggregate | Fail or block one required criterion | Delivery is failed/blocked even when other commands pass
+I-73 | Browser evidence | Require UI acceptance without owned browser run | Browser criterion remains unavailable; no visual success claim
+I-74 | Deterministic review | Change unplanned/vendor/env paths or add debug/suppression | Evidence-linked issue with stable severity; blocking issue prevents delivery
+I-75 | Test safety | Add `.skip`/`.only`, remove assertion, or record justified test evolution | Weakening is flagged; explicit justified evolution remains reviewable
+I-76 | Change ledger | Compare baseline, planned change, unexpected change, and pre-existing dirty file | Ownership and before/after fingerprints remain distinct
+I-77 | Task checkpoint | Snapshot bounded approved files | Stored outside source tree, size/path bounded, no Git history mutation, cleanup available
+I-78 | Safe recovery | Recover owned edit while unrelated user file is dirty | Owned file restored; unrelated user content byte-for-byte preserved
+I-79 | Recovery conflict | User changes the same file after Hassali | Blind overwrite blocked; conflict/manual intervention reported
+I-80 | Repair eligibility | Attempt new, repeated, expanded, stale, and third repair | New evidence and current permission required; expansion reapproves; third cycle denied
+I-81 | Artifact verification | Validate JSON, CSV header, ZIP structure/expected path, and corrupt outputs | Valid structure passes; corrupt/missing contract fails independent of producer exit
+I-82 | Delivery claim | Compare verified, partial, blocked, and failed evidence | Wording and Git eligibility match evidence; push authority always separate
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers
