@@ -169,7 +169,20 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Declared repository scripts are classified as build/test/typecheck/lint/dev/format/generate/migration/other with duration, side-effect, network, and risk metadata. Targeted verification is preferred, but commands are not run in I3.
 - `ExecutionRequirement` records capability, working scope, filesystem/network needs, duration, mutation, risk, missing prerequisites, and approval requirement. Every I3 requirement carries `permission: not-granted`.
 - The adaptive CODE planner consumes owned repository and capability evidence after ownership verification. Missing tools block only work that actually requires execution; generation can proceed with truthful prerequisite metadata.
-- Secure execution, package installation, sandbox/resource enforcement, media/OCR processing, and command approval lifecycle remain Run 04 I4 work.
+- Capability discovery never grants execution authority. Available tools still require the I4 broker policy and a matching server-issued grant.
+
+### Secure execution
+
+- `lib/server/runtime/secure-execution/` owns structured execution requests/results, mode policy, server-side grants, task artifacts, deterministic tool adapters, and the only new command-process launcher.
+- The authenticated approval route issues short-lived CODE grants bound to user, project, mode, capability, root, risk ceiling, approval source, expiry, and a bounded use count. Client/model/project text cannot mint authority.
+- Existing repository-derived typecheck, test, build, and lint commands now run through the broker with direct executable/argv spawning. Shell interpreters, inline dynamic code, installs, deployment, Git mutation/push, destructive database operations, and unapproved network use are denied.
+- ASK deterministic Python uses a fixed Hassali-owned script in a random task directory, never arbitrary user code or project mutation. CODE project Python uses an evidence-backed file entry point, project grant, direct argv, and the same broker. FFmpeg, ffprobe, and Tesseract expose structured operations and return unavailable without installation.
+- Local Tesseract is an optional user-bound `OcrProvider`; it stages explicit bytes in task artifacts and does not replace the provider-neutral OCR contract.
+- Project and task paths are canonicalized, checked against owned roots, and reject traversal, sensitive files, and symlink/junction escape. Child environments use an allowlist without provider, Clerk, database, token, password, or key secrets.
+- Execution has bounded timeout/output, owned process-tree cancellation, sanitized untrusted output, lightweight audit events, truthful resource metadata, and no uncontrolled polling.
+- Repository fingerprints are rechecked immediately before execution. Read-only commands that mutate project evidence fail and stop; evidence is preserved. Declared build artifacts are tracked as expected mutation. Only a failed Hassali-authored repair may roll back its own unchanged attempt.
+- Current Windows isolation is truthfully `process-bounded`: path and network rules are policy-enforced, with no claim of kernel filesystem/network isolation, containerization, CPU quota, or memory quota.
+- Full verification judging/recovery remains Run 04 I5. Timeline/background jobs and local Git delivery remain `Live Execution Timeline, Git Workflow and Verified Delivery` in Run 04 I6.
 
 ## Design
 
@@ -276,4 +289,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 04 I1 checkpoint: `CODE-I1: add adaptive planning and delivery contracts`
 - Run 04 I2 checkpoint: `CODE-I2: add repository intelligence and impact mapping`
 - Run 04 I3 checkpoint: `CODE-I3: add multi-language capability packs and runtime detection`
+- Run 04 I4 checkpoint: `CODE-I4: add secure execution and permission enforcement`
 - The repository HEAD is authoritative; confirm it with Git before every task.

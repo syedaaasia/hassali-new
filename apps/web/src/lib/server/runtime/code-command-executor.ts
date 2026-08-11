@@ -1,68 +1,27 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import path from "node:path";
-import { sanitizeUntrustedToolText } from "@/lib/server/intelligence/security-kernel";
 import { isServerOwnedProjectWorkspaceRoot } from "./workspace-binding";
-import { stopOwnedChild } from "./owned-runtime-safety";
+import { clearCodeRepositoryInspectionCache, inspectCodeRepository } from "./code-repository-inspector";
+import {
+  cleanupOwnedSecureExecutionProcesses,
+  createSecureExecutionEnvironment,
+  executeWithBroker,
+  ownedSecureExecutionProcessCount
+} from "./secure-execution/execution-broker";
 import type {
   CodeCommandResult,
   CodeCommandSpec,
   CodeFailureType
 } from "./code-execution-types";
 
-const maxOutputBytes = 48_000;
-const ownedCommandChildren = new Set<ChildProcessWithoutNullStreams>();
-const sensitiveEnvironmentName = /(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|DATABASE_URL|PRIVATE_KEY|CLERK|OPENROUTER)/i;
-const osEnvironmentNames = new Set([
-  "APPDATA",
-  "COMSPEC",
-  "HOME",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "LOCALAPPDATA",
-  "NUMBER_OF_PROCESSORS",
-  "OS",
-  "PATH",
-  "PATHEXT",
-  "PROCESSOR_ARCHITECTURE",
-  "PROGRAMDATA",
-  "PROGRAMFILES",
-  "PROGRAMFILES(X86)",
-  "SYSTEMDRIVE",
-  "SYSTEMROOT",
-  "TEMP",
-  "TMP",
-  "USERPROFILE",
-  "WINDIR"
-]);
-
 export function createCodeExecutionEnvironment(extra: Record<string, string> = {}) {
-  const environment: Record<string, string | undefined> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value && osEnvironmentNames.has(key.toUpperCase()) && !sensitiveEnvironmentName.test(key)) {
-      environment[key] = value;
-    }
-  }
-  return {
-    ...environment,
-    ...extra,
-    BROWSER: "none",
-    CI: "1",
-    HASSALI_CODE_EXECUTION: "1",
-    NODE_ENV: process.env.NODE_ENV ?? "development",
-    NO_UPDATE_NOTIFIER: "1"
-  };
+  return createSecureExecutionEnvironment(extra);
 }
 
 export function ownedCodeCommandProcessCount() {
-  return ownedCommandChildren.size;
+  return ownedSecureExecutionProcessCount();
 }
 
 export async function cleanupOwnedCodeCommands() {
-  for (const child of [...ownedCommandChildren]) {
-    await stopOwnedChild(child).catch(() => undefined);
-    if (child.exitCode !== null) ownedCommandChildren.delete(child);
-  }
-  return ownedCommandChildren.size;
+  return cleanupOwnedSecureExecutionProcesses();
 }
 
 function classifyFailure(command: CodeCommandSpec, output: string): CodeFailureType {
@@ -78,18 +37,15 @@ function classifyFailure(command: CodeCommandSpec, output: string): CodeFailureT
   return "TOOL_ERROR";
 }
 
-function boundedOutput(stdout: string, stderr: string) {
-  const combined = `${stdout}\n${stderr}`.trim().slice(-maxOutputBytes);
-  return sanitizeUntrustedToolText(combined).sanitized;
-}
-
 export async function runBoundedCodeCommand(input: {
   abortSignal?: AbortSignal;
   command: CodeCommandSpec;
+  executionGrantId: string;
+  expectedWorkspaceFingerprint: string;
+  externalUserId: string;
   projectId: string;
   workspaceRoot: string;
 }): Promise<CodeCommandResult> {
-  const startedAt = Date.now();
   if (!(await isServerOwnedProjectWorkspaceRoot(input.workspaceRoot))) {
     return {
       commandId: input.command.id,
@@ -101,156 +57,74 @@ export async function runBoundedCodeCommand(input: {
       status: "FAILED"
     };
   }
-  if (input.abortSignal?.aborted) {
-    return {
-      commandId: input.command.id,
-      durationMs: 0,
-      exitCode: null,
-      failureType: null,
-      outputExcerpt: "",
-      signal: "ABORTED",
-      status: "CANCELLED"
-    };
-  }
-  const root = path.resolve(input.workspaceRoot);
-
-  return new Promise<CodeCommandResult>((resolveResult) => {
-    let stdout = "";
-    let stderr = "";
-    let finished = false;
-    let termination: "abort" | "timeout" | null = null;
-    const child = spawn(input.command.command, input.command.args, {
-      cwd: root,
-      env: createCodeExecutionEnvironment(),
-      shell: false,
-      stdio: "pipe",
-      windowsHide: true
-    });
-    ownedCommandChildren.add(child);
-    const finish = (result: CodeCommandResult) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timeout);
-      input.abortSignal?.removeEventListener("abort", abort);
-      resolveResult(result);
-    };
-    const abort = () => {
-      termination = "abort";
-      void stopOwnedChild(child)
-        .then(() => finish({
-          commandId: input.command.id,
-          durationMs: Date.now() - startedAt,
-          exitCode: null,
-          failureType: null,
-          outputExcerpt: boundedOutput(stdout, stderr),
-          signal: "ABORTED",
-          status: "CANCELLED"
-        }))
-        .catch((error) => finish({
-          commandId: input.command.id,
-          durationMs: Date.now() - startedAt,
-          exitCode: null,
-          failureType: "PROCESS_TEARDOWN_ERROR",
-          outputExcerpt: boundedOutput(
-            stdout,
-            `${stderr}\nOwned process teardown failed: ${error instanceof Error ? error.message : "unknown error"}`
-          ),
-          signal: "TEARDOWN_FAILED",
-          status: "FAILED"
-        }));
-    };
-    const timeout = setTimeout(() => {
-      termination = "timeout";
-      void stopOwnedChild(child)
-        .then(() => {
-          const output = boundedOutput(stdout, `${stderr}\nCommand exceeded ${input.command.timeoutMs}ms.`);
-          finish({
-            commandId: input.command.id,
-            durationMs: Date.now() - startedAt,
-            exitCode: null,
-            failureType: "TOOL_ERROR",
-            outputExcerpt: output,
-            signal: "TIMEOUT",
-            status: "FAILED"
-          });
-        })
-        .catch((error) => finish({
-          commandId: input.command.id,
-          durationMs: Date.now() - startedAt,
-          exitCode: null,
-          failureType: "PROCESS_TEARDOWN_ERROR",
-          outputExcerpt: boundedOutput(
-            stdout,
-            `${stderr}\nCommand timed out and owned process teardown failed: ${error instanceof Error ? error.message : "unknown error"}`
-          ),
-          signal: "TEARDOWN_FAILED",
-          status: "FAILED"
-        }));
-    }, input.command.timeoutMs);
-
-    input.abortSignal?.addEventListener("abort", abort, { once: true });
-    child.stdout.on("data", (chunk) => {
-      stdout = `${stdout}${String(chunk)}`.slice(-maxOutputBytes);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr = `${stderr}${String(chunk)}`.slice(-maxOutputBytes);
-    });
-    child.once("error", (error) => {
-      ownedCommandChildren.delete(child);
-      const output = boundedOutput(stdout, `${stderr}\n${error.message}`);
-      finish({
-        commandId: input.command.id,
-        durationMs: Date.now() - startedAt,
-        exitCode: null,
-        failureType: classifyFailure(input.command, output),
-        outputExcerpt: output,
-        signal: null,
-        status: "FAILED"
-      });
-    });
-    child.once("exit", (code, signal) => {
-      ownedCommandChildren.delete(child);
-      const output = boundedOutput(
-        stdout,
-        termination === "timeout"
-          ? `${stderr}\nCommand exceeded ${input.command.timeoutMs}ms.`
-          : stderr
-      );
-      finish({
-        commandId: input.command.id,
-        durationMs: Date.now() - startedAt,
-        exitCode: termination ? null : code,
-        failureType: termination === "timeout"
-          ? "TOOL_ERROR"
-          : termination === "abort"
-            ? null
-            : code === 0
-              ? null
-              : classifyFailure(input.command, output),
-        outputExcerpt: output,
-        signal: termination === "abort" ? "ABORTED" : termination === "timeout" ? "TIMEOUT" : signal,
-        status: termination === "abort" ? "CANCELLED" : code === 0 && !termination ? "PASSED" : "FAILED"
-      });
-    });
+  const execution = await executeWithBroker({
+    abortSignal: input.abortSignal,
+    actor: { externalUserId: input.externalUserId, projectId: input.projectId },
+    capability: "repository.verify",
+    command: {
+      args: input.command.args,
+      executable: input.command.command,
+      provenance: { evidence: `Repository-inspected scripts.${input.command.scriptName}.`, source: "repository-inspector" }
+    },
+    cwd: input.workspaceRoot,
+    expectedWorkspaceFingerprint: input.expectedWorkspaceFingerprint,
+    grantId: input.executionGrantId,
+    id: input.command.id,
+    mode: "CODE",
+    mutation: input.command.effect === "REVERSIBLE_LOCAL" ? "project" : "none",
+    network: "none",
+    risk: input.command.effect === "READ_ONLY" ? "low" : "medium",
+    scope: { allowedInputs: ["."], allowedOutputs: [], kind: "project", root: input.workspaceRoot },
+    timeoutMs: input.command.timeoutMs
   });
+  const output = `${execution.output.stdout}\n${execution.output.stderr}`.trim();
+  const failureType: CodeFailureType | null = execution.failure?.code === "unexpected-mutation" || execution.failure?.code === "stale-workspace" || execution.failure?.code === "path-blocked" || execution.failure?.code.startsWith("grant-")
+    ? "PROJECT_SCOPE_ERROR"
+    : execution.failure?.code === "process-teardown-failed"
+      ? "PROCESS_TEARDOWN_ERROR"
+      : execution.status === "failed" || execution.status === "timed-out" || execution.status === "unavailable" || execution.status === "blocked"
+        ? classifyFailure(input.command, output)
+        : null;
+  return {
+    commandId: input.command.id,
+    durationMs: execution.durationMs,
+    exitCode: execution.exitCode,
+    failureType,
+    mutationState: execution.mutation.state,
+    outputExcerpt: execution.failure ? `${output}\n${execution.failure.message}`.trim() : output,
+    signal: execution.signal,
+    status: execution.status === "cancelled" ? "CANCELLED" : execution.status === "passed" ? "PASSED" : "FAILED"
+  };
 }
 
 export async function runCodeCommandSuite(input: {
   abortSignal?: AbortSignal;
   commands: CodeCommandSpec[];
+  executionGrantId: string;
+  expectedWorkspaceFingerprint: string;
+  externalUserId: string;
   projectId: string;
   workspaceRoot: string;
 }) {
   const results: CodeCommandResult[] = [];
+  let expectedWorkspaceFingerprint = input.expectedWorkspaceFingerprint;
   for (const command of input.commands) {
     const result = await runBoundedCodeCommand({
       abortSignal: input.abortSignal,
       command,
+      executionGrantId: input.executionGrantId,
+      expectedWorkspaceFingerprint,
+      externalUserId: input.externalUserId,
       projectId: input.projectId,
       workspaceRoot: input.workspaceRoot
     });
     results.push(result);
     if (result.status === "CANCELLED" || result.failureType === "PROCESS_TEARDOWN_ERROR") break;
+    if (result.mutationState === "unexpected") break;
+    if (result.mutationState === "expected") {
+      clearCodeRepositoryInspectionCache(input.workspaceRoot);
+      expectedWorkspaceFingerprint = (await inspectCodeRepository(input.workspaceRoot)).fingerprint;
+    }
   }
   return results;
 }

@@ -194,15 +194,18 @@ function frameworkFor(files: Set<string>, dependencies: Set<string>) {
 
 async function fingerprintFor(root: string, files: string[]) {
   const hash = createHash("sha256");
-  const important = files
-    .filter((file) => /(?:package\.json|lock|tsconfig|vite\.config|next\.config|pyproject|requirements|go\.mod|composer\.json)$/i.test(file))
-    .slice(0, 40);
-  for (const file of important) {
+  for (const file of files.slice().sort()) {
     const target = path.resolve(root, file);
     const fileStat = await stat(target).catch(() => null);
     hash.update(`${file}:${fileStat?.size ?? 0}:${fileStat?.mtimeMs ?? 0}\n`);
+    if (
+      fileStat &&
+      fileStat.size <= 256_000 &&
+      /(?:^|\/)(?:package\.json|[^/]+\.(?:[cm]?[jt]sx?|json|md|py|go|php|rb|rs|sql|toml|ya?ml)|(?:requirements|composer|tsconfig|vite\.config|next\.config|go\.mod)[^/]*)$/i.test(file)
+    ) {
+      hash.update(await readFile(target).catch(() => Buffer.alloc(0)));
+    }
   }
-  hash.update(files.slice().sort().join("\n"));
   return hash.digest("hex").slice(0, 24);
 }
 

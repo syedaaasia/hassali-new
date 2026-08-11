@@ -13,10 +13,6 @@ import {
 } from "./code-repository-inspector";
 import { createOpenRouterCodeRepairProvider } from "./code-repair-provider";
 import {
-  captureOwnedProjectWorkspaceSnapshot,
-  restoreOwnedProjectWorkspaceSnapshot
-} from "./owned-workspace-hydration";
-import {
   normalizeCodeExecutionPolicy,
   repairBudgetForPolicy,
   type CodeCommandResult,
@@ -183,25 +179,13 @@ async function readApprovedFiles(workspaceRoot: string, approvedPaths: string[])
 async function runScopedCodeCommandSuite(input: {
   abortSignal?: AbortSignal;
   commands: Parameters<typeof runCodeCommandSuite>[0]["commands"];
+  executionGrantId: string;
+  expectedWorkspaceFingerprint: string;
+  externalUserId: string;
   projectId: string;
   workspaceRoot: string;
 }) {
-  const snapshot = await captureOwnedProjectWorkspaceSnapshot(input.workspaceRoot);
-  const results = await runCodeCommandSuite(input);
-  const reconciliation = await restoreOwnedProjectWorkspaceSnapshot(snapshot);
-  if (reconciliation.restored.length > 0) {
-    const paths = reconciliation.restored.slice(0, 20);
-    results.push({
-      commandId: "workspace-side-effect-guard",
-      durationMs: 0,
-      exitCode: null,
-      failureType: "PROJECT_SCOPE_ERROR",
-      outputExcerpt: `Verification attempted to change project files outside its read-only evidence role. Hassali restored: ${paths.join(", ")}${reconciliation.restored.length > paths.length ? ", ..." : ""}.`,
-      signal: "SIDE_EFFECT_RESTORED",
-      status: "FAILED"
-    });
-  }
-  return results;
+  return runCodeCommandSuite(input);
 }
 
 function compactResumableState(input: {
@@ -237,7 +221,9 @@ function compactResumableState(input: {
 export async function runCodeAutonomousExecution(input: {
   abortSignal?: AbortSignal;
   approvedPaths: string[];
+  executionGrantId: string;
   executionPolicy?: CodeExecutionPolicy | string;
+  externalUserId: string;
   objective: string;
   projectId: string;
   proposalId: string;
@@ -317,6 +303,9 @@ export async function runCodeAutonomousExecution(input: {
   let commandResults = await runScopedCodeCommandSuite({
     abortSignal: input.abortSignal,
     commands: repository.commands,
+    executionGrantId: input.executionGrantId,
+    expectedWorkspaceFingerprint: repository.fingerprint,
+    externalUserId: input.externalUserId,
     projectId: input.projectId,
     workspaceRoot: input.workspaceRoot
   });
@@ -437,6 +426,9 @@ export async function runCodeAutonomousExecution(input: {
     const verificationAfter = await runScopedCodeCommandSuite({
       abortSignal: input.abortSignal,
       commands: repository.commands,
+      executionGrantId: input.executionGrantId,
+      expectedWorkspaceFingerprint: repository.fingerprint,
+      externalUserId: input.externalUserId,
       projectId: input.projectId,
       workspaceRoot: input.workspaceRoot
     });
@@ -494,6 +486,9 @@ export async function runCodeAutonomousExecution(input: {
       commandResults = await runScopedCodeCommandSuite({
         abortSignal: input.abortSignal,
         commands: repository.commands,
+        executionGrantId: input.executionGrantId,
+        expectedWorkspaceFingerprint: repository.fingerprint,
+        externalUserId: input.externalUserId,
         projectId: input.projectId,
         workspaceRoot: input.workspaceRoot
       });

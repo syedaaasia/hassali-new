@@ -6,8 +6,9 @@ import {
 } from "../code-attempt-snapshot";
 import {
   findNonRepairableCodeFailure,
-  runCodeAutonomousExecution
+  runCodeAutonomousExecution as runBrokeredCodeAutonomousExecution
 } from "../code-autonomous-orchestrator";
+import { issueExecutionGrant, revokeExecutionGrant } from "../secure-execution/execution-grants";
 import {
   createCodeExecutionEnvironment,
   ownedCodeCommandProcessCount
@@ -52,6 +53,29 @@ const tests: TestCase[] = [];
 
 function test(name: string, run: TestCase["run"]) {
   tests.push({ name, run });
+}
+
+async function runCodeAutonomousExecution(
+  input: Omit<Parameters<typeof runBrokeredCodeAutonomousExecution>[0], "executionGrantId" | "externalUserId">
+) {
+  const externalUserId = "code-autonomous-smoke-user";
+  const executionGrantId = issueExecutionGrant({
+    approvalPolicy: "ask",
+    approvalSource: "inline_approval",
+    capabilities: ["repository.verify"],
+    externalUserId,
+    maxUses: 32,
+    mode: "CODE",
+    projectId: input.projectId,
+    riskCeiling: "medium",
+    scopeKind: "project",
+    scopeRoot: input.workspaceRoot
+  });
+  try {
+    return await runBrokeredCodeAutonomousExecution({ ...input, executionGrantId, externalUserId });
+  } finally {
+    revokeExecutionGrant(executionGrantId);
+  }
 }
 
 async function fixture(name: string) {
@@ -428,7 +452,7 @@ test("build failure is classified separately and repaired", async () => {
       workspaceRoot: root
     });
     assert.equal(report.repairAttempts[0]?.failureBefore.failureType, "BUILD_ERROR");
-    assert.equal(report.commandResults[0]?.status, "PASSED");
+    assert.equal(report.commandResults[0]?.status, "PASSED", JSON.stringify(report.commandResults));
   } finally {
     clearCodeRepositoryInspectionCache(root);
     await rm(root, { recursive: true, force: true });
@@ -792,7 +816,7 @@ test("cancelled execution stops before repair", async () => {
   }
 });
 
-test("verification side effects are restored and treated as a project-scope failure", async () => {
+test("verification side effects are preserved as evidence and treated as a project-scope failure", async () => {
   const root = await fixture("verification-side-effect");
   const projectId = "project-verification-side-effect";
   let providerCalls = 0;
@@ -832,14 +856,18 @@ test("verification side effects are restored and treated as a project-scope fail
     });
     assert.equal(report.completionStatus, "FAILED");
     assert(report.commandResults.some((result) =>
-      result.commandId === "workspace-side-effect-guard" &&
-      result.failureType === "PROJECT_SCOPE_ERROR"
+      result.commandId === "package-script-test" &&
+      result.failureType === "PROJECT_SCOPE_ERROR" &&
+      result.mutationState === "unexpected"
     ));
     assert.equal(providerCalls, 0);
-    await assert.rejects(readFile(path.join(root, "src/unapproved.js"), "utf8"));
+    assert.equal(
+      await readFile(path.join(root, "src/unapproved.js"), "utf8"),
+      "export const injected = true;\n"
+    );
     assert.equal(
       await readFile(path.join(root, ".hassali/events.jsonl"), "utf8"),
-      "trusted-event\n"
+      "forged-event\n"
     );
   } finally {
     clearCodeRepositoryInspectionCache(root);
@@ -891,7 +919,10 @@ test("post-repair project-scope failure rolls back and stops before another comm
     assert(report.commandResults.some((result) => result.failureType === "PROJECT_SCOPE_ERROR"));
     assert.equal(await readFile(path.join(root, "logic.js"), "utf8"), original);
     assert.equal(await readFile(path.join(root, ".next/verification-count.txt"), "utf8"), "2");
-    await assert.rejects(readFile(path.join(root, "src/unapproved.js"), "utf8"));
+    assert.equal(
+      await readFile(path.join(root, "src/unapproved.js"), "utf8"),
+      "export const injected = true;\n"
+    );
   } finally {
     clearCodeRepositoryInspectionCache(root);
     await rm(root, { recursive: true, force: true });
@@ -993,7 +1024,7 @@ test("server proposal authority rejects ASK, keeps SUGGEST file-only, and suppor
     ? path.resolve(process.cwd(), "src/lib/server/runtime/code-command-executor.ts")
     : path.resolve(process.cwd(), "apps/web/src/lib/server/runtime/code-command-executor.ts");
   const executor = await readFile(executorPath, "utf8");
-  assert(executor.includes('failureType: "PROCESS_TEARDOWN_ERROR"'));
+  assert(executor.includes('"PROCESS_TEARDOWN_ERROR"'));
   assert(executor.includes('result.failureType === "PROCESS_TEARDOWN_ERROR"'));
 });
 

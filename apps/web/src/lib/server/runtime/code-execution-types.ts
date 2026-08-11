@@ -57,6 +57,7 @@ export type CodeCommandResult = {
   outputExcerpt: string;
   signal: string | null;
   status: "CANCELLED" | "FAILED" | "PASSED";
+  mutationState?: "expected" | "none" | "unexpected" | "unknown";
 };
 
 export type CodeRepositoryUnderstanding = {

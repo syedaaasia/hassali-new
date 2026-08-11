@@ -279,6 +279,17 @@ I-55 | Capability matching | Require available, degraded, missing, or unsupporte
 I-56 | Execution handoff | Refine an approved CODE plan with capability evidence | Requirements remain permission-not-granted and approval-bound
 I-57 | Missing runtime | Plan execution with unavailable runtime | Execution blocks; source-only generation does not fabricate a runnable step
 I-58 | Real repository trace | Analyze Hassali repository and current process | TS/JS, pnpm, scripts, and actual local statuses are evidence-backed
+I-59 | Execution grant | Use missing, forged, expired, exhausted, or mismatched authority | Broker blocks before process start; server-bound grant cannot be forged
+I-60 | Execution policy | Compare ASK/WEBSITE/CODE/Growth and approval modes | Mode capabilities stay distinct; hard deny outranks standing/full-project approval
+I-61 | Shell/install safety | Request shell, inline code, package install, deploy, Git push, or DB reset | Structured hard denial; no process or network action
+I-62 | Path safety | Use traversal, sensitive file, external root, or symlink/junction escape | Canonical server-side confinement blocks the request
+I-63 | Environment | Run a bounded child with provider/database secrets in parent env | Child receives only safe allowlisted variables
+I-64 | Process lifecycle | Timeout, cancel, or teardown a command | Owned process tree stops; bounded status/output/audit evidence returned
+I-65 | Mutation | Read-only command writes project evidence | Unexpected mutation fails, later steps stop, files remain for review
+I-66 | Staleness | Change repository after planning and before command | Fresh fingerprint mismatch blocks before spawn
+I-67 | Python utility | Calculate known value from fixed ASK transform | Random task root, controlled script, no project write/install/network, cleaned after use
+I-68 | Media/OCR adapters | Build ffprobe/FFmpeg/Tesseract requests or remove binary from PATH | Fixed argv and explicit artifacts; unavailable is structured and truthful
+I-69 | Isolation truth | Inspect execution result on Windows | Process-bounded/policy-only metadata; no OS sandbox or network-enforcement claim
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers

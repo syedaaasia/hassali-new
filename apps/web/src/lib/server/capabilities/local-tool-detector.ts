@@ -20,9 +20,9 @@ type ProbeDefinition = {
 
 const definitions: ProbeDefinition[] = [
   { args: ["--version"], id: "node", kinds: ["runtime", "interpreter"], limitations: ["Availability does not authorize project command execution."], operations: ["run JavaScript", "run TypeScript toolchains"] },
-  { args: ["-version"], id: "ffmpeg", kinds: ["media-tool"], limitations: ["Detection only; media processing is deferred to secure execution."], operations: ["transcode", "trim", "crop", "resize", "extract frames", "extract audio", "concatenate", "subtitle overlay", "thumbnail", "compress"] },
+  { args: ["-version"], id: "ffmpeg", kinds: ["media-tool"], limitations: ["Detection does not authorize use; media operations require the secure execution broker."], operations: ["transcode", "trim", "crop", "resize", "extract frames", "extract audio", "concatenate", "subtitle overlay", "thumbnail", "compress"] },
   { args: ["-version"], id: "ffprobe", kinds: ["media-tool", "utility-tool"], limitations: ["Detection only; user media is not inspected during discovery."], operations: ["inspect duration", "inspect codecs", "inspect dimensions", "inspect streams", "inspect frame rate", "inspect media integrity"] },
-  { args: ["--version"], id: "tesseract", kinds: ["ocr-tool"], limitations: ["Detection does not run OCR; recognition remains provider-controlled and is deferred for local execution."], operations: ["local deterministic OCR"] }
+  { args: ["--version"], id: "tesseract", kinds: ["ocr-tool"], limitations: ["Detection does not authorize OCR; local recognition requires a user-bound secure execution grant."], operations: ["local deterministic OCR"] }
 ];
 
 let cached: { expiresAt: number; platform: NodeJS.Platform; tools: LocalToolCapability[] } | null = null;
@@ -119,7 +119,7 @@ async function detectPython(platform: NodeJS.Platform, runner: SafeProbeRunner) 
     const result = await probe(
       "python", candidate.executable, candidate.args, platform, runner, ["language", "interpreter", "runtime"],
       ["run Python", "support Python project toolchains"],
-      ["A Python environment is not a security sandbox.", "Project code execution and package installation remain disabled in I3."]
+      ["A Python environment is not a security sandbox.", "Project code execution requires a scoped broker grant; package installation remains disabled."]
     );
     results.push(result);
     if (result.status === "available") return result;

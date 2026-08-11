@@ -23,6 +23,7 @@ import { buildRuntimeAuthorityDecision } from "@/lib/server/runtime/runtime-auth
 import { selectRuntimeAdapter } from "@/lib/server/runtime/runtime-adapter-selector";
 import { readApprovedFile } from "@/lib/server/runtime/approved-file-runner";
 import { runCodeAutonomousExecution } from "@/lib/server/runtime/code-autonomous-orchestrator";
+import { issueExecutionGrant, revokeExecutionGrant } from "@/lib/server/runtime/secure-execution/execution-grants";
 import {
   codeExecutionKey,
   runCodeExecutionOnce
@@ -758,18 +759,38 @@ export async function POST(request: Request) {
       productMode === "CODE" &&
       authorizedProposal.approvalMode === "EXECUTE"
       ? await runCodeExecutionOnce({
-          execute: (abortSignal) => runCodeAutonomousExecution({
-            abortSignal,
-            approvedPaths: plan.steps
-              .filter((step) => step.tool === "write_file" && step.path)
-              .map((step) => step.path!),
-            executionPolicy,
-            objective: taskObjective,
-            projectId: parsed.projectId,
-            proposalId: parsed.proposalId,
-            selectedModel,
-            workspaceRoot: workspaceBinding.workspaceRoot
-          }),
+          execute: async (abortSignal) => {
+            const executionGrantId = issueExecutionGrant({
+              approvalPolicy: parsed.approvalPolicy,
+              approvalSource: parsed.approvalSource,
+              capabilities: ["repository.verify"],
+              externalUserId: userId,
+              maxUses: 32,
+              mode: "CODE",
+              projectId: parsed.projectId,
+              riskCeiling: "medium",
+              scopeKind: "project",
+              scopeRoot: workspaceBinding.workspaceRoot
+            });
+            try {
+              return await runCodeAutonomousExecution({
+                abortSignal,
+                approvedPaths: plan.steps
+                  .filter((step) => step.tool === "write_file" && step.path)
+                  .map((step) => step.path!),
+                executionGrantId,
+                executionPolicy,
+                externalUserId: userId,
+                objective: taskObjective,
+                projectId: parsed.projectId,
+                proposalId: parsed.proposalId,
+                selectedModel,
+                workspaceRoot: workspaceBinding.workspaceRoot
+              });
+            } finally {
+              revokeExecutionGrant(executionGrantId);
+            }
+          },
           key: codeExecutionKey(parsed.projectId, parsed.proposalId)
         })
       : null;

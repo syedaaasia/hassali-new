@@ -2,6 +2,7 @@ import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { runApprovedFilePlan } from "../approved-file-runner";
 import { runCodeAutonomousExecution } from "../code-autonomous-orchestrator";
+import { issueExecutionGrant, revokeExecutionGrant } from "../secure-execution/execution-grants";
 import type { CodeRepairProvider } from "../code-execution-types";
 import { clearCodeRepositoryInspectionCache } from "../code-repository-inspector";
 import { resolveWorkspaceBaseRoot } from "../workspace-binding";
@@ -88,16 +89,31 @@ async function repair() {
       };
     }
   };
+  const externalUserId = "code-browser-acceptance-user";
+  const executionGrantId = issueExecutionGrant({
+    approvalPolicy: "ask",
+    approvalSource: "inline_approval",
+    capabilities: ["repository.verify"],
+    externalUserId,
+    maxUses: 16,
+    mode: "CODE",
+    projectId,
+    riskCeiling: "medium",
+    scopeKind: "project",
+    scopeRoot: workspaceRoot
+  });
   const report = await runCodeAutonomousExecution({
     approvedPaths: Object.keys(files),
+    executionGrantId,
     executionPolicy: "FLOW",
+    externalUserId,
     objective: "Repair the status API and verify the browser button result.",
     projectId,
     proposalId: "proposal-browser-acceptance",
     repairProvider: provider,
     selectedModel: "fixture/model",
     workspaceRoot
-  });
+  }).finally(() => revokeExecutionGrant(executionGrantId));
   process.stdout.write(JSON.stringify({
     completionStatus: report.completionStatus,
     metrics: report.metrics,
