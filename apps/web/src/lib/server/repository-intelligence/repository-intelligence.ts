@@ -835,9 +835,21 @@ export async function mapImplementationSurface(
 ): Promise<ImplementationSurface> {
   const queries = [...(input.suspectedDomains ?? []), ...(input.symbolQuestions ?? []), input.query].filter(Boolean).slice(0, 8);
   const collected: RepositorySearchResult[] = [];
-  for (const query of queries) collected.push(...await searchRepository(snapshot, { limit: 10, query, signal: input.signal }));
-  const deduplicated = collected
-    .sort((left, right) => right.score - left.score)
+  const strongestPerQuery: RepositorySearchResult[] = [];
+  for (const query of queries) {
+    const results = await searchRepository(snapshot, { limit: 10, query, signal: input.signal });
+    collected.push(...results);
+    const pathTokens = queryTokens(query).filter((token) => !broadSearchTokens.has(token));
+    const authoritative = results.filter((result) => result.authoritative && !["config", "test"].includes(result.kind));
+    const strongest = authoritative.sort((left, right) => {
+      const leftPathHits = pathTokens.filter((token) => left.file.toLowerCase().includes(token)).length;
+      const rightPathHits = pathTokens.filter((token) => right.file.toLowerCase().includes(token)).length;
+      return rightPathHits - leftPathHits || right.score - left.score;
+    })[0] ?? results[0];
+    if (strongest) strongestPerQuery.push(strongest);
+  }
+  const ranked = collected.sort((left, right) => right.score - left.score);
+  const deduplicated = [...strongestPerQuery, ...ranked]
     .filter((result, index, values) => values.findIndex((candidate) => candidate.file === result.file) === index)
     .slice(0, 18);
   const authoritativeFiles = deduplicated.filter((result) => result.authoritative && !["config", "test"].includes(result.kind)).slice(0, 10).map((result) => result.file);

@@ -2,12 +2,15 @@ import { relations } from "drizzle-orm";
 import { aiRequests } from "./ai-requests";
 import { chatMessages } from "./chat-messages";
 import { chatSessions } from "./chat-sessions";
+import { conversationMemories } from "./conversation-memories";
 import { files } from "./files";
 import { intelligencePreferences } from "./intelligence-preferences";
 import { intelligenceSourceConnections } from "./intelligence-source-connections";
 import { intelligenceUsageRecords } from "./intelligence-usage-records";
 import { memoryPeople } from "./memory-people";
 import { projects } from "./projects";
+import { projectEpisodes } from "./project-episodes";
+import { projectMemoryRecords } from "./project-memory-records";
 import { prompts } from "./prompts";
 import { snapshots } from "./snapshots";
 import { usageEvents } from "./usage-events";
@@ -19,10 +22,13 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   aiRequests: many(aiRequests),
   chatMessages: many(chatMessages),
   chatSessions: many(chatSessions),
+  conversationMemories: many(conversationMemories),
   intelligencePreferences: one(intelligencePreferences),
   intelligenceSourceConnections: many(intelligenceSourceConnections),
   intelligenceUsageRecords: many(intelligenceUsageRecords),
   memoryPeople: many(memoryPeople),
+  projectEpisodes: many(projectEpisodes),
+  projectMemoryRecords: many(projectMemoryRecords),
   prompts: many(prompts),
   snapshots: many(snapshots),
   usageEvents: many(usageEvents),
@@ -68,14 +74,20 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   }),
   aiRequests: many(aiRequests),
   chatSessions: many(chatSessions),
+  conversationMemories: many(conversationMemories),
   files: many(files),
   intelligenceUsageRecords: many(intelligenceUsageRecords),
   prompts: many(prompts),
+  projectEpisodes: many(projectEpisodes),
+  projectMemoryRecords: many(projectMemoryRecords),
   snapshots: many(snapshots)
 }));
 
 export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => ({
+  conversationMemory: one(conversationMemories),
   messages: many(chatMessages),
+  projectEpisodes: many(projectEpisodes),
+  projectMemoryRecords: many(projectMemoryRecords),
   project: one(projects, {
     fields: [chatSessions.projectId],
     references: [projects.id]
@@ -95,6 +107,26 @@ export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
     fields: [chatMessages.userId],
     references: [users.id]
   })
+}));
+
+export const conversationMemoriesRelations = relations(conversationMemories, ({ one }) => ({
+  conversation: one(chatSessions, { fields: [conversationMemories.conversationId], references: [chatSessions.id] }),
+  project: one(projects, { fields: [conversationMemories.projectId], references: [projects.id] }),
+  user: one(users, { fields: [conversationMemories.userId], references: [users.id] })
+}));
+
+export const projectMemoryRecordsRelations = relations(projectMemoryRecords, ({ one }) => ({
+  conversation: one(chatSessions, { fields: [projectMemoryRecords.conversationId], references: [chatSessions.id] }),
+  project: one(projects, { fields: [projectMemoryRecords.projectId], references: [projects.id] }),
+  sourceMessage: one(chatMessages, { fields: [projectMemoryRecords.sourceMessageId], references: [chatMessages.id] }),
+  user: one(users, { fields: [projectMemoryRecords.userId], references: [users.id] })
+}));
+
+export const projectEpisodesRelations = relations(projectEpisodes, ({ one }) => ({
+  conversation: one(chatSessions, { fields: [projectEpisodes.conversationId], references: [chatSessions.id] }),
+  project: one(projects, { fields: [projectEpisodes.projectId], references: [projects.id] }),
+  sourceMessage: one(chatMessages, { fields: [projectEpisodes.sourceMessageId], references: [chatMessages.id] }),
+  user: one(users, { fields: [projectEpisodes.userId], references: [users.id] })
 }));
 
 export const filesRelations = relations(files, ({ one, many }) => ({

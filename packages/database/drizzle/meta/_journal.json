@@ -29,6 +29,13 @@
       "when": 1786424388603,
       "tag": "0003_thick_franklin_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786426656211,
+      "tag": "0004_uneven_manta",
+      "breakpoints": true
     }
   ]
 }

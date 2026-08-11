@@ -222,6 +222,23 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
 
     void createProject(projectNameFromPrompt).then(hydrateProjectChat);
   };
+  const createProjectChat = async () => {
+    if (!projectId || isLoading) return;
+    setSearchError(null);
+    try {
+      const response = await fetch("/api/workspace/chat", {
+        body: JSON.stringify({ projectId }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      if (!response.ok) throw new Error("New chat could not be created.");
+      const payload = await response.json() as { sessionId?: unknown };
+      if (typeof payload.sessionId !== "string") throw new Error("New chat could not be created.");
+      hydrateChat([], payload.sessionId);
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "New chat could not be created.");
+    }
+  };
   const createFileFromPrompt = () => {
     const path = promptValue("New file path", "src/app/page.tsx");
 
@@ -389,6 +406,16 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: LeftSidebarProps) 
               type="button"
             >
               <span aria-hidden="true">⌕</span>
+            </button>
+            <button
+              aria-label="Start a new chat in this project"
+              className="hassali-focus-ring flex h-7 w-7 items-center justify-center rounded-md text-base text-muted-foreground hover:bg-white/[0.05] hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!projectId || isLoading}
+              onClick={() => void createProjectChat()}
+              title="New project chat"
+              type="button"
+            >
+              <span aria-hidden="true">+</span>
             </button>
           </div>
           <button

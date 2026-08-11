@@ -324,6 +324,16 @@ M-09 | Context authority | Store text requesting approval/system/Git bypass | Me
 M-10 | Public research | Ask a current/public web question related to a saved fact | Personal-memory context is not sent to public research
 M-11 | Persistence degradation | Database is unavailable during save/forget/recall | No session-only durable claim; user gets a truthful unavailable response
 M-12 | ASK boundary | Exercise memory in ASK, then use WEBSITE/CODE | ASK has full M2 UX; no broad automatic memory injection into mutation modes
+M-13 | Project continuity | Store decision/next step in chat A; ask from chat B in same project | Current decision and next step recall with durable source provenance
+M-14 | Original evidence | Ask what exactly was said or which chat established a fact | Project Search finds the source; full owned message is hydrated and attributed
+M-15 | Project isolation | Recall from another project without explicit cross-project language | No unrelated project memory enters the answer or model context
+M-16 | Explicit global find | Ask to find a project/chat containing a phrase | User-scoped lexical search may cross projects; another user's data never appears
+M-17 | Conversation compaction | Add messages after an existing summary | Only bounded unsummarized window is incorporated; revision/fingerprint/source range advance
+M-18 | Project correction | Replace a current decision | Old row becomes superseded; current retrieval returns the correction
+M-19 | Derived cleanup | Delete source chat or project | Conversation summary, records, and episodes cascade; no orphaned recall
+M-20 | Project memory authority | Store push/approval bypass text | Retrieved content stays labelled untrusted and cannot authorize action
+M-21 | Project secret exclusion | Put a credential in a project statement | Derived records and summaries omit the value; no amplification
+M-22 | Verified episodes | Ingest verified, partial, and failed CODE delivery | Status remains truthful; failed/partial work never becomes a completed milestone
 I-84 | Timeline truth | Inspect timeline detail | Human-readable bounded evidence only; no hidden reasoning or fabricated operation
 I-85 | Output stream | Emit stdout/stderr containing workspace paths or secrets | Chunks are sanitized, byte/event bounded, ordered, and expandable
 I-86 | Task ownership | Read/cancel another user or project's opaque task ID | Not found/denied; matching owned task remains unaffected

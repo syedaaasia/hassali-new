@@ -207,7 +207,7 @@ export const canonicalHassaliKnowledge: HassaliKnowledgeRecord[] = [
   }),
   record({
     category: "roadmap",
-    content: "Memory M1 is Hassali Self Knowledge. The next planned phase is M2 User and People Memory, followed by M3 Project and Conversation Memory, M4 Temporal/Conflict/Retrieval Intelligence, M5 Memory Controls and Privacy, and M6 Cross-Mode Shared Memory.",
+    content: "Memory M1 Hassali Self Knowledge, M2 User and People Memory, and M3 Project and Conversation Memory are implemented. M4 Temporal/Conflict/Retrieval Intelligence, M5 Memory Controls and Privacy, and M6 Cross-Mode Shared Memory remain planned.",
     id: "roadmap.memory",
     provenance: [{ kind: "roadmap", reference: "Memory phase M1-M6" }],
     roadmapPhase: "Memory",
@@ -218,12 +218,12 @@ export const canonicalHassaliKnowledge: HassaliKnowledgeRecord[] = [
   }),
   record({
     category: "limitation",
-    content: "M1 adds Hassali self knowledge only. User and People Memory (M2), Project and Conversation Memory (M3), temporal/conflict retrieval (M4), Memory Controls and Privacy (M5), and broader cross-mode personal/project memory (M6) are not implemented.",
+    content: "M1 self knowledge, M2 user/people memory, and M3 bounded project/conversation memory are implemented. Advanced temporal/conflict retrieval (M4), full Memory Controls and Privacy UI (M5), and broad automatic cross-mode memory policy (M6) are not implemented.",
     id: "limitation.personal-memory-not-implemented",
     provenance: [{ kind: "roadmap", reference: "Memory phase M1 boundaries" }],
-    status: "unavailable",
-    tags: ["personal memory", "user memory", "project memory", "conversation memory", "not implemented"],
-    title: "Personal and project long-term memory unavailable",
+    status: "limited",
+    tags: ["personal memory", "user memory", "project memory", "conversation memory", "temporal reasoning", "limited"],
+    title: "Advanced memory capabilities remain limited",
     topic: "memory-limitations"
   }),
   record({

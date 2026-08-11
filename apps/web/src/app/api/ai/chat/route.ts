@@ -23,6 +23,8 @@ import {
 } from "@/lib/server/ai/ask-brain-orchestrator";
 import { createDatabaseUserMemoryStore } from "@/lib/server/user-memory/database-user-memory-store";
 import { handleAskUserMemory } from "@/lib/server/user-memory/user-memory";
+import { createDatabaseProjectMemoryStore } from "@/lib/server/project-memory/database-project-memory-store";
+import { extractProjectMemoryCandidates, handleAskProjectMemory } from "@/lib/server/project-memory/project-memory";
 import {
   buildModeHandoff,
   handoffRequestKey,
@@ -6817,6 +6819,57 @@ export async function POST(request: Request) {
     const memoryOwnerId = persistence?.externalUserId ?? (await auth()).userId;
     if (memoryOwnerId) {
       persistence = await persistPendingUserMessage(persistence);
+      if (persistence?.sessionId) {
+        try {
+          const projectMemory = await handleAskProjectMemory({
+            conversationId: persistence.sessionId,
+            projectNotes: projectNotesContext,
+            prompt: effectiveUserPrompt,
+            sourceMessageId: pendingUserMessageId,
+            store: createDatabaseProjectMemoryStore(memoryOwnerId, persistence.projectId)
+          });
+          if (projectMemory.directAnswer) {
+            const selfReview = runSelfReviewForAskAnswer({
+              answer: projectMemory.directAnswer,
+              generator: "project_memory",
+              projectId: requestedProjectId,
+              prompt: effectiveUserPrompt
+            });
+            persistence = await persistRequestMessage(persistence, {
+              content: projectMemory.directAnswer,
+              metadata: {
+                deterministic: true,
+                model,
+                projectMemory: { saved: projectMemory.saved },
+                responseKind: "project_memory_response",
+                selfReview: compactSelfReview(selfReview)
+              },
+              role: "assistant"
+            });
+            return respond(createTextStream(projectMemory.directAnswer, persistence?.sessionId, {
+              "x-hassali-ask-provider-failure": "none",
+              "x-hassali-ask-response-kind": "project_memory_response"
+            }));
+          }
+          if (projectMemory.context) {
+            askIntelligenceContext = [askIntelligenceContext, projectMemory.context].filter(Boolean).join("\n\n");
+          }
+        } catch (error) {
+          console.error("project memory unavailable", error instanceof Error ? error.message : "Unknown error");
+          if (extractProjectMemoryCandidates(effectiveUserPrompt).length > 0) {
+            const unavailableAnswer = "Durable project memory is unavailable right now, so I did not claim to save that project decision. The current chat can still continue.";
+            persistence = await persistRequestMessage(persistence, {
+              content: unavailableAnswer,
+              metadata: { deterministic: true, projectMemory: { status: "unavailable" }, responseKind: "project_memory_unavailable" },
+              role: "assistant"
+            });
+            return respond(createTextStream(unavailableAnswer, persistence?.sessionId, {
+              "x-hassali-ask-provider-failure": "none",
+              "x-hassali-ask-response-kind": "project_memory_unavailable"
+            }));
+          }
+        }
+      }
       const userMemory = await handleAskUserMemory({
         prompt: effectiveUserPrompt,
         publicResearch: askFreshnessDecision.researchRequired,

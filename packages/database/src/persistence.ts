@@ -3,7 +3,6 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getDatabaseClient, type DatabaseClient } from "./client";
 import {
   chatMessages,
-  chatSessions,
   files,
   projects,
   users,
@@ -83,6 +82,17 @@ export type ProjectChatSearchResult = {
   sessionTitle: string | null;
   snippet: string;
   updatedAt: string;
+};
+
+export type OwnedProjectMessageEvidence = {
+  content: string;
+  createdAt: string;
+  messageId: string;
+  projectId: string;
+  projectName: string;
+  role: ChatRole;
+  sessionId: string;
+  sessionTitle: string;
 };
 
 export type ChatPersistenceContextResult = {
@@ -1173,6 +1183,34 @@ export async function searchProjectsAndChatsForExternalUser(
   }));
 }
 
+export async function loadOwnedProjectMessageEvidence(
+  externalUserId: string,
+  messageIds: string[],
+  db: Db = getDatabaseClient()
+): Promise<OwnedProjectMessageEvidence[]> {
+  const boundedIds = [...new Set(messageIds)].slice(0, 8);
+  if (boundedIds.length === 0) return [];
+  const result = await db.execute<{
+    content: string; createdAt: Date; messageId: string; projectId: string; projectName: string;
+    role: ChatRole; sessionId: string; sessionTitle: string;
+  }>(sql`
+    select chat_messages.id as "messageId", chat_messages.content, chat_messages.role::text as role,
+      chat_messages.created_at as "createdAt", chat_sessions.id as "sessionId", chat_sessions.title as "sessionTitle",
+      projects.id as "projectId", projects.name as "projectName"
+    from chat_messages
+    inner join chat_sessions on chat_sessions.id = chat_messages.session_id
+    inner join projects on projects.id = chat_sessions.project_id
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where users.external_id = ${externalUserId}
+      and chat_sessions.user_id = users.id
+      and chat_messages.user_id = users.id
+      and chat_messages.id in (${sql.join(boundedIds.map((id) => sql`${id}`), sql`, `)})
+    order by chat_messages.created_at desc
+  `);
+  return result.rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt).toISOString() }));
+}
+
 async function getOrCreateChatSession(
   input: { projectId: string; sessionId?: string | null; userId: string },
   db: Db
@@ -1227,6 +1265,31 @@ async function getOrCreateChatSession(
     id: String(createdSession.id),
     resolution: input.sessionId ? "recovered" as const : "created" as const
   };
+}
+
+export async function createOwnedChatSession(
+  input: { externalUserId: string; projectId: string; title?: string },
+  db: Db = getDatabaseClient()
+) {
+  const owner = await db.execute<{ projectId: string; userId: string }>(sql`
+    select projects.id as "projectId", users.id as "userId"
+    from projects
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId} and users.external_id = ${input.externalUserId}
+    limit 1
+  `);
+  const scope = owner.rows[0];
+  if (!scope) throw new Error("PROJECT_NOT_OWNED");
+  const title = input.title?.replace(/\s+/g, " ").trim().slice(0, 160) || "Workspace chat";
+  const created = await db.execute<{ id: string; title: string }>(sql`
+    insert into chat_sessions (project_id, user_id, title)
+    values (${scope.projectId}, ${scope.userId}, ${title})
+    returning id, title
+  `);
+  const session = created.rows[0];
+  if (!session) throw new Error("CHAT_SESSION_CREATE_FAILED");
+  return { id: String(session.id), title: String(session.title) };
 }
 
 export async function resolveChatPersistenceContext(
@@ -1335,13 +1398,20 @@ export async function deleteOwnedChatMessage(
   },
   db: Db = getDatabaseClient()
 ) {
-  const result = await db.execute<{ id: string }>(sql`
-    delete from chat_messages
-    where id = ${input.messageId}
-      and user_id = ${input.userId}
-    returning id
-  `);
-  return Boolean(result.rows[0]);
+  return db.transaction(async (tx) => {
+    const owned = await tx.execute<{ sessionId: string }>(sql`
+      select session_id as "sessionId" from chat_messages
+      where id = ${input.messageId} and user_id = ${input.userId}
+      limit 1 for update
+    `);
+    const sessionId = owned.rows[0]?.sessionId;
+    if (!sessionId) return false;
+    await tx.execute(sql`delete from conversation_memories where conversation_id = ${sessionId}`);
+    const result = await tx.execute<{ id: string }>(sql`
+      delete from chat_messages where id = ${input.messageId} and user_id = ${input.userId} returning id
+    `);
+    return Boolean(result.rows[0]);
+  });
 }
 
 export async function loadOwnedChatProposal(

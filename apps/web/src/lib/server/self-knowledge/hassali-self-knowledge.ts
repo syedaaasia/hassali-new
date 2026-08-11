@@ -314,7 +314,7 @@ export async function createHassaliSelfKnowledgeAnswer(input: {
     return { answer: "Yes. Hassali has a verified optional FFmpeg/ffprobe capability-detection and media-operation architecture. That does not mean the binaries are installed or execution is authorized; current machine availability must be checked dynamically.", recordIds: recordIds("capability.ffmpeg-architecture", "architecture.dynamic-local-capabilities") };
   }
   if (/\b(?:next|after M1|M2)\b[\s\S]{0,70}\b(?:memory|phase)\b|\b(?:memory|phase)\b[\s\S]{0,70}\b(?:next|after M1|M2)\b/i.test(prompt)) {
-    return { answer: "After M1 Hassali Self Knowledge, the next planned phase is M2 User and People Memory. M3 through M6 remain planned after that; personal and cross-chat long-term memory are not part of M1.", recordIds: recordIds("roadmap.memory", "limitation.personal-memory-not-implemented") };
+    return { answer: "Memory M1 self knowledge, M2 user and people memory, and M3 project and conversation memory are implemented. M4 temporal/conflict retrieval is next; M5 controls/privacy and M6 broad cross-mode policy remain planned.", recordIds: recordIds("roadmap.memory", "limitation.personal-memory-not-implemented") };
   }
   if (/\b(?:dashboard|identity)\b[\s\S]{0,60}\b(?:phrase|signature|slogan|wording)\b|\bBuild in\b/i.test(prompt)) {
     return { answer: "The current dashboard identity phrase is: Build in 🇵🇰 for 🌍.", recordIds: recordIds("brand.dashboard-phrase") };
@@ -332,7 +332,7 @@ export async function createHassaliSelfKnowledgeAnswer(input: {
     return { answer: "Hassali is a calm, lightweight AI Creation Workspace with shared intelligence across ASK, WEBSITE, and CODE. ASK reasons without mutating projects, WEBSITE specializes in approval-first website work, and CODE builds, executes, verifies, and delivers software under explicit user control.", recordIds: recordIds("identity.product", "architecture.shared-intelligence", "mode.ask", "mode.website", "mode.code") };
   }
   if (/\b(?:personal|user|people|project|conversation|long-term) memory\b/i.test(prompt)) {
-    return { answer: "Hassali Self Knowledge is implemented in M1. Personal user/people memory, project and conversation memory, temporal conflict handling, user memory controls, and broader cross-mode long-term memory remain planned for M2 through M6.", recordIds: recordIds("roadmap.memory", "limitation.personal-memory-not-implemented") };
+    return { answer: "Hassali has M1 self knowledge, M2 durable user and people memory, and M3 durable project records, incremental conversation summaries, episodes, checkpoints, and bounded source-message recall. Advanced temporal/conflict reasoning, full controls/privacy UI, and broad cross-mode policy remain planned for M4 through M6.", recordIds: recordIds("roadmap.memory", "limitation.personal-memory-not-implemented") };
   }
   return null;
 }
