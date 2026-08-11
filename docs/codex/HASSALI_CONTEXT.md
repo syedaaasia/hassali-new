@@ -148,6 +148,18 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - The normal CODE UI receives only a bounded plan summary. Full constraints, safety boundaries, and private prompts/source remain server-side.
 - `RepositoryInspectionRequest` hands I2 goals, evidence needs, suspected domains, and symbol/dependency/configuration questions without inventing file paths. Repository text remains untrusted evidence, not authority.
 
+### Repository Intelligence
+
+- `lib/server/repository-intelligence/` is a shared, read-only capability. CODE consumes it first, but ASK and WEBSITE can use the same evidence without gaining mutation authority.
+- Bounded snapshots record Git/worktree state, relevant untracked files, languages, workspaces, manifests, environment-variable names, scripts, dependencies, file roles, TS/JS symbols, Next routes, and evidence-backed relationships. Source bodies and secret values are not returned in the snapshot.
+- Discovery skips symlinks and common vendor/build/cache trees, keeps binary and oversized files metadata-only, confines every read to the real repository root, and uses fixed read-only Git commands.
+- Search is lexical, ranked, deduplicated, and bounded. A private hashed token index supports deterministic concept lookup without public model/web calls or a vector database.
+- `ImplementationSurface` separates authoritative files from tests/config/supporting files. `ChangeImpact` separates direct impact from possible consumers and reports a bounded radius plus uncertainty.
+- Imports are not treated as calls. Call/render/test relationships require additional source evidence and carry confidence/provenance.
+- Snapshot fingerprints include revision, dirty/untracked state, and relevant file metadata/content fingerprints. Ordinary source changes use targeted incremental refresh; manifest/workspace changes use a full bounded refresh.
+- The adaptive CODE planner can replace unresolved implementation assumptions with proven files, symbols, routes, and tests while preserving intent, constraints, acceptance criteria, approval policy, and stop conditions.
+- Deep symbol parsing is currently strongest for TypeScript/JavaScript. Broader language capability packs remain Run 04 I3 work.
+
 ## Design
 
 ### Direction
@@ -251,4 +263,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 03 I3 checkpoint: `ASK-I3: add vision and media intelligence`
 - Run 03 I4 checkpoint: `ASK-I4: verify multimodal intelligence end to end`
 - Run 04 I1 checkpoint: `CODE-I1: add adaptive planning and delivery contracts`
+- Run 04 I2 checkpoint: `CODE-I2: add repository intelligence and impact mapping`
 - The repository HEAD is authoritative; confirm it with Git before every task.

@@ -145,6 +145,18 @@ C-25 | Research priority | Repository answers task | No public research requeste
 C-26 | Research freshness | Current external API behavior matters | Sanitized official technical research marked; no source/path/notes leakage
 C-27 | Inspection handoff | Exact files are not yet proven | RepositoryInspectionRequest asks evidence/symbol/config questions; no invented path
 C-28 | Plan UI | Open actionable CODE proposal | Concise task-specific steps shown; internal graph and private context remain hidden
+C-29 | Repository snapshot | Inspect clean and dirty repositories | Revision, branch, modified and relevant untracked files are truthful and bounded
+C-30 | Repository safety | Try traversal, symlink escape, binary and oversized files | Reads stay in root; links skipped; unsafe files remain metadata-only
+C-31 | Repository structure | Inspect workspace monorepo | Packages/apps, manifests, scripts, dependencies, source/test roots and frameworks map from evidence
+C-32 | Repository secrets | Inspect env declarations and script metadata | Variable names may appear; values and credential arguments are redacted
+C-33 | Repository symbols/routes | Trace TS/JS feature and Next route | Definitions, exports, locations, handlers and route paths come from inspected source
+C-34 | Repository relations | Compare import and invocation | Import remains imports; calls/renders/tests require separate evidence and confidence
+C-35 | Repository search | Search path, filename, text, identifier, symbol, route, config and import | Ranked bounded unique evidence; source outranks generated output; no public call
+C-36 | Implementation surface | Trace a feature | Authoritative files/symbols/routes/tests/config separated from supporting evidence and uncertainty
+C-37 | Change impact | Map a bounded feature repair | Direct files/tests/route impact separated from possible consumers; radius is proportional
+C-38 | Repository staleness | Modify source then manifest | Source gets incremental refresh; manifest triggers bounded full refresh
+C-39 | Planner refinement | Resolve RepositoryInspectionRequest | Evidence revises implementation steps without changing intent, constraints, acceptance or approval
+C-40 | Exact-path discipline | No implementation owner found | Planner retains unresolved path and does not invent a conventional location
 ```
 
 ## Approval Policies

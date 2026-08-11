@@ -157,7 +157,15 @@ export type AdaptiveCodePlan = {
   hypotheses: DebugHypothesis[];
   intent: CodeTaskIntent;
   maxRepairCycles: number;
+  repositoryEvidence: {
+    confidence: number;
+    exactPaths: string[];
+    impactRadius: "cross-feature" | "feature" | "local" | "system-wide" | "unknown";
+    snapshotFingerprint: string;
+    status: "found" | "partial" | "unavailable";
+  } | null;
   repositoryInspection: RepositoryInspectionRequest;
+  revisions: PlanRevision[];
   research: {
     publicQuery: string | null;
     reason: string;
@@ -695,7 +703,9 @@ export function buildAdaptiveCodePlan(input: BuildAdaptiveCodePlanInput): Adapti
     hypotheses,
     intent,
     maxRepairCycles: complexity === "tiny" ? 1 : 2,
+    repositoryEvidence: null,
     repositoryInspection: repositoryInspection(intent, taskId),
+    revisions: [],
     research: {
       publicQuery: intent.requiresNetwork ? "official current technical documentation for the requested external capability" : null,
       reason: intent.requiresNetwork ? "Current external behavior cannot be proven by repository evidence alone." : "Inspect repository evidence before public research.",

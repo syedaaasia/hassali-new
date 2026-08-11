@@ -98,8 +98,14 @@ import {
 } from "@/lib/server/ai/execution-planner";
 import {
   buildAdaptiveCodePlan,
+  type AdaptiveCodePlan,
   type AdaptiveCodePlanSummary
 } from "@/lib/server/ai/adaptive-code-planner";
+import {
+  inspectRepository,
+  inspectRepositoryForRequest
+} from "@/lib/server/repository-intelligence/repository-intelligence";
+import { refineAdaptiveCodePlanWithRepository } from "@/lib/server/repository-intelligence/planner-repository-bridge";
 import {
   buildGeneratorContract,
   summarizeGeneratorContract,
@@ -275,6 +281,30 @@ const userSelectableProposalModelIds = new Set(
   getHassaliModelOptions().map((option) => option.value.toLowerCase())
 );
 const handoffMarker = "\nHASSALI_MODE_HANDOFF:";
+
+async function refineOwnedCodePlanWithRepository(
+  plan: AdaptiveCodePlan,
+  projectId: string,
+  signal: AbortSignal
+) {
+  if (!plan.intent.requiresRepositoryInspection) return plan;
+  try {
+    const { userId } = await auth();
+    if (!userId) return plan;
+    await listUserProjectFiles({ externalUserId: userId, projectId });
+    const binding = await resolveProjectWorkspace(projectId);
+    if (isWorkspaceBindingError(binding)) return plan;
+    const snapshot = await inspectRepository(binding.workspaceRoot, { signal });
+    const result = await inspectRepositoryForRequest(snapshot, plan.repositoryInspection, signal);
+    return refineAdaptiveCodePlanWithRepository(plan, result);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    // Repository evidence is an optional read-only refinement. Existing ownership,
+    // approval, and proposal gates remain authoritative if bounded inspection fails.
+    return plan;
+  }
+}
+
 function yieldForRequestCancellation(delayMs = 0) {
   return new Promise<void>((resolve) => {
     if (delayMs > 0) {
@@ -6416,8 +6446,11 @@ export async function POST(request: Request) {
         ]
       })
     : null;
+  const repositoryAwareAdaptiveCodePlan = adaptiveCodePlan && requestedProjectId
+    ? await refineOwnedCodePlanWithRepository(adaptiveCodePlan, requestedProjectId, taskSignal)
+    : adaptiveCodePlan;
   const executionPlan = buildExecutionPlan({
-    adaptiveCodePlan,
+    adaptiveCodePlan: repositoryAwareAdaptiveCodePlan,
     businessBlueprint: blueprint,
     contextPriority,
     currentPrompt: effectiveUserPrompt,
