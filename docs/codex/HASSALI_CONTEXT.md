@@ -137,6 +137,16 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Intelligence Settings can return a complete ready-degraded snapshot when preference persistence is unavailable. BYOK remains encrypted in server memory and the UI states that session limitation truthfully.
 - Project search is deterministic, Clerk-owner-filtered PostgreSQL search over project names, chat titles, and message content. It never invokes a model or public web provider and can open the exact matched chat session.
 
+### Hassali self knowledge
+
+- `lib/server/self-knowledge/` is the canonical server-only product self-knowledge layer shared by ASK, WEBSITE, and CODE. It stores compact structured records rather than injecting a giant product prompt.
+- Records carry category, status, provenance, confidence, modes, roadmap/capability links, and current/superseded state. Status distinguishes implemented, verified, live-verified, degraded, limited, unavailable, planned, and deprecated facts.
+- Retrieval is deterministic lexical/structured search with current-first conflict handling, deduplication, a maximum of eight records, and a 5,000-character hard context ceiling. Hassali internal facts do not require public web search.
+- Current runtime/security truth outranks implementation prose, which outranks canonical docs and checkpoints, which outrank roadmap and superseded history. Descriptive knowledge cannot grant approval or execution authority.
+- Machine-local tool availability is added only from the bounded runtime capability registry when the request asks for current local state; static adapter support is never treated as proof that a binary is available.
+- ASK answers common Hassali identity, mode, capability, approval, roadmap, and local-tool questions deterministically from these records. WEBSITE and CODE receive the same bounded source through shared preflight context.
+- M1 contains Hassali product self knowledge only. Personal/user memory, project/conversation memory, temporal conflict memory, user memory controls, and broader cross-mode long-term memory remain planned for M2-M6.
+
 ### Adaptive CODE planning
 
 - Every actionable CODE request now creates an `AdaptiveCodePlan` before the existing execution-plan/proposal path. ASK and WEBSITE keep their established planners and authority boundaries.
@@ -285,6 +295,8 @@ The reusable acceptance scenarios live in `docs/codex/HASSALI_TEST_MATRIX.md`.
 
 Roadmap names describe intended bounded runs, not completed implementation claims.
 
+The current pre-launch Memory sequence is M1 Hassali Self Knowledge, then planned M2 User and People Memory, M3 Project and Conversation Memory, M4 Temporal/Conflict/Retrieval Intelligence, M5 Memory Controls and Privacy, and M6 Cross-Mode Shared Memory. Growth and Runs 5-6 remain planned rather than implemented.
+
 1. **Premium Workspace and Codex Efficiency Foundation** - polish the creation workspace and establish concise engineering context.
 2. **Live Execution Timeline, Git Workflow and Verified Delivery** - make approved work, evidence, and delivery state easy to inspect.
 3. **Three.js, Image-to-Procedural 3D and Cinematic Sequences** - add bounded, performant 3D and cinematic creation workflows.
@@ -312,4 +324,5 @@ Roadmap names describe intended bounded runs, not completed implementation claim
 - Run 04 I4 checkpoint: `CODE-I4: add secure execution and permission enforcement`
 - Run 04 I5 checkpoint: `CODE-I5: add verification review and safe recovery`
 - Run 04 I6 checkpoint: `CODE-I6: add live execution timeline git workflow and verified delivery`
+- Memory M1 checkpoint: `MEMORY-M1: add Hassali self-knowledge foundation`
 - The repository HEAD is authoritative; confirm it with Git before every task.

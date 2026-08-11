@@ -26,7 +26,7 @@ function boundedGitText(value: string, limit = maxGitOutputBytes) {
     .replace(/[A-Za-z]:\\[^\r\n]+/g, "[workspace]")
     .replace(/\b(?:Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/\b(?:sk|pk)_[A-Za-z0-9_-]{12,}\b/g, "[redacted]")
-    .replace(/((?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PRIVATE[_-]?KEY)\s*[:=]\s*)[^\s,'\"]+/gi, "$1[redacted]")
+    .replace(/((?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|PRIVATE[_-]?KEY)\s*[:=]\s*)[^\s,'"]+/gi, "$1[redacted]")
     .slice(0, limit);
 }
 

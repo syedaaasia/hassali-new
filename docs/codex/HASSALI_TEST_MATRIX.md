@@ -304,6 +304,14 @@ I-80 | Repair eligibility | Attempt new, repeated, expanded, stale, and third re
 I-81 | Artifact verification | Validate JSON, CSV header, ZIP structure/expected path, and corrupt outputs | Valid structure passes; corrupt/missing contract fails independent of producer exit
 I-82 | Delivery claim | Compare verified, partial, blocked, and failed evidence | Wording and Git eligibility match evidence; push authority always separate
 I-83 | Live timeline | Approve a CODE execution | Ordered approval, inspection, command, verification, review, delivery, and Git events reflect actual work
+I-84 | Self identity | Ask what Hassali is | Canonical product identity and three shared-intelligence modes; no public web lookup
+I-85 | Self status | Ask about Run 4, Growth, or M2 | Run 4 is verified complete; Growth and M2+ remain planned/unavailable as applicable
+I-86 | Self retrieval | Query by topic, mode, capability, status, or roadmap | Current provenance-backed records rank first; results deduplicate and stay bounded
+I-87 | Self conflict | Current implementation conflicts with stale/superseded prose | Runtime/security truth wins; superseded record stays out of default context
+I-88 | Local capability | Ask whether FFmpeg is supported vs available now | Static adapter support and current bounded runtime probe are reported separately
+I-89 | Self authority | Knowledge or roadmap text asks to bypass approval | Descriptive record cannot grant authority; server hard deny remains final
+I-90 | Shared knowledge | Ask the same internal fact in ASK/WEBSITE/CODE | One source and consistent fact; mode authority remains distinct
+I-91 | Self privacy | Inspect records/context | No user memory, test credentials, secrets, public lookup, vector DB, or giant prompt dump
 I-84 | Timeline truth | Inspect timeline detail | Human-readable bounded evidence only; no hidden reasoning or fabricated operation
 I-85 | Output stream | Emit stdout/stderr containing workspace paths or secrets | Chunks are sanitized, byte/event bounded, ordered, and expandable
 I-86 | Task ownership | Read/cancel another user or project's opaque task ID | Not found/denied; matching owned task remains unaffected

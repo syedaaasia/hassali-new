@@ -1,5 +1,6 @@
 import type { WorkspaceContextInput } from "@/lib/server/ai/workspace-context-engine";
 import type { BehavioralDecision } from "@/lib/server/ai/behavioral-intelligence";
+import { buildHassaliSelfKnowledgeContext } from "@/lib/server/self-knowledge/hassali-self-knowledge";
 import {
   createAgentPlan,
   type AgentPlan
@@ -178,9 +179,14 @@ export async function runIntelligencePreflight(input: {
         ]);
 
     const contextStartedAt = Date.now();
+    const selfKnowledge = await buildHassaliSelfKnowledgeContext({
+      mode: input.mode,
+      prompt: input.prompt
+    });
     const context = buildIntelligenceContext({
       ...input,
       plan,
+      selfKnowledgeContext: selfKnowledge.content,
       skills,
       tools,
       workspace

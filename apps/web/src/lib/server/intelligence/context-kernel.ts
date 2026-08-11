@@ -20,7 +20,7 @@ export type IntelligenceConversationMessage = {
 export type ContextLayer = {
   content: string;
   estimatedTokens: number;
-  provenance: "conversation" | "plan" | "policy" | "skill" | "tool" | "workspace";
+  provenance: "conversation" | "plan" | "policy" | "self_knowledge" | "skill" | "tool" | "workspace";
   trusted: boolean;
 };
 
@@ -168,6 +168,7 @@ export function buildIntelligenceContext(input: {
   model: string;
   plan: IntelligencePlan;
   prompt: string;
+  selfKnowledgeContext?: string;
   skills: SkillSelectionResult;
   tools: DeferredToolSelection;
   workspace?: WorkspaceContextInput | null;
@@ -201,6 +202,13 @@ export function buildIntelligenceContext(input: {
     provenance: "conversation",
     trusted: true
   });
+  if (input.selfKnowledgeContext?.trim()) {
+    pushLayer(layers, {
+      content: input.selfKnowledgeContext,
+      provenance: "self_knowledge",
+      trusted: true
+    });
+  }
 
   for (const skill of input.skills.loadedSkills) {
     const resourceText = skill.resources
@@ -271,7 +279,7 @@ export function buildIntelligenceContext(input: {
   }
 
   const providerParts = layers
-    .filter((layer) => layer.provenance === "policy" || layer.provenance === "skill" || layer.provenance === "tool" || layer.provenance === "plan")
+    .filter((layer) => layer.provenance === "policy" || layer.provenance === "self_knowledge" || layer.provenance === "skill" || layer.provenance === "tool" || layer.provenance === "plan")
     .map((layer) => layer.content);
   const provider = truncate(providerParts.join("\n\n"), MAX_PROVIDER_CONTEXT);
   truncated ||= provider.truncated;
