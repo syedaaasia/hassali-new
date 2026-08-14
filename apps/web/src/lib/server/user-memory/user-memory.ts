@@ -285,6 +285,14 @@ export async function buildUserMemoryContext(store: UserMemoryStore, prompt: str
 }
 
 export async function handleAskUserMemory(input: {
+  policy?: {
+    allowAutomaticWrite: boolean;
+    allowExplicitWrite: boolean;
+    allowRead: boolean;
+    allowSensitiveExplicitWrite: boolean;
+    blockedRecallMessage?: string;
+    blockedSaveMessage?: string;
+  };
   prompt: string;
   publicResearch: boolean;
   sourceMessageId: string | null;
@@ -311,15 +319,42 @@ export async function handleAskUserMemory(input: {
       };
     }
     if (intent.kind === "recall") {
+      if (input.policy && !input.policy.allowRead) {
+        return { context: "", directAnswer: input.policy.blockedRecallMessage ?? "Saved memory is not available for this request.", intent: intent.kind };
+      }
       return { context: "", directAnswer: await answerRecall(input.store, intent), intent: intent.kind };
     }
     if (intent.kind === "store") {
+      const allowed = intent.candidate.captureMethod === "explicit"
+        ? input.policy?.allowExplicitWrite !== false
+        : input.policy?.allowAutomaticWrite !== false;
+      if (!allowed) {
+        if (intent.candidate.captureMethod === "explicit") {
+          return { context: "", directAnswer: input.policy?.blockedSaveMessage ?? "Memory is unavailable, so I didn't save that.", intent: intent.kind };
+        }
+        return {
+          context: input.policy?.allowRead === false
+            ? ""
+            : await buildUserMemoryContext(input.store, input.prompt, { publicResearch: input.publicResearch }),
+          directAnswer: null,
+          intent: intent.kind
+        };
+      }
+      if (intent.candidate.sensitivity === "sensitive" && input.policy && !input.policy.allowSensitiveExplicitWrite) {
+        return {
+          context: "",
+          directAnswer: "Sensitive Memory is off, so I didn't save that. You can allow explicitly saved sensitive memories in Settings. Passwords, keys, tokens, and credentials can never be saved.",
+          intent: intent.kind
+        };
+      }
       const saved = await input.store.save(intent.candidate, input.sourceMessageId);
       const prefix = saved.action === "updated" ? "Updated." : saved.action === "deduplicated" ? "I already had that saved." : "Got it. I saved that.";
       return { context: "", directAnswer: `${prefix} I’ll remember that ${recordLabel(saved.record)}.`, intent: intent.kind };
     }
     return {
-      context: await buildUserMemoryContext(input.store, input.prompt, { publicResearch: input.publicResearch }),
+      context: input.policy?.allowRead === false
+        ? ""
+        : await buildUserMemoryContext(input.store, input.prompt, { publicResearch: input.publicResearch }),
       directAnswer: null,
       intent: intent.kind
     };

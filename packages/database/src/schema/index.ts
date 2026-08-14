@@ -8,6 +8,7 @@ export * from "./intelligence-preferences";
 export * from "./intelligence-source-connections";
 export * from "./intelligence-usage-records";
 export * from "./memory-people";
+export * from "./memory-preferences";
 export * from "./project-episodes";
 export * from "./project-memory-records";
 export * from "./projects";

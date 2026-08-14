@@ -1,5 +1,6 @@
 import {
   deleteOwnedChatMessage,
+  loadOwnedMemoryPreferences,
   listUserProjectFiles,
   loadOwnedChatHandoff,
   loadOwnedHandoffResponse,
@@ -29,6 +30,7 @@ import {
   buildProjectPlanningMemoryAmbiguities,
   handleAskTemporalMemory
 } from "@/lib/server/memory-intelligence/temporal-memory";
+import { buildMemoryAccessPolicy, disabledMemoryMessage } from "@/lib/server/memory-controls/memory-policy";
 import {
   buildModeHandoff,
   handoffRequestKey,
@@ -6451,6 +6453,8 @@ export async function POST(request: Request) {
         const memoryOwnerId = (await auth()).userId;
         if (!memoryOwnerId) return [];
         try {
+          const policy = buildMemoryAccessPolicy(await loadOwnedMemoryPreferences(memoryOwnerId));
+          if (!policy.projectRead) return [];
           return await buildProjectPlanningMemoryAmbiguities({
             projectNotes: boundedProjectNotes,
             prompt: behavior.resolvedRequest,
@@ -6842,16 +6846,24 @@ export async function POST(request: Request) {
     const memoryOwnerId = persistence?.externalUserId ?? (await auth()).userId;
     if (memoryOwnerId) {
       persistence = await persistPendingUserMessage(persistence);
+      let memoryPolicy;
+      try {
+        memoryPolicy = buildMemoryAccessPolicy(await loadOwnedMemoryPreferences(memoryOwnerId));
+      } catch (error) {
+        console.error("memory preferences unavailable", error instanceof Error ? error.message : "Unknown error");
+      }
       if (persistence?.sessionId) {
         try {
           const projectStore = createDatabaseProjectMemoryStore(memoryOwnerId, persistence.projectId);
-          const temporalMemory = await handleAskTemporalMemory({
+          const temporalMemory = memoryPolicy && memoryPolicy.userRead && memoryPolicy.projectRead && memoryPolicy.conversationRead
+            ? await handleAskTemporalMemory({
             projectId: persistence.projectId,
             projectNotes: boundedProjectNotes,
             projectStore,
             prompt: effectiveUserPrompt,
             userStore: createDatabaseUserMemoryStore(memoryOwnerId)
-          });
+            })
+            : null;
           if (temporalMemory) {
             const selfReview = runSelfReviewForAskAnswer({
               answer: temporalMemory.answer,
@@ -6881,6 +6893,8 @@ export async function POST(request: Request) {
             }));
           }
           const projectMemory = await handleAskProjectMemory({
+            allowRead: memoryPolicy?.projectRead === true && memoryPolicy?.conversationRead === true,
+            allowWrite: memoryPolicy?.projectWrite === true && memoryPolicy?.conversationWrite === true,
             conversationId: persistence.sessionId,
             projectNotes: projectNotesContext,
             prompt: effectiveUserPrompt,
@@ -6930,6 +6944,21 @@ export async function POST(request: Request) {
         }
       }
       const userMemory = await handleAskUserMemory({
+        policy: memoryPolicy ? {
+          allowAutomaticWrite: memoryPolicy.userAutomaticWrite,
+          allowExplicitWrite: memoryPolicy.userExplicitWrite,
+          allowRead: memoryPolicy.userRead,
+          allowSensitiveExplicitWrite: memoryPolicy.userSensitiveExplicitWrite,
+          blockedRecallMessage: disabledMemoryMessage(memoryPolicy.state, "recall"),
+          blockedSaveMessage: disabledMemoryMessage(memoryPolicy.state, "save")
+        } : {
+          allowAutomaticWrite: false,
+          allowExplicitWrite: false,
+          allowRead: false,
+          allowSensitiveExplicitWrite: false,
+          blockedRecallMessage: "Memory settings are unavailable right now, so I'm not using or claiming to recall saved memory.",
+          blockedSaveMessage: "Memory settings are unavailable right now, so I didn't save that."
+        },
         prompt: effectiveUserPrompt,
         publicResearch: askFreshnessDecision.researchRequired,
         sourceMessageId: pendingUserMessageId,

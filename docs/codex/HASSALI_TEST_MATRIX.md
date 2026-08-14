@@ -346,6 +346,20 @@ M-31 | Forget history | Forget a corrected fact, then ask for current and previo
 M-32 | Temporal bounds | Retrieve from large personal/project history | Scope, candidate count, evidence count, and answer text remain capped without a vector DB
 M-33 | Secret exclusion | Place a secret-like value in candidate memory | Candidate is rejected before temporal retrieval and never appears in output
 M-34 | Planner ambiguity | Material current project evidence conflicts during CODE planning | Existing adaptive planner blocks assumptions until the conflict is resolved
+M-35 | Preference defaults | Open Memory Settings for an existing user | Compatible defaults: Memory/automatic/scopes on, Pause/sensitive off
+M-36 | Durable controls | Change OFF, Pause, automatic, and sensitive settings; reload | PostgreSQL values persist for the same Clerk user; another user is unchanged
+M-37 | Read gate | Turn Memory OFF or Pause, then ask personal/project/temporal recall | M2-M4 derived context is absent; M1 and current conversation remain available
+M-38 | Write gate | Explicit/automatic save while OFF or paused | No durable write and a truthful response; privacy deletion remains available
+M-39 | Automatic gate | Disable automatic memory; state a durable fact, then explicitly remember it | Ordinary implicit save is skipped; explicit low-risk save remains available
+M-40 | Sensitive consent | Explicitly remember a sensitive fact with setting off/on | Off blocks it; on permits only explicit consent; secrets remain prohibited always
+M-41 | Memory listing | Search/filter personal, people, project, current, and history | Bounded owner-only results with understandable provenance and no raw IDs
+M-42 | Derived edit | Correct active personal/project memory in Settings | New current version created; prior version historical; source chat unchanged
+M-43 | Individual forget | Forget current or historical personal/project memory | Entire derived temporal chain disappears and cannot resurrect
+M-44 | Scoped cleanup | Forget person or clear project/conversation context | Only owned derived scope removed; original chat/project/files/notes remain
+M-45 | Clear all | Type confirmation and clear an isolated user's derived memory | One transaction clears M2-M4 only; M1/account/projects/chats remain
+M-46 | Memory export | Download authenticated JSON while Memory is on or off | Coherent owner-only derived snapshot; no secrets/IDs; labeled non-account export
+M-47 | Memory IDOR | Use another user's memory/person/project/conversation IDs | Read/edit/delete/export/clear fails closed without changing either owner
+M-48 | Memory responsive UI | Open Settings → Memory at desktop and narrow width | Controls remain accessible, scannable, keyboard named, and horizontally contained
 I-84 | Timeline truth | Inspect timeline detail | Human-readable bounded evidence only; no hidden reasoning or fabricated operation
 I-85 | Output stream | Emit stdout/stderr containing workspace paths or secrets | Chunks are sanitized, byte/event bounded, ordered, and expandable
 I-86 | Task ownership | Read/cancel another user or project's opaque task ID | Not found/denied; matching owned task remains unaffected

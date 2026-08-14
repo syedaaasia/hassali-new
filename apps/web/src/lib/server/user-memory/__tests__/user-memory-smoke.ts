@@ -156,14 +156,14 @@ test("ISOLATION-01 separate user stores do not cross-read", async () => {
 
 test("ISOLATION-02 API and persistence bind every operation to Clerk external user ownership", async () => {
   const route = await readFile(new URL("../../../../app/api/memory/route.ts", import.meta.url), "utf8");
-  const persistence = await readFile(new URL("../../../../../../../packages/database/src/user-memory-persistence.ts", import.meta.url), "utf8");
-  assert.match(route, /const \{ userId \} = await auth\(\)/);
-  assert.match(route, /listOwnedUserMemories\(userId/);
-  assert.match(route, /externalUserId: userId/);
+  const persistence = await readFile(new URL("../../../../../../../packages/database/src/memory-management-persistence.ts", import.meta.url), "utf8");
+  assert.match(route, /return \(await auth\(\)\)\.userId/);
+  assert.match(route, /loadOwnedMemorySnapshot\(userId\)/);
+  assert.match(route, /forgetOwnedUserMemoryById\(userId/);
   assert.match(route, /private, no-store/);
   assert.match(persistence, /users\.external_id = \$\{externalUserId\}/);
-  assert.match(persistence, /where external_id = \$\{input\.externalUserId\}/);
-  assert.match(persistence, /from chat_messages[\s\S]{0,160}user_id = \$\{userId\}/);
+  assert.match(persistence, /users\.external_id = \$\{input\.externalUserId\}/);
+  assert.match(persistence, /workspaces\.owner_id = users\.id/);
   assert.doesNotMatch(route, /console\.(?:log|info|error).*memory/i);
 });
 

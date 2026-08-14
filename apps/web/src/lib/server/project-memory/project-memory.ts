@@ -312,13 +312,17 @@ export async function recordVerifiedProjectOutcome(input: {
 }
 
 export async function handleAskProjectMemory(input: {
+  allowRead?: boolean;
+  allowWrite?: boolean;
   conversationId: string;
   projectNotes?: string;
   prompt: string;
   sourceMessageId: string | null;
   store: ProjectMemoryStore;
 }): Promise<{ context: string; directAnswer: string | null; saved: number }> {
-  const candidates = extractProjectMemoryCandidates(input.prompt);
+  const allowRead = input.allowRead !== false;
+  const allowWrite = input.allowWrite !== false;
+  const candidates = allowWrite ? extractProjectMemoryCandidates(input.prompt) : [];
   let saved = 0;
   for (const candidate of candidates) {
     await input.store.saveRecord(candidate, input.sourceMessageId, input.conversationId);
@@ -326,29 +330,32 @@ export async function handleAskProjectMemory(input: {
   }
   const terms = queryTerms(input.prompt).join(" ");
   if (sourceIntent(input.prompt)) {
+    if (!allowRead) return { context: "", directAnswer: null, saved };
     const evidence = await input.store.searchOriginalMessages(terms || input.prompt, isExplicitCrossProjectQuery(input.prompt), 3, input.sourceMessageId);
-    await updateConversationMemory(input.store, input.conversationId);
+    if (allowWrite) await updateConversationMemory(input.store, input.conversationId);
     return { context: "", directAnswer: formatEvidence(evidence), saved };
   }
   if (isExplicitCrossProjectQuery(input.prompt)) {
+    if (!allowRead) return { context: "", directAnswer: null, saved };
     const records = await input.store.searchAcrossProjects(terms || input.prompt, 8);
     const evidence = await input.store.searchOriginalMessages(terms || input.prompt, true, 4, input.sourceMessageId);
-    await updateConversationMemory(input.store, input.conversationId);
+    if (allowWrite) await updateConversationMemory(input.store, input.conversationId);
     return { context: "", directAnswer: formatRecall(records, [], evidence, input.projectNotes), saved };
   }
   if (historicalIntent(input.prompt)) {
+    if (!allowRead) return { context: "", directAnswer: null, saved };
     const records = await input.store.listRecords({ limit: 10, query: terms });
     const current = records.length ? records : await input.store.listRecords({ limit: 10 });
     const conversations = (await input.store.listConversations(4)).filter((item) => item.conversationId !== input.conversationId).slice(0, 3);
     const evidence = current.length === 0 && terms ? await input.store.searchOriginalMessages(terms, false, 3, input.sourceMessageId) : [];
-    await updateConversationMemory(input.store, input.conversationId);
+    if (allowWrite) await updateConversationMemory(input.store, input.conversationId);
     return { context: "", directAnswer: formatRecall(current, conversations, evidence, input.projectNotes), saved };
   }
-  await updateConversationMemory(input.store, input.conversationId);
+  if (allowWrite) await updateConversationMemory(input.store, input.conversationId);
   if (saved > 0 && /\b(?:we decided|project decision|next step|update the project decision|checkpoint|milestone|unresolved issue)\b/i.test(input.prompt)) {
     return { context: "", directAnswer: `I recorded ${saved === 1 ? "that project memory" : `${saved} project memories`} with its conversation source.`, saved };
   }
-  return { context: await buildProjectMemoryContext(input.store, input.prompt, input.projectNotes), directAnswer: null, saved };
+  return { context: allowRead ? await buildProjectMemoryContext(input.store, input.prompt, input.projectNotes) : "", directAnswer: null, saved };
 }
 
 export class InMemoryProjectMemoryStore implements ProjectMemoryStore {

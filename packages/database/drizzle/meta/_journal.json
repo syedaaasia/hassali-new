@@ -36,6 +36,13 @@
       "when": 1786426656211,
       "tag": "0004_uneven_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786664279658,
+      "tag": "0005_daily_typhoid_mary",
+      "breakpoints": true
     }
   ]
 }

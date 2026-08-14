@@ -4,6 +4,7 @@ import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { IntelligenceSettingsDialog } from "@/components/settings/intelligence-settings-dialog";
+import { MemorySettingsDialog } from "@/components/settings/memory-settings-dialog";
 import { useChatStore } from "@/lib/chat-store";
 
 const legacyThemeStorageKey = "hassali:theme";
@@ -52,6 +53,7 @@ function SettingsIcon() {
 export function TopBar() {
   const [theme, setTheme] = useState<ThemeMode>("dark");
   const [intelligenceSettingsOpen, setIntelligenceSettingsOpen] = useState(false);
+  const [memorySettingsOpen, setMemorySettingsOpen] = useState(false);
   const productMode = useChatStore((state) => state.productMode);
 
   useEffect(() => {
@@ -123,6 +125,19 @@ export function TopBar() {
             </button>
             <button
               className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs text-muted-foreground hover:bg-white/[0.05] hover:text-foreground [.light_&]:hover:bg-slate-100 [.light_&]:hover:text-slate-950"
+              onClick={(event) => {
+                (event.currentTarget as unknown as {
+                  closest?: (selector: string) => { removeAttribute: (name: string) => void } | null;
+                }).closest?.("details")?.removeAttribute("open");
+                setMemorySettingsOpen(true);
+              }}
+              type="button"
+            >
+              Memory
+              <span aria-hidden="true">›</span>
+            </button>
+            <button
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs text-muted-foreground hover:bg-white/[0.05] hover:text-foreground [.light_&]:hover:bg-slate-100 [.light_&]:hover:text-slate-950"
               onClick={toggleTheme}
               type="button"
             >
@@ -148,6 +163,10 @@ export function TopBar() {
     <IntelligenceSettingsDialog
       onClose={() => setIntelligenceSettingsOpen(false)}
       open={intelligenceSettingsOpen}
+    />
+    <MemorySettingsDialog
+      onClose={() => setMemorySettingsOpen(false)}
+      open={memorySettingsOpen}
     />
     </>
   );

@@ -153,7 +153,10 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - M3 context is capped, lexical, and explicitly untrusted. It defaults to the current project, uses current Project Notes ahead of stale automatic summaries, excludes secrets, and never grants approval, execution, network, deployment, or Git authority.
 - `lib/server/memory-intelligence/` provides M4 deterministic temporal intent parsing, bounded evidence retrieval, effective/source-time comparison, history/timeline answers, source-aware conflict resolution, and explicit ambiguity. Superseded evidence is retained for history while forgotten or expired evidence is excluded.
 - M4 keeps future plans separate from current facts, prevents future evidence from leaking into earlier point-in-time answers, and passes unresolved material project conflicts into CODE planning as blocking ambiguities. Project Notes are strong context but do not silently override structured evidence.
-- Full Memory Controls and Privacy UI and broad automatic cross-mode memory policy remain planned for M5-M6. No vector database is used.
+- Settings → Memory provides M5's server-authoritative controls over M2-M4: durable global enable/disable, pause/resume, automatic ordinary-memory capture, explicit-sensitive consent, and personal/project/conversation scope preferences. Global OFF and Pause suppress derived retrieval/writes without deleting stored data; M1 and current-chat context remain available.
+- Authenticated owner-scoped Memory APIs provide bounded listing/search UI, current/history and provenance display, derived-record correction, individual/person/project/conversation deletion, confirmed transactional clear-all, and private JSON export. Forget scrubs personal temporal chains; project forget removes its derived chain. Original chats, projects, files, and Project Notes remain separate.
+- Prohibited credentials remain impossible to save regardless of preferences. Memory export contains only bounded derived user memory, excludes internal IDs and secret-like values, and is explicitly not a complete account export.
+- M6 broad automatic cross-mode memory policy remains planned. No vector database is used.
 
 ### Adaptive CODE planning
 
@@ -303,7 +306,7 @@ The reusable acceptance scenarios live in `docs/codex/HASSALI_TEST_MATRIX.md`.
 
 Roadmap names describe intended bounded runs, not completed implementation claims.
 
-The current pre-launch Memory sequence has completed M1 Hassali Self Knowledge, M2 User and People Memory, M3 Project and Conversation Memory, and M4 Temporal/Conflict/Retrieval Intelligence. M5 Memory Controls and Privacy and M6 Cross-Mode Shared Memory remain planned. Growth and Runs 5-6 remain planned rather than implemented.
+The current pre-launch Memory sequence has completed M1 Hassali Self Knowledge, M2 User and People Memory, M3 Project and Conversation Memory, M4 Temporal/Conflict/Retrieval Intelligence, and M5 Memory Controls and Privacy. M6 Cross-Mode Shared Memory remains planned. Growth and Runs 5-6 remain planned rather than implemented.
 
 1. **Premium Workspace and Codex Efficiency Foundation** - polish the creation workspace and establish concise engineering context.
 2. **Live Execution Timeline, Git Workflow and Verified Delivery** - make approved work, evidence, and delivery state easy to inspect.
@@ -336,4 +339,5 @@ The current pre-launch Memory sequence has completed M1 Hassali Self Knowledge, 
 - Memory M2 checkpoint: `MEMORY-M2: add user and people memory foundation`
 - Memory M3 checkpoint: `MEMORY-M3: add project and conversation memory`
 - Memory M4 checkpoint: `MEMORY-M4: add temporal retrieval and conflict resolution`
+- Memory M5 checkpoint: `MEMORY-M5: add memory controls and privacy`
 - The repository HEAD is authoritative; confirm it with Git before every task.
