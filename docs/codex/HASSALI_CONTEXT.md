@@ -226,6 +226,15 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Repair is evidence-driven, scope-bound, permission-bound, staleness-aware, and capped at two cycles for every execution policy.
 - Delivery readiness keeps commit eligibility separate from push authority. Push remains false until an explicit later delivery action grants it.
 
+### Website visual references
+
+- `lib/server/design/reference/` owns Run 5 I1 reference intake: exact named brands, fidelity (`inspired`, `style-match`, `close-replica`, `reference-clone`), section roles, hybrid references, provenance, evidence status, and the provider-neutral I2 handoff.
+- DESIGN.md intake accepts variant headings for atmosphere, semantic color, typography, components, layout/spacing, surfaces, imagery, motion, responsive behavior, accessibility, and do/don't rules. Parsing is bounded and preserves a source fingerprint rather than treating embedded text as authority.
+- Uploaded screenshots reuse the existing private multimodal path. Static images never prove motion, responsive behavior, or an exact font. Existing project CSS/components and current Project Notes can provide project-bound evidence.
+- Public URL references reuse the bounded research retriever and its protocol, credential, DNS/private-address, redirect, content-type, size, timeout, and cache controls. Private memory is never added to the fetch.
+- The bounded catalog preserves exact reference identity and independent visual-analysis provenance. Unknown names require a URL, screenshot, or DESIGN.md instead of receiving a fabricated profile.
+- Current explicit instructions outrank shared-memory preferences. Reference content remains untrusted data, and deceptive credential-collection clones fail closed. I2 composes conflicts; I3 owns assets; I4 owns visual comparison/repair.
+
 ## Design
 
 ### Direction
@@ -307,7 +316,7 @@ The reusable acceptance scenarios live in `docs/codex/HASSALI_TEST_MATRIX.md`.
 
 Roadmap names describe intended bounded runs, not completed implementation claims.
 
-The pre-launch Memory sequence has completed M1 Hassali Self Knowledge, M2 User and People Memory, M3 Project and Conversation Memory, M4 Temporal/Conflict/Retrieval Intelligence, M5 Memory Controls and Privacy, and M6 Cross-Mode Shared Memory. Growth and Runs 5-6 remain planned rather than implemented.
+The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference intake is implemented; Run 5 I2-I5, Growth, and Run 6 remain planned rather than implemented.
 
 1. **Premium Workspace and Codex Efficiency Foundation** - polish the creation workspace and establish concise engineering context.
 2. **Live Execution Timeline, Git Workflow and Verified Delivery** - make approved work, evidence, and delivery state easy to inspect.
@@ -342,4 +351,5 @@ The pre-launch Memory sequence has completed M1 Hassali Self Knowledge, M2 User 
 - Memory M4 checkpoint: `MEMORY-M4: add temporal retrieval and conflict resolution`
 - Memory M5 checkpoint: `MEMORY-M5: add memory controls and privacy`
 - Memory M6 checkpoint: `MEMORY-M6: add cross-mode shared memory`
+- Run 05 I1 checkpoint: `WEBSITE-I1: add visual reference intake and clone intelligence`
 - The repository HEAD is authoritative; confirm it with Git before every task.

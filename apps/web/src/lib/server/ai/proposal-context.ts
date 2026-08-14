@@ -13,12 +13,14 @@ import {
 } from "@/lib/server/ai/generation-brief";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import { pageToHtmlPath } from "@/lib/server/ai/website-source-of-truth";
+import type { DesignDirectionRequest } from "@/lib/server/design/reference/design-reference-contract";
 
 export type ProposalContextMode = "ASK" | "CODE" | "WEBSITE";
 
 export type ProposalContext = {
   businessName?: string;
   codeGenerationBrief?: CodeGenerationBrief | null;
+  designDirectionRequest?: DesignDirectionRequest | null;
   designTheme?: string;
   domain: string;
   entities: string[];
@@ -73,6 +75,7 @@ export function decidePromptOwnership(input: {
 
 export function buildProposalContext(input: {
   contract?: ProjectContract | null;
+  designDirectionRequest?: DesignDirectionRequest | null;
   generatorContract?: GeneratorContract | null;
   mode: ProposalContextMode;
   prompt: string;
@@ -134,6 +137,7 @@ export function buildProposalContext(input: {
       generatorBusiness ??
       undefined,
     codeGenerationBrief,
+    designDirectionRequest: input.mode === "WEBSITE" ? input.designDirectionRequest ?? null : null,
     designTheme: input.translatedIntent.theme ?? input.translatedIntent.visualLanguage ?? undefined,
     domain,
     entities: input.generatorContract?.requiredEntities.length

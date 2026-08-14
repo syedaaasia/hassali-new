@@ -297,6 +297,13 @@ import {
   isWorkspaceBindingError,
   resolveProjectWorkspace
 } from "@/lib/server/runtime/project-workspace-registry";
+import {
+  buildDesignReferenceIntake,
+  compactDesignDirectionRequest,
+  designReferenceVisibleSummary
+} from "@/lib/server/design/reference/reference-intake";
+import type { DesignDirectionRequest } from "@/lib/server/design/reference/design-reference-contract";
+import { hasDesignReferenceSignal } from "@/lib/server/design/reference/reference-intent";
 
 export const runtime = "nodejs";
 
@@ -953,6 +960,56 @@ function isBroadExistingCodeScaffoldProposal(payload: DiffProposalPayload, works
     bootstrapPaths.length >= 5 ||
     rewritesExistingBootstrap.length >= 4
   );
+}
+
+function attachDesignReferenceContext(
+  proposal: DiffProposal,
+  request: DesignDirectionRequest | null | undefined
+): DiffProposal {
+  if (!request) return proposal;
+  const visible = designReferenceVisibleSummary(request);
+  const alreadyIncluded = visible && proposal.summary.startsWith(visible);
+  return {
+    ...proposal,
+    previewMetadata: {
+      ...proposal.previewMetadata,
+      designReference: compactDesignDirectionRequest(request)
+    },
+    summary: visible && !alreadyIncluded ? `${visible}\n\n${proposal.summary}` : proposal.summary
+  };
+}
+
+function createBlockedDesignReferenceProposal(input: {
+  mode: "EXECUTE" | "SUGGEST";
+  projectId: string | null;
+  request: DesignDirectionRequest;
+}): DiffProposal {
+  const unresolved = input.request.references.filter((reference) =>
+    reference.resolutionStatus === "ambiguous" || reference.resolutionStatus === "not-found"
+  );
+  const reason = input.request.security.reason ??
+    (unresolved.length
+      ? `I could not verify the visual reference ${unresolved.map((reference) => reference.name).join(", ")}. Add its public URL, screenshot, or DESIGN.md so I do not invent its design.`
+      : "The visual reference could not be resolved safely.");
+  return attachDesignReferenceContext({
+    approvalDisabled: true,
+    approvalRecommendation: "reject",
+    blockedReason: reason,
+    changes: [],
+    id: `proposal-${Date.now()}`,
+    mode: input.mode,
+    previewMode: "answer_only",
+    projectId: input.projectId,
+    proposalRoutingMode: "blocked",
+    proposalRoutingReasons: [{
+      code: input.request.security.blocked ? "unsafe_reference_clone" : "unresolved_design_reference",
+      message: reason,
+      severity: "high"
+    }],
+    shouldBlockExecution: true,
+    status: "pending",
+    summary: reason
+  }, input.request);
 }
 
 function sanitizeUntrustedWorkspaceReference(value: string) {
@@ -4233,7 +4290,7 @@ function attachProposalRoutingMetadata(
     kernel.routingDecision.mode,
     proposalContext
   );
-  const mergedPreviewMetadata = proposalContext?.mode === "CODE" && proposal.previewMetadata?.productPreview
+  const modePreviewMetadata = proposalContext?.mode === "CODE" && proposal.previewMetadata?.productPreview
     ? {
         ...previewMetadata,
         productPreview: proposal.previewMetadata.productPreview
@@ -4247,6 +4304,12 @@ function attachProposalRoutingMetadata(
           previewType: "static_website"
         }
       : previewMetadata;
+  const mergedPreviewMetadata = proposalContext?.mode === "WEBSITE" && proposalContext.designDirectionRequest
+    ? {
+        ...modePreviewMetadata,
+        designReference: compactDesignDirectionRequest(proposalContext.designDirectionRequest)
+      }
+    : modePreviewMetadata;
   const criticalRoutingReasons = routing.reasons.filter((reason) =>
     reason.code === "welcome_ts_pollution" ||
     reason.message.toLowerCase().includes("cross-project") ||
@@ -4385,6 +4448,9 @@ function attachProposalRoutingMetadata(
     sourceOfTruthDomain: proposalContext?.domain ?? proposal.sourceOfTruthDomain,
     sourceOfTruthPages: proposalContext?.pages.length ? proposalContext.pages : proposal.sourceOfTruthPages,
     sourceOfTruthPrompt: proposalContext?.sourcePrompt ?? proposal.sourceOfTruthPrompt,
+    summary: proposalContext?.mode === "WEBSITE"
+      ? attachDesignReferenceContext(proposal, proposalContext.designDirectionRequest).summary
+      : proposal.summary,
     publicCopyCleanStatus: proposal.websiteCopyValidationStatus === "blocked"
       ? "blocked"
       : proposal.publicCopyCleanStatus ?? "clean",
@@ -6367,6 +6433,33 @@ export async function POST(request: Request) {
         totalCharacters: sharedMemoryContext.diagnostics.totalCharacters
       }
     : null;
+  const designDirectionRequest = productMode === "WEBSITE" &&
+    (mode === "SUGGEST" || mode === "EXECUTE") &&
+    !nonMutatingFinalAction &&
+    (
+      classifyWebsiteRequestScope(behavior.resolvedRequest) === "full_generation" ||
+      isFullWebsiteReplacementRequest(behavior.resolvedRequest) ||
+      hasDesignReferenceSignal({
+        attachmentNames: multimodalContext?.records.map((record) => record.metadata.safeName),
+        prompt: behavior.resolvedRequest
+      })
+    )
+    ? await buildDesignReferenceIntake({
+        attachments: multimodalContext?.records,
+        memory: sharedMemoryContext,
+        projectNotes: boundedProjectNotes,
+        prompt: behavior.resolvedRequest,
+        signal: taskSignal,
+        visionText: multimodalContext?.visionText,
+        visualArtifacts: multimodalContext?.visualArtifacts,
+        workspace: {
+          activeFileContent: workspace.activeFileContent,
+          activePath: workspace.activePath,
+          fileContents: workspace.fileContents,
+          fileList: workspace.fileList
+        }
+      })
+    : null;
 
   if (productMode !== "ASK" && nonMutatingFinalAction) {
     let specialistPersistence = persistence;
@@ -6607,6 +6700,7 @@ export async function POST(request: Request) {
   const proposalContext = adaptProposalContextForScopedCodeEdit(
     isolateProposalContextForMixedCodeWorkspace(buildProposalContext({
       contract: activeProjectContract,
+      designDirectionRequest,
       generatorContract: initialGeneratorContract,
       mode: productMode,
       prompt: effectiveUserPrompt,
@@ -6831,6 +6925,43 @@ export async function POST(request: Request) {
     ]);
     return persistedContext;
   };
+
+  const unresolvedNamedReferences = designDirectionRequest?.references.filter((reference) =>
+    reference.sourceType === "named-brand" &&
+    (reference.resolutionStatus === "ambiguous" || reference.resolutionStatus === "not-found")
+  ) ?? [];
+  const hasIndependentReferenceEvidence = designDirectionRequest?.references.some((reference) =>
+    ["public-url", "uploaded-design-md", "uploaded-image", "uploaded-screenshot"].includes(reference.sourceType) &&
+    reference.resolutionStatus !== "not-found"
+  ) ?? false;
+  if (
+    designDirectionRequest &&
+    (mode === "SUGGEST" || mode === "EXECUTE") &&
+    (designDirectionRequest.security.blocked || (unresolvedNamedReferences.length > 0 && !hasIndependentReferenceEvidence))
+  ) {
+    const blockedProposal = createBlockedDesignReferenceProposal({
+      mode,
+      projectId: requestedProjectId,
+      request: designDirectionRequest
+    });
+    persistence = await persistRequestMessage(persistence, {
+      content: blockedProposal.summary,
+      metadata: {
+        designReference: compactDesignDirectionRequest(designDirectionRequest),
+        deterministic: true,
+        model,
+        proposal: blockedProposal
+      },
+      role: "assistant"
+    });
+    return respond(createProposalStream(blockedProposal, persistence?.sessionId, {
+      abortSignal: taskSignal,
+      approvalPolicy: persistence?.approvalPolicy ?? approvalPolicy,
+      projectRevision: persistence?.projectRevision,
+      selectedModel: model,
+      taskObjective: effectiveUserPrompt
+    }));
+  }
 
   if (persistence?.sourceHandoffRequestKey && productMode !== "ASK") {
     const existingResponse = await loadOwnedHandoffResponse({
@@ -7389,7 +7520,7 @@ export async function POST(request: Request) {
     if (websiteEditContext.hasWebsiteFiles) {
       const websiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
       const websiteEditPlan = planWebsiteEdit(websiteEditContext, websiteEditIntent);
-      const proposal = withCurrentAttachmentAssets(createWebsiteEditProposal({
+      const proposal = attachDesignReferenceContext(withCurrentAttachmentAssets(createWebsiteEditProposal({
         context: websiteEditContext,
         generatorContract,
         intent: websiteEditIntent,
@@ -7398,7 +7529,7 @@ export async function POST(request: Request) {
         projectId: requestedProjectId,
         prompt: effectiveUserPrompt,
         proposalContext
-      }));
+      })), designDirectionRequest);
       const visibleSummary =
         websiteEditPlan.mode === "blocked"
           ? "I reviewed the existing website edit request, but it is not safe to apply as-is."
@@ -7463,7 +7594,7 @@ export async function POST(request: Request) {
       targetFiles: []
     };
     const websiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
-    const proposal = withCurrentAttachmentAssets(createWebsiteEditProposal({
+    const proposal = attachDesignReferenceContext(withCurrentAttachmentAssets(createWebsiteEditProposal({
       context: websiteEditContext,
       generatorContract,
       intent: websiteEditIntent,
@@ -7472,7 +7603,7 @@ export async function POST(request: Request) {
       projectId: requestedProjectId,
       prompt: effectiveUserPrompt,
       proposalContext
-    }));
+    })), designDirectionRequest);
 
     persistence = await persistRequestMessage(persistence, {
       content: blockedReason,
