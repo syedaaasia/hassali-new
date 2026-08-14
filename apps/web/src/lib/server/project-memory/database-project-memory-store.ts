@@ -31,13 +31,13 @@ export function createDatabaseProjectMemoryStore(externalUserId: string, project
       return memory ? mapConversation(memory) : null;
     },
     listConversations: async (limit) => (await listOwnedConversationMemories({ externalUserId, limit, projectId })).map(mapConversation),
-    listEpisodes: async (limit) => (await listOwnedProjectEpisodes({ externalUserId, limit, projectId })).map((episode) => ({ checkpoint: episode.checkpoint, description: episode.description, eventType: episode.eventType, importance: importance(episode.importance), outcome: episode.outcome, status: episode.status as "failed" | "partial" | "resolved" | "verified" })),
+    listEpisodes: async (limit) => (await listOwnedProjectEpisodes({ externalUserId, limit, projectId })).map((episode) => ({ checkpoint: episode.checkpoint, description: episode.description, eventType: episode.eventType, importance: importance(episode.importance), occurredAt: episode.occurredAt, outcome: episode.outcome, status: episode.status as "failed" | "partial" | "resolved" | "verified" })),
     listRecords: async (input) => (await listOwnedProjectMemories({ ...input, externalUserId, projectId })).map(mapRecord),
     listUnsummarizedMessages: (conversationId, offset, limit) => listOwnedConversationMessagesAfter({ conversationId, externalUserId, limit, offset, projectId }),
     saveConversation: (memory) => upsertOwnedConversationMemory({ ...memory, externalUserId, projectId }),
     saveEpisode: async (episode) => {
       const saved = await persistOwnedProjectEpisode({ ...episode, externalUserId, projectId });
-      return { checkpoint: saved.checkpoint, description: saved.description, eventType: saved.eventType, importance: importance(saved.importance), outcome: saved.outcome, status: saved.status as "failed" | "partial" | "resolved" | "verified" };
+      return { checkpoint: saved.checkpoint, description: saved.description, eventType: saved.eventType, importance: importance(saved.importance), occurredAt: saved.occurredAt, outcome: saved.outcome, status: saved.status as "failed" | "partial" | "resolved" | "verified" };
     },
     saveRecord: async (candidate, sourceMessageId, conversationId) => {
       const result = await persistOwnedProjectMemory({

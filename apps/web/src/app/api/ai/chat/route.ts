@@ -1,6 +1,5 @@
 import {
   deleteOwnedChatMessage,
-  loadOwnedMemoryPreferences,
   listUserProjectFiles,
   loadOwnedChatHandoff,
   loadOwnedHandoffResponse,
@@ -30,7 +29,16 @@ import {
   buildProjectPlanningMemoryAmbiguities,
   handleAskTemporalMemory
 } from "@/lib/server/memory-intelligence/temporal-memory";
-import { buildMemoryAccessPolicy, disabledMemoryMessage } from "@/lib/server/memory-controls/memory-policy";
+import { disabledMemoryMessage } from "@/lib/server/memory-controls/memory-policy";
+import {
+  buildOwnedSharedMemoryContext,
+  captureOwnedCrossModeMemory
+} from "@/lib/server/shared-memory/database-shared-memory";
+import {
+  isExplicitSharedMemoryWrite,
+  isSharedMemoryContinuityPrompt,
+  shouldUseSharedMemoryAsPrimaryContext
+} from "@/lib/server/shared-memory/shared-memory";
 import {
   buildModeHandoff,
   handoffRequestKey,
@@ -6091,11 +6099,22 @@ export async function POST(request: Request) {
   const nonMutatingFinalAction = behavior.answerOnly &&
     ["answer", "clarify", "plan"].includes(behavior.finalDisposition);
   const askRuntimeContext = buildAskRuntimeContext();
-  const askFreshnessDecision = decideAskFreshness({
+  const classifiedAskFreshnessDecision = decideAskFreshness({
     hasPrivateFileContent: Boolean(requestedWorkspace.activeFileContent?.trim() || multimodalContext?.contextText),
     prompt: nonMutatingFinalAction ? askReasoningPrompt : "",
     runtime: askRuntimeContext
   });
+  const memoryContinuityPrompt = isSharedMemoryContinuityPrompt({
+    mode: productMode,
+    prompt: effectiveUserPrompt
+  });
+  const askFreshnessDecision = memoryContinuityPrompt
+    ? decideAskFreshness({
+        hasPrivateFileContent: true,
+        prompt: "Explain the supplied saved project context.",
+        runtime: askRuntimeContext
+      })
+    : classifiedAskFreshnessDecision;
   const detectedAskLiveIntent = detectAskLiveIntent(askReasoningPrompt);
   const askLiveIntent = ["build_request", "current_time", "weather"].includes(detectedAskLiveIntent)
     ? detectedAskLiveIntent
@@ -6306,23 +6325,59 @@ export async function POST(request: Request) {
     return respond(new Response(null, { status: 499 }));
   }
   const requestedSessionId = typeof body?.chatSessionId === "string" ? body.chatSessionId : null;
+  let persistence = await createPersistenceContext({
+    approvalPolicy,
+    mode,
+    projectId: requestedProjectId,
+    sessionId: requestedSessionId,
+    taskObjective: effectiveUserPrompt
+  });
+  const sharedMemoryContext = persistence
+    ? await buildOwnedSharedMemoryContext({
+        conversationId: persistence.sessionId,
+        externalUserId: persistence.externalUserId,
+        mode: productMode,
+        projectId: persistence.projectId,
+        prompt: effectiveUserPrompt,
+        publicResearch: productMode === "ASK" && askFreshnessDecision.researchRequired
+      })
+    : null;
+  const sharedMemoryProviderContext = sharedMemoryContext?.providerContext ?? "";
+  const sharedMemoryIsPrimaryContext = shouldUseSharedMemoryAsPrimaryContext({
+    capsule: sharedMemoryContext,
+    mode: productMode,
+    prompt: effectiveUserPrompt
+  });
+  const specialistFreshnessDecision = sharedMemoryIsPrimaryContext
+    ? decideAskFreshness({
+        hasPrivateFileContent: true,
+        prompt: "Explain the supplied saved preference.",
+        runtime: askRuntimeContext
+      })
+    : askFreshnessDecision;
+  const sharedMemoryDiagnostics = sharedMemoryContext
+    ? {
+        excludedCount: sharedMemoryContext.diagnostics.excludedCount,
+        includedCount: sharedMemoryContext.diagnostics.includedCount,
+        intent: sharedMemoryContext.policy.intent,
+        mode: sharedMemoryContext.policy.mode,
+        requestedLayers: sharedMemoryContext.diagnostics.requestedLayers,
+        sourceScopes: sharedMemoryContext.diagnostics.sourceScopes,
+        state: sharedMemoryContext.policy.state,
+        totalCharacters: sharedMemoryContext.diagnostics.totalCharacters
+      }
+    : null;
 
   if (productMode !== "ASK" && nonMutatingFinalAction) {
-    let specialistPersistence = await createPersistenceContext({
-      approvalPolicy,
-      mode,
-      projectId: requestedProjectId,
-      sessionId: requestedSessionId,
-      taskObjective: effectiveUserPrompt
-    });
+    let specialistPersistence = persistence;
     const expertAnswer = await runAskBrain({
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
-      freshnessDecision: askFreshnessDecision,
+      freshnessDecision: specialistFreshnessDecision,
       evidenceGraph: multimodalVerification.graph,
       evidenceVerificationState: multimodalVerification.state,
-      intelligenceContext: [intelligencePreflight.providerContext, projectNotesContext].filter(Boolean).join("\n\n"),
+      intelligenceContext: [intelligencePreflight.providerContext, sharedMemoryProviderContext, projectNotesContext].filter(Boolean).join("\n\n"),
       messages: relevantMessages,
       model,
       modelSelectionPolicy,
@@ -6334,7 +6389,7 @@ export async function POST(request: Request) {
         userId: specialistPersistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
-      researchPolicy,
+      researchPolicy: sharedMemoryIsPrimaryContext ? "no-search" : researchPolicy,
       researchRetriever: retrieveAskResearchSources,
       prompt: askReasoningPrompt,
       projectName: workspace.projectName ?? null,
@@ -6376,19 +6431,21 @@ export async function POST(request: Request) {
         model,
         productMode,
         responseKind: expertAnswer.decision.responseKind,
+        sharedMemory: sharedMemoryDiagnostics,
         selfReview: compactSelfReview(selfReview)
       },
       persistence: specialistPersistence,
       signal: taskSignal,
       userContent: latestUserPrompt,
       userMetadata: {
-        activityState: askFreshnessDecision.researchRequired
+        activityState: specialistFreshnessDecision.researchRequired
           ? "checking_source_requirements"
           : "preparing_answer",
-        askFreshness: compactAskFreshnessDecision(askFreshnessDecision),
+        askFreshness: compactAskFreshnessDecision(specialistFreshnessDecision),
         behavioralDecision: compactBehavioralDecision(behavior),
         intelligencePreflight: compactIntelligencePreflight(intelligencePreflight),
         model,
+        sharedMemory: sharedMemoryDiagnostics,
         workspace: {
           activePath: workspace.activePath,
           fileList: workspace.fileList,
@@ -6396,6 +6453,17 @@ export async function POST(request: Request) {
         }
       }
     });
+    if (specialistPersistence?.sessionId) {
+      await captureOwnedCrossModeMemory({
+        conversationId: specialistPersistence.sessionId,
+        externalUserId: specialistPersistence.externalUserId,
+        mode: productMode,
+        projectId: specialistPersistence.projectId,
+        prompt: effectiveUserPrompt
+      }).catch((error) => {
+        console.error("cross-mode memory capture unavailable", error instanceof Error ? error.message : "Unknown error");
+      });
+    }
 
     if (taskSignal.aborted) {
       return respond(new Response(null, { status: 499 }));
@@ -6448,17 +6516,13 @@ export async function POST(request: Request) {
     projectContract: activeProjectContract,
     translatedIntent
   });
-  const planningMemoryAmbiguities = productMode === "CODE" && requestedProjectId
+  const planningMemoryAmbiguities = productMode === "CODE" && persistence && sharedMemoryContext?.policy.readProject
     ? await (async () => {
-        const memoryOwnerId = (await auth()).userId;
-        if (!memoryOwnerId) return [];
         try {
-          const policy = buildMemoryAccessPolicy(await loadOwnedMemoryPreferences(memoryOwnerId));
-          if (!policy.projectRead) return [];
           return await buildProjectPlanningMemoryAmbiguities({
             projectNotes: boundedProjectNotes,
             prompt: behavior.resolvedRequest,
-            store: createDatabaseProjectMemoryStore(memoryOwnerId, requestedProjectId)
+            store: createDatabaseProjectMemoryStore(persistence.externalUserId, persistence.projectId)
           });
         } catch {
           return [];
@@ -6606,13 +6670,6 @@ export async function POST(request: Request) {
   }
 
   const formattedDiagnostic = redactWorkspaceSecrets(formatDiagnosticContext(diagnostic)).redacted;
-  let persistence = await createPersistenceContext({
-    approvalPolicy,
-    mode,
-    projectId: requestedProjectId,
-    sessionId: requestedSessionId,
-    taskObjective: effectiveUserPrompt
-  });
   const requestedHandoff = parseModeHandoff(body?.handoff);
   let serverHandoff: ModeHandoff | null = null;
 
@@ -6650,6 +6707,7 @@ export async function POST(request: Request) {
   }
 
   let pendingUserMessageId: string | null = null;
+  let crossModeMemoryCaptured = false;
   const pendingUserMessage = {
     content: latestUserPrompt,
     metadata: {
@@ -6686,6 +6744,7 @@ export async function POST(request: Request) {
           }
         : undefined,
       intelligencePreflight: compactIntelligencePreflight(intelligencePreflight),
+      sharedMemory: sharedMemoryDiagnostics,
       workspace: {
         activePath: workspace.activePath,
         blueprint: compactBusinessBlueprint(blueprint),
@@ -6721,6 +6780,19 @@ export async function POST(request: Request) {
     if (pendingUserPersisted || taskSignal.aborted) return context;
     const nextContext = await persistChatMessage(context, pendingUserMessage, taskSignal);
     pendingUserPersisted = true;
+    if (nextContext?.sessionId && productMode !== "ASK" && !crossModeMemoryCaptured) {
+      crossModeMemoryCaptured = true;
+      await captureOwnedCrossModeMemory({
+        conversationId: nextContext.sessionId,
+        externalUserId: nextContext.externalUserId,
+        mode: productMode,
+        projectId: nextContext.projectId,
+        prompt: effectiveUserPrompt,
+        sourceMessageId: pendingUserMessageId
+      }).catch((error) => {
+        console.error("cross-mode memory capture unavailable", error instanceof Error ? error.message : "Unknown error");
+      });
+    }
     return nextContext;
   };
   const removeCancelledSavedMessages = async (
@@ -6800,8 +6872,9 @@ export async function POST(request: Request) {
           : ""
       ].filter(Boolean).join("\n")
     : "";
-  let askIntelligenceContext = [
+  const askIntelligenceContext = [
     intelligencePreflight.providerContext,
+    sharedMemoryProviderContext,
     intelligenceToolProviderContext,
     multimodalVerification.contextText,
     outcomeWorkflowContext,
@@ -6842,20 +6915,22 @@ export async function POST(request: Request) {
     }));
   }
 
-  if (productMode === "ASK") {
+  const memoryIndependentSelfKnowledgeAnswer = productMode === "ASK"
+    ? await createHassaliSelfKnowledgeAnswer({ mode: productMode, prompt: effectiveUserPrompt })
+    : null;
+  const memoryIndependentIdentityAnswer = productMode === "ASK"
+    ? createHassaliIdentityAnswer({ model, prompt: effectiveUserPrompt })
+    : null;
+
+  if (productMode === "ASK" && !memoryIndependentSelfKnowledgeAnswer && !memoryIndependentIdentityAnswer) {
     const memoryOwnerId = persistence?.externalUserId ?? (await auth()).userId;
     if (memoryOwnerId) {
       persistence = await persistPendingUserMessage(persistence);
-      let memoryPolicy;
-      try {
-        memoryPolicy = buildMemoryAccessPolicy(await loadOwnedMemoryPreferences(memoryOwnerId));
-      } catch (error) {
-        console.error("memory preferences unavailable", error instanceof Error ? error.message : "Unknown error");
-      }
+      const memoryPolicy = sharedMemoryContext?.policy ?? null;
       if (persistence?.sessionId) {
         try {
           const projectStore = createDatabaseProjectMemoryStore(memoryOwnerId, persistence.projectId);
-          const temporalMemory = memoryPolicy && memoryPolicy.userRead && memoryPolicy.projectRead && memoryPolicy.conversationRead
+          const temporalMemory = memoryPolicy?.readUser && memoryPolicy.readProject && memoryPolicy.readConversation
             ? await handleAskTemporalMemory({
             projectId: persistence.projectId,
             projectNotes: boundedProjectNotes,
@@ -6893,8 +6968,9 @@ export async function POST(request: Request) {
             }));
           }
           const projectMemory = await handleAskProjectMemory({
-            allowRead: memoryPolicy?.projectRead === true && memoryPolicy?.conversationRead === true,
-            allowWrite: memoryPolicy?.projectWrite === true && memoryPolicy?.conversationWrite === true,
+            allowRead: memoryPolicy?.readProject === true && memoryPolicy.readConversation === true,
+            allowWrite: memoryPolicy?.writeProject === true && memoryPolicy.writeConversation === true &&
+              (memoryPolicy.automaticCapture || isExplicitSharedMemoryWrite(effectiveUserPrompt)),
             conversationId: persistence.sessionId,
             projectNotes: projectNotesContext,
             prompt: effectiveUserPrompt,
@@ -6924,9 +7000,6 @@ export async function POST(request: Request) {
               "x-hassali-ask-response-kind": "project_memory_response"
             }));
           }
-          if (projectMemory.context) {
-            askIntelligenceContext = [askIntelligenceContext, projectMemory.context].filter(Boolean).join("\n\n");
-          }
         } catch (error) {
           console.error("project memory unavailable", error instanceof Error ? error.message : "Unknown error");
           if (extractProjectMemoryCandidates(effectiveUserPrompt).length > 0) {
@@ -6945,12 +7018,16 @@ export async function POST(request: Request) {
       }
       const userMemory = await handleAskUserMemory({
         policy: memoryPolicy ? {
-          allowAutomaticWrite: memoryPolicy.userAutomaticWrite,
-          allowExplicitWrite: memoryPolicy.userExplicitWrite,
-          allowRead: memoryPolicy.userRead,
-          allowSensitiveExplicitWrite: memoryPolicy.userSensitiveExplicitWrite,
-          blockedRecallMessage: disabledMemoryMessage(memoryPolicy.state, "recall"),
-          blockedSaveMessage: disabledMemoryMessage(memoryPolicy.state, "save")
+          allowAutomaticWrite: memoryPolicy.writeUserAutomatic,
+          allowExplicitWrite: memoryPolicy.writeUserExplicit,
+          allowRead: memoryPolicy.readUser,
+          allowSensitiveExplicitWrite: memoryPolicy.writeUserSensitiveExplicit,
+          blockedRecallMessage: memoryPolicy.state === "unavailable"
+            ? "Memory settings are unavailable right now, so I'm not using or claiming to recall saved memory."
+            : disabledMemoryMessage(memoryPolicy.state, "recall"),
+          blockedSaveMessage: memoryPolicy.state === "unavailable"
+            ? "Memory settings are unavailable right now, so I didn't save that."
+            : disabledMemoryMessage(memoryPolicy.state, "save")
         } : {
           allowAutomaticWrite: false,
           allowExplicitWrite: false,
@@ -6989,9 +7066,6 @@ export async function POST(request: Request) {
         }));
       }
 
-      if (userMemory.context) {
-        askIntelligenceContext = [askIntelligenceContext, userMemory.context].filter(Boolean).join("\n\n");
-      }
     }
   }
 
@@ -7032,10 +7106,7 @@ export async function POST(request: Request) {
       }));
     }
 
-    const selfKnowledgeAnswer = await createHassaliSelfKnowledgeAnswer({
-      mode: productMode,
-      prompt: effectiveUserPrompt
-    });
+    const selfKnowledgeAnswer = memoryIndependentSelfKnowledgeAnswer;
 
     if (selfKnowledgeAnswer) {
       const selfReview = runSelfReviewForAskAnswer({
@@ -7065,10 +7136,7 @@ export async function POST(request: Request) {
       }));
     }
 
-    const identityAnswer = createHassaliIdentityAnswer({
-      model,
-      prompt: effectiveUserPrompt
-    });
+    const identityAnswer = memoryIndependentIdentityAnswer;
 
     if (identityAnswer) {
       const selfReview = runSelfReviewForAskAnswer({
@@ -7662,6 +7730,7 @@ export async function POST(request: Request) {
         taskDecomposition: decomposition,
         translatedIntent
       },
+      sharedMemory: sharedMemoryProviderContext || null,
       diagnostic: sanitizeUntrustedWorkspaceReference(formattedDiagnostic),
       existingCodeSource: scopedExistingCodeEdit
         ? buildScopedCodeEditReference(workspace)

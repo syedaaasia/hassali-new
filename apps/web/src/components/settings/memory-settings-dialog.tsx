@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SettingsSwitch } from "./settings-switch";
 
 type Preferences = {
   automaticMemoryEnabled: boolean;
@@ -127,29 +128,6 @@ function sourceLabel(source: string, capture?: string) {
       ? "Explicitly remembered from your message"
       : "Remembered from your message";
   return source.replaceAll("_", " ");
-}
-
-function Toggle(props: {
-  checked: boolean;
-  disabled?: boolean;
-  label: string;
-  onChange: () => void;
-}) {
-  return (
-    <button
-      aria-checked={props.checked}
-      aria-label={props.label}
-      className={`hassali-focus-ring relative h-6 w-11 shrink-0 rounded-full transition-colors ${props.checked ? "bg-[hsl(var(--premium-accent))]" : "bg-white/15 [.light_&]:bg-slate-300"}`}
-      disabled={props.disabled}
-      onClick={props.onChange}
-      role="switch"
-      type="button"
-    >
-      <span
-        className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${props.checked ? "translate-x-6" : "translate-x-1"}`}
-      />
-    </button>
-  );
 }
 
 export function MemorySettingsDialog(props: { onClose: () => void; open: boolean }) {
@@ -361,7 +339,7 @@ export function MemorySettingsDialog(props: { onClose: () => void; open: boolean
                           {row.description}
                         </p>
                       </div>
-                      <Toggle
+                      <SettingsSwitch
                         checked={snapshot.preferences[row.key]}
                         disabled={busy !== null || disabled}
                         label={row.label}

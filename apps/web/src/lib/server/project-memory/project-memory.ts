@@ -46,6 +46,7 @@ export type ProjectEpisode = {
   description: string;
   eventType: string;
   importance: ProjectMemoryImportance;
+  occurredAt?: Date;
   outcome: string | null;
   status: "failed" | "partial" | "resolved" | "verified";
 };
@@ -133,6 +134,35 @@ export function extractProjectMemoryCandidates(prompt: string): ProjectMemoryCan
   const candidates: ProjectMemoryCandidate[] = [];
   const codeName = codeNameCandidate(prompt);
   if (codeName) candidates.push(codeName);
+
+  const scopedRemember = prompt.match(/\bfor\s+(?:this|the\s+[^,.]{1,80})\s+project,?\s+remember\s+that\s+(.+?)(?:[.!?]|$)/i)?.[1];
+  if (scopedRemember) {
+    const content = cleanClause(scopedRemember);
+    candidates.push({
+      category: /\b(?:design|brand|interface|layout|theme|visual)\b/i.test(content) ? "preference" : "requirement",
+      confidence: 0.99,
+      content: `Project preference: ${content}.`,
+      importance: "high",
+      normalizedKey: `project preference ${normalize(content).split(" ").slice(0, 6).join(" ")}`,
+      title: "Explicit project preference"
+    });
+  }
+
+  const shouldRemain = prompt.match(/\bthis project(?:'s|â€™s)\s+(.+?)\s+should\s+remain\s+(.+?)(?:[.!?]|$)/i);
+  if (shouldRemain) {
+    const subject = cleanClause(shouldRemain[1] ?? "project decision");
+    const value = cleanClause(shouldRemain[2] ?? "");
+    if (value) {
+      candidates.push({
+        category: "decision",
+        confidence: 0.99,
+        content: `Decision: ${subject} remains ${value}.`,
+        importance: "high",
+        normalizedKey: `decision ${normalize(subject)}`,
+        title: `Project ${subject}`
+      });
+    }
+  }
 
   const nextStep = prompt.match(/\b(?:the\s+)?next step is to\s+(.+?)(?:[.!?]|$)/i)?.[1];
   if (nextStep) {

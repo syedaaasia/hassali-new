@@ -1,5 +1,5 @@
 import type { CodeAmbiguity } from "@/lib/server/ai/adaptive-code-planner";
-import type { ProjectMemoryRecord, ProjectMemoryStore } from "@/lib/server/project-memory/project-memory";
+import type { ProjectEpisode, ProjectMemoryRecord, ProjectMemoryStore } from "@/lib/server/project-memory/project-memory";
 import type { UserMemoryRecord, UserMemoryStore } from "@/lib/server/user-memory/user-memory";
 import { containsForbiddenMemorySecret, normalizeMemoryText } from "@/lib/server/user-memory/user-memory";
 
@@ -132,7 +132,7 @@ export type MemoryRetrievalPlan = {
   includeOriginalMessages: boolean;
   limit: number;
   query: TemporalMemoryQuery;
-  sources: Array<"project-memory" | "project-notes" | "self-knowledge" | "user-memory">;
+  sources: Array<"project-episodes" | "project-memory" | "project-notes" | "self-knowledge" | "user-memory">;
 };
 
 const monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -243,7 +243,12 @@ export function isTemporalMemoryQuery(prompt: string) {
 export function planMemoryRetrieval(query: TemporalMemoryQuery): MemoryRetrievalPlan {
   const sources: MemoryRetrievalPlan["sources"] = [];
   if (["current-user", "person", "combined-bounded"].includes(query.scope)) sources.push("user-memory");
-  if (["current-project", "conversation", "combined-bounded"].includes(query.scope)) sources.push("project-memory", "project-notes");
+  if (["current-project", "conversation", "combined-bounded"].includes(query.scope)) {
+    sources.push("project-memory", "project-notes");
+    if (/\b(?:latest|last|recent|most recent)\s+verified\b|\bverified\s+(?:technical\s+)?(?:outcome|result|delivery)\b/i.test(query.raw)) {
+      sources.push("project-episodes");
+    }
+  }
   if (query.scope === "hassali-self" || query.scope === "runtime-current") sources.push("self-knowledge");
   return {
     includeOriginalMessages: /\b(?:exactly|source|message|quote|newer)\b/i.test(query.raw),
@@ -316,6 +321,31 @@ export function projectRecordToTemporal(record: ProjectMemoryRecord): TemporalMe
     status: candidateStatus(record.status, assertionType),
     subject: record.normalizedKey,
     value: record.content
+  };
+}
+
+export function projectEpisodeToTemporal(
+  episode: ProjectEpisode,
+  index: number,
+  projectId: string | null
+): TemporalMemoryCandidate {
+  const sourceTimestamp = episode.occurredAt ?? new Date(0);
+  return {
+    assertionType: "verified-outcome",
+    authority: episode.status === "verified" ? 96 : 88,
+    confidence: episode.status === "verified" ? 1 : 0.9,
+    effectiveFrom: sourceTimestamp,
+    effectiveUntil: null,
+    explicitCorrection: false,
+    id: `project-episode-${index}`,
+    projectId,
+    sensitivity: "standard",
+    sourceId: episode.checkpoint,
+    sourceTimestamp,
+    sourceType: "verified-project-outcome",
+    status: episode.status === "verified" || episode.status === "resolved" ? "current" : "historical",
+    subject: `verified technical outcome ${episode.description}`,
+    value: `${episode.description}${episode.outcome ? ` Outcome: ${episode.outcome}` : ""}`
   };
 }
 
@@ -523,6 +553,12 @@ export async function handleAskTemporalMemory(input: {
   if (plan.sources.includes("project-memory") && input.projectStore) {
     const records = await input.projectStore.listRecords({ includeSuperseded: true, limit: Math.min(40, plan.limit) });
     candidates.push(...records.map(projectRecordToTemporal));
+  }
+  if (plan.sources.includes("project-episodes") && input.projectStore) {
+    const episodes = await input.projectStore.listEpisodes(Math.min(20, plan.limit));
+    candidates.push(...episodes
+      .filter((episode) => episode.status === "verified" || episode.status === "resolved")
+      .map((episode, index) => projectEpisodeToTemporal(episode, index, input.projectId)));
   }
   if (plan.sources.includes("project-notes")) candidates.push(...noteCandidates(input.projectNotes ?? "", now, input.projectId));
   const resolution = resolveMemoryTruth(query, candidates);

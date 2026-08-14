@@ -360,6 +360,14 @@ M-45 | Clear all | Type confirmation and clear an isolated user's derived memory
 M-46 | Memory export | Download authenticated JSON while Memory is on or off | Coherent owner-only derived snapshot; no secrets/IDs; labeled non-account export
 M-47 | Memory IDOR | Use another user's memory/person/project/conversation IDs | Read/edit/delete/export/clear fails closed without changing either owner
 M-48 | Memory responsive UI | Open Settings → Memory at desktop and narrow width | Controls remain accessible, scannable, keyboard named, and horizontally contained
+M-49 | ASK to WEBSITE | Save a website preference in ASK, then ask WEBSITE in the same project | Current relevant preference is used without unrelated personal facts or public research
+M-50 | WEBSITE to CODE | Record a project API/architecture decision in WEBSITE, then ask CODE | Same-project technical decision is available; no proposal or execution authority is inferred
+M-51 | CODE to ASK | Record a verified CODE episode, then ask from a fresh ASK chat | Latest verified outcome resolves from owned project history without a live-source lookup
+M-52 | Cross-mode current truth | Correct a preference, then query WEBSITE/CODE and historical ASK | Current value crosses modes; ASK can still identify the superseded value when explicitly asked
+M-53 | Cross-mode controls | Toggle Memory OFF and Pause while switching ASK/WEBSITE/CODE | Every M2-M4 capsule is empty; M1 and current conversation remain available
+M-54 | Mode relevance | Store website, coding, and unrelated personal preferences | WEBSITE/CODE receive only relevant current facts within shared bounds
+M-55 | Shared project isolation | Store a code name in project A and query project B | No implicit cross-project retrieval; explicit owned search remains a separate path
+M-56 | Memory switch geometry | Inspect ON/OFF, keyboard focus, reload, and 390px layout | One reusable 32x18 track keeps its 14x14 knob contained, persists server state, and causes no overflow
 I-84 | Timeline truth | Inspect timeline detail | Human-readable bounded evidence only; no hidden reasoning or fabricated operation
 I-85 | Output stream | Emit stdout/stderr containing workspace paths or secrets | Chunks are sanitized, byte/event bounded, ordered, and expandable
 I-86 | Task ownership | Read/cancel another user or project's opaque task ID | Not found/denied; matching owned task remains unaffected

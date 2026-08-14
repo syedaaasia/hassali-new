@@ -156,6 +156,18 @@ function parseStorableStatement(statement: string, captureMethod: "automatic" | 
   const favorite = normalizedStatement.match(/^my\s+(favorite\s+.+?)\s+is\s+(.+)$/i);
   if (favorite) return candidate({ captureMethod, category: "preference", key: favorite[1] ?? "preference", value: favorite[2] ?? "" });
 
+  const scopedPreference = normalizedStatement.match(/^for\s+(?:my\s+)?(websites?|coding|code|tests?|answers?)\s+i\s+(prefer|hate|avoid)\s+(.+)$/i);
+  if (scopedPreference) {
+    const behavior = scopedPreference[2]?.toLowerCase();
+    const value = behavior === "prefer" ? scopedPreference[3] ?? "" : `Avoid ${scopedPreference[3] ?? ""}`;
+    return candidate({
+      captureMethod,
+      category: "preference",
+      key: `${scopedPreference[1] ?? "workflow"} preference`,
+      value
+    });
+  }
+
   const preference = normalizedStatement.match(/^i\s+prefer\s+(.+)$/i);
   if (preference) return candidate({ captureMethod, category: "preference", key: "general preference", value: preference[1] ?? "" });
 
