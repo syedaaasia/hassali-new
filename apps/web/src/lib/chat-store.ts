@@ -74,6 +74,7 @@ export type WorkspaceContext = {
   projectId: string | null;
   projectName: string | null;
   approvalPolicy: ProjectApprovalPolicy;
+  projectDesignNotes?: string;
   projectNotes?: string;
   useProjectNotesAsContext?: boolean;
 };
@@ -1588,6 +1589,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           modelSelectionPolicy: get().modelSelectionPolicy,
           productMode,
           projectId: workspaceContext.projectId,
+          projectDesignNotes: productMode === "WEBSITE"
+            ? workspaceContext.projectDesignNotes
+            : undefined,
           projectNotes: workspaceContext.useProjectNotesAsContext
             ? workspaceContext.projectNotes
             : undefined,

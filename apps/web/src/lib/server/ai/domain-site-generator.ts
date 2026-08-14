@@ -27,6 +27,11 @@ import {
 import { renderWebsiteQualityFiles } from "@/lib/server/ai/website-quality-renderer";
 import { GSAP_VERSION, THREE_VERSION } from "@/lib/server/ai/website-scene-renderer";
 import type { WebsiteCinematicAssetInput } from "@/lib/server/ai/website-cinematic-asset-analyzer";
+import { renderProjectDesignMd } from "@/lib/server/design/direction/project-design-md";
+import {
+  reviewGeneratedWebsiteDesign,
+  type DesignQualityReview
+} from "@/lib/server/design/direction/design-quality-kernel";
 
 export type SiteDomain =
   | "car rental"
@@ -64,6 +69,7 @@ type DomainSiteFiles = {
 };
 
 export type PlannedWebsiteGeneration = {
+  designQualityReview: DesignQualityReview | null;
   designTokenCount: number;
   designTokenTheme: string;
   designTokenValidationPassed: boolean;
@@ -2202,7 +2208,8 @@ export function generatePlannedWebsiteFiles(input: {
 }): PlannedWebsiteGeneration {
   const plan = planWebsite(input);
   const brief = input.proposalContext?.websiteGenerationBrief ?? null;
-  const creativeDirection = getWebsiteCreativeDirection({ brief, plan });
+  const projectDesignContract = input.proposalContext?.projectDesignContract ?? null;
+  const creativeDirection = getWebsiteCreativeDirection({ brief, plan, projectDesignContract });
   const creativeSummary = summarizeCreativeDirection(creativeDirection);
   const qualityBlueprint = buildWebsiteQualityBlueprint({
     brief,
@@ -2210,6 +2217,7 @@ export function generatePlannedWebsiteFiles(input: {
     direction: creativeDirection,
     intent: input.intent,
     plan,
+    projectBrand: projectDesignContract?.identity.userBrand,
     prompt: input.proposalContext?.sourcePrompt ?? input.intent.summary,
     workspaceAssets: input.workspaceAssets
   });
@@ -2222,6 +2230,10 @@ export function generatePlannedWebsiteFiles(input: {
     ? `Three.js ${THREE_VERSION}${qualityBlueprint.scene.motionEngine === "gsap-scrolltrigger" ? `; GSAP/ScrollTrigger ${GSAP_VERSION}` : ""}`
     : "none";
   const plannedFiles = renderWebsiteQualityFiles(qualityBlueprint);
+  if (projectDesignContract) {
+    plannedFiles["DESIGN.md"] = renderProjectDesignMd(projectDesignContract);
+    plannedFiles["styles.css"] = `${plannedFiles["styles.css"] ?? ""}\n\n/* Hassali ProjectDesignContract: ${projectDesignContract.fingerprint} */\n`;
+  }
   plannedFiles["HASSALI.md"] = brief ? [
     "# HASSALI.md",
     "",
@@ -2268,6 +2280,12 @@ export function generatePlannedWebsiteFiles(input: {
     `- Primary CTA: ${brief.ctaPatterns[0] ?? "Contact us"} above the fold and repeated after proof/services`,
     `- Proof strategy: ${creativeSummary.proofStrategy}`,
     `- Section rhythm: ${creativeSummary.rhythm}`,
+    ...(projectDesignContract ? [
+      `- Project design contract: DESIGN.md`,
+      `- Design fingerprint: ${projectDesignContract.fingerprint}`,
+      `- Design version/status: ${projectDesignContract.version}/${projectDesignContract.status}`,
+      `- Reference composition: ${projectDesignContract.references.map((reference) => `${reference.name}:${reference.role}`).join(", ") || "original"}`
+    ] : []),
     "",
     "## Website Quality Blueprint",
     "",
@@ -2351,6 +2369,9 @@ export function generatePlannedWebsiteFiles(input: {
     "- Do not mix unrelated domains into public copy.",
     "- Keep static preview files local and approval-first."
   ].join("\n");
+  const designQualityReview = projectDesignContract
+    ? reviewGeneratedWebsiteDesign({ contract: projectDesignContract, files: plannedFiles })
+    : null;
   const validation = validateWebsitePlanAndFiles({
     assets: qualityBlueprint.assets,
     availableAssetPaths: input.workspaceAssets?.map((asset) => asset.path),
@@ -2365,6 +2386,7 @@ export function generatePlannedWebsiteFiles(input: {
     Object.keys(plannedFiles).filter((path) => path.endsWith(".html")).every((path) => expectedPaths.includes(path));
 
   return {
+    designQualityReview,
     designTokenCount: plan.designTokenCount,
     designTokenTheme: plan.designTokenTheme,
     designTokenValidationPassed: plan.designTokenValidationPassed,

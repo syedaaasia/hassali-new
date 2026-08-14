@@ -14,6 +14,7 @@ import {
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import { pageToHtmlPath } from "@/lib/server/ai/website-source-of-truth";
 import type { DesignDirectionRequest } from "@/lib/server/design/reference/design-reference-contract";
+import type { ProjectDesignContract } from "@/lib/server/design/direction/project-design-contract";
 
 export type ProposalContextMode = "ASK" | "CODE" | "WEBSITE";
 
@@ -31,6 +32,7 @@ export type ProposalContext = {
   mode: ProposalContextMode;
   pages: string[];
   previewType?: string;
+  projectDesignContract?: ProjectDesignContract | null;
   projectType: string;
   requiredFiles: string[];
   runtimeType?: string;
@@ -78,6 +80,7 @@ export function buildProposalContext(input: {
   designDirectionRequest?: DesignDirectionRequest | null;
   generatorContract?: GeneratorContract | null;
   mode: ProposalContextMode;
+  projectDesignContract?: ProjectDesignContract | null;
   prompt: string;
   translatedIntent: TranslatedIntentSpec;
 }): ProposalContext {
@@ -160,6 +163,7 @@ export function buildProposalContext(input: {
       : input.mode === "WEBSITE"
         ? "website"
         : "none",
+    projectDesignContract: input.mode === "WEBSITE" ? input.projectDesignContract ?? null : null,
     projectType: input.mode,
     requiredFiles,
     runtimeType: usePythonStack

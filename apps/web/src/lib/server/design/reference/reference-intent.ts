@@ -40,7 +40,15 @@ export function hasDesignReferenceSignal(input: { attachmentNames?: string[]; pr
     input.attachmentNames?.some((name) => /design.*\.md$|\.(?:avif|gif|jpe?g|png|webp)$/i.test(name)) ||
     /https?:\/\//i.test(input.prompt) ||
     /\b(?:clone|copy|recreate|replicate|reference|screenshot|design\.md|visual style|style-match|inspired by|vibes?|look like|looks like|match the (?:existing|current|rest of)|existing project|current project)\b/i.test(input.prompt) ||
+    /\b(?:rounded|square|sharp)\s+(?:cards?|corners?)\b|\b(?:cards?|corners?)\s+(?:rounded|square|sharp)\b/i.test(input.prompt) ||
     /\b(?:ferrari|snap\s?chat|sound\s?cloud|apple|nike|spotify|stripe|linear|notion|airbnb|shopify|vercel)\b/i.test(input.prompt)
+  );
+}
+
+export function isDesignDirectionRevisionRequest(prompt: string) {
+  return Boolean(
+    /\b(?:change|revise|update|replace|switch|move|shift|turn)\b[\s\S]{0,80}\b(?:current|existing|overall|global|site|website|design)\b[\s\S]{0,60}\b(?:direction|theme|visual language|design system|style)\b/i.test(prompt) ||
+    /\b(?:change|revise|update|replace|switch|move|shift|turn)\b[\s\S]{0,60}\b(?:direction|theme|visual language|design system)\b/i.test(prompt)
   );
 }
 
@@ -77,7 +85,7 @@ function referenceRole(prompt: string, start: number, end: number): { pageTarget
 }
 
 function userBrandFrom(prompt: string) {
-  const explicit = prompt.match(/\b(?:my own fictional brand|fictional brand|brand named|company named)\s+([A-Z][A-Za-z0-9&' -]{1,48}?)(?=\s*(?:[.,]|$|\b(?:with|using|but|that|for)\b))/);
+  const explicit = prompt.match(/\b(?:my own fictional brand|fictional brand|my fictional company|fictional company|my company|brand named|company named)\s+([A-Z][A-Za-z0-9&' -]{1,48}?)(?=\s*(?:[.,]|$|\b(?:with|using|but|that|for)\b))/);
   if (explicit?.[1]) return explicit[1].trim();
 
   const projectName = prompt.match(/\b(?:for|called)\s+([A-Z][A-Za-z0-9&' -]{1,48}?)(?=\s+(?:very close|inspired by|with|using|that|but|website|site|landing page|app)\b)/i);

@@ -303,7 +303,16 @@ import {
   designReferenceVisibleSummary
 } from "@/lib/server/design/reference/reference-intake";
 import type { DesignDirectionRequest } from "@/lib/server/design/reference/design-reference-contract";
-import { hasDesignReferenceSignal } from "@/lib/server/design/reference/reference-intent";
+import {
+  hasDesignReferenceSignal,
+  isDesignDirectionRevisionRequest
+} from "@/lib/server/design/reference/reference-intent";
+import {
+  buildProjectDesignContract,
+  projectDesignVisibleSummary
+} from "@/lib/server/design/direction/design-direction-kernel";
+import { compactProjectDesignContract } from "@/lib/server/design/direction/project-design-contract";
+import { renderProjectDesignMd } from "@/lib/server/design/direction/project-design-md";
 
 export const runtime = "nodejs";
 
@@ -2203,6 +2212,24 @@ function decisionForProposalContext(decision: DecisionPlan, proposalContext?: Pr
     };
   }
 
+  if (
+    proposalContext?.mode === "WEBSITE" &&
+    proposalContext.projectDesignContract &&
+    isDesignDirectionRevisionRequest(proposalContext.sourcePrompt)
+  ) {
+    return {
+      ...decision,
+      reason: `${decision.reason} WEBSITE design contract revision requires a coherent full-site regeneration.`,
+      requestType: proposalContext.pages.length > 1 ? "multi_page_generation" : "website_generation",
+      requiredFiles: proposalContext.requiredFiles,
+      siteStructure: {
+        pageCount: proposalContext.pages.length,
+        pages: proposalContext.pages,
+        sections: proposalContext.websiteGenerationBrief?.expectedSections ?? decision.siteStructure.sections
+      }
+    };
+  }
+
   return decision;
 }
 
@@ -2282,10 +2309,13 @@ function createLocalProposal(
   generatorContract?: GeneratorContract,
   proposalContext?: ProposalContext
 ): DiffProposal {
-  const renameRequest = isFullWebsiteReplacementRequest(prompt) ? null : detectRenameRequest(prompt);
+  const renameRequest = isFullWebsiteReplacementRequest(prompt) || isDesignDirectionRevisionRequest(prompt)
+    ? null
+    : detectRenameRequest(prompt);
   const isFullWebsiteGeneration =
     decision.requestType === "website_generation" ||
     decision.requestType === "multi_page_generation" ||
+    (proposalContext?.mode === "WEBSITE" && isDesignDirectionRevisionRequest(prompt)) ||
     (proposalContext?.mode === "WEBSITE" &&
       Boolean(proposalContext.websiteGenerationBrief) &&
       ["full_generation", "full_replacement"].includes(
@@ -3173,10 +3203,17 @@ if ("IntersectionObserver" in window) {
       : [];
     const copyValidation = websiteGeneration.qualityBlueprint.copyValidation;
     const blockingCopyFindings = copyValidation.findings.filter((finding) => finding.severity === "BLOCK");
+    const designQualityReview = websiteGeneration.designQualityReview;
     const websiteMetadata = {
       designTokenCount: websiteGeneration.designTokenCount,
       designTokenTheme: websiteGeneration.designTokenTheme,
       designTokenValidationPassed: websiteGeneration.designTokenValidationPassed,
+      designContractFingerprint: proposalContext?.projectDesignContract?.fingerprint,
+      designContractStatus: proposalContext?.projectDesignContract?.status,
+      designContractVersion: proposalContext?.projectDesignContract?.version,
+      designQualityFindingCount: designQualityReview?.findings.length ?? 0,
+      designQualityScore: designQualityReview?.coherenceScore,
+      designQualityStatus: designQualityReview?.status,
       memoryIgnoredForNewProject: websiteBrief?.requestScope !== "full_replacement",
       plannerGeneratorAligned: websiteGeneration.plannerGeneratorAligned,
       sourceOfTruthDomain: websiteGeneration.sourceOfTruthDomain,
@@ -3222,7 +3259,7 @@ if ("IntersectionObserver" in window) {
       websiteNormalizedActionCount: contractAssertion.normalizedActionCount,
       websiteRepairInputCount: contractAssertion.repairInputCount,
       websiteRequestScope: websiteBrief?.requestScope ?? ("full_generation" as const),
-      websitePreviewAssetPaths: Object.keys(websiteFiles).filter((path) => path !== "HASSALI.md"),
+      websitePreviewAssetPaths: Object.keys(websiteFiles).filter((path) => path !== "HASSALI.md" && path !== "DESIGN.md"),
       websitePreviewEntryRoute: "index.html",
       websitePreviewIdentity: websiteGeneration.qualityBlueprint.previewIdentity,
       websiteObsoleteOwnedFiles: obsoleteOwnedFiles,
@@ -3264,13 +3301,14 @@ if ("IntersectionObserver" in window) {
       };
     }
 
-    if (!normalizedValidation.passed || forbiddenHits.length > 0 || blockingCopyFindings.length > 0) {
+    if (!normalizedValidation.passed || forbiddenHits.length > 0 || blockingCopyFindings.length > 0 || designQualityReview?.blocking) {
       const blockedReasons = [
         ...normalizedValidation.blockedReasons,
         ...(forbiddenHits.length
           ? [`Generated content still contained forbidden terms: ${forbiddenHits.slice(0, 8).join(", ")}.`]
           : []),
-        ...blockingCopyFindings.map((finding) => `${finding.code}: ${finding.message} Evidence: ${finding.evidence}`)
+        ...blockingCopyFindings.map((finding) => `${finding.code}: ${finding.message} Evidence: ${finding.evidence}`),
+        ...(designQualityReview?.findings.filter((finding) => finding.severity === "block").map((finding) => `${finding.code}: ${finding.message} Evidence: ${finding.evidence}`) ?? [])
       ];
 
       return {
@@ -4304,12 +4342,18 @@ function attachProposalRoutingMetadata(
           previewType: "static_website"
         }
       : previewMetadata;
-  const mergedPreviewMetadata = proposalContext?.mode === "WEBSITE" && proposalContext.designDirectionRequest
+  const designPreviewMetadata = proposalContext?.mode === "WEBSITE" && proposalContext.designDirectionRequest
     ? {
         ...modePreviewMetadata,
         designReference: compactDesignDirectionRequest(proposalContext.designDirectionRequest)
       }
     : modePreviewMetadata;
+  const mergedPreviewMetadata = proposalContext?.mode === "WEBSITE" && proposalContext.projectDesignContract
+    ? {
+        ...designPreviewMetadata,
+        projectDesignContract: compactProjectDesignContract(proposalContext.projectDesignContract)
+      }
+    : designPreviewMetadata;
   const criticalRoutingReasons = routing.reasons.filter((reason) =>
     reason.code === "welcome_ts_pollution" ||
     reason.message.toLowerCase().includes("cross-project") ||
@@ -4449,7 +4493,10 @@ function attachProposalRoutingMetadata(
     sourceOfTruthPages: proposalContext?.pages.length ? proposalContext.pages : proposal.sourceOfTruthPages,
     sourceOfTruthPrompt: proposalContext?.sourcePrompt ?? proposal.sourceOfTruthPrompt,
     summary: proposalContext?.mode === "WEBSITE"
-      ? attachDesignReferenceContext(proposal, proposalContext.designDirectionRequest).summary
+      ? [
+          proposalContext.projectDesignContract ? projectDesignVisibleSummary(proposalContext.projectDesignContract) : "",
+          attachDesignReferenceContext(proposal, proposalContext.designDirectionRequest).summary
+        ].filter(Boolean).join("\n\n")
       : proposal.summary,
     publicCopyCleanStatus: proposal.websiteCopyValidationStatus === "blocked"
       ? "blocked"
@@ -5914,6 +5961,7 @@ export async function POST(request: Request) {
     modelSelectionPolicy?: unknown;
     productMode?: unknown;
     projectId?: unknown;
+    projectDesignNotes?: unknown;
     projectNotes?: unknown;
     researchPolicy?: unknown;
     workspace?: unknown;
@@ -5964,6 +6012,9 @@ export async function POST(request: Request) {
     : defaultProjectApprovalPolicy;
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
   const projectNotesContext = explicitProjectNotesContext(body?.projectNotes, productMode);
+  const boundedProjectDesignNotes = productMode === "WEBSITE" && typeof body?.projectDesignNotes === "string"
+    ? body.projectDesignNotes.trim().slice(0, maximumExplicitProjectNotesContextLength)
+    : "";
   const boundedProjectNotes = typeof body?.projectNotes === "string"
     ? body.projectNotes.trim().slice(0, maximumExplicitProjectNotesContextLength)
     : "";
@@ -6439,6 +6490,7 @@ export async function POST(request: Request) {
     (
       classifyWebsiteRequestScope(behavior.resolvedRequest) === "full_generation" ||
       isFullWebsiteReplacementRequest(behavior.resolvedRequest) ||
+      isDesignDirectionRevisionRequest(behavior.resolvedRequest) ||
       hasDesignReferenceSignal({
         attachmentNames: multimodalContext?.records.map((record) => record.metadata.safeName),
         prompt: behavior.resolvedRequest
@@ -6447,7 +6499,7 @@ export async function POST(request: Request) {
     ? await buildDesignReferenceIntake({
         attachments: multimodalContext?.records,
         memory: sharedMemoryContext,
-        projectNotes: boundedProjectNotes,
+        projectNotes: boundedProjectDesignNotes,
         prompt: behavior.resolvedRequest,
         signal: taskSignal,
         visionText: multimodalContext?.visionText,
@@ -6460,7 +6512,6 @@ export async function POST(request: Request) {
         }
       })
     : null;
-
   if (productMode !== "ASK" && nonMutatingFinalAction) {
     let specialistPersistence = persistence;
     const expertAnswer = await runAskBrain({
@@ -6584,6 +6635,16 @@ export async function POST(request: Request) {
     mode: productMode,
     prompt: effectiveUserPrompt
   });
+  const projectDesignContract = designDirectionRequest
+    ? buildProjectDesignContract({
+        domain: translatedIntent.domain ?? translatedIntent.businessType,
+        request: designDirectionRequest,
+        workspace: {
+          fileContents: workspace.fileContents,
+          fileList: workspace.fileList
+        }
+      })
+    : null;
   const blueprint = matchBusinessBlueprint({
     contract: activeProjectContract,
     productMode,
@@ -6703,6 +6764,7 @@ export async function POST(request: Request) {
       designDirectionRequest,
       generatorContract: initialGeneratorContract,
       mode: productMode,
+      projectDesignContract,
       prompt: effectiveUserPrompt,
       translatedIntent
     }), workspace),
@@ -7512,6 +7574,7 @@ export async function POST(request: Request) {
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     productMode === "WEBSITE" &&
     hasWebsiteEditSignal(effectiveUserPrompt) &&
+    !isDesignDirectionRevisionRequest(effectiveUserPrompt) &&
     classifyWebsiteRequestScope(effectiveUserPrompt) !== "full_generation" &&
     !isFullWebsiteReplacementRequest(effectiveUserPrompt)
   ) {
@@ -7519,7 +7582,21 @@ export async function POST(request: Request) {
 
     if (websiteEditContext.hasWebsiteFiles) {
       const websiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
-      const websiteEditPlan = planWebsiteEdit(websiteEditContext, websiteEditIntent);
+      const plannedWebsiteEdit = planWebsiteEdit(websiteEditContext, websiteEditIntent);
+      const websiteEditPlan = plannedWebsiteEdit.mode === "planned" && projectDesignContract && designDirectionRequest
+        ? {
+            ...plannedWebsiteEdit,
+            changes: [
+              ...plannedWebsiteEdit.changes.filter((change) => change.path !== "DESIGN.md"),
+              {
+                content: renderProjectDesignMd(projectDesignContract),
+                path: "DESIGN.md",
+                summary: "Updates the portable Project Design Contract for the approved visual change."
+              }
+            ],
+            targetFiles: Array.from(new Set([...plannedWebsiteEdit.targetFiles, "DESIGN.md"]))
+          }
+        : plannedWebsiteEdit;
       const proposal = attachDesignReferenceContext(withCurrentAttachmentAssets(createWebsiteEditProposal({
         context: websiteEditContext,
         generatorContract,
@@ -7637,7 +7714,9 @@ export async function POST(request: Request) {
       : null;
   const scopedExistingCodeEdit =
     productMode === "CODE" && isScopedExistingCodeEditRequest(effectiveUserPrompt, workspace);
-  const renameRequest = detectRenameRequest(effectiveUserPrompt);
+  const renameRequest = isDesignDirectionRevisionRequest(effectiveUserPrompt)
+    ? null
+    : detectRenameRequest(effectiveUserPrompt);
   const shouldUseDeterministicProposal =
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (Boolean(renameRequest) ||
@@ -7645,6 +7724,7 @@ export async function POST(request: Request) {
       (!scopedExistingCodeEdit &&
         (shouldUseDeterministicDecision(decision) ||
           (productMode === "WEBSITE" && isFullWebsiteReplacementRequest(effectiveUserPrompt)) ||
+          (productMode === "WEBSITE" && isDesignDirectionRevisionRequest(effectiveUserPrompt)) ||
           isEnhancementRequest(effectiveUserPrompt) ||
           (mode === "EXECUTE" && isInvoiceRequest(effectiveUserPrompt)))));
 

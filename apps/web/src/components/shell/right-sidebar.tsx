@@ -947,6 +947,9 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
       fileList: visibleFileList,
       projectId,
       projectName,
+      projectDesignNotes: productMode === "WEBSITE" && notesProjectId === projectId
+        ? boundedProjectNotesContext(projectNotes)
+        : "",
       projectNotes: productMode === "ASK" && notesProjectId === projectId
         ? boundedProjectNotesContext(projectNotes)
         : "",

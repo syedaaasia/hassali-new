@@ -299,6 +299,10 @@ function isExplicitWebsiteFactUpdate(value: string) {
   );
 }
 
+function isExplicitWebsiteDesignUpdate(value: string) {
+  return /^for\s+(?:the\s+)?[a-z0-9][a-z0-9 -]{0,60}\s+(?:use|make|keep|set)\s+(?:rounded|square|sharp|dark|light|editorial|minimal|playful|cinematic)\b/i.test(value.trim());
+}
+
 function extractExplicitNegatives(value: string) {
   return unique(
     Array.from(value.matchAll(/\b(?:do not|don't|dont|never|no|without)\s+([^.!?\n]{2,120})/gi))
@@ -845,7 +849,9 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   });
   const inferredAction = inferAction(currentPrompt, resolvedRequest);
   const mixedAction = inferMixedMutationAction(currentPrompt);
-  const action = input.selectedMode === "WEBSITE" && isExplicitWebsiteFactUpdate(currentPrompt)
+  const action = input.selectedMode === "WEBSITE" && (
+    isExplicitWebsiteFactUpdate(currentPrompt) || isExplicitWebsiteDesignUpdate(currentPrompt)
+  )
     ? "EDIT"
     : mixedAction ?? inferredAction;
   const mixedIntent = Boolean(mixedAction);

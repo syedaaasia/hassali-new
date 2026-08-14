@@ -27,6 +27,7 @@ export type WebsitePlan = {
   layoutType: WebsiteLayoutType;
   optionalSections: WebsiteSectionDefinition[];
   pages: string[];
+  projectDesignFingerprint: string | null;
   requiredSections: WebsiteSectionDefinition[];
   sectionRegistryVersion: "11.2B";
   sourceOfTruthDomain: string | null;
@@ -300,6 +301,7 @@ export function planWebsite(input: {
       input.generatorContract?.authoritativeBusinessType ?? ""
     ].join(" ")
   });
+  const projectDesign = input.proposalContext?.projectDesignContract ?? null;
 
   return {
     audience: profile.audience,
@@ -310,16 +312,21 @@ export function planWebsite(input: {
     designTokens,
     goal: profile.goal,
     industry,
-    layoutStrategy: `${profile.layoutType} layout with industry-specific section rhythm and no generic hero/features/pricing repetition.`,
+    layoutStrategy: projectDesign
+      ? `${projectDesign.layout.container} ${projectDesign.layout.grid} Rhythm: ${projectDesign.layout.sectionRhythm.join(" -> ")}.`
+      : `${profile.layoutType} layout with industry-specific section rhythm and no generic hero/features/pricing repetition.`,
     layoutType: profile.layoutType,
     optionalSections: profile.optionalSections,
     pages,
+    projectDesignFingerprint: projectDesign?.fingerprint ?? null,
     requiredSections: profile.requiredSections,
     sectionRegistryVersion: "11.2B",
     sourceOfTruthDomain: input.proposalContext?.websiteGenerationBrief?.domainId ?? input.proposalContext?.domain ?? input.generatorContract?.authoritativeDomain ?? input.intent.domain,
     sourceOfTruthPages: input.proposalContext?.websiteGenerationBrief?.requestedPages ?? pages,
     tokensStudioExportAvailable: true,
-    visualStrategy: profile.visualStrategy
+    visualStrategy: projectDesign
+      ? `${projectDesign.identity.archetype}; ${projectDesign.intent.personality.join(", ")}; accent ${projectDesign.colors.accent.value}; ${projectDesign.geometry.surfaceTreatment}`
+      : profile.visualStrategy
   };
 }
 

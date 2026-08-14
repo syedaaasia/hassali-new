@@ -79,6 +79,7 @@ const mutationCases: Array<[string, Mode, BehavioralAction]> = [
   ["Build a premium website for a law firm.", "WEBSITE", "BUILD"],
   ["Create this landing page.", "WEBSITE", "BUILD"],
   ["Change the hero to black.", "WEBSITE", "EDIT"],
+  ["For the gallery cards use rounded corners.", "WEBSITE", "EDIT"],
   ["Use WebGL on this site.", "WEBSITE", "EDIT"],
   ["Redesign this website.", "WEBSITE", "EDIT"],
   ["Can you build this for me?", "CODE", "BUILD"],

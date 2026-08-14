@@ -2,6 +2,7 @@ import type { BusinessBlueprint, BlueprintPreviewType } from "@/lib/server/ai/bl
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import { isFullWebsiteReplacementRequest } from "@/lib/server/ai/website-edit-intent";
+import { isDesignDirectionRevisionRequest } from "@/lib/server/design/reference/reference-intent";
 
 export type ContextPriorityStatus = "clear" | "conflicts_resolved" | "low_confidence";
 export type AuthoritativeIntentFamily =
@@ -89,6 +90,7 @@ function intentFamilyFor(input: BuildContextPriorityInput): AuthoritativeIntentF
 
   if (input.productMode === "ASK") return "answer";
   if (input.productMode === "WEBSITE" && isFullWebsiteReplacementRequest(prompt)) return "full_generation";
+  if (input.productMode === "WEBSITE" && isDesignDirectionRevisionRequest(prompt)) return "full_generation";
   if (isRegeneration(prompt, input.regenerationContext)) return "regeneration";
   if (isSmallEdit(prompt)) return "targeted_text_replacement";
   if (text.includes("theme") || text.includes("color") || text.includes("colour") || text.includes("make it")) {

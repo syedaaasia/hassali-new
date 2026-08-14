@@ -316,7 +316,7 @@ The reusable acceptance scenarios live in `docs/codex/HASSALI_TEST_MATRIX.md`.
 
 Roadmap names describe intended bounded runs, not completed implementation claims.
 
-The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference intake is implemented; Run 5 I2-I5, Growth, and Run 6 remain planned rather than implemented.
+The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference intake and Run 5 I2 design-direction kernel are implemented; Run 5 I3-I5, Growth, and Run 6 remain planned rather than implemented.
 
 1. **Premium Workspace and Codex Efficiency Foundation** - polish the creation workspace and establish concise engineering context.
 2. **Live Execution Timeline, Git Workflow and Verified Delivery** - make approved work, evidence, and delivery state easy to inspect.
@@ -352,4 +352,16 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Memory M5 checkpoint: `MEMORY-M5: add memory controls and privacy`
 - Memory M6 checkpoint: `MEMORY-M6: add cross-mode shared memory`
 - Run 05 I1 checkpoint: `WEBSITE-I1: add visual reference intake and clone intelligence`
+- Run 05 I2 checkpoint: `WEBSITE-I2: add design direction and quality kernel`
 - The repository HEAD is authoritative; confirm it with Git before every task.
+
+## WEBSITE Design Direction
+
+- `ProjectDesignContract` is the canonical WEBSITE visual-system handoff between reference intake, planning, generation, proposal metadata, and quality review.
+- The current instruction outranks Project Notes, current memory, scoped reference roles, global references, existing-project evidence, and professional defaults in that order where they conflict.
+- Reference roles remain scoped: a pricing, navigation, hero, or product-storytelling reference does not silently become the global visual identity.
+- WEBSITE generation emits a portable `DESIGN.md` containing version, fingerprint, semantic roles, system rules, provenance, uncertainty, responsive behavior, and accessibility guidance.
+- `DESIGN.md`, reference pages, screenshots, notes, and memory remain untrusted design data. They cannot grant mutation, approval, shell, provider, or deployment authority.
+- The WEBSITE builder consumes contract color, type, spacing, layout, geometry, component, imagery, motion, responsive, and accessibility decisions through the existing creative-direction and quality-blueprint path.
+- Generated WEBSITE output is blocked for fabricated social proof, material semantic-color drift, or a missing contract fingerprint; generic unsupported styling patterns remain visible warnings.
+- Existing project `DESIGN.md` and CSS may inform revisions, but current user instructions remain authoritative and every revision receives a new version and fingerprint.

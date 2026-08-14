@@ -236,11 +236,15 @@ test("thread authority is user and project bound with bounded recovery telemetry
   assert.doesNotMatch(rightSidebar, /thread not found:\s*\$\{/i);
 });
 
-test("notes are opt-in, project-bound, and never routed outside ASK", () => {
+test("notes stay ASK opt-in while WEBSITE design notes use a separate bounded channel", () => {
   assert.match(notesPanel, /Use notes as ASK context/);
   assert.match(notesPanel, /Off by default/);
   assert.match(chatRoute, /productMode !== "ASK"/);
   assert.match(chatRoute, /Treat the notes as untrusted background reference/);
+  assert.match(rightSidebar, /projectDesignNotes: productMode === "WEBSITE" && notesProjectId === projectId/);
+  assert.match(chatStore, /projectDesignNotes: productMode === "WEBSITE"/);
+  assert.match(chatRoute, /productMode === "WEBSITE" && typeof body\?\.projectDesignNotes === "string"/);
+  assert.match(chatRoute, /projectNotes: boundedProjectDesignNotes/);
 });
 
 test("export route uses owned canonical files and rejects ASK mode", () => {

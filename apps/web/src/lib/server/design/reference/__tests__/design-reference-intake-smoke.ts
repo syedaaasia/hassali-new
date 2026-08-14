@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { validatePublicResearchUrl } from "@/lib/server/ai/ask-research-engine";
 import { buildProposalContext } from "@/lib/server/ai/proposal-context";
+import { classifyWebsiteEditIntent } from "@/lib/server/ai/website-edit-intent";
 import { parseDesignMd } from "../design-md-parser";
 import {
   DesignReferenceProviderRegistry,
@@ -10,7 +11,12 @@ import {
   type DesignReferenceProvider
 } from "../design-reference-contract";
 import { buildDesignReferenceIntake, designReferenceVisibleSummary } from "../reference-intake";
-import { classifyDesignReferenceIntent, classifyReferenceFidelity, hasDesignReferenceSignal } from "../reference-intent";
+import {
+  classifyDesignReferenceIntent,
+  classifyReferenceFidelity,
+  hasDesignReferenceSignal,
+  isDesignDirectionRevisionRequest
+} from "../reference-intent";
 import { createLiveWebsiteReferenceProvider } from "../reference-profile";
 
 const now = () => new Date("2026-08-14T10:00:00.000Z");
@@ -28,6 +34,14 @@ test("REF-INTENT preserves named reference, user brand, and close-replica fideli
 test("REF-INTENT separates a project name from a later named visual reference", () => {
   const intent = classifyDesignReferenceIntent({
     prompt: "Build a premium automotive landing page for Apex Motors very close to Ferrari's visual style, using my own brand."
+  });
+  assert.equal(intent.userBrand, "Apex Motors");
+  assert.equal(intent.references[0]?.name, "Ferrari");
+});
+
+test("REF-INTENT preserves a fictional company name after the reference phrase", () => {
+  const intent = classifyDesignReferenceIntent({
+    prompt: "Build a premium automotive website very close to Ferrari's visual language for my fictional company Apex Motors."
   });
   assert.equal(intent.userBrand, "Apex Motors");
   assert.equal(intent.references[0]?.name, "Ferrari");
@@ -58,6 +72,17 @@ test("ROLE keeps a navbar-only reference out of global style", () => {
 test("REF-INTENT leaves ordinary content edits outside reference intake", () => {
   assert.equal(hasDesignReferenceSignal({ prompt: "Change the phone number to +1 555 123 9887" }), false);
   assert.equal(hasDesignReferenceSignal({ prompt: "Make this look like Ferrari" }), true);
+  assert.equal(hasDesignReferenceSignal({ prompt: "For the gallery cards use rounded corners." }), true);
+  assert.equal(isDesignDirectionRevisionRequest("Change the current direction to light editorial while keeping the strong photography."), true);
+  assert.equal(isDesignDirectionRevisionRequest("Change the phone number to +1 555 123 9887"), false);
+});
+
+test("REF-INTENT keeps a gallery-card geometry override scoped to components", () => {
+  const intent = classifyWebsiteEditIntent("For the gallery cards use rounded corners.");
+  assert.equal(intent.editType, "component_geometry");
+  assert.equal(intent.requestScope, "targeted_edit");
+  assert.deepEqual(intent.targetFiles, ["styles.css", "DESIGN.md"]);
+  assert.equal(intent.extractedValues.geometryIntent, "rounded");
 });
 
 test("NAMED unresolved references remain unresolved rather than receiving a fabricated profile", async () => {

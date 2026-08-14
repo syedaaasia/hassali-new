@@ -62,7 +62,7 @@ function projectNoteConstraints(notes: string | undefined) {
   if (!notes?.trim()) return [];
   return notes.split(/\r?\n/)
     .map((line) => line.replace(/^[-*]\s+/, "").trim())
-    .filter((line) => line && /\b(?:brands?|buttons?|cards?|colors?|corners?|design|fonts?|layout|radius|theme|typography|visual)\b/i.test(line))
+    .filter((line) => line && /\b(?:accents?|backgrounds?|brands?|buttons?|cards?|colors?|corners?|design|display|fonts?|headings?|imagery|layout|palette|radius|sans(?:-serif)?|serif|surfaces?|theme|typography|visual)\b/i.test(line))
     .slice(0, 5);
 }
 

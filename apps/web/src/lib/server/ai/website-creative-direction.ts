@@ -1,6 +1,7 @@
 import type { WebsiteGenerationBrief } from "@/lib/server/ai/generation-brief";
 import type { DomainId } from "@/lib/server/ai/industry-taxonomy";
 import type { WebsitePlan } from "@/lib/server/ai/website-planner";
+import type { ProjectDesignContract } from "@/lib/server/design/direction/project-design-contract";
 
 export type WebsiteCreativeDirection = {
   domainId: string;
@@ -443,12 +444,69 @@ export function isPriorityWebsiteDomain(domainId: string | null | undefined): do
 export function getWebsiteCreativeDirection(input: {
   brief?: WebsiteGenerationBrief | null;
   plan: WebsitePlan;
+  projectDesignContract?: ProjectDesignContract | null;
 }): WebsiteCreativeDirection {
   const domainId = domainFrom(input);
+  const projectContract = input.projectDesignContract;
+  const applyProjectContract = (direction: WebsiteCreativeDirection): WebsiteCreativeDirection => {
+    if (!projectContract) return direction;
+    const heroText = projectContract.layout.hero.toLowerCase();
+    const heroLayout: WebsiteCreativeDirection["hero"]["layout"] = heroText.includes("full-bleed") || heroText.includes("editorial")
+      ? "editorial"
+      : heroText.includes("product")
+        ? "retail-showcase"
+        : direction.hero.layout;
+    return {
+      ...direction,
+      conversion: {
+        ...direction.conversion,
+        ctaStyle: `${projectContract.components.buttons}; radius ${projectContract.geometry.buttonRadius}`
+      },
+      hero: {
+        ...direction.hero,
+        backgroundTreatment: projectContract.layout.hero,
+        layout: heroLayout
+      },
+      palette: {
+        ...direction.palette,
+        accent: projectContract.colors.accent.value,
+        background: projectContract.colors.background.value,
+        border: projectContract.colors.border.value,
+        mutedText: projectContract.colors.textMuted.value,
+        primary: projectContract.colors.primaryAction.value,
+        primaryDark: projectContract.colors.textPrimary.value,
+        surface: projectContract.colors.surface.value,
+        surfaceAlt: projectContract.colors.elevatedSurface.value,
+        text: projectContract.colors.textPrimary.value
+      },
+      rhythm: {
+        avoidPatterns: projectContract.dontRules,
+        homeSections: projectContract.layout.sectionRhythm
+      },
+      spacing: {
+        ...direction.spacing,
+        cardRadius: projectContract.geometry.cardRadius,
+        sectionPadding: projectContract.spacing.sectionGap
+      },
+      typography: {
+        ...direction.typography,
+        bodyFont: projectContract.typography.body,
+        headingFont: projectContract.typography.display,
+        scale: {
+          body: projectContract.typography.scale.body,
+          h1: projectContract.typography.scale.h1,
+          h2: projectContract.typography.scale.h2,
+          h3: projectContract.typography.scale.h3,
+          small: projectContract.typography.scale.small
+        }
+      },
+      visualArchetype: projectContract.identity.archetype
+    };
+  };
 
   if (domainId === "electronics_store") {
     const retail = directions.mobile_phone_shop ?? baseDirection(domainId);
-    return {
+    return applyProjectContract({
       ...retail,
       domainId,
       hero: {
@@ -457,55 +515,55 @@ export function getWebsiteCreativeDirection(input: {
         eyebrow: "Television and home cinema"
       },
       visualArchetype: "Cinematic electronics showroom"
-    };
+    });
   }
 
   if (domainId === "crm_software") {
     const crm = baseDirection(domainId);
-    return {
+    return applyProjectContract({
       ...crm,
       domainId,
       hero: { ...crm.hero, eyebrow: "Customer operations, clearly connected", layout: "split-proof" },
       visualArchetype: "Precise product interface"
-    };
+    });
   }
 
   if (domainId === "restaurant" || domainId === "seafood_restaurant") {
     const dining = baseDirection(domainId);
-    return {
+    return applyProjectContract({
       ...dining,
       domainId,
       hero: { ...dining.hero, backgroundTreatment: "editorial dining composition with subtle ambient depth", eyebrow: "Seasonal menu and reservations", layout: "editorial" },
       proof: { ...dining.proof, sectionTitle: "Menu clarity, reservation guidance, and dietary notes", type: "menu-signature", visualTreatment: "editorial dish and dining-room studies" },
       visualArchetype: "Editorial dining room"
-    };
+    });
   }
 
   if (domainId === "creative_portfolio") {
     const portfolio = baseDirection(domainId);
-    return { ...portfolio, domainId, hero: { ...portfolio.hero, eyebrow: "Creative direction and selected work", layout: "editorial" }, visualArchetype: "Cinematic typographic portfolio" };
+    return applyProjectContract({ ...portfolio, domainId, hero: { ...portfolio.hero, eyebrow: "Creative direction and selected work", layout: "editorial" }, visualArchetype: "Cinematic typographic portfolio" });
   }
 
   if (domainId === "hvac_service") {
     const service = directions.cleaning_service ?? baseDirection(domainId);
-    return { ...service, domainId, hero: { ...service.hero, eyebrow: "Heating, cooling, and home comfort" }, visualArchetype: "Confident local utility" };
+    return applyProjectContract({ ...service, domainId, hero: { ...service.hero, eyebrow: "Heating, cooling, and home comfort" }, visualArchetype: "Confident local utility" });
   }
 
   if (domainId === "law_firm") {
     const legal = baseDirection(domainId);
-    return { ...legal, domainId, hero: { ...legal.hero, eyebrow: "Measured legal guidance", layout: "editorial" }, visualArchetype: "Restrained professional editorial" };
+    return applyProjectContract({ ...legal, domainId, hero: { ...legal.hero, eyebrow: "Measured legal guidance", layout: "editorial" }, visualArchetype: "Restrained professional editorial" });
   }
 
   if (domainId === "technology_consultancy") {
     const technology = baseDirection(domainId);
-    return { ...technology, domainId, hero: { ...technology.hero, eyebrow: "Technology strategy and delivery", layout: "split-proof" }, visualArchetype: "Precise technical editorial" };
+    return applyProjectContract({ ...technology, domainId, hero: { ...technology.hero, eyebrow: "Technology strategy and delivery", layout: "split-proof" }, visualArchetype: "Precise technical editorial" });
   }
 
   if (isPriorityWebsiteDomain(domainId)) {
-    return directions[domainId] ?? baseDirection(domainId);
+    return applyProjectContract(directions[domainId] ?? baseDirection(domainId));
   }
 
-  return baseDirection(domainId ?? "generic");
+  return applyProjectContract(baseDirection(domainId ?? "generic"));
 }
 
 export function summarizeCreativeDirection(direction: WebsiteCreativeDirection) {

@@ -1030,6 +1030,7 @@ export function buildWebsiteQualityBlueprint(input: {
   direction: WebsiteCreativeDirection;
   intent: IntentIntelligence;
   plan: WebsitePlan;
+  projectBrand?: string | null;
   prompt: string;
   workspaceAssets?: WebsiteCinematicAssetInput[];
 }): WebsiteQualityBlueprint {
@@ -1062,7 +1063,7 @@ export function buildWebsiteQualityBlueprint(input: {
   });
   const semanticRepairApplied = initialConsistency.repairRecommended && semantic.source !== "generic_fallback" && semantic.source !== "canonical_taxonomy";
   if (semanticRepairApplied) selectedProfile = genericSemanticProfile(input.prompt, input.plan);
-  const userSuppliedBrand = contentContract.businessIdentity.displayName;
+  const userSuppliedBrand = input.projectBrand?.trim() || contentContract.businessIdentity.displayName;
   const brandName = userSuppliedBrand ?? contentContract.businessIdentity.publicLabel;
   const domainId = input.brief?.domainId ?? input.plan.sourceOfTruthDomain;
   const initialPages = input.plan.pages.map((page) => {

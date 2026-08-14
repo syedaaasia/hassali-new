@@ -3,6 +3,7 @@ export type WebsiteEditType =
   | "add_testimonials"
   | "business_name"
   | "color_palette"
+  | "component_geometry"
   | "contact_info"
   | "cta_text"
   | "hero_style"
@@ -39,6 +40,7 @@ export type WebsiteEditIntent = {
     colorIntent?: string;
     email?: string;
     experienceSectionTarget?: string;
+    geometryIntent?: "rounded" | "square";
     pageToRemove?: string;
     pageTarget?: string;
     phone?: string;
@@ -60,7 +62,7 @@ export type WebsiteEditIntent = {
 const editVerbPattern = /\b(?:change|update|make|use|turn|enable|convert|add|remove|rename|replace|rewrite|rebuild|redesign|improve|polish|edit|darken|lighten)\b/i;
 const businessNameFactPattern = /^(?:our\s+(?:(?:business|brand|company|site|website)\s+)?name|(?:my|the)\s+(?:business|brand|company|site|website)\s+name)\s+(?:is|should be)\s+\S/i;
 
-const pagePattern = /\b(?:homepage|home|about(?: us)?|services?|products?|pricing|contact|blog|checkout|cart|gallery)(?:\s+page)?\b/i;
+const pagePattern = /\b(?:homepage|home|about(?: us)?|services?|products?|pricing|contact|blog|checkout|cart)(?:\s+page)?\b|\bgallery\s+page\b/i;
 const sectionPattern = /\b(?:hero|footer|navigation|navbar|header|testimonials?|faq|cta|call to action|product grid|service grid)\b/i;
 
 export function isFullWebsiteReplacementRequest(prompt: string) {
@@ -228,6 +230,14 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
     !explicitBusinessName &&
     !primaryCta &&
     !wantsTestimonials;
+  const geometryIntent = /\brounded\b/i.test(prompt)
+    ? "rounded" as const
+    : /\b(?:square|sharp)\b/i.test(prompt)
+      ? "square" as const
+      : undefined;
+  const wantsComponentGeometry = Boolean(
+    geometryIntent && /\b(?:gallery|product|service|feature|pricing)?\s*cards?\b/i.test(prompt)
+  );
 
   let editType: WebsiteEditType = "unknown";
 
@@ -247,6 +257,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   else if (services.length || /\b(?:add prices|prices to the services|service names)\b/i.test(prompt)) editType = "service_copy";
   else if (wantsHeroStyle) editType = "hero_style";
   else if (wantsColor) editType = "color_palette";
+  else if (wantsComponentGeometry) editType = "component_geometry";
   else if (requestScope === "large_partial_replacement" && pageTarget) editType = "page_replacement";
   else if (requestScope === "page_edit" && pageTarget) editType = "page_edit";
   else if (requestScope === "section_edit" && sectionTarget) editType = "section_edit";
@@ -266,6 +277,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
     editType === "set_cinematic" ? ["index.html", "sequence.js", "sequence-manifest.js", "HASSALI.md"] :
     editType === "add_carousel" ? ["index.html", "styles.css", "main.js"] :
     editType === "hero_style" || editType === "color_palette" ? ["styles.css", "HASSALI.md"] :
+    editType === "component_geometry" ? ["styles.css", "DESIGN.md"] :
     editType === "remove_page" && pageToRemove ? [pageToPath(pageToRemove), "HASSALI.md"] :
     editType === "service_copy" ? ["services.html", "index.html", "HASSALI.md"] :
     editType === "add_testimonials" ? ["index.html", "styles.css", "HASSALI.md"] :
@@ -283,6 +295,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
       colorIntent: editType === "color_palette" ? prompt : undefined,
       email,
       experienceSectionTarget,
+      geometryIntent,
       pageToRemove: pageToRemove ? normalizePageName(pageToRemove) : undefined,
       pageTarget,
       phone,

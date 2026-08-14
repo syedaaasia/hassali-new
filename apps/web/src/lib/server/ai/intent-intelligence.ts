@@ -6,6 +6,7 @@ import {
   inferSemanticDomain
 } from "@/lib/server/ai/industry-taxonomy";
 import { isFullWebsiteReplacementRequest } from "@/lib/server/ai/website-edit-intent";
+import { isDesignDirectionRevisionRequest } from "@/lib/server/design/reference/reference-intent";
 
 export type IntentIntelligence = {
   brandName: string | null;
@@ -384,6 +385,10 @@ function inferUserIntent(promptText: string): IntentIntelligence["userIntent"] {
       /\b(?:system|web app|app|dashboard|inventory|crm|erp|pos|tool)\b/.test(promptText))
   ) {
     return "new_site";
+  }
+
+  if (isDesignDirectionRevisionRequest(promptText)) {
+    return "visual_theme_edit";
   }
 
   if (isVisualThemeEditRequest(promptText)) {

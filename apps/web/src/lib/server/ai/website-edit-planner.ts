@@ -471,6 +471,14 @@ function addCarouselCss(content: string) {
   return `${content.trimEnd()}\n\n.carousel { overflow: hidden; }\n.carousel-track { display: flex; gap: 1rem; transition: transform .35s ease; touch-action: pan-y; }\n.carousel-slide { flex: 0 0 min(31rem, 82vw); }\n.carousel-controls { display: flex; justify-content: flex-end; align-items: center; gap: .8rem; margin-top: 1rem; }\n`;
 }
 
+function updateComponentGeometryCss(content: string, geometry: "rounded" | "square") {
+  const radius = geometry === "rounded" ? "18px" : "2px";
+  const rule = `/* hassali-component-geometry */\n.gallery-grid .entity-card, .gallery-card, [data-gallery] .entity-card { border-radius: ${radius}; }`;
+  return /\/\* hassali-component-geometry \*\/[\s\S]*?(?=\n\n|$)/i.test(content)
+    ? content.replace(/\/\* hassali-component-geometry \*\/[\s\S]*?(?=\n\n|$)/i, rule)
+    : `${content.trimEnd()}\n\n${rule}\n`;
+}
+
 function addCarouselJs(content: string) {
   if (/data-carousel-prev/i.test(content)) return content;
   return `${content.trimEnd()}\n\ndocument.querySelectorAll("[data-carousel]").forEach((carousel) => {\n  const track = carousel.querySelector("[data-carousel-track]");\n  const slides = Array.from(carousel.querySelectorAll("[data-carousel-slide]"));\n  const status = carousel.querySelector("[data-carousel-status]");\n  let index = 0;\n  let startX = 0;\n  const update = () => { const width = slides[0]?.getBoundingClientRect().width ?? 0; if (track instanceof HTMLElement) track.style.transform = "translateX(-" + (index * (width + 16)) + "px)"; if (status) status.textContent = (index + 1) + " / " + slides.length; };\n  const move = (step) => { index = (index + step + slides.length) % Math.max(slides.length, 1); update(); };\n  carousel.querySelector("[data-carousel-prev]")?.addEventListener("click", () => move(-1));\n  carousel.querySelector("[data-carousel-next]")?.addEventListener("click", () => move(1));\n  carousel.addEventListener("keydown", (event) => { if (event.key === "ArrowLeft") move(-1); if (event.key === "ArrowRight") move(1); });\n  carousel.addEventListener("pointerdown", (event) => { startX = event.clientX; }, { passive: true });\n  carousel.addEventListener("pointerup", (event) => { const distance = event.clientX - startX; if (Math.abs(distance) > 48) move(distance > 0 ? -1 : 1); }, { passive: true });\n  update();\n});\n`;
@@ -669,6 +677,14 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
       ? "- Visual archetype: Warm luxury craft studio"
       : "- Palette: darker, warmer, and more refined while preserving the existing domain";
     changes.push(change(contractPath, updateCreativeDirection(hassali, palette), "Updates Creative Direction notes."));
+  }
+
+  if (intent.editType === "component_geometry" && intent.extractedValues.geometryIntent && files["styles.css"]) {
+    changes.push(change(
+      "styles.css",
+      updateComponentGeometryCss(files["styles.css"], intent.extractedValues.geometryIntent),
+      `Updates gallery card geometry to ${intent.extractedValues.geometryIntent} corners without changing unrelated components.`
+    ));
   }
 
   if (intent.editType === "cta_text" && intent.extractedValues.primaryCta) {
