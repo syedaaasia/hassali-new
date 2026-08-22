@@ -361,6 +361,7 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Run 07 checkpoint: `CODE-RUN7: build verified software factory`
 - Run 08 checkpoint: `EXPERIENCE-RUN8: add rich media and verified shipping`
 - Run 09 checkpoint: `GRAPH-RUN9: add shared intelligence graph kernel`
+- Run 10 checkpoint: `MEMORY-RUN10: add durable knowledge and memory 2.0`
 - The repository HEAD is authoritative; confirm it with Git before every task.
 
 ## WEBSITE Design Direction
@@ -407,6 +408,17 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Serialization defaults to provider-eligible/public nodes, rejects malformed versions/endpoints, redacts secret-like labels, omits secret/body/source metadata, and never embeds source bodies or binary assets.
 - Contradictions between non-authoritative inferred facts are represented explicitly. Domain owners still resolve confirmed authority conflicts.
 - Optional graph enrichment failure preserves a valid core result and adds no graph-derived claims.
+
+## Knowledge Graph and Memory 2.0
+
+- `lib/server/knowledge-memory/` is the normalized record/query layer over the existing durable user and project stores. It does not replace PostgreSQL ownership, conversations, canonical project state, source documents, or the Run 9 graph.
+- Records distinguish user, project, conversation, source, and ephemeral scopes and retain subject, value, provenance, fact state, authority, lifecycle, privacy, tags, expiry, and supersession lineage.
+- Existing M2 user and M3 project records adapt into the normalized contract without a database migration. Their existing owner-scoped stores remain the durable write/delete authority.
+- Write classification rejects secrets, temporary context, unapproved sensitive capture, and unsupported inference. Explicit low-risk saves and stable/project facts retain their existing policy gates.
+- Retrieval is deterministic, lexical, scope- and revision-aware, graph-enrichable, deduplicated, conflict-visible, and bounded to eight records / 2,400 characters. Unrelated memory is negative-filtered rather than injected by default.
+- Live/current public facts do not treat personal memory as sufficient authority. Source-grounded records retain source, chunk, and section provenance; verified outcomes remain distinct from inferred or failed work.
+- Corrections supersede rather than overwrite, forget invalidates active/history retrieval, and in-process query caches clear on every save/correction/delete.
+- Run 9 graph projections add private claim nodes and `SUPERSEDES`/bounded relationship context only; the graph remains an index and relationship layer, not the memory store.
 
 ## WEBSITE Visual QA
 

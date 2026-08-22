@@ -18,6 +18,11 @@ import {
   resolveMemoryTruth,
   userRecordToTemporal
 } from "@/lib/server/memory-intelligence/temporal-memory";
+import {
+  projectMemoryToKnowledgeRecord,
+  retrieveKnowledge,
+  userMemoryToKnowledgeRecord
+} from "@/lib/server/knowledge-memory/knowledge-memory";
 
 export type SharedMemoryMode = "ASK" | "CODE" | "GROWTH" | "WEBSITE";
 export type SharedMemoryIntent =
@@ -81,12 +86,10 @@ const maximumContextRecords = 12;
 const ignoredTokens = new Set([
   "about", "and", "are", "build", "can", "for", "from", "help", "how", "make", "that", "the", "this", "use", "what", "with", "you", "your"
 ]);
-const websiteTerms = new Set([
-  "brand", "button", "color", "copy", "corner", "design", "editorial", "font", "interface", "landing", "layout", "minimal", "page", "portfolio", "site", "theme", "typography", "visual", "website"
-]);
-const codeTerms = new Set([
-  "api", "architecture", "auth", "build", "cmd", "code", "command", "database", "debug", "framework", "git", "lint", "python", "repository", "test", "testing", "typescript"
-]);
+
+function knowledgeMode(mode: SharedMemoryMode) {
+  return mode === "GROWTH" ? "SHARED" as const : mode;
+}
 
 function tokens(value: string) {
   return normalizeMemoryText(value)
@@ -97,15 +100,6 @@ function tokens(value: string) {
 function overlapScore(query: string[], value: string) {
   const normalized = normalizeMemoryText(value);
   return query.reduce((score, token) => score + (normalized.includes(token) ? 3 : 0), 0);
-}
-
-function modeScore(mode: SharedMemoryMode, value: string) {
-  const valueTokens = new Set(tokens(value));
-  const vocabulary = mode === "WEBSITE" ? websiteTerms : mode === "CODE" ? codeTerms : null;
-  if (!vocabulary) return 0;
-  let score = 0;
-  for (const term of vocabulary) if (valueTokens.has(term)) score += 2;
-  return Math.min(score, 6);
 }
 
 function detectIntent(mode: SharedMemoryMode, prompt: string): SharedMemoryIntent {
@@ -310,27 +304,31 @@ export async function buildSharedMemoryContext(input: {
       ? await input.userStore.listHistory(80)
       : await input.userStore.list(80);
     const records = selectCurrentUserRecords(history);
-    const scored = records
-      .filter((record) => {
+    const allowed = records.filter((record) => {
         const allowed = record.status === "active" && (policy.allowSensitive || record.sensitivity === "standard");
         if (!allowed) excludedCount += 1;
         return allowed;
-      })
-      .map((record) => ({
-        record,
-        score: overlapScore(query, `${record.key} ${record.value} ${record.person?.canonicalName ?? ""} ${record.person?.relationship ?? ""}`) +
-          modeScore(input.mode, `${record.key} ${record.value}`) +
-          (record.category === "instruction" ? 2 : 0)
-      }))
-      .filter((entry) => {
-        const relevant = entry.score > 0;
-        if (!relevant) excludedCount += 1;
-        return relevant;
-      })
-      .sort((left, right) => right.score - left.score || right.record.updatedAt.getTime() - left.record.updatedAt.getTime())
-      .slice(0, 4);
-    sections.user = scored.filter((entry) => !entry.record.person).map((entry) => userItem(entry.record));
-    sections.people = scored.filter((entry) => entry.record.person).map((entry) => userItem(entry.record));
+      });
+    const retrieval = retrieveKnowledge(allowed.map((record) => userMemoryToKnowledgeRecord("current-user", record)), {
+      includeSensitive: policy.allowSensitive,
+      limit: 4,
+      maxCharacters: policy.maxCharacters,
+      mode: knowledgeMode(input.mode),
+      ownerId: "current-user",
+      text: input.mode === "WEBSITE"
+        ? `${input.prompt} website design layout interface typography`
+        : input.mode === "CODE"
+          ? `${input.prompt} code architecture framework test`
+          : input.prompt
+    });
+    const byId = new Map(allowed.map((record) => [record.id, record]));
+    const selected = retrieval.records.flatMap((record) => {
+      const original = byId.get(record.id);
+      return original ? [original] : [];
+    });
+    excludedCount += retrieval.diagnostics.excluded + Math.max(0, allowed.length - selected.length);
+    sections.user = selected.filter((record) => !record.person).map(userItem);
+    sections.people = selected.filter((record) => record.person).map(userItem);
 
     if (policy.intent === "people" && sections.people.length < 2) {
       const people = await input.userStore.listPeople(30);
@@ -349,21 +347,23 @@ export async function buildSharedMemoryContext(input: {
     if (policy.readProject) {
       const history = await input.projectStore.listRecords({ includeSuperseded: true, limit: 30 });
       const records = selectCurrentProjectRecords(history);
-      const scored = records
-        .map((record) => ({
-          record,
-          score: overlapScore(query, `${record.title} ${record.content} ${record.category}`) +
-            modeScore(input.mode, `${record.title} ${record.content}`) +
-            (["critical", "high"].includes(record.importance) ? 1 : 0)
-        }))
-        .filter((entry) => {
-          const relevant = entry.score > 0;
-          if (!relevant) excludedCount += 1;
-          return relevant;
-        })
-        .sort((left, right) => right.score - left.score || right.record.updatedAt.getTime() - left.record.updatedAt.getTime())
-        .slice(0, 5);
-      sections.project = scored.map((entry) => projectItem(entry.record));
+      const ownerId = "current-user";
+      const projectId = records[0]?.projectId ?? null;
+      const retrieval = retrieveKnowledge(records.map((record) => projectMemoryToKnowledgeRecord(ownerId, record)), {
+        limit: 5,
+        maxCharacters: policy.maxCharacters,
+        mode: knowledgeMode(input.mode),
+        ownerId,
+        projectId,
+        text: input.prompt
+      });
+      const byId = new Map(records.map((record) => [record.id, record]));
+      const selected = retrieval.records.flatMap((record) => {
+        const original = byId.get(record.id);
+        return original ? [original] : [];
+      });
+      excludedCount += retrieval.diagnostics.excluded + Math.max(0, records.length - selected.length);
+      sections.project = selected.map(projectItem);
 
       if (policy.intent === "project_history") {
         const episodes = await input.projectStore.listEpisodes(3);

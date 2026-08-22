@@ -187,7 +187,7 @@ test("M6-ROUTE-01 shared service reaches ASK, WEBSITE, CODE, and proposal contex
   assert.match(route, /sharedMemoryIsPrimaryContext \? "no-search" : researchPolicy/);
   assert.match(route, /productMode !== "ASK"/);
   assert.match(route, /captureOwnedCrossModeMemory/);
-  assert.match(route, /!memoryIndependentSelfKnowledgeAnswer && !memoryIndependentIdentityAnswer/);
+  assert.match(route, /!memoryIndependentSelfKnowledgeAnswer\s*&&\s*!memoryIndependentIdentityAnswer/);
   assert.match(orchestrator, /Do not replace supplied memory with a generic default/);
 });
 

@@ -368,6 +368,20 @@ M-53 | Cross-mode controls | Toggle Memory OFF and Pause while switching ASK/WEB
 M-54 | Mode relevance | Store website, coding, and unrelated personal preferences | WEBSITE/CODE receive only relevant current facts within shared bounds
 M-55 | Shared project isolation | Store a code name in project A and query project B | No implicit cross-project retrieval; explicit owned search remains a separate path
 M-56 | Memory switch geometry | Inspect ON/OFF, keyboard focus, reload, and 390px layout | One reusable 32x18 track keeps its 14x14 knob contained, persists server state, and causes no overflow
+M-57 | Memory 2.0 explicit save | Explicitly save a stable low-risk preference | Existing durable owner store persists it and normalized retrieval returns it
+M-58 | General knowledge | Ask "What is vibe coding?" with no saved memory | ASK answers normally; memory is neither required nor fabricated
+M-59 | Personal recall | Ask for an unsaved personal fact | Truthful unknown result; general knowledge and unrelated memory do not substitute
+M-60 | Memory correction | Correct a durable fact after a cached recall | New record supersedes old, cache invalidates, only current value retrieves
+M-61 | Memory forget | Forget a corrected subject | Active and historical versions no longer enter retrieval or graph context
+M-62 | Knowledge scope | Query project A with similar records in project B | Only owned project A and relevant user-scope facts participate
+M-63 | Project revision | Retrieve project-state facts after revision rollover | Only the current authoritative revision participates; stale derived facts are excluded
+M-64 | Verified outcome | Record failed, partial, and verified outcomes | Only evidence-backed verified state may answer as verified completion
+M-65 | Source provenance | Retrieve a document claim | Source ID, chunk, and section remain attached; no invented citation
+M-66 | Knowledge conflict | Retrieve two equal-authority active values | Conflict is exposed with both record IDs; no silent blend or winner
+M-67 | Retrieval bounds | Query many mixed user/project/source facts | Deterministic relevant top eight and 2,400-character ceiling; duplicates collapse
+M-68 | Graph-assisted retrieval | Follow project-memory relationships | Bounded Run 9 traversal boosts related record IDs without making graph authoritative
+M-69 | Freshness | Ask current weather/price/leadership from saved memory | Stale memory is insufficient; live/source reliability path remains authoritative
+M-70 | Legacy/optional failure | Adapt M2/M3 records or lose optional retrieval | No schema migration; legacy records normalize and optional failure degrades to empty context
 
 ## WEBSITE Visual References
 
