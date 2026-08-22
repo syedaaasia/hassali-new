@@ -20,6 +20,7 @@ export type CodeTaskComplexity = "large" | "medium" | "small" | "system-level" |
 export type CodeRiskLevel = "CRITICAL" | "HIGH" | "LOW" | "MODERATE";
 export type CodeReversibility = "irreversible" | "partially-reversible" | "reversible";
 export type CodePlanStatus = "blocked" | "planned" | "ready" | "requires-approval";
+export type CodeVerificationCommand = "build" | "lint" | "test" | "typecheck";
 export type PlannerFailureCode =
   | "APPROVAL_REQUIRED"
   | "BLOCKING_AMBIGUITY"
@@ -166,6 +167,20 @@ export type AdaptiveCodePlan = {
   hypotheses: DebugHypothesis[];
   intent: CodeTaskIntent;
   maxRepairCycles: number;
+  mutationBudget: {
+    maxFiles: number;
+    reason: string;
+  };
+  preserveRequirements: string[];
+  projectState: {
+    fileCount: number;
+    framework: string | null;
+    kind: "existing" | "greenfield";
+    packageManager: string | null;
+    presentTechnologies: string[];
+    requestedTechnologies: string[];
+    targetHints: string[];
+  };
   repositoryEvidence: {
     confidence: number;
     exactPaths: string[];
@@ -201,11 +216,16 @@ export type AdaptiveCodePlanSummary = {
   complexity: CodeTaskComplexity;
   clarificationQuestion: string | null;
   planSteps: string[];
+  preserveRequirements: string[];
+  projectKind: "existing" | "greenfield";
   risk: CodeRiskLevel;
   status: CodePlanStatus;
   taskId: string;
   taskType: CodeTaskType;
   verificationChecks: string[];
+  verificationCommands: CodeVerificationCommand[];
+  mutationFileLimit: number;
+  mutationRequired: boolean;
 };
 
 export type BuildAdaptiveCodePlanInput = {
@@ -214,6 +234,7 @@ export type BuildAdaptiveCodePlanInput = {
   projectContext?: {
     fileCount?: number;
     framework?: string | null;
+    languageHints?: string[];
     packageManager?: string | null;
     projectSelected?: boolean;
     testFramework?: string | null;
@@ -226,7 +247,11 @@ const concepts: Record<CodeTaskType, RegExp[]> = {
   "add-feature": [/\badd\b/i, /\bimplement\b/i, /\bintroduce\b/i, /\bsupport\b/i],
   automate: [/\bautomat(?:e|ion)\b/i, /\bworkflow\b/i, /\bscheduled?\b/i],
   configure: [/\bconfigur(?:e|ation)\b/i, /\bsetup\b/i, /\bsettings?\b/i],
-  "create-project": [/\bbuild\b/i, /\bcreate\b.*\b(?:app|project|system|tool|api)\b/i, /\bnew\s+(?:app|project|system)\b/i],
+  "create-project": [
+    /\bbuild\b/i,
+    /\bcreate\b.*\b(?:api|app|cli|command-line (?:app|tool)|library|package|project|script|service|system|tool)\b/i,
+    /\bnew\s+(?:api|app|cli|library|package|project|service|system|tool)\b/i
+  ],
   debug: [/\bdebug\b/i, /\binvestigat(?:e|ion)\b/i, /\bwhy\b.*\b(?:fail|break|error)\b/i],
   deploy: [/\bdeploy(?:ment)?\b/i, /\bproduction release\b/i, /\bpublish\b.*\b(?:app|service)\b/i],
   explain: [/\bexplain\b/i, /\bhow does\b/i, /\bwhat does\b.*\b(?:function|code|module)\b/i],
@@ -326,6 +351,8 @@ function extractConstraints(input: BuildAdaptiveCodePlanInput): CodeConstraint[]
     { pattern: /\b(?:do not|don't)\s+change\s+(?:the\s+)?design\b/i, type: "preserve-area", value: "Preserve the current design." },
     { pattern: /\b(?:do not|don't)\s+change\s+desktop\b/i, type: "preserve-area", value: "Preserve desktop behavior." },
     { pattern: /\b(?:keep|preserve)\s+(?:the\s+)?current\s+api\b/i, type: "preserve-area", value: "Preserve the current API contract." },
+    { pattern: /\b(?:do not|don't)\s+change\s+(?:the\s+)?public\s+api\b/i, type: "preserve-area", value: "Preserve the current API contract." },
+    { pattern: /\b(?:do not|don't)\s+change\s+anything\s+else\b/i, type: "scope", value: "Preserve every file and behavior outside the requested target." },
     { pattern: /\bmust\s+work\s+offline\b|\boffline-only\b/i, type: "offline", value: "Must work offline." },
     { pattern: /\bwindows\b/i, type: "environment", value: "Target Windows compatibility." },
     { pattern: /\bread[- ]only\b|\bdo not modify\b/i, type: "mutation", value: "Read-only; do not mutate project files." }
@@ -337,6 +364,42 @@ function extractConstraints(input: BuildAdaptiveCodePlanInput): CodeConstraint[]
   if (context?.packageManager) constraints.push({ source: "project-context", strength: "inferred", type: "existing-dependencies", value: "Use the existing " + compact(context.packageManager, 40) + " package workflow." });
   if (context?.testFramework) constraints.push({ source: "project-context", strength: "inferred", type: "existing-architecture", value: "Reuse the existing " + compact(context.testFramework, 60) + " test conventions." });
   return constraints;
+}
+
+function requestedTechnologies(input: BuildAdaptiveCodePlanInput) {
+  const patterns: Array<[string, RegExp]> = [
+    ["C#", /(?:^|\W)c#(?:$|\W)/i], ["Go", /\b(?:golang|using go|in go)\b/i],
+    ["Java", /\bjava\b/i], ["JavaScript", /\bjavascript\b/i], ["Next.js", /\bnext\.?js\b/i],
+    ["PHP", /\bphp\b/i], ["Python", /\bpython\b/i], ["React", /\breact\b/i],
+    ["Rust", /\brust\b/i], ["SQL", /\bsql\b/i], ["TypeScript", /\btypescript\b/i],
+    ["Vue", /\bvue(?:\.js)?\b/i], ["PowerShell", /\bpowershell\b/i],
+    ["Streamlit", /\bstreamlit\b/i], ["Vite", /\bvite\b/i]
+  ];
+  return patterns.filter(([, pattern]) => pattern.test(input.prompt)).map(([technology]) => technology);
+}
+
+function targetHints(input: BuildAdaptiveCodePlanInput) {
+  const paths = input.prompt.match(/(?:[A-Za-z0-9_.-]+[\\/])+[A-Za-z0-9_.-]+|[A-Za-z0-9_-]+\.(?:css|go|html|java|js|json|jsx|md|php|ps1|py|rs|sql|ts|tsx|vue)/gi) ?? [];
+  const symbols = [...input.prompt.matchAll(/\b(?:class|component|function|method|route|setting|variable)\s+[`"']?([A-Za-z_$][\w$.-]*)/gi)]
+    .map((match) => match[1] ?? "");
+  return unique([...paths, ...symbols]).slice(0, 12);
+}
+
+function mutationBudget(complexity: CodeTaskComplexity, projectKind: "existing" | "greenfield") {
+  if (projectKind === "greenfield") {
+    return { maxFiles: complexity === "system-level" ? 40 : complexity === "large" ? 30 : 18, reason: "Greenfield scope permits only the minimal runnable project structure." };
+  }
+  const limits: Record<CodeTaskComplexity, number> = { large: 24, medium: 12, small: 6, "system-level": 40, tiny: 2 };
+  return { maxFiles: limits[complexity], reason: "Existing-project mutations must remain proportional to the requested outcome." };
+}
+
+function verificationCommands(plan: VerificationPlan): CodeVerificationCommand[] {
+  return unique([
+    plan.focusedTests ? "test" : "",
+    plan.typecheck ? "typecheck" : "",
+    plan.build ? "build" : "",
+    plan.lint ? "lint" : ""
+  ]) as CodeVerificationCommand[];
 }
 
 function findConstraintConflicts(prompt: string, constraints: CodeConstraint[], intent: CodeTaskIntent): ConstraintConflict[] {
@@ -651,6 +714,9 @@ export function buildAdaptiveCodePlan(input: BuildAdaptiveCodePlanInput): Adapti
   const delivery = deliveryRequirements(input.prompt, intent);
   const verification = verificationPlan(complexity, intent, risk);
   const criteria = acceptanceCriteria(intent, constraints, verification);
+  const projectKind = (input.projectContext?.fileCount ?? 0) > 0 || (intent.taskType !== "create-project" && input.projectContext?.projectSelected)
+    ? "existing" as const
+    : "greenfield" as const;
   const highRisk = risk === "HIGH" || risk === "CRITICAL";
   const specialApproval = highRisk || delivery.pushRequested || delivery.deploymentRequested || reversibility === "irreversible";
   const authorityBearingAction = intent.requiresMutation || intent.requiresExecution;
@@ -718,6 +784,20 @@ export function buildAdaptiveCodePlan(input: BuildAdaptiveCodePlanInput): Adapti
     hypotheses,
     intent,
     maxRepairCycles: complexity === "tiny" ? 1 : 2,
+    mutationBudget: mutationBudget(complexity, projectKind),
+    preserveRequirements: unique([
+      ...constraints.filter((constraint) => constraint.strength === "hard").map((constraint) => constraint.value),
+      projectKind === "existing" ? "Preserve unrelated files, architecture, dependencies, and user work." : "Avoid unnecessary framework and infrastructure complexity."
+    ]),
+    projectState: {
+      fileCount: input.projectContext?.fileCount ?? 0,
+      framework: input.projectContext?.framework ?? null,
+      kind: projectKind,
+      packageManager: input.projectContext?.packageManager ?? null,
+      presentTechnologies: unique(input.projectContext?.languageHints ?? []),
+      requestedTechnologies: requestedTechnologies(input),
+      targetHints: targetHints(input)
+    },
     repositoryEvidence: null,
     repositoryInspection: repositoryInspection(intent, taskId),
     revisions: [],
@@ -758,10 +838,15 @@ export function summarizeAdaptiveCodePlan(plan: AdaptiveCodePlan): AdaptiveCodeP
     complexity: plan.complexity,
     clarificationQuestion: plan.ambiguities.find((ambiguity) => ambiguity.blocking)?.question ?? null,
     planSteps: plan.actions.map((action) => action.objective).slice(0, 6),
+    preserveRequirements: plan.preserveRequirements.slice(0, 6),
+    projectKind: plan.projectState.kind,
     risk: plan.risk,
     status: plan.status,
     taskId: plan.taskId,
     taskType: plan.intent.taskType,
-    verificationChecks
+    verificationChecks,
+    verificationCommands: verificationCommands(plan.verificationPlan),
+    mutationFileLimit: plan.mutationBudget.maxFiles,
+    mutationRequired: plan.intent.requiresMutation
   };
 }

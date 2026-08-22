@@ -26,6 +26,7 @@ import { buildRuntimeAuthorityDecision } from "@/lib/server/runtime/runtime-auth
 import { selectRuntimeAdapter } from "@/lib/server/runtime/runtime-adapter-selector";
 import { readApprovedFile } from "@/lib/server/runtime/approved-file-runner";
 import { runCodeAutonomousExecution } from "@/lib/server/runtime/code-autonomous-orchestrator";
+import type { CodeCommandKind } from "@/lib/server/runtime/code-execution-types";
 import { issueExecutionGrant, revokeExecutionGrant } from "@/lib/server/runtime/secure-execution/execution-grants";
 import {
   codeExecutionKey,
@@ -835,6 +836,8 @@ export async function POST(request: Request) {
     ? proposalMetadata.adaptiveCodePlan as Record<string, unknown>
     : null;
   const acceptanceCriteria = stringArrayValue(adaptiveCodePlanMetadata?.acceptanceCriteria);
+  const verificationKinds = stringArrayValue(adaptiveCodePlanMetadata?.verificationCommands)
+    .filter((value): value is CodeCommandKind => ["build", "lint", "test", "typecheck"].includes(value));
   const baselineFileContents = Object.fromEntries(
     ownedProjectFiles.map((file) => [file.path, file.content])
   );
@@ -910,6 +913,7 @@ export async function POST(request: Request) {
                     proposalId: parsed.proposalId,
                     selectedModel,
                     taskId: liveTask.taskId,
+                    verificationKinds,
                     workspaceRoot: workspaceBinding.workspaceRoot
                   });
                   return await finalizeCodeLiveExecution({

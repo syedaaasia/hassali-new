@@ -15,7 +15,9 @@ import { createOpenRouterCodeRepairProvider } from "./code-repair-provider";
 import {
   normalizeCodeExecutionPolicy,
   repairBudgetForPolicy,
+  type CodeCommandKind,
   type CodeCommandResult,
+  type CodeCommandSpec,
   type CodeExecutionPolicy,
   type CodeExecutionReport,
   type CodeFailureEvidence,
@@ -46,6 +48,15 @@ const nonRepairableFailures = new Set<CodeFailureType>([
   "PROJECT_SCOPE_ERROR",
   "TEST_HARNESS_ERROR"
 ]);
+
+export function selectCodeVerificationCommands(
+  commands: CodeCommandSpec[],
+  requestedKinds?: CodeCommandKind[]
+) {
+  if (!requestedKinds?.length) return commands;
+  const allowed = new Set(requestedKinds);
+  return commands.filter((command) => allowed.has(command.kind));
+}
 const severity: Record<CodeFailureType, number> = {
   API_ERROR: 5,
   AUTH_ERROR: 8,
@@ -252,6 +263,7 @@ export async function runCodeAutonomousExecution(input: {
   onProgress?: (event: CodeProgressEvent) => void;
   workspaceRoot: string;
   taskId?: string;
+  verificationKinds?: CodeCommandKind[];
 }): Promise<CodeExecutionReport> {
   const startedAt = now();
   const taskId = input.taskId ?? `code-execution-${randomUUID()}`;
@@ -333,7 +345,7 @@ export async function runCodeAutonomousExecution(input: {
   emitProgress("VERIFYING", "Running bounded project verification", "active");
   let commandResults = await runScopedCodeCommandSuite({
     abortSignal: input.abortSignal,
-    commands: repository.commands,
+    commands: selectCodeVerificationCommands(repository.commands, input.verificationKinds),
     executionGrantId: input.executionGrantId,
     expectedWorkspaceFingerprint: repository.fingerprint,
     externalUserId: input.externalUserId,
@@ -477,7 +489,7 @@ export async function runCodeAutonomousExecution(input: {
     repository = await inspectCodeRepository(input.workspaceRoot);
     const verificationAfter = await runScopedCodeCommandSuite({
       abortSignal: input.abortSignal,
-      commands: repository.commands,
+      commands: selectCodeVerificationCommands(repository.commands, input.verificationKinds),
       executionGrantId: input.executionGrantId,
       expectedWorkspaceFingerprint: repository.fingerprint,
       externalUserId: input.externalUserId,
@@ -539,7 +551,7 @@ export async function runCodeAutonomousExecution(input: {
     } else if (!succeeded && !cancelled) {
       commandResults = await runScopedCodeCommandSuite({
         abortSignal: input.abortSignal,
-        commands: repository.commands,
+        commands: selectCodeVerificationCommands(repository.commands, input.verificationKinds),
         executionGrantId: input.executionGrantId,
         expectedWorkspaceFingerprint: repository.fingerprint,
         externalUserId: input.externalUserId,

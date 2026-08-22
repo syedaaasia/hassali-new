@@ -126,6 +126,7 @@ import {
   type AdaptiveCodePlan,
   type AdaptiveCodePlanSummary
 } from "@/lib/server/ai/adaptive-code-planner";
+import { validateCodeMutationCandidate } from "@/lib/server/ai/code-software-factory";
 import {
   inspectRepository,
   inspectRepositoryForRequest
@@ -837,6 +838,7 @@ type DiffProposal = {
   compositionRequiredSectionCount?: number;
   compositionStatus?: "answer_only" | "planned" | "targeted";
   compositionWarningCount?: number;
+  codeCandidateValidation?: ReturnType<typeof validateCodeMutationCandidate>;
   decompositionId?: string;
   decompositionStatus?: "answer_only" | "decomposed" | "targeted";
   detectedDomain?: string;
@@ -4501,15 +4503,31 @@ function attachProposalRoutingMetadata(
     preservedProposalBlockReasons.length > 0;
   const adaptiveCodePlan = executionPlan?.adaptiveCodePlan;
   const adaptivePlanBlocked = adaptiveCodePlan?.status === "blocked";
+  const codeCandidateValidation = adaptiveCodePlan && (
+    proposalContext?.mode === "CODE" || contextPriority?.authoritativeMode === "CODE"
+  )
+    ? validateCodeMutationCandidate({ changes: proposal.changes, plan: adaptiveCodePlan })
+    : null;
+  const codeCandidateBlocked = codeCandidateValidation?.valid === false;
   const adaptiveBlockingReason = adaptiveCodePlan?.blockingReason ??
     adaptiveCodePlan?.clarificationQuestion ??
     "The adaptive CODE plan is blocked until its safety constraints are resolved.";
+  const codeCandidateBlockingReason = codeCandidateValidation?.issues[0]?.message ??
+    "The CODE proposal failed deterministic mutation validation.";
   const adaptiveRoutingReason: ProposalRoutingReason = {
     code: "adaptive_code_plan_blocked",
     message: adaptiveBlockingReason,
     severity: "high"
   };
-  const routedReasons = adaptivePlanBlocked
+  const codeCandidateRoutingReason: ProposalRoutingReason = {
+    code: "code_candidate_invalid",
+    message: codeCandidateBlockingReason,
+    severity: "high"
+  };
+  const codePlanBlocked = adaptivePlanBlocked || codeCandidateBlocked;
+  const routedReasons = codeCandidateBlocked
+    ? [codeCandidateRoutingReason, ...criticalRoutingReasons]
+    : adaptivePlanBlocked
     ? [adaptiveRoutingReason, ...criticalRoutingReasons]
     : criticalRoutingReasons.length > 0
       ? routing.reasons
@@ -4522,15 +4540,19 @@ function attachProposalRoutingMetadata(
     ...proposal,
     ...compactProposalRouting(kernel, {
       ...routing,
-      mode: adaptivePlanBlocked || preservesProposalBlock ? "blocked" : routingMode,
+      mode: codePlanBlocked || preservesProposalBlock ? "blocked" : routingMode,
       reasons: routedReasons,
-      shouldBlockExecution: adaptivePlanBlocked || routingShouldBlock || preservesProposalBlock,
-      shouldRequireExtraReview: adaptivePlanBlocked || preservesProposalBlock || routing.shouldRequireExtraReview || routing.mode === "blocked"
+      shouldBlockExecution: codePlanBlocked || routingShouldBlock || preservesProposalBlock,
+      shouldRequireExtraReview: codePlanBlocked || preservesProposalBlock || routing.shouldRequireExtraReview || routing.mode === "blocked"
     }),
     adaptiveApprovalRequired: adaptiveCodePlan?.approvalRequired,
     adaptiveCodePlan,
-    approvalDisabled: adaptivePlanBlocked ? true : proposal.approvalDisabled,
-    blockedReason: adaptivePlanBlocked ? adaptiveBlockingReason : proposal.blockedReason,
+    approvalDisabled: codePlanBlocked ? true : proposal.approvalDisabled,
+    blockedReason: codeCandidateBlocked
+      ? codeCandidateBlockingReason
+      : adaptivePlanBlocked
+        ? adaptiveBlockingReason
+        : proposal.blockedReason,
     blueprintConfidence: blueprint?.confidence,
     blueprintId: blueprint?.blueprintId,
     blueprintKind: blueprint?.blueprintKind,
@@ -4553,6 +4575,7 @@ function attachProposalRoutingMetadata(
     compositionRequiredSectionCount: compositionPlan?.requiredSections.length,
     compositionStatus: compositionPlan?.compositionStatus,
     compositionWarningCount: compositionPlan?.compositionWarnings.length,
+    codeCandidateValidation: codeCandidateValidation ?? undefined,
     decompositionId: decomposition?.decompositionId,
     decompositionStatus: decomposition?.decompositionStatus,
     detectedDomain,
@@ -6979,6 +7002,24 @@ export async function POST(request: Request) {
         memoryAmbiguities: planningMemoryAmbiguities,
         projectContext: {
           fileCount: workspace.fileList.length,
+          framework: workspace.fileList.some((path) => /(?:^|\/)next\.config\./i.test(path))
+            ? "Next.js"
+            : workspace.fileList.some((path) => /(?:^|\/)vite\.config\./i.test(path))
+              ? "Vite"
+              : workspace.fileList.some((path) => /(?:^|\/)(?:pyproject\.toml|requirements\.txt|app\.py)$/i.test(path))
+                ? "Python"
+                : workspace.fileList.some((path) => /(?:^|\/)go\.mod$/i.test(path))
+                  ? "Go"
+                  : workspace.fileList.some((path) => /(?:^|\/)Cargo\.toml$/i.test(path))
+                    ? "Rust"
+                    : null,
+          languageHints: [
+            workspace.fileList.some((path) => /\.tsx?$/i.test(path)) ? "TypeScript" : "",
+            workspace.fileList.some((path) => /\.jsx?$/i.test(path)) ? "JavaScript" : "",
+            workspace.fileList.some((path) => /\.py$/i.test(path)) ? "Python" : "",
+            workspace.fileList.some((path) => /\.go$/i.test(path)) ? "Go" : "",
+            workspace.fileList.some((path) => /\.rs$/i.test(path)) ? "Rust" : ""
+          ].filter(Boolean),
           packageManager: workspace.fileList.some((path) => path.endsWith("pnpm-lock.yaml"))
             ? "pnpm"
             : workspace.fileList.some((path) => path.endsWith("yarn.lock"))
