@@ -5,6 +5,7 @@ import {
   unknownIntelligenceUsage,
   type IntelligenceCapabilityProfile,
   type IntelligenceCitation,
+  type IntelligenceExecutionLocality,
   type IntelligenceComputeSource,
   type IntelligenceFailure,
   type IntelligenceFailureCategory,
@@ -57,9 +58,11 @@ export type OpenAICompatibleAdapterConfig = {
   fetchImpl?: IntelligenceFetch;
   getApiKey?: () => string | null;
   getHeaders?: () => Readonly<Record<string, string>>;
+  executionLocality?: IntelligenceExecutionLocality;
   healthProbe?: { method?: "GET" | "HEAD"; path: string; timeoutMs?: number };
   id: string;
   modelDiscoveryPath?: string;
+  maxResponseBytes?: number;
   normalizeCitations?: (payload: unknown) => IntelligenceCitation[];
   normalizeCost?: (payload: unknown) => IntelligenceUsage["cost"];
   providerId: string;
@@ -91,6 +94,9 @@ export function normalizeOpenAICompatibleBaseUrl(value: string, allowInsecureLoo
 }
 
 export function normalizeLocalIntelligenceEndpoint(value: string) {
+  if (/(?:^|\/)(?:\.{1,2}|%2e(?:%2e)?)(?:\/|$)/i.test(value)) {
+    throw new IntelligenceContractError("LOCAL_ENDPOINT_PATH_INVALID", "Local provider endpoints cannot contain traversal segments.");
+  }
   let url: URL;
   try {
     url = new URL(value);
@@ -112,6 +118,39 @@ function endpoint(baseUrl: string, path: string) {
 
 function boundedTimeout(value: number) {
   return Math.max(1_000, Math.min(value, 120_000));
+}
+
+function boundedResponseBytes(value = 2 * 1024 * 1024) {
+  return Math.max(64 * 1024, Math.min(value, 4 * 1024 * 1024));
+}
+
+async function readBoundedJsonResponse(response: Response, maximumBytes: number) {
+  const declared = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+  if (Number.isFinite(declared) && declared > maximumBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new IntelligenceContractError("PROVIDER_RESPONSE_TOO_LARGE", "The provider response exceeded Hassali's safe response limit.");
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new IntelligenceContractError("PROVIDER_RESPONSE_MISSING", "The provider returned no readable response body.");
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maximumBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new IntelligenceContractError("PROVIDER_RESPONSE_TOO_LARGE", "The provider response exceeded Hassali's safe response limit.");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(bytes)) as OpenAICompatiblePayload;
 }
 
 function retryAfterMs(response: Response) {
@@ -465,10 +504,12 @@ export function createOpenAICompatibleAdapter(config: OpenAICompatibleAdapterCon
   const capabilities = createCapabilityProfile(config.capabilities ?? {});
   const timeoutMs = boundedTimeout(config.timeoutMs ?? 30_000);
   const chatPath = config.chatCompletionsPath ?? "chat/completions";
+  const maxResponseBytes = boundedResponseBytes(config.maxResponseBytes);
 
   const adapter: IntelligenceAdapter = {
     capabilities,
     computeSource: config.computeSource,
+    executionLocality: config.executionLocality,
     defaultModelId: config.defaultModelId ?? null,
     id: config.id,
     providerId: config.providerId,
@@ -569,10 +610,15 @@ export function createOpenAICompatibleAdapter(config: OpenAICompatibleAdapterCon
       }
       let payload: OpenAICompatiblePayload;
       try {
-        payload = await result.response.json() as OpenAICompatiblePayload;
-      } catch {
+        payload = await readBoundedJsonResponse(result.response, maxResponseBytes);
+      } catch (error) {
         result.cleanup();
-        return { ok: false, failure: providerFailure({ category: "malformed-provider-response", code: "PROVIDER_JSON_INVALID", model: request.requestedModel, providerId: config.providerId }) };
+        return { ok: false, failure: providerFailure({
+          category: "malformed-provider-response",
+          code: error instanceof IntelligenceContractError ? error.code : "PROVIDER_JSON_INVALID",
+          model: request.requestedModel,
+          providerId: config.providerId
+        }) };
       }
       result.cleanup();
       const content = responseText(payload);
@@ -586,6 +632,7 @@ export function createOpenAICompatibleAdapter(config: OpenAICompatibleAdapterCon
         response: {
           citations: config.normalizeCitations?.(payload) ?? [],
           computeSource: config.computeSource,
+          executionLocality: config.executionLocality,
           content: content ? [{ text: content, type: "text" }] : [],
           finishReason: payload.choices?.[0]?.finish_reason ?? null,
           model,
@@ -639,6 +686,7 @@ export function createOpenAICompatibleAdapter(config: OpenAICompatibleAdapterCon
         ok: true,
         response: {
           computeSource: config.computeSource,
+          executionLocality: config.executionLocality,
           model: request.requestedModel ?? "unknown",
           providerId: config.providerId,
           stream

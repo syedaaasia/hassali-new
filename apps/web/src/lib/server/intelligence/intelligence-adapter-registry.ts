@@ -2,6 +2,7 @@ import {
   normalizeIntelligenceRequest,
   type IntelligenceCapabilityProfile,
   type IntelligenceComputeSource,
+  type IntelligenceExecutionLocality,
   type IntelligenceFailure,
   type IntelligenceHealth,
   type IntelligenceModelDescriptor,
@@ -13,6 +14,7 @@ import {
 export type IntelligenceAdapter = {
   capabilities: IntelligenceCapabilityProfile;
   computeSource: IntelligenceComputeSource;
+  executionLocality?: IntelligenceExecutionLocality;
   defaultModelId?: string | null;
   discoverModels?: (signal?: AbortSignal) => Promise<IntelligenceModelDescriptor[]>;
   health: (signal?: AbortSignal) => Promise<IntelligenceHealth>;

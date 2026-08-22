@@ -21,6 +21,13 @@ import {
   type IntelligenceCostScope
 } from "./intelligence-budget";
 import { normalizeIntelligenceResultQuality } from "./intelligence-result-quality";
+import {
+  assessIntelligenceRuntimeFit,
+  executionLocalityForComputeSource,
+  isFreshnessDependentRequest,
+  type EdgeRuntimeProfile,
+  type IntelligenceRuntimeFit
+} from "./local-edge-intelligence";
 
 export type IntelligenceRoutingPrivacy = "allow-cloud" | "local-only" | "prefer-local";
 export type IntelligenceTaskTier = "complex" | "simple" | "specialist" | "standard";
@@ -38,7 +45,9 @@ export type IntelligenceRoutingReasonCode =
   | "FALLBACK_AFTER_TIMEOUT"
   | "HEALTHY_SOURCE"
   | "LOCAL_PREFERRED"
+  | "LOCAL_RESOURCE_FIT"
   | "LOWER_KNOWN_COST"
+  | "PRIVACY_LOCALITY_FIT"
   | "USER_OVERRIDE"
   | "VISION_REQUIRED"
   | "WEBSITE_MODE_FIT";
@@ -52,6 +61,7 @@ export type AutoRoutingPreferences = {
   } | null;
   preferredModelId?: string | null;
   privacy: IntelligenceRoutingPrivacy;
+  runtimeProfile?: EdgeRuntimeProfile;
   scopeId?: string;
   taskTier?: IntelligenceTaskTier;
   taskType?: IntelligenceRoutingTaskType;
@@ -63,12 +73,15 @@ export type IntelligenceRouteCandidate = {
   computeSource: IntelligenceAdapter["computeSource"];
   costScope: IntelligenceCostScope;
   estimatedRequestCostMicros: number | null;
+  executionLocality: ReturnType<typeof executionLocalityForComputeSource>;
   health: IntelligenceHealth["status"];
   isLocal: boolean;
+  identity: string;
   knownCostPerMillion: number | null;
   modelId: string;
   providerId: string;
   reasonCodes: IntelligenceRoutingReasonCode[];
+  runtimeFit: IntelligenceRuntimeFit;
   score: number;
 };
 
@@ -310,10 +323,11 @@ export class AutoIntelligenceRouter {
     const scopeId = preferences.scopeId?.trim() || "default";
     const now = Date.now();
     const preferred = preferredCapabilities(request);
+    const effectivePrivacy = request.privacy?.dataLocality === "local-only" ? "local-only" : preferences.privacy;
     const resolvedTaskTier = taskTier(request, preferences.taskTier);
     const explicit = preferences.explicitOverride ?? null;
     const adapters = this.registry.list().filter((adapter) => {
-      if (preferences.privacy === "local-only" && !isLocal(adapter)) return false;
+      if (effectivePrivacy === "local-only" && !isLocal(adapter)) return false;
       if (explicit && adapter.id.toLowerCase() !== explicit.adapterId.toLowerCase()) return false;
       return true;
     });
@@ -346,6 +360,12 @@ export class AutoIntelligenceRouter {
           rejectedCapabilities.add("streaming");
           continue;
         }
+        const runtimeFit = assessIntelligenceRuntimeFit({ model, request, runtimeProfile: preferences.runtimeProfile });
+        if (runtimeFit.status === "incompatible") continue;
+        if (isLocal(source.adapter) && isFreshnessDependentRequest(request) && capabilitySupport(source.adapter, model, "webResearch") !== "supported") {
+          rejectedCapabilities.add("webResearch");
+          continue;
+        }
 
         const routeBase = {
           adapterId: source.adapter.id,
@@ -372,11 +392,16 @@ export class AutoIntelligenceRouter {
           score += 10;
           reasons.push("DEFAULT_RELIABLE");
         }
-        if (preferences.privacy === "prefer-local" && isLocal(source.adapter)) {
+        if (effectivePrivacy === "prefer-local" && isLocal(source.adapter)) {
           score += 45;
           reasons.push("LOCAL_PREFERRED");
         }
-        if (preferences.privacy === "allow-cloud" && isLocal(source.adapter)) score += 3;
+        if (effectivePrivacy === "allow-cloud" && isLocal(source.adapter)) score += 3;
+        if (isLocal(source.adapter) && runtimeFit.status === "compatible") reasons.push("LOCAL_RESOURCE_FIT");
+        if (isLocal(source.adapter) && request.privacy?.containsSensitiveData) {
+          score += 20;
+          reasons.push("PRIVACY_LOCALITY_FIT");
+        }
         if (explicit) {
           score += 100;
           reasons.push("USER_OVERRIDE");
@@ -410,13 +435,16 @@ export class AutoIntelligenceRouter {
           computeSource: source.adapter.computeSource,
           costScope: scope,
           estimatedRequestCostMicros,
+          executionLocality: source.adapter.executionLocality ?? executionLocalityForComputeSource(source.adapter.computeSource),
           health: source.health.status,
           isLocal: isLocal(source.adapter),
+          identity: `${source.adapter.id}:${source.adapter.computeSource}:${model.modelId}`.toLowerCase(),
           knownCostPerMillion: cost,
           model,
           modelId: model.modelId,
           providerId: source.adapter.providerId,
           reasonCodes: [...new Set(reasons)],
+          runtimeFit,
           score
         });
       }
@@ -442,7 +470,7 @@ export class AutoIntelligenceRouter {
           })
         };
       }
-      if (preferences.privacy === "local-only") {
+      if (effectivePrivacy === "local-only") {
         return {
           ok: false,
           failure: routingFailure({
@@ -477,12 +505,15 @@ export class AutoIntelligenceRouter {
       computeSource: candidate.computeSource,
       costScope: candidate.costScope,
       estimatedRequestCostMicros: candidate.estimatedRequestCostMicros,
+      executionLocality: candidate.executionLocality,
       health: candidate.health,
       isLocal: candidate.isLocal,
+      identity: candidate.identity,
       knownCostPerMillion: candidate.knownCostPerMillion,
       modelId: candidate.modelId,
       providerId: candidate.providerId,
       reasonCodes: candidate.reasonCodes,
+      runtimeFit: candidate.runtimeFit,
       score: candidate.score
     });
     const fallbackCandidates = candidates.slice(1).filter((candidate) =>
@@ -504,7 +535,7 @@ export class AutoIntelligenceRouter {
         fallback: fallback ? publicCandidate(fallback) : null,
         preferredCapabilities: preferred,
         primary: publicCandidate(primary),
-        privacy: preferences.privacy,
+        privacy: effectivePrivacy,
         requiredCapabilities: request.requiredCapabilities,
         taskTier: resolvedTaskTier
       }
@@ -524,7 +555,7 @@ export class AutoIntelligenceRouter {
       ...request,
       privacy: {
         ...request.privacy,
-        dataLocality: preferences.privacy === "local-only" ? "local-only" : request.privacy?.dataLocality
+        dataLocality: resolution.decision.privacy === "local-only" ? "local-only" : request.privacy?.dataLocality
       },
       requestedModel: candidate.modelId
     });
@@ -574,7 +605,7 @@ export class AutoIntelligenceRouter {
         ...request,
         privacy: {
           ...request.privacy,
-          dataLocality: preferences.privacy === "local-only" ? "local-only" : request.privacy?.dataLocality
+          dataLocality: resolution.decision.privacy === "local-only" ? "local-only" : request.privacy?.dataLocality
         },
         requestedModel: candidate.modelId
       });

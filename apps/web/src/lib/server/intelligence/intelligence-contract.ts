@@ -17,6 +17,11 @@ export type IntelligenceComputeSource =
   | "hassali-local"
   | "local-endpoint"
   | "managed-cloud";
+export type IntelligenceExecutionLocality = {
+  environment: "browser-device" | "cloud" | "deterministic-local" | "server-local";
+  network: "internet" | "loopback" | "none";
+  trust: "configured-loopback" | "configured-trusted" | "provider-managed" | "unverified";
+};
 export type IntelligenceMode = "ASK" | "CODE" | "WEBSITE";
 
 export type IntelligenceTextInputPart = {
@@ -199,6 +204,7 @@ export type IntelligenceToolCall = {
 export type IntelligenceResponse = {
   citations: IntelligenceCitation[];
   computeSource: IntelligenceComputeSource;
+  executionLocality?: IntelligenceExecutionLocality;
   content: Array<{ text: string; type: "text" }>;
   finishReason: string | null;
   model: string;
@@ -220,6 +226,7 @@ export type IntelligenceStreamEvent =
 
 export type IntelligenceStreamResponse = {
   computeSource: IntelligenceComputeSource;
+  executionLocality?: IntelligenceExecutionLocality;
   model: string;
   providerId: string;
   stream: ReadableStream<IntelligenceStreamEvent>;

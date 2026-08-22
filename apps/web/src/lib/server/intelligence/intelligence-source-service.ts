@@ -46,11 +46,11 @@ import { localFoundationStatus } from "./hassali-local-contract";
 
 const sourceDetails: Record<ConfigurableIntelligenceSourceId, { description: string; label: string }> = {
   "llama-cpp": {
-    description: "Connect to a running llama.cpp server on this computer. Hassali never starts or installs it.",
+    description: "Connect to a trusted OpenAI-compatible llama.cpp service on the Hassali server host. Hassali never starts or installs it.",
     label: "llama.cpp"
   },
   ollama: {
-    description: "Use models already available from a running local Ollama service.",
+    description: "Use models already available from a trusted Ollama service on the Hassali server host.",
     label: "Ollama"
   },
   "openrouter-byok": {

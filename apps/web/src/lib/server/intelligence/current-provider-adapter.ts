@@ -14,6 +14,7 @@ import {
   createOpenAICompatibleAdapter,
   type IntelligenceFetch
 } from "./openai-compatible-adapter";
+import { executionLocalityForComputeSource } from "./local-edge-intelligence";
 
 export const currentIntelligenceAdapterId = "openrouter";
 
@@ -108,6 +109,7 @@ export function createCurrentOpenRouterAdapter(options?: {
       webResearch: "supported"
     },
     computeSource: "free-cloud",
+    executionLocality: executionLocalityForComputeSource("free-cloud"),
     defaultModelId: process.env.HASSALI_DEFAULT_MODEL ?? "openai/gpt-4o-mini",
     configuredModels: async () => hassaliModelRegistry
       .filter((model) => model.executionProviderId === "openrouter" && !model.isTestOnly)

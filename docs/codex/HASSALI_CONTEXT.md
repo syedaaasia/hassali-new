@@ -93,6 +93,9 @@ Product behavior must remain provider-independent. A selected OpenAI, Anthropic,
 - Intelligence metering stores one metadata-only record per request, including at most two attempts, provider/model/source, tokens, latency, outcome, and actual/estimated/unknown/not-applicable cost. It never stores prompts, files, credentials, or provider payloads.
 - OpenRouter keys are user-scoped and AES-256-GCM encrypted. With `HASSALI_INTELLIGENCE_MASTER_KEY`, ciphertext, unique IV, authentication tag, key version, and user/source AAD persist in PostgreSQL; otherwise credentials remain encrypted in server memory for the session only. Disconnect removes both copies.
 - Ollama and llama.cpp connections accept loopback endpoints only, reject redirects, and never install, start, stop, pull, or delete models. Health and discovery are explicit, bounded actions rather than render-time polling.
+- Locality is part of the existing Auto router, not a second router. Candidates carry distinct provider/source/model identity, truthful cloud or server-local execution metadata, declared context/resource fit, and `allow-cloud`, `prefer-local`, or fail-closed `local-only` policy.
+- Request-level local-only privacy cannot be weakened by stored routing preferences. Local candidates must satisfy the same capability, freshness, quality, health/cooldown, and bounded-fallback contracts as cloud candidates.
+- OpenAI-compatible inference responses are byte-bounded. Local endpoint configuration remains loopback-only, rejects credentials and traversal-like paths, and uses redirect-error fetches; `localhost` means the Hassali server host, never an inferred browser device.
 - Hassali Local currently provides protocol, pairing/origin, hardware/benchmark, model-pack/license/checksum, and conservative resource-policy contracts only. No native companion, hardware probe, model, installer, download, or routing candidate ships in this checkpoint.
 
 ### ASK research
@@ -362,6 +365,7 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Run 08 checkpoint: `EXPERIENCE-RUN8: add rich media and verified shipping`
 - Run 09 checkpoint: `GRAPH-RUN9: add shared intelligence graph kernel`
 - Run 10 checkpoint: `MEMORY-RUN10: add durable knowledge and memory 2.0`
+- Run 11 checkpoint: `LOCAL-RUN11: add privacy-aware local and edge intelligence`
 - The repository HEAD is authoritative; confirm it with Git before every task.
 
 ## WEBSITE Design Direction

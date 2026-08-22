@@ -8,6 +8,7 @@ import {
   type IntelligenceModelDescriptor
 } from "./intelligence-contract";
 import type { IntelligenceAdapter } from "./intelligence-adapter-registry";
+import { executionLocalityForComputeSource } from "./local-edge-intelligence";
 import type { StoredIntelligenceSource } from "./intelligence-source-vault";
 import {
   createOpenAICompatibleAdapter,
@@ -365,6 +366,7 @@ export function createConfiguredSourceAdapter(input: {
       baseUrl: openRouterBaseUrl,
       capabilities: { streaming: "supported", structuredOutput: "supported", text: "supported", tools: "supported", vision: "supported" },
       computeSource: "byok-cloud",
+      executionLocality: executionLocalityForComputeSource("byok-cloud"),
       configuredModels: async () => input.source.models.map((model) => storedModelDescriptor(input.source, model)),
       defaultModelId: input.source.defaultModel,
       fetchImpl: input.fetchImpl,
@@ -415,6 +417,7 @@ export function createConfiguredSourceAdapter(input: {
     baseUrl: inferenceBase,
     capabilities: { streaming: "supported", text: "supported" },
     computeSource: "local-endpoint",
+    executionLocality: executionLocalityForComputeSource("local-endpoint"),
     configuredModels: async () => input.source.models.map((model) => storedModelDescriptor(input.source, model)),
     defaultModelId: input.source.defaultModel,
     fetchImpl: input.fetchImpl,

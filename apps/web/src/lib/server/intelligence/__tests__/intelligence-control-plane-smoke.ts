@@ -65,12 +65,15 @@ function candidate(input: Partial<IntelligenceRouteCandidate> = {}): Intelligenc
     computeSource: "managed-cloud",
     costScope: "managed",
     estimatedRequestCostMicros: null,
+    executionLocality: { environment: "cloud", network: "internet", trust: "provider-managed" },
     health: "ready",
+    identity: "managed:managed-cloud:fixture/model",
     isLocal: false,
     knownCostPerMillion: null,
     modelId: "fixture/model",
     providerId: "fixture",
     reasonCodes: ["HEALTHY_SOURCE"],
+    runtimeFit: { estimatedInputTokens: 1, estimatedTotalTokens: 1, reason: null, status: "unknown" },
     score: 100,
     ...input
   };
