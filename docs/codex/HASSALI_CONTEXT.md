@@ -356,6 +356,10 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Run 05 I2 parity closure: pending ordinary-user browser acceptance; no closure checkpoint yet.
 - Run 05 I3 engineering: typed asset planning and durable approval lifecycle are in the preserved dirty tree; combined I2+I3 browser acceptance and closure checkpoint remain pending.
 - Run 05 I4 engineering: typed visual reports, five-viewport geometry contracts, bounded candidate repair, static Preview geometry diagnostics, and post-apply visual-verification truth are in the preserved dirty tree; combined I2+I3+I4 acceptance remains pending.
+- Run 05 closure checkpoint: `WEBSITE-RUN5: complete authoritative website studio`
+- Run 06 checkpoint: `ASK-RUN6: build universal assistant orchestration`
+- Run 07 checkpoint: `CODE-RUN7: build verified software factory`
+- Run 08 checkpoint: `EXPERIENCE-RUN8: add rich media and verified shipping`
 - The repository HEAD is authoritative; confirm it with Git before every task.
 
 ## WEBSITE Design Direction
@@ -382,6 +386,15 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Image-generation briefs use the provider-neutral visual contract. Missing provider capability remains unresolved and cannot be reported as generated or applied.
 - Durable proposal metadata distinguishes pending/applying/applied/failed/rejected and derives stale state from project revision. Reject and apply remain owner/project/proposal scoped and duplicate apply remains idempotent.
 - The proposal UI loads backend lifecycle state after reload; `Approving...`, `Applying changes...`, and `Applied` do not imply one another.
+
+## Rich Experiences and Verified Shipping
+
+- Rich artifacts use a compact mode-owned contract for kind, status, provenance, Preview/download capability, canonical revision, integrity, warnings, and unresolved capabilities. Optional rich-output failure does not erase an otherwise valid core answer.
+- Curated website media is provider-neutral. `assets.hassali.site` is one replaceable public origin resolved through registry metadata; generation code does not crawl the origin or guess filenames.
+- Media ranking is deterministic and metadata-based across domain, section role, subject, style, orientation/aspect, people/product evidence, quality, license, and provenance. Unknown/disallowed production licenses fail closed, and no suitable match yields image-light output rather than wrong-domain imagery.
+- Explicitly requested user media outranks curated media. Attachment presence alone grants no visual authority. Generated media remains provider-neutral and degrades truthfully when unavailable.
+- WEBSITE and CODE downloads read the ownership-verified canonical project files. The exporter filters caches, environment files, and sensitive paths, blocks private-key content, writes a SHA-256 shipping manifest, reopens the ZIP, and verifies every path, size, and hash before returning it.
+- Package identity is deterministic for the same canonical revision and file set. Package-integrity verification is separate from project/runtime verification, which remains `not_recorded` unless evidence is supplied.
 
 ## WEBSITE Visual QA
 

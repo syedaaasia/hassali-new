@@ -1,11 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { listUserProjectFiles, loadWorkspaceForExternalUser } from "@hassali/database";
 import {
-  createStoredZip,
-  prepareProjectExportFiles,
   projectExportFileName,
   type ProjectExportMode
 } from "@/lib/server/project-export";
+import { createVerifiedProjectPackage } from "@/lib/server/verified-shipping";
 
 export const runtime = "nodejs";
 
@@ -40,20 +39,22 @@ export async function GET(request: Request) {
       return Response.json({ error: "Project ownership could not be verified." }, { status: 403 });
     }
 
-    const exportFiles = prepareProjectExportFiles({
+    const packaged = createVerifiedProjectPackage({
       files: files.map((file) => ({ content: String(file.content), path: String(file.path) })),
       mode,
-      projectName: workspace.project.name
+      projectName: workspace.project.name,
+      projectVerification: "not_recorded"
     });
-    const zip = createStoredZip(exportFiles);
     const fileName = projectExportFileName(workspace.project.name, mode);
 
-    return new Response(zip, {
+    return new Response(packaged.zip, {
       headers: {
         "Cache-Control": "private, no-store",
         "Content-Disposition": `attachment; filename="${fileName}"`,
-        "Content-Length": String(zip.byteLength),
+        "Content-Length": String(packaged.zip.byteLength),
         "Content-Type": "application/zip",
+        "X-Hassali-Canonical-Revision": packaged.manifest.canonicalRevision,
+        "X-Hassali-Package-Id": packaged.manifest.packageId,
         "X-Content-Type-Options": "nosniff"
       }
     });

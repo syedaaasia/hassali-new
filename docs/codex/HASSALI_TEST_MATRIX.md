@@ -444,6 +444,19 @@ I-93 | Git unsafe state | Include sensitive, staged, untracked, unrelated, or ou
 I-94 | Delivery projection | Inspect verified, warnings, partial, blocked, failed, and cancelled outcomes | UI and API use matching evidence-backed state and limitations
 I-95 | CODE timeline UI | Expand/collapse timeline and command output on desktop/mobile | Current operation visible, detail accessible, controls contained, no approval takeover
 I-96 | Dashboard signature | Inspect dashboard themes and narrow layout | Exact `Build in 🇵🇰 for 🌍` signature is tiny, bottom-centered, non-interactive, and contained
+X-01 | Curated media | Rank architecture and construction hero fixtures | Strong in-domain evidence wins; architecture and active construction never cross-select
+X-02 | Curated media | Rank beauty product and automotive hero fixtures | Correct domain/role wins with stable deterministic tie-breaking
+X-03 | Media authority | Explicitly request a user upload, then attach it without requesting use | Explicit user asset wins; unrelated attachment does not override curated/project media
+X-04 | Media fallback | Request a niche with no licensed match and toggle generated provider | Generated brief is semantic; unavailable optional media becomes image-light without fake success
+X-05 | License/path | Rank unknown-license media or provide traversal/insecure origin | Unknown license excluded; unsafe path and non-HTTPS origin rejected
+X-06 | Canonical WEBSITE | Apply hero B after hero A, then Preview/export | Current revision references and packages B; rejected/stale A is not shipped
+X-07 | Canonical CODE | Package verified post-repair project | Current repaired files and canonical revision recorded; stale pre-repair bytes absent
+X-08 | Shipping manifest | Build and reopen project ZIP | Manifest paths, sizes, content types, SHA-256 hashes, entrypoint, mode, and canonical identity match
+X-09 | Shipping safety | Include env, cache, private key, and traversal fixtures | Env/cache excluded, env example retained, private key blocks, traversal rejects without leaking values
+X-10 | Package integrity | Alter a packaged file after manifest creation | Verification fails and package cannot report ready
+X-11 | ASK artifact | Create a valid CSV from supplied rows | ASK-owned validated artifact; no CODE workspace or mutation authority
+X-12 | Mode isolation | Create ASK artifact and WEBSITE/CODE packages | Each retains its own mode, canonical source, and artifact identity
+X-13 | Rich degradation | Fail optional artifact rendering after valid answer | Core answer remains valid with a truthful bounded warning
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers
