@@ -91,6 +91,73 @@ export function growthBusinessTruthFromWebsite(handoff: WebsiteGrowthHandoff): G
   };
 }
 
+export function growthBusinessTruthFromPrompt(prompt: string, base: GrowthBusinessTruth | null = null): GrowthBusinessTruth {
+  const normalized = clean(prompt, 2_000);
+  const category = normalized.match(/\bfor\s+(?:an?\s+)?(.+?\b(?:business|company|service|shop|store|product|brand))(?=\s+(?:selling|serving|targeting|that|which)\b|[.!?]|$)/i)?.[1]
+    ?? normalized.match(/\b(?:business|company)\s+(?:is|selling|offering)\s+(.+?)(?=\s+(?:to|for)\b|[.!?]|$)/i)?.[1]
+    ?? null;
+  const audienceText = normalized.match(/\b(?:selling to|serving|targeting)\s+(.+?)(?=[.!?]|$)/i)?.[1] ?? null;
+  const explicitAudiences = audienceText
+    ? unique(audienceText.split(/,|\band\b/i).map((value) => clean(value, 160)).filter(Boolean))
+    : [];
+  const evidenceId = "growth-current-request";
+  const categoryTokens = (value: string | null | undefined) => new Set((value ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 3 && token !== "business"));
+  const explicitCategoryTokens = categoryTokens(category);
+  const baseCategoryTokens = categoryTokens(base?.business.category.value);
+  const incompatibleBase = Boolean(category && base?.business.category.value) &&
+    ![...explicitCategoryTokens].some((token) => baseCategoryTokens.has(token));
+  const retainedBase = incompatibleBase ? null : base;
+  const assertion = <T>(value: T | null, status: "confirmed" | "inferred" | "unknown" = value === null ? "unknown" : "confirmed") => ({
+    confidence: value === null ? 0 : status === "confirmed" ? 0.98 : 0.72,
+    evidenceIds: value === null ? [] : [evidenceId],
+    status,
+    value
+  } as const);
+  const selectedCategory = category ? clean(category, 160) : retainedBase?.business.category.value ?? null;
+  const audiences = explicitAudiences.length
+    ? explicitAudiences.map((segment, index) => audience({ index, segment, status: "confirmed" }))
+    : retainedBase?.audiences ?? [];
+  const offers = category
+    ? [{
+        assetPaths: [],
+        category: selectedCategory,
+        cta: { label: "Start a Conversation", target: "contact" },
+        description: `Offer for ${selectedCategory}`,
+        evidenceIds: [evidenceId],
+        features: [],
+        id: `offer-${slug(selectedCategory ?? "business")}`,
+        name: selectedCategory ?? "Business offer",
+        page: "growth",
+        price: assertion<string>(null),
+        status: "inferred" as const,
+        type: /service|consult|agency/i.test(selectedCategory ?? "") ? "service" as const : "category" as const
+      }]
+    : retainedBase?.offers ?? [];
+  return {
+    audiences,
+    brandVoice: retainedBase?.brandVoice ?? [],
+    business: {
+      category: category ? assertion(selectedCategory) : retainedBase?.business.category ?? assertion<string>(null),
+      description: category ? assertion(`${selectedCategory} serving ${explicitAudiences.join(" and ") || "its target customers"}.`) : retainedBase?.business.description ?? assertion<string>(null),
+      geography: retainedBase?.business.geography ?? assertion<string>(null),
+      name: retainedBase?.business.name ?? assertion<string>(null)
+    },
+    claims: retainedBase?.claims ?? [],
+    constraints: retainedBase?.constraints ?? [],
+    evidence: category || explicitAudiences.length
+      ? [...(retainedBase?.evidence ?? []), { id: evidenceId, kind: "explicit_user_instruction", location: "current Growth request", summary: normalized.slice(0, 240) }]
+      : retainedBase?.evidence ?? [],
+    offers,
+    positioning: {
+      differentiators: retainedBase?.positioning.differentiators ?? assertion<string[]>(null),
+      valueProposition: category
+        ? assertion(`A focused ${selectedCategory} offer for ${explicitAudiences.join(" and ") || "the intended audience"}.`, "inferred")
+        : retainedBase?.positioning.valueProposition ?? assertion<string>(null)
+    },
+    sourceWebsite: retainedBase?.sourceWebsite ?? null
+  };
+}
+
 export function createGrowthProject(input: {
   businessTruth: GrowthBusinessTruth;
   createdAt?: Date;

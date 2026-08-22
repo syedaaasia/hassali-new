@@ -2,10 +2,15 @@ export type ProjectNoteAction =
   | { kind: "add"; content: string }
   | { kind: "remove"; target: string }
   | { kind: "show" }
+  | { kind: "summarize" }
   | { kind: "update"; from: string; to: string };
 
 export function parseProjectNoteAction(prompt: string): ProjectNoteAction | null {
   const text = prompt.trim();
+  if (/^(?:please\s+)?(?:add\s+)?(?:a\s+short\s+)?summar(?:y|ize)\b[\s\S]*\b(?:conversation|chat)\b[\s\S]*\b(?:to|into|in)\s+(?:my\s+)?notes?\b/i.test(text) ||
+      /^(?:please\s+)?summarize\s+(?:what\s+we(?:'ve| have)\s+done|this\s+(?:conversation|chat))[\s\S]*\bnotes?\b/i.test(text)) {
+    return { kind: "summarize" };
+  }
   const add = text.match(/^(?:please\s+)?(?:add|save|write)\s+(?:to\s+)?(?:my\s+)?notes?\s+(?:that\s+)?(.+)$/i);
   if (add?.[1]) return { content: add[1].replace(/[.\s]+$/, "").trim(), kind: "add" };
   if (/^(?:please\s+)?(?:show|read|list|what(?:'s| is) in)\s+(?:my\s+)?notes?\??$/i.test(text)) return { kind: "show" };
@@ -22,6 +27,7 @@ function lines(notes: string) {
 
 export function applyProjectNoteAction(notes: string, action: ProjectNoteAction) {
   const current = lines(notes);
+  if (action.kind === "summarize") return { answer: "I can update the Hassali Summary from this conversation.", notes };
   if (action.kind === "show") return { answer: current.length ? `My Notes:\n${current.map((line) => `- ${line.replace(/^[-*]\s*/, "")}`).join("\n")}` : "My Notes are empty.", notes };
   if (action.kind === "add") {
     const normalized = action.content.toLowerCase();
@@ -42,7 +48,10 @@ export function applyProjectNoteAction(notes: string, action: ProjectNoteAction)
 }
 
 export function buildDeterministicAskSummary(messages: Array<{ content: string; role: "assistant" | "user" }>) {
-  const meaningful = messages.filter((message) => message.content.trim().length >= 20).slice(-8);
+  const meaningful = messages
+    .filter((message) => message.content.trim().length >= 20)
+    .filter((message) => !/\bsummar(?:y|ize)\b[\s\S]*\bnotes?\b/i.test(message.content))
+    .slice(-10);
   const bullets: string[] = [];
   for (let index = 0; index < meaningful.length; index += 2) {
     const user = meaningful[index];

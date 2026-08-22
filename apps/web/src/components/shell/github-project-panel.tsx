@@ -28,7 +28,11 @@ export function GitHubProjectPanel({ projectId }: { projectId: string | null }) 
         setSelected(payload.repository ?? null);
         setError(payload.configured === false ? payload.reason ?? "GitHub is not configured." : null);
       })
-      .catch(() => setError("GitHub status is unavailable."));
+      .catch(() => {
+        setConfigured(false);
+        setConnected(false);
+        setError("GitHub connection needs to be configured or is temporarily unavailable.");
+      });
   }, [projectId]);
 
   const discover = async () => {
@@ -55,13 +59,23 @@ export function GitHubProjectPanel({ projectId }: { projectId: string | null }) 
     finally { setLoading(false); }
   };
 
+  const disconnect = async () => {
+    setLoading(true); setError(null);
+    try {
+      const response = await fetch("/api/github/status", { method: "DELETE" });
+      if (!response.ok) throw new Error("GitHub could not be disconnected.");
+      setConnected(false); setRepositories([]); setSelected(null);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "GitHub could not be disconnected."); }
+    finally { setLoading(false); }
+  };
+
   return <div className="mt-2 space-y-2 px-2 pb-2 text-[11px] text-muted-foreground">
     {selected ? <div className="rounded-md bg-white/[0.035] px-2 py-2"><div className="truncate font-medium text-foreground">{selected.repositoryOwner}/{selected.repositoryName}</div><div>{selected.private ? "Private" : "Public"} repository · read-only source context</div></div> : null}
-    {!configured ? <p>{error ?? "GitHub is not configured."}</p> : !connected ? <button className="hassali-focus-ring rounded-md bg-white/[0.06] px-2 py-1.5 text-foreground hover:bg-white/[0.1]" onClick={() => { const location = (globalThis as BrowserGlobal).location; if (location) location.href = "/api/github/connect"; }} type="button">Connect GitHub</button> : <>
+    {!configured ? <p>{error ?? "GitHub connection needs to be configured."}</p> : !connected ? <div className="space-y-2"><p>Connect your account to work with repositories in CODE.</p><button className="hassali-focus-ring rounded-md bg-white/[0.06] px-2 py-1.5 text-foreground hover:bg-white/[0.1]" onClick={() => { const location = (globalThis as BrowserGlobal).location; if (location) location.href = "/api/github/connect"; }} type="button">Connect GitHub</button></div> : <>
       <button className="hassali-focus-ring text-[hsl(var(--premium-accent-soft))] hover:text-foreground" disabled={loading} onClick={() => void discover()} type="button">{loading ? "Loading..." : "Choose repository"}</button>
       {repositories.length ? <div className="space-y-1"><select aria-label="GitHub repository" className="h-8 w-full rounded-md border border-white/10 bg-[hsl(var(--premium-panel-strong))] px-2 text-xs text-foreground" onChange={(event) => setSelectedName((event.currentTarget as unknown as { value: string }).value)} value={selectedName}>{repositories.map((repository) => <option key={repository.fullName} value={repository.fullName}>{repository.fullName}{repository.private ? " · private" : ""}</option>)}</select><button className="hassali-focus-ring rounded-md bg-[hsl(var(--premium-accent)/0.14)] px-2 py-1.5 text-[hsl(var(--premium-accent-soft))]" disabled={!projectId || !selectedName || loading} onClick={() => void attach()} type="button">Attach to current project</button></div> : null}
+      <button className="hassali-focus-ring block text-muted-foreground hover:text-foreground" disabled={loading} onClick={() => void disconnect()} type="button">Disconnect</button>
     </>}
     {error && configured ? <p className="text-rose-300">{error}</p> : null}
-    <p className="leading-4">Attaching reads bounded repository metadata. File changes, commits, and push still require CODE authority; push is never automatic.</p>
   </div>;
 }

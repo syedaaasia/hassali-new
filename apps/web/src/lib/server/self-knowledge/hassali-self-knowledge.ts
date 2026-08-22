@@ -329,7 +329,7 @@ export async function createHassaliSelfKnowledgeAnswer(input: {
     return { answer: "Hassali's visual direction is calm, premium, technical, warm, precise, dimensional, minimal, and mature, led by Hassali orange. It intentionally avoids neon, crypto/cyberpunk styling, generic purple SaaS, excessive glass, and nested-card noise.", recordIds: recordIds("brand.direction") };
   }
   if (/\b(?:model strategy|models?|providers?|BYOK|Auto routing|Hassali Local)\b/i.test(prompt)) {
-    return { answer: "Hassali keeps models replaceable and owns the routing, capability, privacy, reliability, and safety system around them. The current foundation includes capability-aware Auto routing, external providers, BYOK, local-provider connections, metering and budgets. Hassali does not claim to own a frontier model, and Hassali Local's native companion and local inference runtime remain future work.", recordIds: recordIds("model.strategy", "capability.hassali-local-foundation") };
+    return { answer: "Hassali can use multiple AI models through its own routing system instead of depending on one permanent model. The exact model depends on the selected configuration and the task. Hassali does not claim to own a frontier base model.", recordIds: recordIds("model.strategy") };
   }
   if (/\b(?:approval modes?|Ask for approval|Approve for me|Full project access)\b/i.test(prompt)) {
     return { answer: "Hassali has three approval policies: Ask for approval, Approve for me, and Full project access. All remain project-scoped and server-enforced; none can bypass ownership, hard safety blocks, or separately permissioned actions such as Git push.", recordIds: recordIds("approval.modes", "approval.full-project-scope", "security.authority") };

@@ -152,7 +152,7 @@ export function LeftSidebar({ collapsed, onToggleCollapsed }: Props) {
       </section>
       <button aria-current={area === "growth" ? "page" : undefined} className={`hassali-focus-ring flex items-center gap-2 rounded-md px-2 py-2 text-left text-xs ${area === "growth" ? "bg-[hsl(var(--premium-accent)/0.12)] text-foreground" : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground"}`} onClick={() => { setProductMode("ASK"); setArea("growth"); }} type="button"><GrowthIcon /><span>Growth</span></button>
       <section className="mt-1">
-        <button aria-expanded={githubOpen} className="hassali-focus-ring flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-white/[0.04] hover:text-foreground" onClick={() => setGithubOpen((value) => !value)} type="button"><Chevron direction={githubOpen ? "down" : "right"} /><GitHubIcon /><span>GitHub</span></button>
+        <button aria-expanded={githubOpen} className="hassali-focus-ring flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-white/[0.04] hover:text-foreground" onClick={() => setGithubOpen((value) => !value)} type="button"><GitHubIcon /><span>GitHub</span></button>
         {githubOpen ? <GitHubProjectPanel projectId={projectId} /> : null}
       </section>
       <div className="mt-auto pt-2"><SidebarSettings /></div>

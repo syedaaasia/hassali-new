@@ -50,6 +50,45 @@
   box-shadow: 0 22px 68px rgb(0 0 0 / 30%);
 }
 
+:global(.darker) .workspace {
+  --background: 0 0% 0%;
+  --foreground: 0 0% 98%;
+  --surface: 0 0% 4%;
+  --surface-foreground: 0 0% 98%;
+  --muted: 0 0% 9%;
+  --muted-foreground: 0 0% 66%;
+  --border: 0 0% 16%;
+  --royal-black: 0 0% 0%;
+  --royal-surface: 0 0% 3% / 0.96;
+  --royal-panel: 0 0% 5% / 0.96;
+  --royal-panel-raised: 0 0% 8%;
+  --royal-border-soft: 0 0% 100% / 0.07;
+  --premium-canvas: 0 0% 0%;
+  --premium-void: 0 0% 0%;
+  --premium-panel: 0 0% 4%;
+  --premium-panel-strong: 0 0% 7%;
+  --premium-border: 0 0% 100% / 0.07;
+  --premium-paper: 0 0% 98%;
+  --premium-muted: 0 0% 66%;
+  --workspace-secondary: #070707;
+  --workspace-surface: #0a0a0a;
+  --workspace-elevated: #121212;
+  --workspace-border: #292929;
+  --workspace-text-secondary: #b3b3b3;
+  background: #000;
+}
+
+:global(.darker) .ambient {
+  background: linear-gradient(180deg, rgb(255 255 255 / 1.5%), transparent 18rem);
+}
+
+:global(.darker) .primarySurface,
+:global(.darker) .toolSurface {
+  border-color: rgb(255 255 255 / 7%);
+  background: rgb(8 8 8 / 96%);
+  box-shadow: 0 18px 56px rgb(0 0 0 / 45%);
+}
+
 :global(.light) .workspace {
   color-scheme: light;
   --background: 214 24% 96%;

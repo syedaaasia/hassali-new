@@ -17,7 +17,7 @@ import {
   getGitHubAccessToken,
   listGitHubRepositoryPaths
 } from "@/lib/server/github/github-integration";
-import { applyProjectNoteAction, parseProjectNoteAction } from "@/lib/project-notes-intelligence";
+import { applyProjectNoteAction, buildDeterministicAskSummary, parseProjectNoteAction } from "@/lib/project-notes-intelligence";
 import { auth } from "@clerk/nextjs/server";
 import {
   boundedJsonFailure,
@@ -7501,8 +7501,21 @@ export async function POST(request: Request) {
     if (!existingNotes) {
       return respond(createTextStream("I couldn't verify the selected project's Notes, so I changed nothing.", notePersistence.sessionId));
     }
-    const result = applyProjectNoteAction(existingNotes.manualNotes, projectNoteAction);
-    if (projectNoteAction.kind !== "show" && result.notes !== existingNotes.manualNotes) {
+    const requestedSummary = projectNoteAction.kind === "summarize"
+      ? buildDeterministicAskSummary(messages.map((message) => ({ content: message.content, role: message.role })))
+      : null;
+    const result = projectNoteAction.kind === "summarize"
+      ? { answer: requestedSummary ? "Updated the Hassali Summary in Project Notes." : "There is not enough conversation content to summarize yet.", notes: existingNotes.manualNotes }
+      : applyProjectNoteAction(existingNotes.manualNotes, projectNoteAction);
+    if (projectNoteAction.kind === "summarize" && requestedSummary) {
+      await upsertOwnedProjectNotes({
+        externalUserId: notePersistence.externalUserId,
+        hassaliSummary: requestedSummary,
+        manualNotes: existingNotes.manualNotes,
+        projectId: notePersistence.projectId,
+        useAsContext: existingNotes.useAsContext
+      });
+    } else if (projectNoteAction.kind !== "show" && result.notes !== existingNotes.manualNotes) {
       await upsertOwnedProjectNotes({
         externalUserId: notePersistence.externalUserId,
         hassaliSummary: existingNotes.hassaliSummary,

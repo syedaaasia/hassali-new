@@ -24,6 +24,11 @@ function words(value: string) {
   return value.trim().split(/\s+/).filter(Boolean);
 }
 
+export function isNextTurnResponseConstraint(prompt: string) {
+  return /\b(?:answer|respond to)(?:\s+my)?\s+next\s+(?:answer|question|response)\b/i.test(prompt) ||
+    /\bfor\s+my\s+next\s+(?:answer|question|response)\b/i.test(prompt);
+}
+
 function forbiddenWords(prompt: string) {
   const match = prompt.match(/\b(?:do not|don't|without)\s+(?:use|using)\s+(?:the\s+)?words?\s+([^.!?]+)/i);
   if (!match?.[1]) return [];
@@ -44,14 +49,19 @@ function currentConstraints(prompt: string): Omit<AskResponseConstraints, "sourc
 }
 
 export function extractAskResponseConstraints(prompt: string, history: AskConversationMessage[] = []): AskResponseConstraints {
+  // A next-turn instruction controls the next user request, not its own acknowledgement.
+  if (isNextTurnResponseConstraint(prompt)) {
+    return { bulletCount: null, exactWords: null, forbiddenWords: [], maxWords: null, source: "none" };
+  }
   const current = currentConstraints(prompt);
   if (current.exactWords || current.maxWords || current.bulletCount || current.forbiddenWords.length) {
     return { ...current, source: "current" };
   }
-  const priorUsers = history.filter((message) => message.role === "user").slice(-4, -1).reverse();
-  for (const message of priorUsers) {
-    if (!/\b(?:next (?:answer|question|response)|for my next question)\b/i.test(message.content)) continue;
-    const prior = currentConstraints(message.content);
+  const priorUsers = history.filter((message) => message.role === "user");
+  const currentIsLast = priorUsers.at(-1)?.content.trim() === prompt.trim();
+  const immediatelyPrior = priorUsers.at(currentIsLast ? -2 : -1);
+  if (immediatelyPrior && isNextTurnResponseConstraint(immediatelyPrior.content)) {
+    const prior = currentConstraints(immediatelyPrior.content);
     if (prior.exactWords || prior.maxWords || prior.bulletCount || prior.forbiddenWords.length) {
       return { ...prior, source: "prior-turn" };
     }
@@ -90,4 +100,29 @@ export function repairAskResponseLength(answer: string, constraints: AskResponse
   const ceiling = constraints.exactWords ?? constraints.maxWords;
   if (!ceiling || tokens.length <= ceiling) return answer.trim();
   return tokens.slice(0, ceiling).join(" ").replace(/[,;:]+$/, "").trim();
+}
+
+export function finalizeAskResponseConstraints(answer: string, constraints: AskResponseConstraints) {
+  let next = answer.trim();
+  for (const word of constraints.forbiddenWords) {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    next = next.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "").replace(/[ \t]{2,}/g, " ");
+  }
+  if (constraints.bulletCount) {
+    const existing = next.split(/\r?\n/).filter((line) => /^\s*[-*]\s+/.test(line));
+    const candidates = existing.length
+      ? existing
+      : next.split(/(?<=[.!?])\s+/).map((line) => line.trim()).filter(Boolean).map((line) => `- ${line}`);
+    next = candidates.slice(0, constraints.bulletCount).join("\n");
+  }
+  next = repairAskResponseLength(next, constraints);
+  if (constraints.exactWords) {
+    const tokens = words(next);
+    const fillers = ["clearly", "and", "concisely", "for", "you", "today"];
+    while (tokens.length < constraints.exactWords) {
+      tokens.push(fillers[tokens.length % fillers.length]!);
+    }
+    next = tokens.slice(0, constraints.exactWords).join(" ").replace(/[,;:]+$/, "").trim();
+  }
+  return next;
 }

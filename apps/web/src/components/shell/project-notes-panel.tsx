@@ -8,8 +8,6 @@ import {
   useProjectNotesStore
 } from "@/lib/project-notes-store";
 import { useWorkspaceStore } from "@/lib/workspace-store";
-import { useChatStore } from "@/lib/chat-store";
-import { buildDeterministicAskSummary } from "@/lib/project-notes-intelligence";
 
 export function ProjectNotesPanel() {
   const projectId = useWorkspaceStore((state) => state.projectId);
@@ -21,11 +19,9 @@ export function ProjectNotesPanel() {
   const notes = useProjectNotesStore((state) => state.notes);
   const isSaving = useProjectNotesStore((state) => state.isSaving);
   const setIsOpen = useProjectNotesStore((state) => state.setIsOpen);
-  const setHassaliSummary = useProjectNotesStore((state) => state.setHassaliSummary);
   const setNotes = useProjectNotesStore((state) => state.setNotes);
   const setUseAsContext = useProjectNotesStore((state) => state.setUseAsContext);
   const useAsContext = useProjectNotesStore((state) => state.useAsContext);
-  const messages = useChatStore((state) => state.messages);
 
   useEffect(() => {
     hydrateProject(projectId);
@@ -36,12 +32,6 @@ export function ProjectNotesPanel() {
     const handle = setTimeout(() => void persistProjectNotes(), 500);
     return () => clearTimeout(handle);
   }, [activeProjectId, hassaliSummary, notes, projectId, useAsContext]);
-
-  useEffect(() => {
-    if (activeProjectId !== projectId) return;
-    const summary = buildDeterministicAskSummary(messages);
-    if (summary && summary !== hassaliSummary) setHassaliSummary(summary);
-  }, [activeProjectId, hassaliSummary, messages, projectId, setHassaliSummary]);
 
   if (!isOpen) {
     return (
@@ -79,7 +69,7 @@ export function ProjectNotesPanel() {
         <section className="mb-3 border-b border-white/[0.06] pb-3">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Hassali Summary</div>
           <div className="mt-2 whitespace-pre-wrap text-[11px] leading-5 text-foreground/85">
-            {hassaliSummary || "Meaningful ASK work will be summarized here in a few short bullets."}
+            {hassaliSummary || "Ask Hassali to summarize this conversation into Notes when you want a concise checkpoint."}
           </div>
         </section>
         <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">My Notes</div>

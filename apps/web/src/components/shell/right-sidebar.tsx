@@ -24,7 +24,7 @@ import { canApplyWithProjectApprovalPolicy } from "@/lib/approval-policy";
 import { useApprovalPolicyStore } from "@/lib/approval-policy-store";
 import { getHassaliModelOptions } from "@/lib/model-registry";
 import { boundedProjectNotesContext, useProjectNotesStore } from "@/lib/project-notes-store";
-import { applyProjectNoteAction, parseProjectNoteAction } from "@/lib/project-notes-intelligence";
+import { applyProjectNoteAction, buildDeterministicAskSummary, parseProjectNoteAction } from "@/lib/project-notes-intelligence";
 import {
   type RuntimeApprovalResponse,
   syncRuntimeApprovalResult
@@ -94,9 +94,9 @@ type SpeechGlobal = {
   webkitSpeechRecognition?: new () => SpeechRecognitionLike;
 };
 const activeModeClasses: Record<ProductMode, string> = {
-  ASK: "bg-[#57A8FF] text-[#0B0D10] shadow-[0_8px_22px_rgba(87,168,255,0.2)]",
-  WEBSITE: "bg-[#9D7BFF] text-[#0B0D10] shadow-[0_8px_22px_rgba(157,123,255,0.2)]",
-  CODE: "bg-[#FF7A3C] text-[#0B0D10] shadow-[0_8px_22px_rgba(255,122,60,0.2)]"
+  ASK: "bg-[#57A8FF] text-[#0B0D10] shadow-[0_8px_22px_rgba(87,168,255,0.2)] [.darker_&]:bg-white/[0.12] [.darker_&]:text-white [.darker_&]:shadow-none",
+  WEBSITE: "bg-[#9D7BFF] text-[#0B0D10] shadow-[0_8px_22px_rgba(157,123,255,0.2)] [.darker_&]:bg-white/[0.12] [.darker_&]:text-white [.darker_&]:shadow-none",
+  CODE: "bg-[#FF7A3C] text-[#0B0D10] shadow-[0_8px_22px_rgba(255,122,60,0.2)] [.darker_&]:bg-white/[0.12] [.darker_&]:text-white [.darker_&]:shadow-none"
 };
 type ChatScrollBehavior = "auto" | "smooth";
 type ChatScrollContainer = {
@@ -748,6 +748,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const approvalPolicyProjectId = useApprovalPolicyStore((state) => state.activeProjectId);
   const notesProjectId = useProjectNotesStore((state) => state.activeProjectId);
   const projectNotes = useProjectNotesStore((state) => state.notes);
+  const setHassaliSummary = useProjectNotesStore((state) => state.setHassaliSummary);
   const setProjectNotes = useProjectNotesStore((state) => state.setNotes);
   const useProjectNotesAsContext = useProjectNotesStore((state) => state.useAsContext);
   const activeFile = files[activePath];
@@ -1038,7 +1039,11 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     }
     const noteAction = productMode === "ASK" ? parseProjectNoteAction(input) : null;
     if (noteAction && noteAction.kind !== "show" && notesProjectId === projectId) {
-      setProjectNotes(applyProjectNoteAction(projectNotes, noteAction).notes);
+      if (noteAction.kind === "summarize") {
+        setHassaliSummary(buildDeterministicAskSummary(messages));
+      } else {
+        setProjectNotes(applyProjectNoteAction(projectNotes, noteAction).notes);
+      }
     }
     const result = sendMessage(createWorkspaceContext());
     if (input.trim() && composerUploads.every((upload) => upload.status === "ready")) {
@@ -1332,7 +1337,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
   return (
     <Panel className="flex min-h-0 min-w-0 flex-1 flex-col bg-transparent">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] bg-[#12161C]/80 px-3 py-2 [.light_&]:bg-white sm:px-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel)/0.8)] px-3 py-2 [.light_&]:bg-white sm:px-4">
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             {productMode === "ASK" ? "Ask" : productMode === "WEBSITE" ? "Website" : "Code"}
@@ -1727,7 +1732,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
 
         {isAwayFromLatest ? (
           <button
-            className="absolute bottom-[7.4rem] left-1/2 z-20 -translate-x-1/2 rounded-full border border-[hsl(var(--premium-border))] bg-[#1A2029] px-3 py-1.5 text-[11px] font-medium text-foreground shadow-[0_12px_34px_rgba(0,0,0,0.4)] hover:border-[hsl(var(--premium-accent)/0.45)] [.light_&]:bg-white"
+            className="absolute bottom-[7.4rem] left-1/2 z-20 -translate-x-1/2 rounded-full border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel-strong))] px-3 py-1.5 text-[11px] font-medium text-foreground shadow-[0_12px_34px_rgba(0,0,0,0.4)] hover:border-[hsl(var(--premium-accent)/0.45)] [.light_&]:bg-white"
             data-jump-to-latest
             onClick={() => scrollToLatest("smooth")}
             type="button"
@@ -1737,7 +1742,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         ) : null}
 
         <form
-          className="shrink-0 border-t border-[hsl(var(--premium-border))] bg-[#0B0D10]/95 px-3 py-2.5 [.light_&]:border-slate-200 [.light_&]:bg-[#F4F3EE] sm:px-4 lg:px-6"
+          className="shrink-0 border-t border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-void)/0.95)] px-3 py-2.5 [.light_&]:border-slate-200 [.light_&]:bg-[#F4F3EE] sm:px-4 lg:px-6"
           data-website-composer={productMode === "WEBSITE" ? "true" : undefined}
           onDragOver={(event) => {
             const transfer = event.dataTransfer as unknown as { types: { includes: (value: string) => boolean } };
@@ -1840,7 +1845,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               value={model}
             />
           </div>
-          <div className="mx-auto flex w-full max-w-4xl items-center gap-2 rounded-2xl border border-[hsl(var(--premium-border))] bg-[#1A2029] px-2.5 py-2 shadow-[0_10px_32px_rgba(0,0,0,0.2)] focus-within:border-[hsl(var(--premium-accent)/0.55)] focus-within:ring-2 focus-within:ring-[hsl(var(--premium-accent)/0.1)] [.light_&]:border-slate-300 [.light_&]:bg-white [.light_&]:shadow-[0_16px_44px_rgba(0,0,0,0.08)] sm:px-3">
+          <div className="mx-auto flex w-full max-w-4xl items-center gap-2 rounded-2xl border border-[hsl(var(--premium-border))] bg-[hsl(var(--premium-panel-strong))] px-2.5 py-2 shadow-[0_10px_32px_rgba(0,0,0,0.2)] focus-within:border-[hsl(var(--premium-accent)/0.55)] focus-within:ring-2 focus-within:ring-[hsl(var(--premium-accent)/0.1)] [.light_&]:border-slate-300 [.light_&]:bg-white [.light_&]:shadow-[0_16px_44px_rgba(0,0,0,0.08)] sm:px-3">
             <button
               aria-label="Attach files"
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-lg leading-none text-muted-foreground hover:bg-white/[0.04] hover:text-foreground [.light_&]:hover:bg-slate-200 [.light_&]:hover:text-slate-950"

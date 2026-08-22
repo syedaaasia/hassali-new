@@ -250,7 +250,6 @@ export function decideAskFreshness(input: {
   runtime: Pick<AskRuntimeContext, "currentIsoDatetime" | "serverTimezone">;
 }): AskFreshnessDecision {
   const prompt = input.prompt.trim();
-  const normalized = normalize(prompt);
   const intent = classifyAskIntent(prompt);
   const time = normalizeAskTimeContext(prompt, input.runtime);
   const referencedUrl = extractUrl(prompt);
@@ -271,7 +270,7 @@ export function decideAskFreshness(input: {
   let researchRequired = false;
   let researchPreferred = false;
   let directAnswerAllowed = true;
-  let confidence = 0.86;
+  const confidence = 0.86;
   const reasons: string[] = [];
   let preferredSourceTypes: string[] = [];
   let recencyRequirement: string | undefined;
@@ -367,15 +366,6 @@ export function decideAskFreshness(input: {
     researchPreferred = /\b(?:exact|documentation|specification|standard)\b/i.test(prompt);
     preferredSourceTypes = researchPreferred ? ["official documentation or standard"] : [];
     reasons.push(conceptException ? "Freshness words describe a concept or historical frame, not the present state." : "The request is a stable explanatory question.");
-  } else if (/\b(?:current|latest|today|now|recent)\b/i.test(normalized)) {
-    freshnessClass = "unknown";
-    sourceRequirement = "live_source_required";
-    researchRequired = true;
-    directAnswerAllowed = false;
-    preferredSourceTypes = ["current authoritative source"];
-    recencyRequirement = "current evidence appropriate to the requested entity";
-    confidence = 0.68;
-    reasons.push("The request appears current, but its volatility could not be classified more specifically.");
   } else {
     freshnessClass = "timeless";
     sourceRequirement = "none_required";

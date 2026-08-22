@@ -276,7 +276,8 @@ function isActionableObjective(value: string) {
 }
 
 function isConstraintOnly(value: string) {
-  return /^(?:do not|don't|dont|never|no|without)\b/i.test(value.trim());
+  return /^(?:do not|don't|dont|never|no|without)\b/i.test(value.trim()) ||
+    /^(?:answer|respond to)(?:\s+my)?\s+next\s+(?:answer|question|response)\b/i.test(value.trim());
 }
 
 function containsUnsafeBusinessNameCharacter(value: string) {
