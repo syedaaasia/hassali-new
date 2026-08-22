@@ -8,6 +8,7 @@ export type TaxonomyTier = 1 | 2;
 export type DomainId =
   | "accounting_firm"
   | "bakery"
+  | "beauty_cosmetics"
   | "beauty_salon"
   | "automotive_showroom"
   | "bicycle_shop"
@@ -36,6 +37,7 @@ export type DomainId =
   | "mechanical_watch"
   | "motorcycle_shop"
   | "photography_studio"
+  | "paint_brand"
   | "real_estate"
   | "restaurant"
   | "seafood_restaurant"
@@ -168,6 +170,22 @@ function stubProfile(input: Pick<IndustryTaxonomyProfile, "aliases" | "conflicts
 }
 
 export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
+  fullProfile({
+    aliases: ["paint brand", "paint company", "paint manufacturer", "coatings brand", "interior paint", "exterior paint", "decorative coatings"],
+    codeHints: { entities: ["color collection", "finish", "surface", "primer", "project"], possibleApps: ["color collection manager", "paint inventory", "project specification tool"] },
+    commonPages: ["home", "products", "inspiration", "about", "contact"],
+    commonSections: ["hero", "color_collections", "finishes", "surfaces", "application_guidance", "inspiration", "contact"],
+    conflicts: ["electronics_store", "furniture_store", "law_firm"],
+    ctas: ["Explore color collections", "Find the right finish", "Ask about your project"],
+    displayName: "Paint and Coatings Brand",
+    expectedEntities: ["interior paint", "exterior paint", "color collections", "finishes", "primers", "surfaces"],
+    id: "paint_brand",
+    relatedIndustries: ["decorative coatings", "interior design", "building materials"],
+    trustSignals: ["application guidance", "surface suitability", "finish information", "verified product details"],
+    typoVariants: [],
+    visualHints: ["paint swatches", "coated surfaces", "color fields", "interior and exterior settings"],
+    websiteVocabulary: ["paint", "coatings", "color collections", "interior", "exterior", "finishes", "primers", "surfaces", "application", "coverage"]
+  }),
   fullProfile({
     aliases: ["upholstery", "upholstry", "upholestry", "reupholstery", "sofa upholstery", "furniture upholstery", "chair upholstery", "fabric repair", "leather repair", "furniture restoration"],
     codeHints: {
@@ -351,6 +369,7 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   stubProfile({ aliases: ["florist", "flower shop", "bridal flowers", "bouquet"], conflicts: ["crm_software", "mobile_phone_shop"], ctas: ["Order flowers", "Request an arrangement", "Schedule delivery"], displayName: "Florist", id: "florist", trustSignals: ["seasonal collections", "wedding arrangements", "same-day delivery"], typoVariants: [], websiteVocabulary: ["flowers", "bouquet", "wedding", "event", "delivery", "freshness", "arrangements"] }),
   stubProfile({ aliases: ["cleaning service", "cleaning company", "cleaners", "home cleaning", "carpet cleaning", "carpet cleaner", "rug cleaning", "upholstery and carpet cleaning"], conflicts: ["restaurant", "crm_software"], ctas: ["Book a cleaning", "Get a free quote", "Schedule recurring cleaning"], displayName: "Cleaning Service", id: "cleaning_service", trustSignals: ["insured cleaners", "local reviews", "recurring cleaning"], typoVariants: [], websiteVocabulary: ["cleaning", "deep clean", "home cleaning", "office cleaning", "carpet cleaning", "rug care", "stain treatment", "move-in cleaning", "move-out cleaning", "schedule", "trusted cleaners"] }),
   stubProfile({ aliases: ["gym", "fitness studio", "gym fitness studio", "personal training"], conflicts: ["restaurant", "car_rental"], displayName: "Gym / Fitness Studio", id: "gym_fitness_studio", typoVariants: [], websiteVocabulary: ["gym", "fitness", "training", "classes", "coaches", "membership", "strength"] }),
+  stubProfile({ aliases: ["beauty brand", "cosmetic brand", "cosmetics brand", "beauty cosmetics", "cosmetics business", "beauty business"], conflicts: ["beauty_salon", "dental_clinic", "crm_software"], commonPages: ["home", "products", "about", "contact"], commonSections: ["hero", "product categories", "product discovery", "brand approach", "shopping information", "contact"], ctas: ["Explore beauty categories", "Browse products", "Ask about products"], displayName: "Beauty / Cosmetics Brand", id: "beauty_cosmetics", trustSignals: ["clear product information", "usage guidance boundaries", "delivery and returns information"], typoVariants: [], visualHints: ["beauty editorial", "product-led photography", "restrained category presentation"], websiteVocabulary: ["beauty", "cosmetics", "makeup", "products", "categories", "routine", "product details", "delivery", "returns"] }),
   stubProfile({ aliases: ["beauty salon", "salon", "hair salon", "makeup studio"], conflicts: ["dental_clinic", "crm_software", "skincare_store"], displayName: "Beauty Salon", id: "beauty_salon", typoVariants: [], websiteVocabulary: ["beauty salon", "hair styling", "makeup service", "appointments", "stylists", "treatments", "care"] }),
   stubProfile({ aliases: ["skincare", "skin care", "skincare product", "skincare products", "skincare store", "skin care store", "skincare shop", "cosmetics store", "beauty store", "mascara store", "skin products shop"], conflicts: ["beauty_salon", "dental_clinic", "crm_software"], commonPages: ["home", "products", "about", "contact"], commonSections: ["hero", "skin concerns", "product collections", "ingredients", "routine builder", "delivery", "contact"], ctas: ["Shop skincare", "Build a routine", "Browse skin concerns"], displayName: "Skincare Store", id: "skincare_store", trustSignals: ["clear ingredient information", "skin-type guidance", "delivery and returns"], typoVariants: [], visualHints: ["clinical editorial", "ingredient close-ups", "calm product shelves"], websiteVocabulary: ["skincare", "skin care", "cleanser", "serum", "moisturizer", "SPF", "ingredients", "skin type", "routine", "products", "delivery", "returns"] }),
   stubProfile({ aliases: ["greeting card store", "greeting card shop", "greeting cards", "card shop", "card store", "birthday card shop", "occasion cards"], conflicts: ["crm_software", "dental_clinic"], commonPages: ["home", "products", "about", "contact"], commonSections: ["hero", "occasions", "featured cards", "personalization", "paper quality", "delivery", "contact"], ctas: ["Browse cards", "Shop by occasion", "Personalize a card"], displayName: "Greeting Card Store", id: "greeting_card_store", trustSignals: ["paper and print details", "personalization guidance", "delivery information"], typoVariants: [], visualHints: ["editorial paper craft", "restrained card grid", "warm handwritten detail"], websiteVocabulary: ["greeting cards", "birthday cards", "anniversary cards", "occasions", "personalized message", "paper stock", "envelopes", "gift notes", "delivery"] }),
@@ -385,7 +404,7 @@ export const industryTaxonomyProfiles: IndustryTaxonomyProfile[] = [
   stubProfile({ aliases: ["clothing brand", "fashion brand", "apparel store", "clothing store", "fashion store", "fashion and footwear store", "footwear store", "sneaker store"], conflicts: ["crm_software", "restaurant"], displayName: "Clothing Brand", id: "clothing_brand", typoVariants: [], websiteVocabulary: ["clothing", "fashion", "footwear", "sneakers", "backpacks", "collection", "lookbook", "sizes", "fabric", "shipping"] }),
   stubProfile({ aliases: ["interior design", "interior designer", "home interiors"], conflicts: ["upholstery", "construction_company"], displayName: "Interior Design", id: "interior_design", typoVariants: [], websiteVocabulary: ["interior design", "space planning", "materials", "moodboard", "consultation", "home styling"] }),
   stubProfile({ aliases: ["furniture store", "furniture shop", "sofa store", "chair store"], conflicts: ["upholstery", "mobile_phone_shop"], displayName: "Furniture Store", id: "furniture_store", typoVariants: [], websiteVocabulary: ["furniture", "sofa", "chair", "table", "showroom", "delivery", "collections"] }),
-  stubProfile({ aliases: ["photography studio", "photographer", "photo studio"], conflicts: ["crm_software", "restaurant"], displayName: "Photography Studio", id: "photography_studio", typoVariants: [], websiteVocabulary: ["photography", "portfolio", "shoot", "studio", "packages", "gallery", "booking"] }),
+  stubProfile({ aliases: ["photography studio", "photographer", "photo studio", "photographer portfolio"], commonPages: ["home", "work", "about", "contact"], commonSections: ["hero", "selected work", "project stories", "approach", "contact"], conflicts: ["crm_software", "restaurant"], ctas: ["View selected work", "Explore the portfolio", "Start a conversation"], displayName: "Photography Studio", id: "photography_studio", trustSignals: [], typoVariants: [], visualHints: ["image-led portfolio", "editorial sequencing", "project storytelling"], websiteVocabulary: ["photography", "portfolio", "shoot", "studio", "gallery", "project", "film", "visual story"] }),
   stubProfile({ aliases: ["event planning", "event planner", "wedding planner", "events company"], conflicts: ["restaurant", "crm_software"], displayName: "Event Planning", id: "event_planning", typoVariants: [], websiteVocabulary: ["events", "planning", "weddings", "coordination", "decor", "vendors", "consultation"] }),
   stubProfile({ aliases: ["education training", "training center", "online course", "academy", "school"], conflicts: ["crm_software", "restaurant"], displayName: "Education / Training", id: "education_training", typoVariants: [], websiteVocabulary: ["courses", "training", "students", "certificates", "classes", "instructors", "enrollment"] })
 ];
@@ -622,9 +641,19 @@ function contractForbiddenVocabulary(profile: IndustryTaxonomyProfile | null) {
     "warranty",
     "workshop"
   ]);
+  const belongsToOwnDomain = (term: string) => {
+    const normalized = normalizeText(term);
+    return [...ownVocabulary].some((own) =>
+      own === normalized ||
+      own.startsWith(`${normalized} `) ||
+      own.endsWith(` ${normalized}`) ||
+      normalized.startsWith(`${own} `) ||
+      normalized.endsWith(` ${own}`)
+    );
+  };
   const conflicts = profile.conflicts
     .flatMap((id) => getTaxonomyProfile(id)?.websiteVocabulary ?? [id.replace(/_/g, " ")])
-    .filter((term) => !ownVocabulary.has(normalizeText(term)) && !commonWords.has(normalizeText(term)) && term.length > 3);
+    .filter((term) => !belongsToOwnDomain(term) && !commonWords.has(normalizeText(term)) && term.length > 3);
   return unique(["Current Prompt Website", "domain-specific hero", "contact / unknown", "unknown with clear guidance", ...conflicts]);
 }
 
@@ -634,8 +663,9 @@ export function buildWebsiteIntentContract(input: {
   requestedPagesFallback?: string[];
 }): WebsiteIntentContract {
   const promptClassification = classifyDomainIntent(input.prompt);
+  const existingProfile = !promptClassification.profile ? getTaxonomyProfile(input.existingDomain) : null;
   const existingClassification = !promptClassification.profile && input.existingDomain
-    ? classifyDomainIntent(input.existingDomain)
+    ? classifyDomainIntent(existingProfile?.aliases[0] ?? existingProfile?.displayName ?? input.existingDomain)
     : null;
   const classification = existingClassification?.profile ? existingClassification : promptClassification;
   const profile = classification.profile;

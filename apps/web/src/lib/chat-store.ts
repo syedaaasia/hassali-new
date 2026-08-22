@@ -21,6 +21,7 @@ import { normalizeSafeProjectPath } from "@/lib/utils/path";
 import { shouldRestorePreviousAttachments, type HassaliAttachment } from "@/lib/attachments";
 import type { ProjectApprovalPolicy } from "@/lib/approval-policy";
 import type { AdaptiveCodePlanSummary } from "@/lib/server/ai/adaptive-code-planner";
+import { hassaliChatContractHeader, hassaliChatContractVersion, hassaliReloadRequiredMessage } from "@/lib/chat-contract";
 
 export type ChatRole = "user" | "assistant";
 export type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
@@ -239,6 +240,7 @@ export type DiffProposal = {
   proposalRepairConfidence?: number;
   proposalRepairStatus?: "failed" | "keep_blocked" | "not_needed" | "partial_repair" | "repaired";
   proposalRepairStrategy?: string;
+  repairAuthority?: Record<string, unknown>;
   proposalRevalidationPassed?: boolean;
   proposalUnresolvedIssueCount?: number;
   qualityBlockCount?: number;
@@ -303,6 +305,12 @@ export type DiffProposal = {
   websiteSectionCount?: number;
   websiteValidationPassed?: boolean;
   websiteVisualStrategy?: string;
+  websiteVisualQADeterministicPassed?: boolean;
+  websiteVisualQAIssueCount?: number;
+  websiteVisualQARenderStatus?: "failed" | "not_attempted" | "rendered";
+  websiteVisualQAScreenshotReview?: "not_available" | "not_evaluated" | "rendered";
+  websiteVisualQAStatus?: "failed" | "incomplete" | "passed" | "review_required";
+  websiteVisualQAVisionReview?: "not_available" | "not_evaluated" | "passed" | "review_required";
   changes: Array<{
     action: ProposalAction;
     path?: string;
@@ -1270,6 +1278,28 @@ function isDiffProposal(value: unknown): value is DiffProposal {
       typeof proposal.websiteValidationPassed === "boolean") &&
     (typeof proposal.websiteVisualStrategy === "undefined" ||
       typeof proposal.websiteVisualStrategy === "string") &&
+    (typeof proposal.websiteVisualQADeterministicPassed === "undefined" ||
+      typeof proposal.websiteVisualQADeterministicPassed === "boolean") &&
+    (typeof proposal.websiteVisualQAIssueCount === "undefined" ||
+      typeof proposal.websiteVisualQAIssueCount === "number") &&
+    (typeof proposal.websiteVisualQARenderStatus === "undefined" ||
+      proposal.websiteVisualQARenderStatus === "failed" ||
+      proposal.websiteVisualQARenderStatus === "not_attempted" ||
+      proposal.websiteVisualQARenderStatus === "rendered") &&
+    (typeof proposal.websiteVisualQAScreenshotReview === "undefined" ||
+      proposal.websiteVisualQAScreenshotReview === "not_available" ||
+      proposal.websiteVisualQAScreenshotReview === "not_evaluated" ||
+      proposal.websiteVisualQAScreenshotReview === "rendered") &&
+    (typeof proposal.websiteVisualQAStatus === "undefined" ||
+      proposal.websiteVisualQAStatus === "failed" ||
+      proposal.websiteVisualQAStatus === "incomplete" ||
+      proposal.websiteVisualQAStatus === "passed" ||
+      proposal.websiteVisualQAStatus === "review_required") &&
+    (typeof proposal.websiteVisualQAVisionReview === "undefined" ||
+      proposal.websiteVisualQAVisionReview === "not_available" ||
+      proposal.websiteVisualQAVisionReview === "not_evaluated" ||
+      proposal.websiteVisualQAVisionReview === "passed" ||
+      proposal.websiteVisualQAVisionReview === "review_required") &&
     Array.isArray(proposal.changes) &&
     proposal.changes.every(
       (change) => {
@@ -1579,6 +1609,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         body: JSON.stringify({
           approvalPolicy: workspaceContext.approvalPolicy,
           attachmentIds: selectedAttachmentIds,
+          clientContractVersion: hassaliChatContractVersion,
           messages: nextMessages
             .filter((message) => message.content.trim().length > 0)
             .map(({ role, content, providerFailureCategory, responseKind }) => ({ role, content, providerFailureCategory, responseKind })),
@@ -1601,7 +1632,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
             fileContents: requestWorkspace.fileContents,
             fileList: requestWorkspace.fileList,
             projectName: requestWorkspace.projectName
-          }
+          },
+          workspaceProjectId: workspaceContext.projectId
         }),
         headers: {
           "Content-Type": "application/json"
@@ -1611,6 +1643,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
 
       if (!requestIsCurrent()) return;
+      const serverContractVersion = response.headers.get(hassaliChatContractHeader);
+      if (response.status === 409 || (serverContractVersion && serverContractVersion !== hassaliChatContractVersion)) {
+        throw new Error(hassaliReloadRequiredMessage);
+      }
       if (!response.ok || !response.body) {
         throw new Error("Unable to start assistant stream.");
       }
@@ -1834,7 +1870,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           message.id === assistantMessage.id
             ? {
                 ...message,
-                content: "The assistant stream could not start. Check the server configuration."
+                content: error instanceof Error && error.message === hassaliReloadRequiredMessage
+                  ? hassaliReloadRequiredMessage
+                  : "The assistant stream could not start. Check the server configuration."
               }
             : message
         )

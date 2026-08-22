@@ -338,7 +338,7 @@ export function validateAssetVisuals(input: BuildAssetVisualValidationInput): As
       evidence: snippets.filter((snippet) => genericPlaceholderTerms.some((term) => includesSignal(snippet, term))).slice(0, 5).join(", "),
       id: "placeholder_only_visual",
       message: "Visual placeholders are too generic.",
-      repairHint: "Use domain-specific visual labels such as bouquet gallery, dental clinic hero, TV showroom panel, or CRM dashboard preview.",
+      repairHint: "Replace generic visual labels with concrete subjects and roles drawn from the current domain contract.",
       severity: "warning"
     }));
   }

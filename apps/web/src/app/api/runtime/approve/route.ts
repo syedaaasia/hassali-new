@@ -3,8 +3,11 @@ import {
   applyUserProjectFileBatch,
   beginOwnedChatProposalApproval,
   completeOwnedChatProposalApproval,
+  failOwnedChatProposalApproval,
   listUserProjectFiles,
+  loadOwnedChatProposalApprovalState,
   loadOwnedChatProposal,
+  rejectOwnedChatProposal,
   releaseOwnedChatProposalApproval
 } from "@hassali/database";
 import {
@@ -43,6 +46,9 @@ import {
   synchronizeOwnedProjectWorkspace
 } from "@/lib/server/runtime/owned-workspace-hydration";
 import { verifyWebsitePreviewFidelity } from "@/lib/website-preview-fidelity";
+import { buildPostApplyWebsiteVisualVerification } from "@/lib/server/ai/website-visual-qa";
+import { summarizeWebsiteGrowthHandoff } from "@/lib/server/ai/website-growth-handoff";
+import { getOwnedWebsiteGrowthHandoff } from "@/lib/server/ai/website-growth-handoff-store";
 import { buildMobilePreviewRuntime } from "@/lib/server/preview/mobile-preview-runtime";
 import { buildMobileRuntimeCandidate } from "@/lib/server/runtime/mobile-runtime-manager";
 import {
@@ -77,6 +83,33 @@ export const runtime = "nodejs";
 
 function errorResponse(error: string, status = 400, extra?: Record<string, unknown>) {
   return Response.json({ error, ...extra }, { status });
+}
+
+export async function GET(request: Request) {
+  const { userId } = await auth();
+  if (!userId) return errorResponse("Unauthorized", 401);
+  const url = new URL(request.url);
+  const projectId = url.searchParams.get("projectId")?.trim() ?? "";
+  const proposalId = url.searchParams.get("proposalId")?.trim() ?? "";
+  if (!projectId || !proposalId) return errorResponse("projectId and proposalId are required.", 400);
+  const lifecycle = await loadOwnedChatProposalApprovalState({ externalUserId: userId, projectId, proposalId }).catch(() => null);
+  return lifecycle ? Response.json(lifecycle) : errorResponse("Proposal not found or access denied.", 404);
+}
+
+export async function PATCH(request: Request) {
+  const { userId } = await auth();
+  if (!userId) return errorResponse("Unauthorized", 401);
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
+  const proposalId = typeof body?.proposalId === "string" ? body.proposalId.trim() : "";
+  if (body?.action !== "reject" || !projectId || !proposalId) return errorResponse("A valid proposal rejection request is required.", 400);
+  const rejected = await rejectOwnedChatProposal({ externalUserId: userId, projectId, proposalId }).catch(() => false);
+  if (!rejected) {
+    const lifecycle = await loadOwnedChatProposalApprovalState({ externalUserId: userId, projectId, proposalId }).catch(() => null);
+    if (lifecycle?.status === "rejected") return Response.json(lifecycle);
+    return errorResponse("This proposal can no longer be rejected.", 409, { lifecycle });
+  }
+  return Response.json({ status: "rejected" });
 }
 
 function snapshotStatusFromBody(value: unknown): WorkerRouterSnapshotStatus | undefined {
@@ -563,6 +596,14 @@ export async function POST(request: Request) {
     });
   }
 
+  if (durableApprovalClaim.status === "rejected") {
+    return errorResponse("This proposal was rejected and cannot be applied.", 409, { lifecycleStatus: "rejected", runnerStatus: "blocked", writtenFiles: [] });
+  }
+
+  if (durableApprovalClaim.status === "failed") {
+    return errorResponse("This proposal previously failed to apply. Regenerate it before retrying.", 409, { lifecycleStatus: "failed", runnerStatus: "blocked", writtenFiles: [] });
+  }
+
   if (durableApprovalClaim.status !== "acquired") {
     return errorResponse("The durable proposal authority could not be claimed for execution.", 409, {
       runnerStatus: "blocked",
@@ -580,6 +621,16 @@ export async function POST(request: Request) {
     });
     await releaseOwnedChatProposalApproval({
       claimToken: durableClaimToken,
+      externalUserId: userId,
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId
+    }).catch(() => false);
+  };
+  const failApprovalClaims = async (error: string) => {
+    releaseServerProposalApproval({ projectId: parsed.projectId, proposalId: parsed.proposalId });
+    await failOwnedChatProposalApproval({
+      claimToken: durableClaimToken,
+      error,
       externalUserId: userId,
       projectId: parsed.projectId,
       proposalId: parsed.proposalId
@@ -738,9 +789,10 @@ export async function POST(request: Request) {
     });
     result = await adapter.sendApprovedPlan(session, plan);
   } catch (error) {
-    await releaseApprovalClaims();
+    const message = error instanceof Error ? error.message : "Approved execution could not start.";
+    await failApprovalClaims(message);
     return errorResponse(
-      error instanceof Error ? error.message : "Approved CODE execution could not start.",
+      message,
       500,
       {
         runnerStatus: "failed",
@@ -885,9 +937,10 @@ export async function POST(request: Request) {
       files: ownedProjectFiles,
       workspaceRoot: workspaceBinding.workspaceRoot
     }).catch(() => undefined);
-    await releaseApprovalClaims();
+    const message = error instanceof Error ? error.message : "Autonomous CODE verification could not complete.";
+    await failApprovalClaims(message);
     return errorResponse(
-      error instanceof Error ? error.message : "Autonomous CODE verification could not complete.",
+      message,
       500,
       {
         runnerStatus: "failed",
@@ -900,6 +953,8 @@ export async function POST(request: Request) {
   const codeExecution = codeExecutionResult?.report ?? null;
   const finalFileContents = codeExecution?.finalFileContents ?? {};
   let workspaceCanonicalizedForRuntime = false;
+  let authoritativeProjectFiles: Array<{ content: string; id?: string; path: string }> = [];
+  let authoritativeProjectRevision: string | null = null;
 
   if (result.ok) {
     try {
@@ -915,8 +970,9 @@ export async function POST(request: Request) {
           continue;
         }
 
-        const finalContent = finalFileContents[step.path] ??
-          await readApprovedFile(workspaceBinding.workspaceRoot, step.path);
+        const finalContent = productMode === "WEBSITE"
+          ? step.content
+          : finalFileContents[step.path] ?? await readApprovedFile(workspaceBinding.workspaceRoot, step.path);
         persistenceWrites.push({ content: finalContent, path: step.path });
       }
       const persistenceResult = await applyUserProjectFileBatch({
@@ -938,17 +994,23 @@ export async function POST(request: Request) {
           })
         },
         writes: persistenceWrites
-      });
+      }) as
+        | { files: Array<{ content: string; id: string; path: string }>; revision: string; status: "applied" | "unchanged" }
+        | { files: Array<{ content: string; id: string; path: string }>; status: "claim_lost" | "missing" | "stale" };
 
       if (persistenceResult.status !== "applied") {
         const reason = persistenceResult.status === "stale"
           ? "The project changed during execution. Hassali preserved the newer project state."
           : persistenceResult.status === "claim_lost"
             ? "The durable proposal claim was lost before persistence."
-            : "Project ownership was lost during approval persistence.";
+            : persistenceResult.status === "unchanged"
+              ? "The approved mutation did not advance the authoritative project revision."
+              : "Project ownership was lost during approval persistence.";
         throw new Error(reason);
       }
       const persistedFiles = persistenceResult.files;
+      authoritativeProjectFiles = persistedFiles;
+      authoritativeProjectRevision = persistenceResult.revision;
       const persistedByPath = new Map(persistedFiles.map((file) => [file.path, file.content]));
       for (const file of persistenceWrites) {
         if (persistedByPath.get(file.path) !== file.content) {
@@ -1030,7 +1092,7 @@ export async function POST(request: Request) {
           workspaceRoot: workspaceBinding.workspaceRoot
         }).catch(() => undefined);
       }
-      await releaseApprovalClaims();
+      await failApprovalClaims(message);
 
       return Response.json({
         applied: false,
@@ -1038,7 +1100,7 @@ export async function POST(request: Request) {
           .filter((event) => (event.type === "file_written" || event.type === "file_deleted") && event.stepId)
           .map((event) => event.stepId),
         blockedSteps: [],
-        errors: [`${message} Event PERSIST_FAILURE recorded; proposal remains pending.`],
+        errors: [`${message} Event PERSIST_FAILURE recorded; proposal is marked failed.`],
         events: result.events,
         deletedFiles,
         ok: false,
@@ -1089,6 +1151,26 @@ export async function POST(request: Request) {
         });
       })()
     : null;
+  const websiteVisualVerification = productMode === "WEBSITE"
+    ? buildPostApplyWebsiteVisualVerification({
+        filesApplied: result.ok,
+        previewContentVerified: websitePreviewFidelity?.previewContentVerified ?? false,
+        report: null
+      })
+    : null;
+  let websiteGrowthHandoffFailure: string | null = null;
+  const websiteGrowthHandoff = result.ok && productMode === "WEBSITE"
+    ? await getOwnedWebsiteGrowthHandoff({
+        externalUserId: userId,
+        projectId: parsed.projectId
+      }).catch((error) => {
+        websiteGrowthHandoffFailure = error instanceof Error ? error.message : "Growth handoff could not be derived.";
+        return null;
+      })
+    : null;
+  const websiteGrowthHandoffSummary = websiteGrowthHandoff
+    ? summarizeWebsiteGrowthHandoff(websiteGrowthHandoff)
+    : null;
   const mobilePreview = liveRuntimePreview
     ? buildMobilePreviewRuntime({
         files: liveRuntimePreview.analysis.generatedFiles
@@ -1108,7 +1190,11 @@ export async function POST(request: Request) {
       )
     )
   );
-  const fileApprovalSucceeded = result.ok;
+  const fileApprovalSucceeded = Boolean(
+    result.ok &&
+    authoritativeProjectRevision &&
+    authoritativeProjectFiles.length > 0
+  );
   const codeOutcomeSucceeded = !codeExecution ||
     codeExecution.completionStatus === "COMPLETE_VERIFIED" ||
     codeExecution.completionStatus === "COMPLETE_WITH_LIMITATIONS";
@@ -1187,7 +1273,9 @@ export async function POST(request: Request) {
     events: result.events,
     codeExecution,
     duplicateSuppressed: codeExecutionResult?.duplicateSuppressed ?? false,
-    fileContents: finalFileContents,
+    canonicalProjectFiles: authoritativeProjectFiles,
+    canonicalProjectRevision: authoritativeProjectRevision,
+    fileContents: Object.fromEntries(authoritativeProjectFiles.map((file) => [file.path, file.content])),
     intelligenceCompletion: intelligencePostflight.completion,
     intelligencePostflight,
     deletedFiles,
@@ -1239,6 +1327,19 @@ export async function POST(request: Request) {
     viteRuntime,
     verificationOk: result.verification?.ok ?? null,
     websitePreviewFidelity,
+    websiteGrowthHandoffStatus: websiteGrowthHandoff
+      ? {
+          generated: true,
+          revision: websiteGrowthHandoff.revision,
+          summary: websiteGrowthHandoffSummary
+        }
+      : productMode === "WEBSITE"
+        ? {
+            generated: false,
+            reason: websiteGrowthHandoffFailure ?? (result.ok ? "Growth handoff was unavailable." : "Files were not applied.")
+          }
+        : null,
+    websiteVisualVerification,
     writtenFiles
   };
 
@@ -1276,6 +1377,26 @@ export async function POST(request: Request) {
       route: websitePreviewFidelity.route
     });
   }
+  if (websiteVisualVerification) {
+    await recordBestEffortEvent(workspaceBinding.workspaceRoot, "WEBSITE_VISUAL_VERIFICATION", {
+      filesApplied: websiteVisualVerification.filesApplied,
+      previewContentVerified: websiteVisualVerification.previewContentVerified,
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId,
+      screenshotVerified: websiteVisualVerification.screenshotVerified,
+      status: websiteVisualVerification.status
+    });
+  }
+  if (productMode === "WEBSITE") {
+    await recordBestEffortEvent(workspaceBinding.workspaceRoot, "WEBSITE_GROWTH_HANDOFF", {
+      generated: Boolean(websiteGrowthHandoff),
+      projectId: parsed.projectId,
+      proposalId: parsed.proposalId,
+      readiness: websiteGrowthHandoff?.readiness.status ?? "unavailable",
+      revision: websiteGrowthHandoff?.revision ?? null,
+      unsupportedClaimCount: websiteGrowthHandoffSummary?.unsupportedClaimCount ?? null
+    });
+  }
 
   if (fileApprovalSucceeded) {
     completeServerProposalApproval({
@@ -1284,7 +1405,7 @@ export async function POST(request: Request) {
       result: responsePayload
     });
   } else {
-    await releaseApprovalClaims();
+    await failApprovalClaims(responsePayload.errors[0] ?? "The approved proposal failed during application.");
   }
 
   return Response.json(responsePayload, { status: fileApprovalSucceeded ? 200 : 400 });

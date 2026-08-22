@@ -6,10 +6,13 @@ import { useEffect, useState } from "react";
 import { IntelligenceSettingsDialog } from "@/components/settings/intelligence-settings-dialog";
 import { MemorySettingsDialog } from "@/components/settings/memory-settings-dialog";
 import { useChatStore } from "@/lib/chat-store";
-
-const legacyThemeStorageKey = "hassali:theme";
-const themeStorageKey = "hassali:theme:v2";
-type ThemeMode = "dark" | "light";
+import {
+  defaultThemeMode,
+  legacyThemeStorageKey,
+  resolveThemeMode,
+  themeStorageKey,
+  type ThemeMode
+} from "@/lib/theme-mode";
 type BrowserGlobal = {
   document?: {
     documentElement: {
@@ -29,7 +32,8 @@ function applyTheme(theme: ThemeMode) {
   const classList = (globalThis as BrowserGlobal).document?.documentElement.classList;
 
   classList?.toggle("dark", theme === "dark");
-  classList?.toggle("light", theme === "light");
+  classList?.toggle("darker", theme === "darker");
+  classList?.toggle("light", false);
 }
 
 function SettingsIcon() {
@@ -51,22 +55,23 @@ function SettingsIcon() {
 }
 
 export function TopBar() {
-  const [theme, setTheme] = useState<ThemeMode>("dark");
+  const [theme, setTheme] = useState<ThemeMode>(defaultThemeMode);
   const [intelligenceSettingsOpen, setIntelligenceSettingsOpen] = useState(false);
   const [memorySettingsOpen, setMemorySettingsOpen] = useState(false);
   const productMode = useChatStore((state) => state.productMode);
 
   useEffect(() => {
-    const nextTheme: ThemeMode = "dark";
+    const storage = (globalThis as BrowserGlobal).localStorage;
+    const nextTheme = resolveThemeMode(storage?.getItem(themeStorageKey) ?? storage?.getItem(legacyThemeStorageKey));
 
     setTheme(nextTheme);
     applyTheme(nextTheme);
-    (globalThis as BrowserGlobal).localStorage?.removeItem(legacyThemeStorageKey);
-    (globalThis as BrowserGlobal).localStorage?.setItem(themeStorageKey, nextTheme);
+    storage?.removeItem(legacyThemeStorageKey);
+    storage?.setItem(themeStorageKey, nextTheme);
   }, []);
 
   const toggleTheme = () => {
-    const nextTheme: ThemeMode = theme === "dark" ? "light" : "dark";
+    const nextTheme: ThemeMode = theme === "dark" ? "darker" : "dark";
 
     setTheme(nextTheme);
     applyTheme(nextTheme);
@@ -142,7 +147,7 @@ export function TopBar() {
               type="button"
             >
               Theme
-              <span>{theme === "dark" ? "Light" : "Dark"}</span>
+              <span>{theme === "dark" ? "Darker" : "Dark"}</span>
             </button>
             <div className="mt-1 rounded-xl px-3 py-2">
               <SignedIn>

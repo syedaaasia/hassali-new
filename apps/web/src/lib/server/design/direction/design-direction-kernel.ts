@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { analyzeWebsiteRequestObjective } from "@/lib/server/ai/website-request-objective";
 import type { DesignDirectionRequest, ReferenceDesignProfile } from "@/lib/server/design/reference/design-reference-contract";
 import type {
   DesignEvidenceValue,
@@ -173,6 +174,43 @@ function facts(profile: ReferenceDesignProfile | undefined, dimension: keyof Ref
   return Array.isArray(value) ? value.map((item) => typeof item === "object" && item && "value" in item ? String(item.value) : "").filter(Boolean) : [];
 }
 
+function tokenValue(profile: ReferenceDesignProfile | undefined, names: string[]) {
+  const colors = profile?.knowledge?.colors ?? {};
+  for (const name of names) {
+    const exact = Object.entries(colors).find(([key]) => normalized(key) === normalized(name));
+    if (exact?.[1]) return exact[1];
+  }
+  return null;
+}
+
+function typographyToken(profile: ReferenceDesignProfile | undefined, pattern: RegExp) {
+  const entries = Object.values(profile?.knowledge?.typography ?? {});
+  return entries.find((entry) => pattern.test(entry.name)) ?? entries[0] ?? null;
+}
+
+function typographyDescription(token: ReturnType<typeof typographyToken>, fallback: string) {
+  if (!token) return fallback;
+  return [token.family, token.weight ? `weight ${token.weight}` : "", token.lineHeight ? `line-height ${token.lineHeight}` : "", token.letterSpacing ? `tracking ${token.letterSpacing}` : ""].filter(Boolean).join("; ");
+}
+
+function firstTokenValue(values: Record<string, string> | undefined, names: string[]) {
+  if (!values) return null;
+  for (const name of names) {
+    const exact = Object.entries(values).find(([key]) => normalized(key) === normalized(name));
+    if (exact?.[1]) return exact[1];
+  }
+  return Object.values(values)[0] ?? null;
+}
+
+function provisionalProjectName(request: DesignDirectionRequest, domain: string | null | undefined) {
+  if (request.userBrand?.trim()) return request.userBrand.trim();
+  const objective = analyzeWebsiteRequestObjective(request.currentRequest);
+  const phrase = objective.explicitBrandName ?? objective.subject ?? domain;
+  const cleaned = phrase?.replace(/\b(?:beautiful|premium|responsive|modern|website|site)\b/gi, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "Project Website";
+  return cleaned.split(/\s+/).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ");
+}
+
 function fidelity(mode: DesignDirectionRequest["fidelity"]): ProjectDesignContract["fidelity"] {
   const strength = { inspired: 0.45, "style-match": 0.68, "close-replica": 0.84, "reference-clone": 0.94 }[mode];
   const summary = mode === "inspired"
@@ -195,11 +233,18 @@ export function buildProjectDesignContract(input: BuildProjectDesignContractInpu
   const externalGlobalReference = globalReference && !["existing-project", "existing-project-page", "user-description"].includes(globalReference.sourceType)
     ? globalReference
     : null;
-  const base = presetFor(globalReference?.name);
+  const profile = request.profiles.find((candidate) => candidate.referenceId === globalReference?.id);
+  const profileKnowledge = profile?.knowledge;
+  const tokenKnowledge = globalReference && ["uploaded-design-md", "internal-design-knowledge"].includes(globalReference.sourceType)
+    ? profileKnowledge
+    : undefined;
+  const tokenProfile = tokenKnowledge ? profile : undefined;
+  const base = profileKnowledge?.archetypes.includes("cinematic")
+    ? presets.ferrari
+    : presetFor(profileKnowledge?.name.replace(/-design-analysis$/i, "") ?? globalReference?.name);
   const existing = existingDesign(input.workspace);
   const original = !request.references.some((reference) => reference.sourceType === "named-brand" || reference.sourceType === "public-url");
-  const projectName = request.userBrand ?? existing.userBrand ?? request.currentRequest.match(/(?:called|for)\s+([A-Z][A-Za-z0-9&' -]{2,50})/)?.[1]?.trim() ?? "Current website";
-  const profile = request.profiles.find((candidate) => candidate.referenceId === globalReference?.id);
+  const projectName = request.userBrand ?? existing.userBrand ?? provisionalProjectName(request, input.domain);
   const current = [request.currentRequest, ...request.constraints.currentRequest].join(" ");
   const noteText = request.constraints.projectNotes.join(" ");
   const memoryText = request.constraints.memory.join(" ");
@@ -212,16 +257,28 @@ export function buildProjectDesignContract(input: BuildProjectDesignContractInpu
   const currentBackground = roleColor(current, "background");
   const noteBackground = roleColor(noteText, "background");
   const memoryBackground = roleColor(memoryText, "background");
+  const referenceBackground = tokenValue(tokenProfile, ["canvas-night", "canvas", "background", "canvas-dark", "primary"]);
+  const referenceSurface = tokenValue(tokenProfile, ["canvas-parchment", "surface-pearl", "canvas-night-elevated", "canvas-elevated", "surface-card", "surface-elevated-dark", "surface"]);
+  const referenceText = tokenValue(tokenProfile, ["ink", "body-strong", "text-primary", "on-dark", "on-primary"]);
+  const referenceMuted = tokenValue(tokenProfile, ["ink-muted-48", "body-muted", "shade-40", "muted", "text-muted", "body"]);
+  const referenceBorder = tokenValue(tokenProfile, ["hairline-dark", "hairline", "border", "hairline-light"]);
+  const referenceAccent = tokenValue(tokenProfile, ["primary", "primary-focus", "primary-on-dark", "link-cool-1", "link-cool-2", "link-mint", "accent", "on-dark"]);
+  const referencePrimaryAction = tokenKnowledge?.components["button-primary-pill"]?.resolvedProperties.backgroundColor
+    ?? Object.entries(tokenKnowledge?.components ?? {}).find(([name]) => /button-primary/i.test(name))?.[1]?.resolvedProperties.backgroundColor
+    ?? tokenValue(tokenProfile, ["primary", "accent"]);
   const background = currentBackground
     ?? (/\blight\b/i.test(current) ? originalPreset.colors.background : /\bdark\b/i.test(current) ? presets.ferrari.colors.background : null)
     ?? noteBackground
     ?? memoryBackground
-    ?? (externalGlobalReference ? base.colors.background : existing.semanticColors.background)
+    ?? (externalGlobalReference ? referenceBackground ?? base.colors.background : existing.semanticColors.background)
     ?? base.colors.background;
-  const accent = currentAccent ?? noteAccent ?? memoryAccent ?? (externalGlobalReference ? base.colors.accent : existing.semanticColors.accent) ?? base.colors.accent;
+  const accent = currentAccent ?? noteAccent ?? memoryAccent ?? (externalGlobalReference ? referenceAccent ?? base.colors.accent : existing.semanticColors.accent) ?? base.colors.accent;
   const accentOrigin: DesignValueOrigin = currentAccent ? "current-request" : noteAccent ? "project-note" : memoryAccent ? "project-memory" : externalGlobalReference ? "reference-profile" : existing.semanticColors.accent ? "existing-project" : "professional-default";
   const backgroundOrigin: DesignValueOrigin = currentBackground || /\b(?:light|dark)\b/i.test(current) ? "current-request" : noteBackground ? "project-note" : memoryBackground ? "project-memory" : externalGlobalReference ? "reference-profile" : existing.semanticColors.background ? "existing-project" : "professional-default";
-  const displayTypography = typographyDirection(current) ?? typographyDirection(noteText) ?? typographyDirection(memoryText) ?? base.typography.display;
+  const displayToken = typographyToken(tokenProfile, /display|hero|heading/i);
+  const bodyToken = typographyToken(tokenProfile, /body|paragraph|ui/i);
+  const labelToken = typographyToken(tokenProfile, /label|caption|eyebrow|nav/i);
+  const displayTypography = typographyDirection(current) ?? typographyDirection(noteText) ?? typographyDirection(memoryText) ?? typographyDescription(displayToken, base.typography.display);
   const sectionSpecific: Record<string, string> = {};
   for (const reference of request.references.filter((candidate) => candidate.role !== "global")) {
     const rolePreset = presetFor(reference.name);
@@ -255,24 +312,24 @@ export function buildProjectDesignContract(input: BuildProjectDesignContractInpu
     colors: {
       accent: evidenceValue(accent, accentOrigin, externalGlobalReference && accentOrigin === "reference-profile" ? [externalGlobalReference.id] : []),
       background: evidenceValue(background, backgroundOrigin, externalGlobalReference && backgroundOrigin === "reference-profile" ? [externalGlobalReference.id] : []),
-      border: evidenceValue(base.colors.border, globalReference ? "reference-profile" : "professional-default", globalReference ? [globalReference.id] : []),
+      border: evidenceValue(referenceBorder ?? base.colors.border, globalReference ? "reference-profile" : "professional-default", globalReference ? [globalReference.id] : []),
       destructive: evidenceValue("#b42318", "professional-default"),
-      elevatedSurface: evidenceValue(!externalGlobalReference && existing.semanticColors.surface ? existing.semanticColors.surface : base.colors.surface, !externalGlobalReference && existing.semanticColors.surface ? "existing-project" : externalGlobalReference ? "reference-profile" : "professional-default"),
+      elevatedSurface: evidenceValue(!externalGlobalReference && existing.semanticColors.surface ? existing.semanticColors.surface : referenceSurface ?? base.colors.surface, !externalGlobalReference && existing.semanticColors.surface ? "existing-project" : externalGlobalReference ? "reference-profile" : "professional-default"),
       positive: evidenceValue("#16805d", "professional-default"),
-      primaryAction: evidenceValue(accent, accentOrigin),
+      primaryAction: evidenceValue(externalGlobalReference ? referencePrimaryAction ?? accent : accent, externalGlobalReference ? "reference-profile" : accentOrigin, externalGlobalReference ? [externalGlobalReference.id] : []),
       secondaryAction: evidenceValue("transparent with text-primary border", "professional-default"),
-      surface: evidenceValue(!externalGlobalReference && existing.semanticColors.surface ? existing.semanticColors.surface : base.colors.surface, !externalGlobalReference && existing.semanticColors.surface ? "existing-project" : externalGlobalReference ? "reference-profile" : "professional-default"),
-      textMuted: evidenceValue(base.colors.textMuted, globalReference ? "reference-profile" : "professional-default"),
-      textPrimary: evidenceValue(!externalGlobalReference && existing.semanticColors.text ? existing.semanticColors.text : base.colors.textPrimary, !externalGlobalReference && existing.semanticColors.text ? "existing-project" : externalGlobalReference ? "reference-profile" : "professional-default"),
-      textSecondary: evidenceValue(base.colors.textSecondary, globalReference ? "reference-profile" : "professional-default"),
+      surface: evidenceValue(!externalGlobalReference && existing.semanticColors.surface ? existing.semanticColors.surface : referenceSurface ?? base.colors.surface, !externalGlobalReference && existing.semanticColors.surface ? "existing-project" : externalGlobalReference ? "reference-profile" : "professional-default"),
+      textMuted: evidenceValue(referenceMuted ?? base.colors.textMuted, globalReference ? "reference-profile" : "professional-default"),
+      textPrimary: evidenceValue(!externalGlobalReference && existing.semanticColors.text ? existing.semanticColors.text : referenceText ?? base.colors.textPrimary, !externalGlobalReference && existing.semanticColors.text ? "existing-project" : externalGlobalReference ? "reference-profile" : "professional-default"),
+      textSecondary: evidenceValue(referenceMuted ?? base.colors.textSecondary, globalReference ? "reference-profile" : "professional-default"),
       warning: evidenceValue("#b54708", "professional-default")
     },
     components: {
-      buttons: base.components.buttons,
-      cards: base.components.cards,
+      buttons: tokenKnowledge && Object.keys(tokenKnowledge.components).some((name) => /button/i.test(name)) ? `Use supplied button tokens: ${Object.keys(tokenKnowledge.components).filter((name) => /button/i.test(name)).slice(0, 4).join(", ")}.` : base.components.buttons,
+      cards: tokenKnowledge && Object.keys(tokenKnowledge.components).some((name) => /card/i.test(name)) ? `Use supplied card tokens: ${Object.keys(tokenKnowledge.components).filter((name) => /card/i.test(name)).slice(0, 4).join(", ")}.` : base.components.cards,
       footer: "A quiet full-width close with real routes and no fabricated trust claims.",
       forms: "Clear labels, visible focus, restrained fields, and honest submit behavior.",
-      navigation: base.components.navigation,
+      navigation: tokenKnowledge && Object.keys(tokenKnowledge.components).some((name) => /nav/i.test(name)) ? `Use supplied navigation tokens: ${Object.keys(tokenKnowledge.components).filter((name) => /nav/i.test(name)).slice(0, 4).join(", ")}.` : base.components.navigation,
       sectionSpecific
     },
     conflicts,
@@ -287,6 +344,7 @@ export function buildProjectDesignContract(input: BuildProjectDesignContractInpu
       `Keep ${projectName} as the visible brand identity.`,
       `Use ${base.archetype} as one coherent system.`,
       `Use section containment only when the content needs it.`,
+      ...(tokenKnowledge?.doRules ?? []),
       ...facts(profile, "doRules"),
       ...existing.preservedRules,
       ...request.constraints.projectNotes,
@@ -298,16 +356,18 @@ export function buildProjectDesignContract(input: BuildProjectDesignContractInpu
       "Do not put every section inside a rounded card or repeat generic three-column feature grids.",
       "Do not invent testimonials, customer logos, awards, partnerships, metrics, or revenue.",
       "Do not mix unrelated type, icon, radius, or shadow systems.",
+      ...(tokenKnowledge?.dontRules ?? []),
       ...facts(profile, "dontRules")
     ].slice(0, 16),
     fidelity: fidelity(request.fidelity),
       geometry: {
         ...base.geometry,
+        buttonRadius: firstTokenValue(tokenKnowledge?.geometry, ["pill", "full", "button"]) ?? base.geometry.buttonRadius,
         cardRadius: hasRoundedOverride
           ? "18px for the explicitly rounded target only"
           : hasSquareOverride || hasSavedSquarePreference
             ? "2px"
-            : existing.radii[0] ?? base.geometry.cardRadius
+            : existing.radii[0] ?? firstTokenValue(tokenKnowledge?.geometry, ["md", "lg", "card"]) ?? base.geometry.cardRadius
       },
     identity: {
       archetype: base.archetype,
@@ -333,7 +393,7 @@ export function buildProjectDesignContract(input: BuildProjectDesignContractInpu
       container: "Full-bleed narrative bands with a bounded readable inner container.",
       grid: globalReference?.name.toLowerCase() === "stripe" ? "structured 12-column commercial grid" : "responsive editorial grid with purposeful variation",
       hero: base.hero,
-      sectionRhythm: base.rhythm
+      sectionRhythm: tokenKnowledge?.canvasStrategy.length ? [...tokenKnowledge.canvasStrategy.slice(0, 4), ...base.rhythm].slice(0, 7) : base.rhythm
     },
     motion: {
       evidence: facts(profile, "motion").some((value) => /unavailable|requires/i.test(value)) ? "unavailable" : "project-designed",
@@ -344,7 +404,7 @@ export function buildProjectDesignContract(input: BuildProjectDesignContractInpu
     },
     previousFingerprint: existing.fingerprint,
     provenance,
-    references: request.references.map((reference) => ({ fidelity: reference.fidelity, name: reference.name, referenceId: reference.id, role: reference.role, scope: reference.role === "global" ? "global" : "section", sourceType: reference.sourceType, target: reference.pageTarget })),
+    references: request.references.map((reference) => ({ fidelity: reference.fidelity, name: reference.name, referenceId: reference.id, role: reference.role, scope: reference.role === "global" ? "global" : "section", sourceAttachmentId: reference.sourceAttachmentId ?? null, sourceFingerprint: reference.provenance.fingerprint, sourceType: reference.sourceType, target: reference.pageTarget })),
     responsive: {
       desktop: ["Preserve the intended visual hierarchy and full-bleed moments.", "Use stable max-widths for readable copy."],
       evidence: facts(profile, "responsive").some((value) => /observed/i.test(value)) ? "observed" : "project-designed",
@@ -355,16 +415,16 @@ export function buildProjectDesignContract(input: BuildProjectDesignContractInpu
       componentGap: "clamp(1rem, 2vw, 1.5rem)",
       controlGap: "0.5rem",
       pageGutter: "clamp(1rem, 4vw, 4rem)",
-      scale: ["0.25rem", "0.5rem", "0.75rem", "1rem", "1.5rem", "2rem", "3rem", "4rem", "6rem"],
+      scale: Object.values(tokenKnowledge?.spacing ?? {}).length ? Object.values(tokenKnowledge?.spacing ?? {}).slice(0, 12) : ["0.25rem", "0.5rem", "0.75rem", "1rem", "1.5rem", "2rem", "3rem", "4rem", "6rem"],
       sectionGap: /dense/i.test(base.atmosphere.join(" ")) ? "clamp(2.5rem, 6vw, 5rem)" : "clamp(4rem, 9vw, 8rem)"
     },
     status: conflicts.some((conflict) => conflict.severity === "blocking") ? "draft" : "current",
     typography: {
-      body: base.typography.body,
+      body: typographyDescription(bodyToken, base.typography.body),
       display: displayTypography,
       fallbackPolicy: "Use legal local/system alternatives matching the visual character; never assert an unavailable proprietary font.",
-      labels: base.typography.labels,
-      lineHeight: "1.5 body / 1.05-1.2 display",
+      labels: typographyDescription(labelToken, base.typography.labels),
+      lineHeight: bodyToken?.lineHeight || displayToken?.lineHeight ? `body ${bodyToken?.lineHeight ?? "1.5"} / display ${displayToken?.lineHeight ?? "1.1"}` : "1.5 body / 1.05-1.2 display",
       scale: { body: "clamp(1rem, 0.96rem + 0.18vw, 1.125rem)", display: "clamp(3rem, 8vw, 7.5rem)", h1: "clamp(2.5rem, 6vw, 6rem)", h2: "clamp(1.8rem, 4vw, 3.5rem)", h3: "clamp(1.2rem, 2vw, 1.6rem)", small: "0.875rem" }
     },
     unresolved: request.unknowns.slice(0, 12),

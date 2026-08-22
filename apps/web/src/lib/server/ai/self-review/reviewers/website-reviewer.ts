@@ -11,6 +11,12 @@ import {
   createIssue,
   createReport
 } from "@/lib/server/ai/self-review/review-helpers";
+import {
+  findSemanticSignals,
+  includesSemanticSignal,
+  semanticEvidenceKey,
+  semanticSignalCount
+} from "@/lib/server/ai/domain-signal-matcher";
 
 type HtmlPage = SelfReviewFile & {
   links: Array<{ href: string; label: string }>;
@@ -222,7 +228,8 @@ export const websiteReviewer: SelfReviewReviewer = {
       ...(input.requestedPages ?? []).map(pageToPath),
       ...(input.requiredFiles ?? []).filter((path) => path.endsWith(".html")).map(normalizePath)
     ]));
-    const generatedPublicText = visibleText(htmlPages.map((file) => file.content).join("\n"));
+    const generatedWebsiteSource = htmlPages.map((file) => file.content).join("\n");
+    const generatedPublicText = visibleText(generatedWebsiteSource);
     const websiteContract = input.intentContract?.mode === "WEBSITE" ? input.intentContract : null;
     const cssContent = fileMap.get("styles.css")?.content ?? "";
     const hassaliContent = fileMap.get("HASSALI.md")?.content ?? "";
@@ -281,9 +288,7 @@ export const websiteReviewer: SelfReviewReviewer = {
         });
       }
 
-      const expectedVocabularyFound = websiteContract.expectedVocabulary.filter((term) =>
-        generatedPublicText.toLowerCase().includes(term.toLowerCase())
-      );
+      const expectedVocabularyFound = findSemanticSignals(generatedPublicText, websiteContract.expectedVocabulary);
       const requiredVocabularyCount = Math.min(3, websiteContract.expectedVocabulary.length);
 
       if (requiredVocabularyCount > 0 && expectedVocabularyFound.length < requiredVocabularyCount) {
@@ -311,12 +316,13 @@ export const websiteReviewer: SelfReviewReviewer = {
         });
       }
 
-      const forbiddenFound = websiteContract.forbiddenVocabulary.filter((term) =>
-        term.length > 2 && generatedPublicText.toLowerCase().includes(term.toLowerCase())
+      const forbiddenFound = findSemanticSignals(
+        generatedPublicText,
+        websiteContract.forbiddenVocabulary.filter((term) => term.length > 2)
       );
 
       if (forbiddenFound.length > 0) {
-        const repeatedForbiddenTerm = forbiddenFound.some((term) => countTextOccurrences(generatedPublicText, term) >= 3);
+        const repeatedForbiddenTerm = forbiddenFound.some((term) => semanticSignalCount(generatedPublicText, term) >= 3);
         const strongContradiction = forbiddenFound.length >= 2 || repeatedForbiddenTerm;
         addIssue(strongContradiction ? failures : warnings, {
           category: "domain_consistency",
@@ -344,8 +350,12 @@ export const websiteReviewer: SelfReviewReviewer = {
         });
       }
 
+      const declaredTrustSignals = Array.from(
+        generatedWebsiteSource.matchAll(/\bdata-trust-signal=["']([^"']+)["']/gi),
+        (match) => match[1]?.toLowerCase().trim() ?? ""
+      );
       const trustFound = websiteContract.trustSignals.filter((term) =>
-        generatedPublicText.toLowerCase().includes(term.toLowerCase())
+        includesSemanticSignal(generatedPublicText, term) || declaredTrustSignals.includes(semanticEvidenceKey(term))
       );
 
       if (websiteContract.trustSignals.length > 0 && trustFound.length === 0) {
@@ -673,6 +683,31 @@ export const websiteReviewer: SelfReviewReviewer = {
 
     if (websiteContract && fileMap.has("HASSALI.md")) {
       const contractText = fileMap.get("HASSALI.md")?.content ?? "";
+      const unresolvedCanonicalMetadata = [
+        /^domainId:\s*(?:null|unknown|unclassified|current prompt website)\s*$/im,
+        /^authoritativeDomain:\s*(?:null|unknown|unclassified)\s*$/im,
+        /^qualitySemanticHierarchy:\s*(?:unknown(?::unknown)+|null(?::null)+)/im,
+        /^expectedVocabulary:\s*$/im
+      ].filter((pattern) => pattern.test(contractText));
+      if (unresolvedCanonicalMetadata.length > 0) {
+        addIssue(failures, {
+          category: "metadata",
+          confidence: 0.99,
+          description: "HASSALI.md contains unresolved canonical project identity or empty required semantic metadata.",
+          domain: input.domain,
+          evidence: [{ expected: "resolved domain, semantic hierarchy, vocabulary, and trust strategy", found: "unresolved canonical metadata", source: "HASSALI.md" }],
+          generator: input.generator,
+          id: "website_hassali_canonical_metadata_unresolved",
+          location: { path: "HASSALI.md" },
+          mode: input.mode,
+          recommendedFix: "Rebuild HASSALI.md from the current WebsiteIntentContract and WebsiteGenerationBrief before approval.",
+          repairStrategy: "rewrite_hassali_contract_metadata_from_brief",
+          ruleId: "META001",
+          severity: "high",
+          timestamp,
+          title: "Canonical Website Metadata Unresolved"
+        });
+      }
       const metadataChecks = [
         ["domainId", websiteContract.domainId ?? ""],
         ["requestedPages", websiteContract.requestedPages.join(", ")],

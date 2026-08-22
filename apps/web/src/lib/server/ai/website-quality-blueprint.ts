@@ -1,5 +1,11 @@
 import type { WebsiteGenerationBrief } from "@/lib/server/ai/generation-brief";
+import type {
+  CompositionPlan,
+  WebsiteCompositionStructure
+} from "@/lib/server/ai/composition-engine";
+import { deriveWebsiteCompositionStructure } from "@/lib/server/ai/composition-engine";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
+import { semanticEvidenceKey } from "@/lib/server/ai/domain-signal-matcher";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 import type { WebsiteCreativeDirection } from "@/lib/server/ai/website-creative-direction";
 import type { WebsitePlan } from "@/lib/server/ai/website-planner";
@@ -50,6 +56,11 @@ import {
   validateWebsiteVisitorCopy,
   type WebsiteCopyValidationResult
 } from "@/lib/server/ai/website-copy-validator";
+import type { ProjectDesignContract } from "@/lib/server/design/direction/project-design-contract";
+import {
+  buildWebsiteAssetPlan,
+  type WebsiteAssetPlan
+} from "@/lib/server/ai/website-asset-plan";
 
 export type WebsitePalette = {
   accent: string;
@@ -64,6 +75,7 @@ export type WebsitePalette = {
 export type WebsiteTypography = {
   body: string;
   display: string;
+  displayTracking: string;
   personality: "editorial" | "friendly" | "modern" | "technical";
 };
 
@@ -84,6 +96,16 @@ export type WebsiteVisitorCopy = {
   secondaryTarget?: string;
 };
 
+export type WebsiteOfferEntityType =
+  | "capability"
+  | "collection"
+  | "content_category"
+  | "guidance"
+  | "portfolio_work"
+  | "product"
+  | "product_category"
+  | "service";
+
 export type WebsiteSectionKind =
   | "carousel"
   | "comparison"
@@ -101,7 +123,7 @@ export type WebsiteSectionBlueprint = {
   body: string;
   eyebrow: string;
   id: string;
-  items: Array<{ detail: string; meta?: string; title: string }>;
+  items: Array<{ detail: string; evidenceKey?: string; meta?: string; semanticType?: WebsiteOfferEntityType; title: string }>;
   kind: WebsiteSectionKind;
   title: string;
 };
@@ -175,8 +197,14 @@ export type WebsiteQualityBlueprint = {
     visibleFocus: boolean;
   };
   assets: WebsiteAssetIntelligence;
+  assetPlan: WebsiteAssetPlan;
   brand: {
     generatedName: string;
+    designConstraints: {
+      decorativeGradients: "allowed" | "avoid";
+      imageryPriority: "balanced" | "photography_first";
+      uiShadows: "allowed" | "minimal";
+    };
     nameProvenance: "SAFE_INFERENCE" | "USER_SUPPLIED";
     logo: WebsiteLogoBlueprint;
     logoStrategy: "generated-local-svg";
@@ -206,8 +234,14 @@ export type WebsiteQualityBlueprint = {
     visualSubjects: string[];
   };
   cinematic: WebsiteCinematicExperience;
+  composition: WebsiteCompositionStructure;
+  compositionQuality: {
+    findings: string[];
+    signature: string;
+    status: "passed" | "review_required";
+  };
   contentContract: WebsiteContentContract;
-  contentEntities: Array<{ description: string; label: string; meta: string }>;
+  contentEntities: Array<{ description: string; entityType: WebsiteOfferEntityType; label: string; meta: string }>;
   copyValidation: WebsiteCopyValidationResult;
   interactions: WebsiteInteractionBlueprint[];
   media: WebsiteMediaAsset[];
@@ -246,7 +280,7 @@ type DomainProfile = {
   brandSuffixes: string[];
   businessType: string;
   differentiators: string[];
-  entities: Array<[string, string, string]>;
+  entities: Array<[string, string, string, WebsiteOfferEntityType?]>;
   faq: Array<[string, string]>;
   heroBody?: string;
   primaryGoal: string;
@@ -466,19 +500,19 @@ const profiles: Record<string, DomainProfile> = {
     visualArchetype: "cinematic automotive performance"
   }),
   beauty: profile({
-    audience: ["beauty shoppers", "skincare beginners", "customers comparing cosmetic routines"],
+    audience: ["people exploring beauty and cosmetics"],
     brandStems: ["Luma", "Petal", "Vela", "Mira"],
-    brandSuffixes: ["Beauty", "Ritual", "Skin", "Edit"],
-    businessType: "beauty and skincare store",
-    differentiators: ["routine-led discovery", "clear sample-product labels", "ingredient and suitability prompts"],
-    entities: [["Mascara Edit", "Sample mascara products grouped by finish and brush preference.", "Prototype products"], ["Daily Cleanse", "Editable cleanser category for different routine needs.", "Skincare"], ["Hydration Layer", "Sample moisturizers and serums without treatment promises.", "Skincare"], ["Color Essentials", "Editable cosmetic categories organized by use and finish.", "Cosmetics"], ["Routine Builder", "A simple order-of-use guide that avoids medical claims.", "Guide"], ["Patch-Test Note", "Encourage label review and professional advice for reactions.", "Safety"]],
-    faq: [["Are these products in stock?", "No. Generated products are prototype content until connected to verified inventory."], ["Does this replace skin advice?", "No. Product copy should not diagnose or treat skin conditions."], ["How are sample images labeled?", "Prototype providers and local fallbacks are recorded in the project contract."]],
-    heroBody: "Explore a considered routine by texture, finish, and order of use, with clear product boundaries and no unverified treatment claims.",
-    primaryGoal: "help shoppers explore editable beauty categories without presenting prototype data as inventory",
+    brandSuffixes: ["Beauty", "Studio", "House", "Edit"],
+    businessType: "beauty and cosmetics brand",
+    differentiators: ["distinctive visual identity", "clear category discovery", "considered product presentation"],
+    entities: [["Beauty Collection", "Discover the categories and edits the brand chooses to present.", "Collection"], ["Color and Finish", "Explore categories by color, format, finish, and intended use where those details are available.", "Category guide"], ["New and Notable", "Give current launches and highlighted categories a focused editorial place.", "Brand edit"], ["Everyday Essentials", "Present versatile beauty categories through clear, confident editorial storytelling.", "Beauty edit"], ["The Brand Point of View", "Connect product presentation to the brand's visual identity and creative direction.", "Brand story"], ["Current Information", "Keep availability, delivery, and returns details easy to find when the brand provides them.", "Shopping information"]],
+    faq: [["What can I explore?", "Browse the beauty categories and collections currently presented by the brand."], ["Where can I find product details?", "Each published category can include the format, finish, use, and current information the brand provides."], ["How do I check availability?", "Use the current product or contact path shown by the brand for the latest details."]],
+    heroBody: "Discover a premium beauty point of view through considered collections, expressive color, and a clear path into the brand.",
+    primaryGoal: "introduce the beauty brand and help visitors explore its current collections",
     schema: "Store",
-    sectionIdeas: [["Build a considered routine", "Explore cleansing, hydration, color, and finishing categories in a practical order.", "process"], ["Beauty categories", "Browse editable sample products with their prototype state visible.", "filter"], ["Texture and finish", "Use relevant editorial media to distinguish product experiences.", "gallery"], ["Before you choose", "Keep ingredient, suitability, and patch-test questions visible.", "faq"]],
-    tagline: "A clearer way to shape your ritual.",
-    trustSignals: ["prototype inventory labeled", "no treatment claims", "image sources recorded"],
+    sectionIdeas: [["The collection", "Explore the brand through its current beauty categories and signature edits.", "filter"], ["Color, texture, character", "Use editorial imagery and concise details to make each category feel distinct.", "gallery"], ["Inside the brand", "Share the creative point of view and ideas that shape the collection.", "content"], ["Explore with confidence", "Keep current category, delivery, returns, and contact information easy to find.", "faq"]],
+    tagline: "Beauty, shaped with a point of view.",
+    trustSignals: ["clear category details", "current shopping information", "direct contact path"],
     visualArchetype: "elegant beauty editorial"
   }),
   greetingCard: profile({
@@ -559,6 +593,9 @@ function uniqueStrings(values: string[]) {
 function selectProfile(input: { plan: WebsitePlan; prompt: string; semantic: WebsiteSemanticResolution }) {
   const text = normalize(`${input.prompt} ${input.plan.sourceOfTruthDomain ?? ""} ${input.plan.industry}`);
 
+  if (input.semantic.capabilities.includes("portfolio")) {
+    return genericSemanticProfile(input.prompt, input.plan);
+  }
   if (input.semantic.capabilities.some((value) => value === "interior_design" || value === "architecture")) {
     return genericSemanticProfile(input.prompt, input.plan);
   }
@@ -593,6 +630,7 @@ function selectProfile(input: { plan: WebsitePlan; prompt: string; semantic: Web
 
 function genericSemanticProfile(prompt: string, plan: WebsitePlan): DomainProfile {
   const semantic = inferSemanticDomain(prompt);
+  const isPortfolio = semantic.capabilities.includes("portfolio") || /\bportfolio\b/i.test(prompt);
   const internalCapabilities = new Set(["local_service", "product_showcase", "professional_practice", "technical_product"]);
   const usefulCapabilities = semantic.capabilities
     .filter((value) => value.length > 2 && !internalCapabilities.has(value))
@@ -605,38 +643,72 @@ function genericSemanticProfile(prompt: string, plan: WebsitePlan): DomainProfil
   const model = semantic.businessModels[0]?.replace(/_/g, " ") ?? "independent business";
   const primaryNiche = semantic.subNiche ?? semantic.niche ?? label;
   const visualSubject = semantic.visualSubjects.slice(0, 3).join(", ") || `${primaryNiche} details`;
-  const entityDescription = (term: string, index: number) => {
-    const capability = usefulCapabilities[index % Math.max(1, usefulCapabilities.length)] ?? "practical detail";
-    return `Explore ${term.toLowerCase()} through clear ${capability.replace(/_/g, " ")} guidance, useful comparisons, and an honest next step.`;
+  const entityType = (term: string): WebsiteOfferEntityType => {
+    const normalized = term.toLowerCase();
+    if (isPortfolio && /\b(?:galler(?:y|ies)|films?|projects?|stories|work|series|studies|campaigns?|portraits?)\b/.test(normalized)) return "portfolio_work";
+    if (/collection|range|series|edit\b/.test(normalized)) return "collection";
+    if (semantic.services.some((value) => value.toLowerCase() === normalized)) return "service";
+    if (/guide|advice|support|planning|consult/.test(normalized)) return "guidance";
+    if (/feature|integration|workflow|capabilit/.test(normalized)) return "capability";
+    if (semantic.products.some((value) => value.toLowerCase() === normalized)) {
+      return /(?:s|ings)$/.test(normalized) || /category|interior|exterior/.test(normalized) ? "product_category" : "product";
+    }
+    return "content_category";
   };
+  const entityDescription = (term: string, index: number, type: WebsiteOfferEntityType) => {
+    const capability = usefulCapabilities[index % Math.max(1, usefulCapabilities.length)]?.replace(/_/g, " ");
+    const context = capability ? `, with ${capability} details where they affect the choice` : "";
+    if (type === "portfolio_work") return `Explore ${term.toLowerCase()} through visual work and editable project context covering intent, role, process, and outcome.`;
+    if (type === "collection") return `A grouped way to explore ${term.toLowerCase()} by character, use, and the details worth comparing${context}.`;
+    if (type === "product" || type === "product_category") return `Understand where ${term.toLowerCase()} fit, how the options differ, and which specifications need direct confirmation${context}.`;
+    if (type === "service") return `See the scope of ${term.toLowerCase()}, the decisions involved, and what should be confirmed before work begins${context}.`;
+    return `Use ${term.toLowerCase()} to move from initial interest to a more informed, specific inquiry${context}.`;
+  };
+  const entities: DomainProfile["entities"] = focusTerms.slice(0, 8).map((term, index) => {
+    const type = entityType(term);
+    return [titleCase(term), entityDescription(term, index, type), titleCase(type.replace(/_/g, " ")), type];
+  });
 
   return profile({
     audience: semantic.audiences,
     brandStems: semantic.label.split(/\s+/).filter((part) => part.length > 2).slice(0, 2).map(titleCase).concat(["North", "Morrow"]),
     brandSuffixes: ["Studio", "Works", "House", "Collective"],
     businessType,
-    differentiators: uniqueStrings([
-      ...semantic.capabilities.slice(0, 2).map((value) => `clear ${value.replace(/_/g, " ")} guidance`),
+    differentiators: isPortfolio ? [
+      "work-led visual storytelling",
+      "clear project and role context",
+      "an accessible path from viewing to inquiry"
+    ] : uniqueStrings([
+      ...semantic.capabilities.slice(0, 2).map((value) => `${value.replace(/_/g, " ")} explained in decision-ready detail`),
       semantic.businessModels.includes("custom_build") ? "choices shaped around the customer's requirements" : "a direct path from comparison to inquiry",
       "business facts kept honest until confirmed"
     ]).slice(0, 4),
-    entities: focusTerms.slice(0, 8).map((term, index) => [titleCase(term), entityDescription(term, index), index < semantic.products.length ? "Product" : "Service"]),
-    faq: [
+    entities,
+    faq: isPortfolio ? [
+      ["What does each project include?", "Use project context to explain the intent, role, process, and outcome without inventing client claims."],
+      ["Is all work final?", "Generated sample work remains clearly editable until the portfolio owner supplies verified projects."],
+      ["How can someone inquire?", "Use the contact path with the project type, timing, and relevant context."]
+    ] : [
       ["What should I compare first?", `Start with ${focusTerms.slice(0, 3).join(", ")}, then confirm the specifications or service details that affect your decision.`],
       ["How can I choose the right option?", `Use the ${usefulCapabilities.slice(0, 3).map((value) => value.replace(/_/g, " ")).join(", ") || "practical"} guidance, then ask about your specific requirements.`],
       ["How can I confirm current details?", "Use the inquiry path for current pricing, availability, timing, and terms."]
     ],
-    primaryGoal: `present ${label} with relevant ${model} context and turn interest into a qualified inquiry`,
-    schema: semantic.businessModels.includes("retail") ? "Store" : semantic.businessModels.includes("professional_practice") ? "ProfessionalService" : "Organization",
-    sectionIdeas: [
+    primaryGoal: isPortfolio ? "present selected work with meaningful project context and invite relevant inquiries" : `present ${label} with relevant ${model} context and turn interest into a qualified inquiry`,
+    schema: isPortfolio ? "Person" : semantic.businessModels.includes("retail") ? "Store" : semantic.businessModels.includes("professional_practice") ? "ProfessionalService" : "Organization",
+    sectionIdeas: isPortfolio ? [
+      ["Selected work", "Move through a focused edit of projects, galleries, films, or studies without forcing product semantics.", "carousel"],
+      ["Project stories", "Give each project room for intent, role, process, and outcome.", "gallery"],
+      ["Behind the work", "Introduce the point of view and working approach without unsupported claims.", "content"],
+      ["Start a conversation", "Offer a direct, honest route for relevant project inquiries.", "form"]
+    ] : [
       [`Explore ${primaryNiche}`, `Start with the products, services, and choices that define this ${businessType}.`, semantic.products.length ? "entities" : "content"],
-      ["Choose with useful context", `Compare the details, materials, performance, or outcomes that matter for ${primaryNiche.toLowerCase()}.`, "comparison"],
-      ["How the work comes together", `Follow a clear ${model} path from first interest to a confirmed next step.`, "process"],
-      ["Details worth checking", "Review the practical questions and trust signals that shape a confident decision.", "trust"],
-      ["Common questions", `Get direct guidance about ${focusTerms.slice(0, 3).join(", ")}.`, "faq"]
+      [`Compare ${focusTerms.slice(0, 2).join(" and ")}`, `Focus on the material, use, performance, or outcome differences that shape a suitable ${primaryNiche.toLowerCase()} choice.`, "comparison"],
+      [`From interest to ${model} decision`, `Move from priorities and constraints to a focused option, then confirm the facts that can change.`, "process"],
+      [`Evidence behind the choice`, `Keep specifications, suitability, availability, and other decision-critical facts visible and honestly bounded.`, "trust"],
+      [`Questions about ${focusTerms.slice(0, 2).join(" and ")}`, `Address the practical questions visitors need before making a specific inquiry.`, "faq"]
     ],
-    tagline: `${titleCase(primaryNiche)}, made easier to understand.`,
-    trustSignals: semantic.trustSignals.length ? semantic.trustSignals : ["clear specifications or scope", "honest availability boundaries", "direct inquiry and confirmation"],
+    tagline: isPortfolio ? "Work with a point of view behind every frame." : `${titleCase(primaryNiche)}, shaped around real choices.`,
+    trustSignals: semantic.trustSignals.length ? semantic.trustSignals : isPortfolio ? [] : ["clear specifications or scope", "honest availability boundaries", "direct inquiry and confirmation"],
     visualArchetype: visualSubject
   });
 }
@@ -672,7 +744,19 @@ function extractHexColors(prompt: string) {
   return Array.from(new Set(prompt.match(/#[0-9a-f]{6}\b/gi)?.map((color) => color.toUpperCase()) ?? []));
 }
 
-function paletteFrom(input: { direction: WebsiteCreativeDirection; intent: IntentIntelligence; prompt: string }): WebsitePalette {
+function paletteFrom(input: { direction: WebsiteCreativeDirection; intent: IntentIntelligence; projectDesignContract?: ProjectDesignContract | null; prompt: string }): WebsitePalette {
+  if (input.projectDesignContract) {
+    const colors = input.projectDesignContract.colors;
+    return {
+      accent: colors.accent.value,
+      accentAlt: colors.primaryAction.value,
+      background: colors.background.value,
+      border: colors.border.value,
+      ink: colors.textPrimary.value,
+      muted: colors.textMuted.value,
+      surface: colors.surface.value
+    };
+  }
   const exact = extractHexColors(input.prompt);
   const wantsWhite = /\bwhite\b/i.test(input.prompt);
   const wantsBlack = /\bblack\b/i.test(input.prompt);
@@ -705,15 +789,27 @@ function paletteFrom(input: { direction: WebsiteCreativeDirection; intent: Inten
 function typographyFor(profileValue: DomainProfile, intent: IntentIntelligence): WebsiteTypography {
   const text = `${profileValue.visualArchetype} ${intent.visualStyle.join(" ")} ${intent.typographyTone.join(" ")}`.toLowerCase();
   if (/editorial|luxury|legal|restaurant|real estate/.test(text)) {
-    return { body: 'Inter, "Segoe UI", Arial, sans-serif', display: 'Georgia, "Times New Roman", serif', personality: "editorial" };
+    return { body: 'Inter, "Segoe UI", Arial, sans-serif', display: 'Georgia, "Times New Roman", serif', displayTracking: "0", personality: "editorial" };
   }
   if (/toy|playful|friendly/.test(text)) {
-    return { body: '"Trebuchet MS", "Segoe UI", Arial, sans-serif', display: '"Trebuchet MS", "Segoe UI", Arial, sans-serif', personality: "friendly" };
+    return { body: '"Trebuchet MS", "Segoe UI", Arial, sans-serif', display: '"Trebuchet MS", "Segoe UI", Arial, sans-serif', displayTracking: "0", personality: "friendly" };
   }
   if (/technology|crm|technical|saas/.test(text)) {
-    return { body: 'Inter, "Segoe UI", Arial, sans-serif', display: 'Inter, "Segoe UI", Arial, sans-serif', personality: "technical" };
+    return { body: 'Inter, "Segoe UI", Arial, sans-serif', display: 'Inter, "Segoe UI", Arial, sans-serif', displayTracking: "0", personality: "technical" };
   }
-  return { body: 'Inter, "Segoe UI", Arial, sans-serif', display: '"Helvetica Neue", Arial, sans-serif', personality: "modern" };
+  return { body: 'Inter, "Segoe UI", Arial, sans-serif', display: '"Helvetica Neue", Arial, sans-serif', displayTracking: "0", personality: "modern" };
+}
+
+function contractTypography(contract: ProjectDesignContract | null | undefined, fallback: WebsiteTypography): WebsiteTypography {
+  if (!contract) return fallback;
+  const family = (value: string) => value.split(";")[0]?.trim() || value;
+  const descriptor = `${contract.typography.display} ${contract.typography.body}`.toLowerCase();
+  return {
+    body: family(contract.typography.body),
+    display: family(contract.typography.display),
+    displayTracking: contract.typography.display.match(/tracking\s+([^;]+)/i)?.[1]?.trim() ?? "0",
+    personality: /editorial|grotesk|haas|helvetica/.test(descriptor) ? "editorial" : /technical|mono/.test(descriptor) ? "technical" : "modern"
+  };
 }
 
 function pagePath(page: string) {
@@ -762,9 +858,11 @@ function visitorCopy(input: {
       body = "Share what you need, your preferred timing, and the best way to follow up. A real team member should confirm every request directly.";
     } else if (/product|shop|menu|listing|work|portfolio|service|feature|dashboard/.test(input.page)) {
       const choices = input.profile.entities.slice(0, 3).map(([item]) => item).join(", ");
-      body = `Explore ${choices} with clear details and honest guidance about what should be confirmed before you decide.`;
+      body = `Compare ${choices} by intended use and the details that shape a suitable choice, then verify current specifications and availability.`;
+    } else if (/inspiration|ideas|gallery|journal|blog/.test(input.page)) {
+      body = `Explore settings, materials, combinations, and project ideas that put ${input.profile.businessType} choices into a useful visual context.`;
     } else if (/about|story|company|team/.test(input.page)) {
-      body = `${input.brandName} brings ${input.profile.differentiators.slice(0, 3).join(", ")} to every part of the experience.`;
+      body = `${input.brandName} is shaped around ${input.profile.differentiators.slice(0, 3).join(", ")}. Its approach keeps the experience focused, useful, and easy to understand.`;
     }
   }
 
@@ -779,8 +877,25 @@ function visitorCopy(input: {
   };
 }
 
+function inferredEntityType(label: string, meta: string, explicit?: WebsiteOfferEntityType): WebsiteOfferEntityType {
+  if (explicit) return explicit;
+  const text = `${label} ${meta}`.toLowerCase();
+  if (/portfolio work|project stor|selected work|gallery|film|case study/.test(text)) return "portfolio_work";
+  if (/collection|range|series|edit\b/.test(text)) return "collection";
+  if (/service|repair|cleaning|consultation|appointment|advisory|installation|maintenance/.test(text)) return "service";
+  if (/guide|guidance|notes?|questions?|support|planning|review/.test(text)) return "guidance";
+  if (/feature|workflow|integration|pipeline|reports?|system/.test(text)) return "capability";
+  if (/product|item|dish|plate|room|suite|listing|model|paint|coating|primer|finish/.test(text)) return "product_category";
+  return "content_category";
+}
+
 function itemList(profileValue: DomainProfile) {
-  return profileValue.entities.map(([label, description, meta]) => ({ detail: description, meta, title: label }));
+  return profileValue.entities.map(([label, description, meta, explicitType]) => ({
+    detail: description,
+    meta: explicitType ? titleCase(explicitType.replace(/_/g, " ")) : meta,
+    semanticType: inferredEntityType(label, meta, explicitType),
+    title: label
+  }));
 }
 
 function createSection(input: {
@@ -799,27 +914,31 @@ function createSection(input: {
 
 function pageSections(input: { contract: WebsiteContentContract; page: string; profile: DomainProfile }) {
   const entities = itemList(input.profile);
+  const offer = input.contract.coreOffer || input.profile.businessType;
   const processItems = [
     {
-      detail: `Start with your priorities and the ${input.profile.businessType} outcome you need.`,
-      title: "Define the need"
+      detail: `Start with the result, use, or experience you want from ${offer}.`,
+      title: `Choose your ${offer}`
     },
     {
-      detail: `Compare the relevant options using clear scope, material, performance, or service details.`,
-      title: "Compare the fit"
+      detail: `Compare the options through the details that matter for this ${input.profile.businessType}.`,
+      title: "Explore the details"
     },
     {
-      detail: "Confirm current availability, timing, specifications, and terms directly before deciding.",
-      title: "Confirm current information"
+      detail: "Review current availability, timing, suitability, and terms before deciding.",
+      title: "Review what matters"
     },
     {
-      detail: "Use the inquiry or browsing path with the relevant context gathered so far.",
-      title: "Take the next step"
+      detail: `Continue through the clearest browsing or inquiry path for ${offer}.`,
+      title: `Continue with ${offer}`
     }
   ];
-  const trustItems = input.contract.trustStrategy.map((signal) =>
-    visitorTrustSignal(signal, input.contract.businessType)
-  );
+  const trustSignals = uniqueStrings([...input.profile.trustSignals, ...input.contract.trustStrategy]);
+  const trustItems = trustSignals.map((signal) => ({
+    ...visitorTrustSignal(signal, input.contract.businessType),
+    evidenceKey: semanticEvidenceKey(signal),
+    semanticType: "guidance" as const
+  }));
   const core = input.profile.sectionIdeas.map(([title, body, kind], index) => createSection({
     body,
     eyebrow: titleCase(input.profile.businessType),
@@ -843,6 +962,7 @@ function pageSections(input: { contract: WebsiteContentContract; page: string; p
     const offerItems = input.contract.offerItems.map((item) => ({
       detail: item.detail,
       meta: item.meta,
+      semanticType: inferredEntityType(item.title, item.meta),
       title: item.title
     }));
     return [
@@ -885,14 +1005,114 @@ function pageSections(input: { contract: WebsiteContentContract; page: string; p
     ];
   }
   if (/product|shop|menu|listing|work|portfolio|service|feature|dashboard/.test(input.page)) {
-    return core.slice(0, 4).map((section) => ({ ...section, id: `${input.page}-${section.kind}-${section.id.split("-").pop()}` }));
+    return [
+      createSection({ body: `Browse the principal ${input.profile.businessType} categories with their purpose and decision details kept distinct.`, eyebrow: "Offer", id: `${input.page}-entities`, items: entities, kind: "entities", title: `${pageName} categories` }),
+      createSection({ body: `Compare intended use, material or specification differences, and the facts that need direct confirmation.`, eyebrow: "Compare", id: `${input.page}-comparison`, items: entities.slice(0, 4), kind: "comparison", title: `How the ${pageName.toLowerCase()} options differ` }),
+      createSection({ body: `Move from the intended outcome to a suitable category, then verify current details before deciding.`, eyebrow: "Selection path", id: `${input.page}-process`, items: processItems, kind: "process", title: `Choosing from ${pageName.toLowerCase()}` }),
+      createSection({ body: `Use evidence-backed details rather than assumptions about performance, availability, or suitability.`, eyebrow: "Decision checks", id: `${input.page}-trust`, items: trustItems, kind: "trust", title: `What to verify` })
+    ];
+  }
+  if (/inspiration|ideas|gallery|journal|blog/.test(input.page)) {
+    return [
+      createSection({ body: `See ${input.profile.businessType} ideas organized around setting, use, material, and mood rather than repeated product listings.`, eyebrow: "Inspiration", id: `${input.page}-gallery`, items: entities, kind: "gallery", title: `${pageName} for real contexts` }),
+      createSection({ body: `Connect visual direction to practical choices without inventing performance or availability claims.`, eyebrow: "Apply the idea", id: `${input.page}-content`, items: entities.slice(1, 6), kind: "content", title: `From visual idea to considered choice` }),
+      createSection({ body: `Use the setting and intended outcome to narrow the relevant options before asking for current details.`, eyebrow: "Project path", id: `${input.page}-process`, items: processItems, kind: "process", title: `Shape an idea into a project brief` })
+    ];
+  }
+  if (/about|story|company|team/.test(input.page)) {
+    return [
+      createSection({ body: `Understand the principles that shape this ${input.profile.businessType}: how choices are framed, how facts are handled, and where direct confirmation matters.`, eyebrow: "Brand approach", id: `${input.page}-principles`, items: entities.slice(0, 3), kind: "content", title: `${pageName}: the thinking behind the offer` }),
+      createSection({ body: "See how customer priorities move through a considered, easy-to-follow decision process.", eyebrow: "Working method", id: `${input.page}-process`, items: processItems, kind: "process", title: "How decisions are approached" }),
+      createSection({ body: "Clear offer details, practical guidance, and a direct next step make it easier to decide with confidence.", eyebrow: "What to expect", id: `${input.page}-trust`, items: trustItems, kind: "trust", title: "A clear customer experience" })
+    ];
   }
   return [
     createSection({ body: `Understand the choices and working principles behind this ${input.profile.businessType}.`, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-story`, items: entities.slice(0, 3), kind: "content", title: `${pageName} and ${input.profile.tagline.toLowerCase()}` }),
     createSection({ body: input.profile.sectionIdeas[1]?.[1] ?? input.profile.primaryGoal, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-process`, items: entities.slice(0, 5), kind: "process", title: input.profile.sectionIdeas[1]?.[0] ?? `${pageName} process` }),
-    createSection({ body: `Understand the details that shape a confident ${input.profile.businessType} decision.`, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-trust`, items: input.profile.trustSignals.map((signal) => visitorTrustSignal(signal, input.profile.businessType)), kind: "trust", title: `${pageName} details` }),
+    createSection({ body: `Understand the details that shape a confident ${input.profile.businessType} decision.`, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-trust`, items: input.profile.trustSignals.map((signal) => ({ ...visitorTrustSignal(signal, input.profile.businessType), evidenceKey: semanticEvidenceKey(signal), semanticType: "guidance" as const })), kind: "trust", title: `${pageName} details` }),
     createSection({ body: input.profile.faq[0]?.[1] ?? input.profile.primaryGoal, eyebrow: titleCase(input.profile.businessType), id: `${input.page}-faq`, items: input.profile.faq.map(([title, detail]) => ({ detail, title })), kind: "faq", title: `${pageName} questions` })
   ];
+}
+
+function fallbackCompositionStructure(input: {
+  contract: WebsiteContentContract;
+  domainId: string | null;
+  projectDesignContract?: ProjectDesignContract | null;
+  prompt: string;
+}): WebsiteCompositionStructure {
+  const sequences: Record<string, string[]> = {
+    hotel_guesthouse: ["destination", "rooms and suites", "guest experience", "amenities", "dining", "location", "availability"],
+    paint_brand: ["color immersion", "collections", "surfaces and rooms", "finishes", "craft and formulation", "project inspiration", "samples and contact"],
+    restaurant: ["atmosphere", "signature dishes", "menu", "chef and story", "hospitality proof", "reservation", "location and hours"],
+    seafood_restaurant: ["atmosphere", "signature dishes", "menu", "chef and story", "hospitality proof", "reservation", "location and hours"]
+  };
+  return deriveWebsiteCompositionStructure({
+    designContract: input.projectDesignContract,
+    domain: input.domainId ?? "unknown",
+    prompt: input.prompt,
+    sectionSequence: sequences[input.domainId ?? ""] ?? [input.contract.coreOffer, "workflow", "product proof", "use cases", "credibility", "pricing or demo"]
+  });
+}
+
+function composePageSections(input: {
+  base: WebsiteSectionBlueprint[];
+  page: string;
+  structure: WebsiteCompositionStructure;
+}) {
+  if (input.page !== "home" || input.base.length === 0) return input.base;
+  const kindByFamily: Record<WebsiteCompositionStructure["componentFamilies"][number], WebsiteSectionKind> = {
+    comparison: "comparison",
+    editorial: "content",
+    gallery: "gallery",
+    ledger: "entities",
+    process: "process",
+    stats: "stats"
+  };
+  const sequence = input.structure.sectionSequence.filter((title) => !/^hero$/i.test(title));
+  const usedIds = new Map<string, number>();
+  const planned = sequence.slice(0, Math.max(4, input.base.length)).map((title, index) => {
+    const source = input.base[index % input.base.length];
+    const family = input.structure.componentFamilies[index % input.structure.componentFamilies.length];
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || String(index + 1);
+    const occurrence = (usedIds.get(slug) ?? 0) + 1;
+    usedIds.set(slug, occurrence);
+    return {
+      ...source,
+      id: `home-${slug}${occurrence > 1 ? `-${occurrence}` : ""}`,
+      kind: kindByFamily[family],
+      title: titleCase(title)
+    };
+  });
+  const proofIndex = input.structure.proofPlacement === "early"
+    ? 1
+    : input.structure.proofPlacement === "near-conversion"
+      ? planned.length - 1
+      : Math.floor(planned.length / 2);
+  const trust = planned.find((section) => section.kind === "trust") ?? input.base.find((section) => section.kind === "trust");
+  if (trust && !planned.includes(trust)) planned.splice(Math.max(0, proofIndex), 0, trust);
+  return planned;
+}
+
+function reviewCompositionQuality(input: {
+  cinematicEnabled: boolean;
+  pages: WebsitePageBlueprint[];
+  structure: WebsiteCompositionStructure;
+  webglEnabled: boolean;
+}) {
+  const home = input.pages.find((page) => page.name === "home") ?? input.pages[0];
+  const sections = home?.sections ?? [];
+  const kinds = new Set(sections.map((section) => section.kind));
+  const findings: string[] = [];
+  const cardKinds = sections.filter((section) => section.kind === "entities" || section.kind === "trust").length;
+  if (sections.length < 4 || kinds.size < 3) findings.push("The home-page narrative lacks enough distinct section families.");
+  if (sections.length > 0 && cardKinds / sections.length > 0.6) findings.push("The composition relies too heavily on card grids.");
+  if (!input.structure.specialEngines.webgl && input.webglEnabled) findings.push("WebGL was rendered without composition-plan authority.");
+  if (!input.structure.specialEngines.cinematic && input.cinematicEnabled) findings.push("Cinematic playback was rendered without composition-plan authority.");
+  return {
+    findings,
+    signature: [input.structure.heroArchitecture, input.structure.gridStrategy, input.structure.density, ...sections.map((section) => section.kind)].join("|"),
+    status: findings.length ? "review_required" as const : "passed" as const
+  };
 }
 
 function visitorTrustSignal(signal: string, businessType: string) {
@@ -911,12 +1131,12 @@ function visitorTrustSignal(signal: string, businessType: string) {
       title: "Honest expectations"
     },
     "show representative products, services, or work without claiming availability": {
-      detail: "Explore representative choices, then confirm current models, services, and availability directly.",
-      title: "Representative choices"
+      detail: `Explore the ${businessType} offer, then check the current details for the option that suits you.`,
+      title: `Explore ${titleCase(businessType)}`
     },
     "invite direct confirmation of pricing, timing, availability, and terms": {
-      detail: "Confirm current pricing, timing, availability, and terms before making a decision.",
-      title: "Confirm current details"
+      detail: `Check the current pricing, timing, availability, and terms for this ${businessType}.`,
+      title: "Plan with current details"
     },
     "secure-intake reminder": {
       detail: "Start with only the information needed for an initial inquiry, then use the firm's confirmed confidential intake process.",
@@ -1027,10 +1247,13 @@ function webglPolicy(scene: WebsiteSceneBlueprint) {
 export function buildWebsiteQualityBlueprint(input: {
   brief?: WebsiteGenerationBrief | null;
   composition: CompositionStrategy;
+  compositionPlan?: CompositionPlan;
   direction: WebsiteCreativeDirection;
+  explicitAssetPaths?: string[];
   intent: IntentIntelligence;
   plan: WebsitePlan;
   projectBrand?: string | null;
+  projectDesignContract?: ProjectDesignContract | null;
   prompt: string;
   workspaceAssets?: WebsiteCinematicAssetInput[];
 }): WebsiteQualityBlueprint {
@@ -1061,11 +1284,34 @@ export function buildWebsiteQualityBlueprint(input: {
     visitorCopy: [selectedProfile.tagline, selectedProfile.heroBody ?? "", ...selectedProfile.sectionIdeas.flatMap(([title, body]) => [title, body])],
     visualSubjects: [selectedProfile.visualArchetype]
   });
-  const semanticRepairApplied = initialConsistency.repairRecommended && semantic.source !== "generic_fallback" && semantic.source !== "canonical_taxonomy";
-  if (semanticRepairApplied) selectedProfile = genericSemanticProfile(input.prompt, input.plan);
+  const semanticRepairApplied = initialConsistency.repairRecommended && semantic.source !== "generic_fallback";
+  if (semanticRepairApplied) {
+    selectedProfile = {
+      ...selectedProfile,
+      audience: [contentContract.primaryAudience],
+      businessType: contentContract.businessType,
+      differentiators: contentContract.differentiators,
+      entities: contentContract.offerItems.map((item) => [item.title, item.detail, item.meta]),
+      primaryGoal: contentContract.conversionGoal,
+      tagline: contentContract.hero.headline,
+      trustSignals: contentContract.trustStrategy
+    };
+  }
+  if (input.brief?.trustSignals.length) {
+    selectedProfile = {
+      ...selectedProfile,
+      trustSignals: uniqueStrings([...selectedProfile.trustSignals, ...input.brief.trustSignals])
+    };
+  }
   const userSuppliedBrand = input.projectBrand?.trim() || contentContract.businessIdentity.displayName;
   const brandName = userSuppliedBrand ?? contentContract.businessIdentity.publicLabel;
   const domainId = input.brief?.domainId ?? input.plan.sourceOfTruthDomain;
+  const structure = input.compositionPlan?.websiteStructure ?? fallbackCompositionStructure({
+    contract: contentContract,
+    domainId,
+    projectDesignContract: input.projectDesignContract,
+    prompt: input.prompt
+  });
   const initialPages = input.plan.pages.map((page) => {
     const label = page === "home" ? "Home" : titleCase(page);
     const path = pagePath(page);
@@ -1075,7 +1321,11 @@ export function buildWebsiteQualityBlueprint(input: {
       description: page === "home" ? publicCopy.body : `${label} at ${brandName}. ${publicCopy.body}`,
       name: page,
       path,
-      sections: pageSections({ contract: contentContract, page, profile: selectedProfile }),
+      sections: composePageSections({
+        base: pageSections({ contract: contentContract, page, profile: selectedProfile }),
+        page,
+        structure
+      }),
       structuredDataType: selectedProfile.schema,
       title: page === "home" ? `${brandName} | ${selectedProfile.tagline}` : `${label} | ${brandName}`,
       visitorCopy: publicCopy
@@ -1105,17 +1355,18 @@ export function buildWebsiteQualityBlueprint(input: {
       });
     }
   });
-  const brandPalette = paletteFrom({ direction: input.direction, intent: input.intent, prompt: input.prompt });
+  const brandPalette = paletteFrom({ direction: input.direction, intent: input.intent, projectDesignContract: input.projectDesignContract, prompt: input.prompt });
   const assets = analyzeWebsiteAssets({
     assets: input.workspaceAssets ?? [],
     capabilities: semantic.capabilities,
+    explicitAssetPaths: input.explicitAssetPaths,
     visualSubjects: semantic.visualSubjects
   });
   let cinematic = buildWebsiteCinematicExperience({
     assets: input.workspaceAssets ?? [],
     businessType: selectedProfile.businessType,
     capabilities: semantic.capabilities,
-    prompt: input.prompt
+    prompt: structure.specialEngines.cinematic ? input.prompt : "standard static HTML and CSS website"
   });
   if (cinematic.enabled) {
     interactions.push({
@@ -1130,7 +1381,7 @@ export function buildWebsiteQualityBlueprint(input: {
     palette: brandPalette,
     profile: selectedProfile,
     projectName: brandName,
-    prompt: input.prompt,
+    prompt: structure.specialEngines.webgl ? input.prompt : "standard static HTML and CSS website",
     semantic
   });
   const webgl = webglPolicy(scene);
@@ -1150,6 +1401,16 @@ export function buildWebsiteQualityBlueprint(input: {
   const media = workspaceMedia.length
     ? [...workspaceMedia, ...registryMedia.filter((asset) => !workspaceMedia.some((workspaceAsset) => workspaceAsset.role === asset.role))]
     : registryMedia;
+  const assetPlan = buildWebsiteAssetPlan({
+    assets,
+    businessType: selectedProfile.businessType,
+    composition: structure,
+    explicitAssetPaths: input.explicitAssetPaths,
+    media,
+    projectDesignContract: input.projectDesignContract,
+    prompt: input.prompt,
+    visualSubjects: semantic.visualSubjects
+  });
   const initialExperience = composeWebsiteExperience({
     assets,
     businessCapabilities: semantic.capabilities,
@@ -1197,11 +1458,23 @@ export function buildWebsiteQualityBlueprint(input: {
     identity: contentContract.businessIdentity.displayName,
     pages: pages.map((page) => page.path)
   })).toString(16).padStart(8, "0")}`;
+  const compositionQuality = reviewCompositionQuality({
+    cinematicEnabled: cinematic.enabled,
+    pages,
+    structure,
+    webglEnabled: webgl.enabled
+  });
 
   return {
     accessibility: { landmarks: true, reducedMotion: true, skipLink: true, visibleFocus: true },
+    assetPlan,
     assets,
     brand: {
+      designConstraints: {
+        decorativeGradients: input.projectDesignContract?.dontRules.some((rule) => /(?:no|avoid|don't|do not).{0,24}gradients?|gradients?.{0,24}decorative/i.test(rule)) ? "avoid" : "allowed",
+        imageryPriority: /photography[- ]first|image[- ]dominant|product imagery carries/i.test(input.projectDesignContract?.imagery.direction ?? "") ? "photography_first" : "balanced",
+        uiShadows: input.projectDesignContract?.dontRules.some((rule) => /(?:no|avoid|don't|do not|reserved).{0,32}shadows?|shadows?.{0,24}(?:cards?|buttons?|chrome|reserved)/i.test(rule)) ? "minimal" : "allowed"
+      },
       generatedName: brandName,
       nameProvenance: userSuppliedBrand ? "USER_SUPPLIED" : "SAFE_INFERENCE",
       logo: logoBlueprint(brandName, selectedProfile, domainId),
@@ -1209,8 +1482,8 @@ export function buildWebsiteQualityBlueprint(input: {
       palette: brandPalette,
       tagline: selectedProfile.tagline,
       tone: input.intent.visualStyle.length ? input.intent.visualStyle : ["clear", "credible", "domain-aware"],
-      typography: typographyFor(selectedProfile, input.intent),
-      visualArchetype: selectedProfile.visualArchetype
+      typography: contractTypography(input.projectDesignContract, typographyFor(selectedProfile, input.intent)),
+      visualArchetype: input.projectDesignContract?.identity.archetype ?? selectedProfile.visualArchetype
     },
     business: {
       audience: selectedProfile.audience,
@@ -1232,8 +1505,15 @@ export function buildWebsiteQualityBlueprint(input: {
       visualSubjects: semantic.visualSubjects
     },
     cinematic,
+    composition: structure,
+    compositionQuality,
     contentContract,
-    contentEntities: selectedProfile.entities.map(([label, description, meta]) => ({ description, label, meta })),
+    contentEntities: selectedProfile.entities.map(([label, description, meta, explicitType]) => ({
+      description,
+      entityType: inferredEntityType(label, meta, explicitType),
+      label,
+      meta: explicitType ? titleCase(explicitType.replace(/_/g, " ")) : meta
+    })),
     copyValidation,
     interactions,
     media,
@@ -1252,9 +1532,11 @@ export function buildWebsiteQualityBlueprint(input: {
 
 export function summarizeWebsiteQualityBlueprint(blueprint: WebsiteQualityBlueprint) {
   return {
+    assetPlan: `${blueprint.assetPlan.imageStrategy}:${blueprint.assetPlan.assets.length} planned:${blueprint.assetPlan.unresolved.length} unresolved`,
     assets: `${blueprint.assets.records.length} asset(s), ${blueprint.assets.cinematicSequences.length} sequence(s)`,
     brand: blueprint.brand.generatedName,
     cinematic: blueprint.cinematic.enabled ? `${blueprint.cinematic.sequences.length} sequence(s)` : blueprint.cinematic.requirement,
+    composition: `${blueprint.compositionQuality.status}:${blueprint.compositionQuality.signature}`,
     copyValidation: `${blueprint.copyValidation.status}:${blueprint.copyValidation.findings.length} finding(s)`,
     components: blueprint.sharedComponents,
     interactions: blueprint.interactions.map((interaction) => interaction.id),
@@ -1265,7 +1547,7 @@ export function summarizeWebsiteQualityBlueprint(blueprint: WebsiteQualityBluepr
     pages: blueprint.pages.map((page) => page.path),
     previewIdentity: blueprint.previewIdentity,
     scene: `${blueprint.scene.recipe}:${blueprint.scene.engine}:${blueprint.scene.motionEngine}`,
-    semantic: `${blueprint.business.sector ?? "unknown"}:${blueprint.business.industry ?? "unknown"}:${blueprint.business.niche ?? "unknown"}`,
+    semantic: `${blueprint.business.sector ?? blueprint.business.domainId ?? "general"}:${blueprint.business.industry ?? blueprint.business.category ?? blueprint.business.domainId ?? "general"}:${blueprint.business.niche ?? blueprint.business.businessType}`,
     semanticConsistency: `${blueprint.semanticConsistency.status}:${blueprint.semanticConsistency.coverage}`,
     webgl: blueprint.webgl.enabled ? blueprint.webgl.strategy : "disabled-by-request"
   };

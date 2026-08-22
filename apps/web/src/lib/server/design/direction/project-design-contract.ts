@@ -44,6 +44,8 @@ export type ProjectDesignReferenceRole = {
   referenceId: string;
   role: ReferenceRole;
   scope: "global" | "section";
+  sourceAttachmentId: string | null;
+  sourceFingerprint: string | null;
   sourceType: ReferenceSourceType;
   target: string | null;
 };

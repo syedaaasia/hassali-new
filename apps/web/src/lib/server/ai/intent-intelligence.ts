@@ -6,6 +6,7 @@ import {
   inferSemanticDomain
 } from "@/lib/server/ai/industry-taxonomy";
 import { isFullWebsiteReplacementRequest } from "@/lib/server/ai/website-edit-intent";
+import { extractExplicitWebsiteBrand } from "@/lib/server/ai/website-request-objective";
 import { isDesignDirectionRevisionRequest } from "@/lib/server/design/reference/reference-intent";
 
 export type IntentIntelligence = {
@@ -106,34 +107,6 @@ function isVisualThemeEditRequest(promptText: string) {
 
 function unique(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
-}
-
-function extractBrandName(prompt: string) {
-  const match =
-    prompt.match(/\b(?:named|called)\s+([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i) ??
-    prompt.match(/\bname\s+([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i) ??
-    prompt.match(/\b(?:brand|business|company)\s+name\s+(?:is\s+)?([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i) ??
-    prompt.match(/\b(?:website|site|landing page)\s+for\s+([A-Z][A-Za-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/) ??
-    prompt.match(/\bfor\s+([A-Z][A-Za-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|in|it|should|as)\b|[,.!?]|$)/);
-
-  const value = match?.[1]?.trim().replace(/\s+/g, " ") ?? null;
-  const locationOnly = new Set([
-    "canada",
-    "toronto",
-    "pakistan",
-    "india",
-    "bangladesh",
-    "dubai",
-    "uae",
-    "london",
-    "uk",
-    "new york",
-    "usa",
-    "karachi",
-    "lahore"
-  ]);
-
-  return value && !locationOnly.has(value.toLowerCase()) ? value : null;
 }
 
 function extractPageCount(promptText: string) {
@@ -627,7 +600,7 @@ export function buildIntentIntelligence(input: IntentInput): IntentIntelligence 
   ]);
   const requestedPages = extractRequestedPages(promptText, domain, pageCount);
   const intent: IntentIntelligence = {
-    brandName: extractBrandName(input.prompt),
+    brandName: extractExplicitWebsiteBrand(input.prompt),
     businessGoals: inferBusinessGoals(domain),
     confidence: 0,
     constraints: {

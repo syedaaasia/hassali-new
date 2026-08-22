@@ -1,5 +1,10 @@
 import type { WebsiteEditContext } from "@/lib/server/ai/website-edit-context";
 import type { WebsiteEditIntent } from "@/lib/server/ai/website-edit-intent";
+import { replaceWebsiteSectionImage } from "@/lib/server/ai/website-asset-edit";
+import {
+  parseWebsiteGrowthSourceSnapshot,
+  renderWebsiteGrowthSourceSnapshot
+} from "@/lib/server/ai/website-growth-handoff";
 import { inferSemanticDomain } from "@/lib/server/ai/industry-taxonomy";
 import {
   buildWebsiteSceneBlueprint,
@@ -98,6 +103,22 @@ function updateHassali(content: string, updates: Record<string, string>) {
   }
 
   return next;
+}
+
+function updateGrowthHeroAsset(content: string, assetPath: string) {
+  const snapshot = parseWebsiteGrowthSourceSnapshot(content);
+  const next = updateHassali(content, {
+    assetPlan: "asset_led:1 planned:0 unresolved",
+    assetPlanActions: "hero_product:user_upload:ready",
+    mediaAssets: `user_upload:${assetPath} [approved hero visual]`
+  });
+  if (!snapshot) return next;
+  snapshot.assets = [
+    ...snapshot.assets.filter((asset) => asset.role !== "hero_product" && asset.path !== assetPath),
+    { path: assetPath, role: "hero_product", source: "user_upload", status: "ready" }
+  ];
+  const rendered = renderWebsiteGrowthSourceSnapshot(snapshot);
+  return next.replace(/<!-- HASSALI_GROWTH_SOURCE_V1 -->\s*```json[\s\S]*?```/i, rendered);
 }
 
 const phoneTextPattern = /(?:\+\d[\d\s().-]{6,}\d|\b(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b)/g;
@@ -238,6 +259,73 @@ function replaceBrand(
 function updateCssForStyle(content: string, intent: WebsiteEditIntent, context: WebsiteEditContext) {
   const text = `${intent.extractedValues.styleIntent ?? ""} ${intent.extractedValues.colorIntent ?? ""}`.toLowerCase();
   let next = content;
+  const namedColors: Record<string, string> = {
+    black: "#111111",
+    blue: "#2563eb",
+    gold: "#c79a45",
+    green: "#16835b",
+    orange: "#e96b32",
+    pink: "#d94f8a",
+    purple: "#7457d9",
+    red: "#c43d4d",
+    silver: "#a7adb6",
+    white: "#ffffff",
+    yellow: "#d9a514"
+  };
+  const explicitHex = text.match(/#[0-9a-f]{3,8}\b/i)?.[0];
+  const explicitNames = Array.from(
+    text.matchAll(new RegExp(`\\b(${Object.keys(namedColors).join("|")})\\b`, "gi")),
+    (match) => match[1]?.toLowerCase()
+  ).filter((name): name is string => Boolean(name));
+  const explicitNamed = explicitNames[0];
+  const explicitColor = explicitHex ?? (explicitNamed ? namedColors[explicitNamed] : null);
+  if (explicitColor) {
+    const backgroundRequested = /\b(?:background|surface)\b/i.test(text);
+    const targetVariables = backgroundRequested
+      ? ["--bg", "--surface", "--color-bg", "--color-surface"]
+      : /\b(?:text|ink|foreground)\b/i.test(text)
+        ? ["--ink", "--color-text"]
+        : ["--accent", "--accent-alt", "--color-primary", "--color-accent"];
+    for (const name of targetVariables) {
+      const pattern = new RegExp(`${escapeRegExp(name)}\\s*:\\s*[^;]+;`, "i");
+      if (pattern.test(next)) next = next.replace(pattern, `${name}: ${explicitColor};`);
+    }
+    if (backgroundRequested && explicitNamed === "black") {
+      for (const [name, value] of Object.entries({
+        "--border": "rgba(255, 255, 255, 0.16)",
+        "--color-border": "rgba(255, 255, 255, 0.16)",
+        "--color-muted": "#b8b8b8",
+        "--color-text": "#f7f7f7",
+        "--ink": "#f7f7f7",
+        "--muted": "#b8b8b8"
+      })) {
+        const pattern = new RegExp(`${escapeRegExp(name)}\\s*:\\s*[^;]+;`, "i");
+        if (pattern.test(next)) next = next.replace(pattern, `${name}: ${value};`);
+      }
+    }
+    if (explicitNames.length > 1) {
+      const secondaryName = explicitNames[1];
+      const secondary = namedColors[secondaryName];
+      for (const name of ["--accent-alt", "--color-accent"]) {
+        const pattern = new RegExp(`${escapeRegExp(name)}\\s*:\\s*[^;]+;`, "i");
+        if (pattern.test(next)) next = next.replace(pattern, `${name}: ${secondary};`);
+      }
+      if (secondaryName === "black") {
+        for (const [name, value] of Object.entries({
+          "--bg": "#111111",
+          "--color-bg": "#111111",
+          "--color-surface": "#181818",
+          "--color-text": "#f7f7f7",
+          "--ink": "#f7f7f7",
+          "--surface": "#181818"
+        })) {
+          const pattern = new RegExp(`${escapeRegExp(name)}\\s*:\\s*[^;]+;`, "i");
+          if (pattern.test(next)) next = next.replace(pattern, `${name}: ${value};`);
+        }
+      }
+    }
+    return next;
+  }
   const palette = text.includes("blue")
     ? {
         "--color-bg": "#f6fbff",
@@ -314,6 +402,93 @@ function updateCssForStyle(content: string, intent: WebsiteEditIntent, context: 
   }
 
   return next;
+}
+
+function requestedTypography(prompt: string) {
+  if (/\b(?:editorial|elegant|luxury|high[- ]fashion|serif)\b/i.test(prompt)) {
+    return {
+      body: "Inter, ui-sans-serif, system-ui, sans-serif",
+      display: "Georgia, 'Times New Roman', serif",
+      label: "editorial serif display with a clean system sans body"
+    };
+  }
+  if (/\b(?:mono|monospace|technical)\b/i.test(prompt)) {
+    return {
+      body: "Inter, ui-sans-serif, system-ui, sans-serif",
+      display: "'SFMono-Regular', Consolas, 'Liberation Mono', monospace",
+      label: "technical monospaced display with a readable system sans body"
+    };
+  }
+  return {
+    body: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif",
+    display: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif",
+    label: "modern system sans typography"
+  };
+}
+
+function updateTypographyCss(content: string, prompt: string) {
+  const typography = requestedTypography(prompt);
+  let next = content;
+  const variables = {
+    "--font-body": typography.body,
+    "--font-display": typography.display
+  };
+  for (const [name, value] of Object.entries(variables)) {
+    const pattern = new RegExp(`${escapeRegExp(name)}\\s*:\\s*[^;]+;`, "i");
+    next = pattern.test(next)
+      ? next.replace(pattern, `${name}: ${value};`)
+      : next.replace(/:root\s*{/, `:root {\n  ${name}: ${value};`);
+  }
+  return next;
+}
+
+function updateDesignTypography(content: string, prompt: string) {
+  const typography = requestedTypography(prompt);
+  const line = `Typography: ${typography.label}; display=${typography.display}; body=${typography.body}`;
+  if (/^Typography:\s*.*$/im.test(content)) return content.replace(/^Typography:\s*.*$/im, line);
+  if (/^##\s+Typography\s*$/im.test(content)) {
+    return content.replace(/^##\s+Typography\s*$/im, `## Typography\n\n${line}`);
+  }
+  return `${content.trimEnd()}\n\n## Typography\n\n${line}\n`;
+}
+
+function updateRequestedText(content: string, intent: WebsiteEditIntent) {
+  const value = intent.extractedValues.textValue;
+  if (!value) return content;
+  const escaped = escapeHtmlText(value);
+  if (intent.extractedValues.textTarget === "hero_copy") {
+    const hero = content.match(/<section\b[^>]*class=["'][^"']*\bhero\b[^"']*["'][^>]*>[\s\S]*?<\/section>/i)?.[0];
+    if (!hero) return content;
+    const nextHero = hero.replace(/(<h1\b[^>]*>[\s\S]*?<\/h1>\s*)<p\b([^>]*)>[\s\S]*?<\/p>/i, `$1<p$2>${escaped}</p>`);
+    return content.replace(hero, nextHero);
+  }
+  if (intent.extractedValues.textTarget === "hero_heading") {
+    const hero = content.match(/<section\b[^>]*class=["'][^"']*\bhero\b[^"']*["'][^>]*>[\s\S]*?<\/section>/i)?.[0];
+    if (hero) return content.replace(hero, hero.replace(/<h1\b([^>]*)>[\s\S]*?<\/h1>/i, `<h1$1>${escaped}</h1>`));
+  }
+  return content.replace(/<h1\b([^>]*)>[\s\S]*?<\/h1>/i, `<h1$1>${escaped}</h1>`);
+}
+
+function updateNavigationLabel(content: string, from: string, to: string) {
+  const pattern = new RegExp(`(<a\\b[^>]*>\\s*)${escapeRegExp(from)}(\\s*<\\/a>)`, "gi");
+  return content.replace(pattern, `$1${escapeHtmlText(to)}$2`);
+}
+
+function addScrollEffectsCss(content: string) {
+  if (/\/\* hassali-scroll-effects \*\//i.test(content)) return content;
+  return `${content.trimEnd()}\n\n/* hassali-scroll-effects */\n[data-scroll-reveal] { opacity: 0; transform: translateY(2rem); transition: opacity .72s ease, transform .72s cubic-bezier(.2,.7,.2,1); }\n[data-scroll-reveal].is-visible { opacity: 1; transform: translateY(0); }\n@media (prefers-reduced-motion: reduce) { [data-scroll-reveal] { opacity: 1; transform: none; transition: none; } }\n`;
+}
+
+function addScrollEffectsJs(content: string) {
+  if (/hassali-scroll-effects/i.test(content)) return content;
+  return `${content.trimEnd()}\n\n// hassali-scroll-effects\n(() => {\n  const items = Array.from(document.querySelectorAll("[data-scroll-reveal]"));\n  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window)) { items.forEach((item) => item.classList.add("is-visible")); return; }\n  const observer = new IntersectionObserver((entries) => entries.forEach((entry) => { if (entry.isIntersecting) { entry.target.classList.add("is-visible"); observer.unobserve(entry.target); } }), { rootMargin: "0px 0px -10%", threshold: .12 });\n  items.forEach((item) => observer.observe(item));\n})();\n`;
+}
+
+function markScrollEffects(content: string) {
+  if (/data-scroll-effect=["']premium-reveal["']/i.test(content)) return content;
+  return content
+    .replace(/<body\b([^>]*)>/i, '<body$1 data-scroll-effect="premium-reveal">')
+    .replace(/<section\b(?![^>]*data-scroll-reveal)([^>]*)>/gi, "<section data-scroll-reveal$1>");
 }
 
 function replaceCta(content: string, cta: string) {
@@ -634,6 +809,41 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
     };
   }
 
+  if (intent.editType === "asset_replacement") {
+    const assetPath = intent.extractedValues.assetPath;
+    if (!assetPath || !files["index.html"]) {
+      return {
+        blockedReason: "The bounded hero replacement did not include a verified project asset or homepage.",
+        changes: [],
+        mode: "blocked",
+        preserved: [`domainId=${context.domainId ?? "unknown"}`, "designAuthority=preserved"],
+        summary: "Website asset replacement stopped before changing project files.",
+        targetFiles: []
+      };
+    }
+    const replacement = replaceWebsiteSectionImage({
+      alt: "User-supplied hero visual",
+      assetPath,
+      html: files["index.html"],
+      section: "hero"
+    });
+    if (!replacement.changed) {
+      return {
+        blockedReason: "The existing homepage did not expose a safe hero image target for this exact replacement.",
+        changes: [],
+        mode: "blocked",
+        preserved: [`domainId=${context.domainId ?? "unknown"}`, "designAuthority=preserved"],
+        summary: "Website asset replacement stopped without redesigning the project.",
+        targetFiles: []
+      };
+    }
+    changes.push(change("index.html", replacement.html, `Replaces only the existing hero visual with approved project asset ${assetPath}.`));
+    const nextContract = updateGrowthHeroAsset(hassali, assetPath);
+    if (nextContract !== hassali) {
+      changes.push(change(contractPath, nextContract, "Records the approved hero asset as a user upload without changing business or design authority."));
+    }
+  }
+
   if (intent.editType === "contact_info") {
     for (const path of htmlFiles(context)) {
       let next = replaceKnownContact(files[path] ?? "", context, intent.extractedValues);
@@ -677,6 +887,34 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
       ? "- Visual archetype: Warm luxury craft studio"
       : "- Palette: darker, warmer, and more refined while preserving the existing domain";
     changes.push(change(contractPath, updateCreativeDirection(hassali, palette), "Updates Creative Direction notes."));
+  }
+
+  if (intent.editType === "typography" && files["styles.css"]) {
+    changes.push(change("styles.css", updateTypographyCss(files["styles.css"], intent.originalPrompt), "Updates the requested typography tokens without regenerating the website."));
+    if (files["DESIGN.md"]) {
+      changes.push(change("DESIGN.md", updateDesignTypography(files["DESIGN.md"], intent.originalPrompt), "Revises only the typography dimension of the current Project Design Contract."));
+    }
+    changes.push(change(contractPath, updateCreativeDirection(hassali, `- Typography: ${requestedTypography(intent.originalPrompt).label}`), contractSummary));
+  }
+
+  if (intent.editType === "text_content" && files["index.html"]) {
+    changes.push(change("index.html", updateRequestedText(files["index.html"], intent), "Updates only the requested visible homepage text."));
+  }
+
+  if (intent.editType === "navigation_label" && intent.extractedValues.navigationLabelFrom && intent.extractedValues.navigationLabelTo) {
+    for (const path of htmlFiles(context)) {
+      const next = updateNavigationLabel(files[path] ?? "", intent.extractedValues.navigationLabelFrom, intent.extractedValues.navigationLabelTo);
+      if (next !== files[path]) changes.push(change(path, next, "Updates only the repeated visible navigation label."));
+    }
+  }
+
+  if (intent.editType === "set_scroll_effects") {
+    if (files["index.html"]) changes.push(change("index.html", markScrollEffects(files["index.html"]), "Adds bounded section reveal markers without changing page content."));
+    if (files["styles.css"]) changes.push(change("styles.css", addScrollEffectsCss(files["styles.css"]), "Adds responsive scroll-reveal styling with a reduced-motion fallback."));
+    if (files["main.js"]) changes.push(change("main.js", addScrollEffectsJs(files["main.js"]), "Adds a bounded IntersectionObserver scroll lifecycle."));
+    changes.push(change(contractPath, updateHassali(hassali, {
+      motionPolicy: "bounded scroll reveals with reduced-motion fallback"
+    }), contractSummary));
   }
 
   if (intent.editType === "component_geometry" && intent.extractedValues.geometryIntent && files["styles.css"]) {
@@ -749,6 +987,7 @@ export function planWebsiteEdit(context: WebsiteEditContext, intent: WebsiteEdit
     nextHtml = setBodyData(nextHtml, "data-webgl", "enabled");
     nextHtml = setBodyData(nextHtml, "data-3d-requirement", "required");
     nextHtml = setBodyData(nextHtml, "data-scene-recipe", scene.recipe);
+    nextHtml = setBodyData(nextHtml, "data-rhythm", "existing-flow-with-spatial-chapter");
     nextHtml = insertExperienceSection(
       nextHtml,
       markExperienceEngine(renderWebsiteSceneSection(renderContext), "procedural_webgl"),

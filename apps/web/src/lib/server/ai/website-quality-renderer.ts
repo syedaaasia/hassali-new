@@ -37,7 +37,7 @@ export function visitorReadyText(value: string) {
     .replace(/\bprototype inventory\b/gi, "featured inventory")
     .replace(/\beditable samples?\b/gi, "representative examples")
     .replace(/\beditable placeholders?\b/gi, "representative details")
-    .replace(/\bprototype content\b/gi, "representative content")
+    .replace(/\bprototype content\b/gi, "featured content")
     .replace(/\bgenerated demo\b/gi, "website")
     .replace(/\bgenerated case studies\b/gi, "representative case studies")
     .replace(/\bgenerated properties\b/gi, "representative properties")
@@ -60,6 +60,14 @@ function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "item";
 }
 
+function semanticItemAttributes(item: WebsiteSectionBlueprint["items"][number]) {
+  return [
+    `data-entity-label="${escapeHtml(item.title)}"`,
+    item.semanticType ? `data-entity-type="${escapeHtml(item.semanticType)}"` : "",
+    item.evidenceKey ? `data-trust-signal="${escapeHtml(item.evidenceKey)}"` : ""
+  ].filter(Boolean).join(" ");
+}
+
 function visitorHref(target: string) {
   if (/^(?:#|mailto:|tel:|https?:\/\/)/i.test(target)) return target;
   return `./${target.replace(/^\.?\//, "")}`;
@@ -70,6 +78,12 @@ function nav(blueprint: WebsiteQualityBlueprint, activePage: string) {
 }
 
 function mediaFor(blueprint: WebsiteQualityBlueprint, role: WebsiteMediaAsset["role"], index = 0, semanticText = "") {
+  if (
+    role === "hero" &&
+    blueprint.assetPlan.assets.some((asset) => asset.destination.section === "hero" && asset.role === "no_asset_required")
+  ) {
+    return null;
+  }
   const exactMatches = blueprint.media.filter((asset) => asset.role === role);
   if (role !== "card") return exactMatches[index] ?? null;
   if (exactMatches.length > 0) {
@@ -89,11 +103,17 @@ function renderMediaFrame(asset: WebsiteMediaAsset, className: string, critical 
   return markup;
 }
 
+function renderBrandMark(blueprint: WebsiteQualityBlueprint, size: number) {
+  const logo = mediaFor(blueprint, "logo");
+  if (!logo) return renderInlineLogo(blueprint, size);
+  return `<img class="brand-logo" src="${escapeHtml(logo.url)}" width="${size}" height="${size}" alt="${escapeVisitorText(logo.alt)}" loading="eager" decoding="async" data-media-provider="workspace" data-fallback-src="./${escapeHtml(logo.fallbackAsset)}" />`;
+}
+
 function renderCards(blueprint: WebsiteQualityBlueprint, section: WebsiteSectionBlueprint, className = "entity-grid") {
   return `<div class="${className}">
 ${section.items.map((item, index) => {
     const itemMedia = mediaFor(blueprint, "card", index, `${item.title} ${item.detail} ${item.meta ?? ""}`);
-    return `          <article class="entity-card reveal" data-category="${escapeHtml(slug(item.meta ?? item.title))}">
+    return `          <article class="entity-card reveal" data-category="${escapeHtml(slug(item.meta ?? item.title))}" ${semanticItemAttributes(item)}>
             ${itemMedia ? renderMediaFrame(itemMedia, "entity-media") : `<div class="entity-art art-${(index % 6) + 1}" aria-hidden="true"><span>${String(index + 1).padStart(2, "0")}</span></div>`}
             ${item.meta ? `<p class="item-meta">${escapeVisitorText(item.meta)}</p>` : ""}
             <h3>${escapeVisitorText(item.title)}</h3>
@@ -108,7 +128,7 @@ function renderCarousel(blueprint: WebsiteQualityBlueprint, section: WebsiteSect
           <div class="carousel-track" data-carousel-track>
 ${section.items.map((item, index) => {
     const itemMedia = mediaFor(blueprint, "card", index, `${item.title} ${item.detail} ${item.meta ?? ""}`);
-    return `            <article class="carousel-slide entity-card" data-carousel-slide aria-label="${index + 1} of ${section.items.length}">
+    return `            <article class="carousel-slide entity-card" data-carousel-slide aria-label="${index + 1} of ${section.items.length}" ${semanticItemAttributes(item)}>
               ${itemMedia ? renderMediaFrame(itemMedia, "carousel-media") : `<div class="entity-art art-${(index % 6) + 1}" aria-hidden="true"><span>${String(index + 1).padStart(2, "0")}</span></div>`}
                <p class="item-meta">${escapeVisitorText(item.meta ?? "Featured option")}</p>
                <h3>${escapeVisitorText(item.title)}</h3>
@@ -165,7 +185,7 @@ function renderComparison(section: WebsiteSectionBlueprint) {
   return `<div class="comparison-wrap"><table>
           <caption>${escapeHtml(section.title)}</caption>
           <thead><tr><th scope="col">Option</th><th scope="col">Best for</th><th scope="col">What to confirm</th></tr></thead>
-          <tbody>${section.items.slice(0, 4).map((item) => `<tr><th scope="row">${escapeVisitorText(item.title)}</th><td>${escapeVisitorText(item.meta ?? "Specific needs")}</td><td>${escapeVisitorText(item.detail)}</td></tr>`).join("")}</tbody>
+          <tbody>${section.items.slice(0, 4).map((item) => `<tr ${semanticItemAttributes(item)}><th scope="row">${escapeVisitorText(item.title)}</th><td>${escapeVisitorText(item.meta ?? "Specific needs")}</td><td>${escapeVisitorText(item.detail)}</td></tr>`).join("")}</tbody>
         </table></div>`;
 }
 
@@ -184,6 +204,14 @@ ${section.items.slice(0, 6).map((item, index) => {
         </div>`;
 }
 
+function renderEditorial(section: WebsiteSectionBlueprint) {
+  return `<div class="editorial-ledger">${section.items.slice(0, 6).map((item, index) => `<article><span>${String(index + 1).padStart(2, "0")}</span><div><h3>${escapeVisitorText(item.title)}</h3><p>${escapeVisitorText(item.detail)}</p></div>${item.meta ? `<strong>${escapeVisitorText(item.meta)}</strong>` : ""}</article>`).join("")}</div>`;
+}
+
+function renderStats(section: WebsiteSectionBlueprint) {
+  return `<dl class="metric-row">${section.items.slice(0, 4).map((item) => `<div><dt>${escapeVisitorText(item.title)}</dt><dd>${escapeVisitorText(item.meta ?? item.detail)}</dd><p>${escapeVisitorText(item.detail)}</p></div>`).join("")}</dl>`;
+}
+
 function renderSection(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlueprint, section: WebsiteSectionBlueprint, index: number) {
   let content: string;
   if (section.kind === "carousel") content = renderCarousel(blueprint, section);
@@ -193,10 +221,12 @@ function renderSection(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlue
   else if (section.kind === "form") content = renderForm(blueprint, section);
   else if (section.kind === "gallery") content = renderGallery(blueprint, section);
   else if (section.kind === "process") content = renderProcess(section);
+  else if (section.kind === "content") content = renderEditorial(section);
+  else if (section.kind === "stats") content = renderStats(section);
   else content = renderCards(blueprint, section, section.kind === "trust" ? "trust-grid" : "entity-grid");
 
   const experience = experienceForSection(blueprint.experience, page.path, section.id);
-  return `      <section class="content-section section-${escapeHtml(section.kind)}" id="${escapeHtml(section.id)}" data-experience-engine="${escapeHtml(experience?.engine ?? "standard_html")}">
+  return `      <section class="content-section section-${escapeHtml(section.kind)} layout-${escapeHtml(blueprint.composition.gridStrategy)} density-${escapeHtml(blueprint.composition.density)}" id="${escapeHtml(section.id)}" data-section-role="${escapeHtml(section.kind)}" data-experience-engine="${escapeHtml(experience?.engine ?? "standard_html")}">
         <div class="section-heading reveal">
           <p class="eyebrow">${escapeVisitorText(section.eyebrow)}</p>
           <h2>${escapeVisitorText(section.title)}</h2>
@@ -205,6 +235,20 @@ function renderSection(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlue
         ${content}
       </section>${index % 3 === 1 ? `
       <aside class="signal-band reveal" aria-label="Key business principle"><p>${escapeVisitorText(blueprint.business.differentiators[index % blueprint.business.differentiators.length] ?? blueprint.brand.tagline)}</p><span>${escapeVisitorText(blueprint.brand.generatedName)}</span></aside>` : ""}`;
+}
+
+function renderCompositionHeroArt(blueprint: WebsiteQualityBlueprint) {
+  const labels = blueprint.contentContract.offerItems.slice(0, 5).map((item) => item.title);
+  if (blueprint.composition.heroArchitecture === "material-immersion") {
+    return `<div class="material-spectrum" role="img" aria-label="${escapeVisitorText(`${blueprint.brand.generatedName} color and material composition`)}">${labels.map((label, index) => `<span class="material-swatch swatch-${index + 1}"><strong>${escapeVisitorText(label)}</strong></span>`).join("")}</div>`;
+  }
+  if (blueprint.composition.heroArchitecture === "product-interface") {
+    return `<div class="product-proof-panel"><p>Product overview</p>${labels.slice(0, 4).map((label, index) => `<div><span>${String(index + 1).padStart(2, "0")}</span><strong>${escapeVisitorText(label)}</strong></div>`).join("")}</div>`;
+  }
+  if (blueprint.composition.heroArchitecture === "editorial-story") {
+    return `<div class="editorial-folio"><span>01</span><strong>${escapeVisitorText(blueprint.brand.tagline)}</strong><p>${escapeVisitorText(labels.slice(0, 3).join(" / "))}</p></div>`;
+  }
+  return `<div class="destination-window"><span>${escapeVisitorText(blueprint.business.businessType)}</span><strong>${escapeVisitorText(blueprint.brand.generatedName)}</strong><p>${escapeVisitorText(labels.slice(0, 3).join(" · "))}</p></div>`;
 }
 
 function schemaFor(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlueprint) {
@@ -221,7 +265,7 @@ function renderHero(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
   const nextPage = blueprint.pages.find((candidate) => candidate.name !== page.name);
   const heroMedia = page.name === "home" ? mediaFor(blueprint, "hero") : null;
   const experience = experienceForSection(blueprint.experience, page.path, page.name === "home" ? "hero" : `${page.name}-hero`);
-  return `      <section class="hero" aria-labelledby="page-title" data-experience-engine="${escapeHtml(experience?.engine ?? "standard_html")}">
+  return `      <section class="hero hero-${escapeHtml(blueprint.composition.heroArchitecture)} media-${escapeHtml(blueprint.composition.mediaRelationship)}" aria-labelledby="page-title" data-experience-engine="${escapeHtml(experience?.engine ?? "standard_html")}">
         <div class="hero-copy reveal">
           <p class="eyebrow">${escapeVisitorText(page.visitorCopy.eyebrow)}</p>
           <h1 id="page-title">${escapeVisitorText(page.visitorCopy.heading)}</h1>
@@ -234,7 +278,7 @@ function renderHero(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
         </div>
         <div class="hero-stage">
           <div class="hero-visual">
-            ${heroMedia ? renderMediaFrame(heroMedia, "hero-media", true) : `<img src="./assets/hero-fallback.svg" width="1200" height="900" alt="${escapeHtml(`${blueprint.brand.generatedName} ${blueprint.brand.visualArchetype} artwork`)}" />`}
+            ${heroMedia ? renderMediaFrame(heroMedia, "hero-media", true) : renderCompositionHeroArt(blueprint)}
           </div>
           <div class="stage-caption"><span>${escapeHtml(blueprint.brand.visualArchetype)}</span><strong>${escapeHtml(blueprint.brand.tagline)}</strong></div>
         </div>
@@ -243,8 +287,8 @@ function renderHero(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
 
 function renderFooter(blueprint: WebsiteQualityBlueprint) {
   const secondary = blueprint.pages.slice(0, 4);
-  return `    <footer class="site-footer">
-      <div class="footer-brand"><a class="brand" href="./index.html">${renderInlineLogo(blueprint, 34)}<span>${escapeVisitorText(blueprint.brand.generatedName)}</span></a><p>${escapeVisitorText(blueprint.brand.tagline)}</p></div>
+  return `    <footer class="site-footer footer-${escapeHtml(blueprint.composition.footerStrategy)}">
+      <div class="footer-brand"><a class="brand" href="./index.html">${renderBrandMark(blueprint, 34)}<span>${escapeVisitorText(blueprint.brand.generatedName)}</span></a><p>${escapeVisitorText(blueprint.brand.tagline)}</p></div>
       <div><h2>Explore</h2><ul>${secondary.map((page) => `<li><a href="./${page.path}">${escapeHtml(page.name === "home" ? "Home" : page.name.replace(/[-_]/g, " "))}</a></li>`).join("")}</ul></div>
       <div><h2>What matters</h2><ul>${blueprint.business.differentiators.map((item) => `<li>${escapeVisitorText(item)}</li>`).join("")}</ul></div>
       <div><h2>Contact</h2><p>Use the inquiry page to share what you are looking for and how you would like to be contacted.</p></div>
@@ -253,6 +297,7 @@ function renderFooter(blueprint: WebsiteQualityBlueprint) {
 }
 
 function renderPage(blueprint: WebsiteQualityBlueprint, page: WebsitePageBlueprint) {
+  const heroMedia = mediaFor(blueprint, "hero");
   const experienceAfter = (sectionId: string) => {
     const experience = experienceForSection(blueprint.experience, page.path, sectionId);
     if (!experience) return "";
@@ -278,7 +323,7 @@ function renderPage(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
     <meta property="og:type" content="website" />
     <meta property="og:title" content="${escapeHtml(page.title)}" />
     <meta property="og:description" content="${escapeHtml(page.description)}" />
-    <meta property="og:image" content="./assets/hero-fallback.svg" />
+    ${heroMedia ? `<meta property="og:image" content="${escapeHtml(heroMedia.url)}" />` : ""}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${escapeHtml(page.title)}" />
     <meta name="twitter:description" content="${escapeHtml(page.description)}" />
@@ -286,10 +331,10 @@ function renderPage(blueprint: WebsiteQualityBlueprint, page: WebsitePageBluepri
     <link rel="stylesheet" href="./styles.css" />
     <script type="application/ld+json">${schemaFor(blueprint, page)}</script>
   </head>
-  <body data-page="${escapeHtml(page.name)}" data-hassali-preview-identity="${escapeHtml(blueprint.previewIdentity)}" data-webgl="${page.name === "home" && blueprint.webgl.enabled ? "enabled" : "disabled"}" data-3d-requirement="${page.name === "home" ? escapeHtml(blueprint.scene.requirement) : "not_requested"}" data-scene-recipe="${page.name === "home" ? escapeHtml(blueprint.scene.recipe) : "none"}" data-scene-spec-version="1" data-cinematic="${page.name === "home" && blueprint.cinematic.enabled ? "enabled" : "disabled"}" data-cinematic-requirement="${page.name === "home" ? escapeHtml(blueprint.cinematic.requirement) : "not_requested"}" data-cinematic-spec-version="1" data-experience-density="${blueprint.experience.advancedDensity}">
+  <body data-page="${escapeHtml(page.name)}" data-design-archetype="${escapeHtml(blueprint.brand.visualArchetype.toLowerCase())}" data-hassali-preview-identity="${escapeHtml(blueprint.previewIdentity)}" data-composition-hero="${escapeHtml(blueprint.composition.heroArchitecture)}" data-composition-grid="${escapeHtml(blueprint.composition.gridStrategy)}" data-composition-density="${escapeHtml(blueprint.composition.density)}" data-responsive-strategy="${escapeHtml(blueprint.composition.responsiveStrategy)}" data-webgl="${page.name === "home" && blueprint.webgl.enabled ? "enabled" : "disabled"}" data-cinematic="${page.name === "home" && blueprint.cinematic.enabled ? "enabled" : "disabled"}" data-experience-density="${blueprint.experience.advancedDensity}">
     <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="site-header" data-site-header>
-      <a class="brand" href="./index.html">${renderInlineLogo(blueprint, 38)}<span>${escapeHtml(blueprint.brand.generatedName)}</span></a>
+      <a class="brand" href="./index.html">${renderBrandMark(blueprint, 38)}<span>${escapeHtml(blueprint.brand.generatedName)}</span></a>
       <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation" data-menu-toggle><span class="sr-only">Open menu</span><span></span><span></span><span></span></button>
       <nav class="primary-navigation" id="primary-navigation" aria-label="Primary navigation" data-primary-navigation>
 ${nav(blueprint, page.name)}
@@ -348,37 +393,6 @@ function renderLogo(blueprint: WebsiteQualityBlueprint) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title" data-logo-symbol="${escapeHtml(blueprint.brand.logo.symbol)}"><title id="title">${escapeHtml(blueprint.brand.generatedName)} brand mark</title><rect width="64" height="64" rx="${blueprint.brand.logo.style === "emblem" ? 32 : 14}" fill="${escapeHtml(p.ink)}"/>${renderLogoGeometry(blueprint)}</svg>`;
 }
 
-function semanticFallbackGeometry(blueprint: WebsiteQualityBlueprint) {
-  const p = blueprint.brand.palette;
-  const capabilities = blueprint.business.capabilities.join(" ").toLowerCase();
-  if (/\b(?:typing|keyboard|keycaps|switches)\b/.test(capabilities)) {
-    return `<g fill="${escapeHtml(p.surface)}" stroke="${escapeHtml(p.ink)}" stroke-width="8">${Array.from({ length: 24 }, (_, index) => {
-      const column = index % 8;
-      const row = Math.floor(index / 8);
-      return `<rect x="${150 + column * 112}" y="${220 + row * 126}" width="88" height="88" rx="16" transform="translate(${row * 24} 0)"/>`;
-    }).join("")}</g><path d="M180 650h780" stroke="${escapeHtml(p.accent)}" stroke-width="32" stroke-linecap="round"/>`;
-  }
-  if (/\b(?:computer_hardware|modular_hardware|technical_product|equipment|robotics|drone)\b/.test(capabilities)) {
-    return `<rect x="170" y="120" width="650" height="650" rx="54" fill="${escapeHtml(p.ink)}"/><rect x="235" y="185" width="520" height="520" rx="30" fill="${escapeHtml(p.surface)}"/><rect x="285" y="250" width="230" height="180" rx="20" fill="${escapeHtml(p.accent)}"/><rect x="555" y="250" width="150" height="380" rx="20" fill="${escapeHtml(p.accentAlt)}"/><path d="M285 485h230M285 545h230M285 605h230" stroke="${escapeHtml(p.ink)}" stroke-width="22" stroke-linecap="round"/><circle cx="940" cy="330" r="145" fill="none" stroke="${escapeHtml(p.accent)}" stroke-width="38"/><path d="M940 185v290M795 330h290" stroke="${escapeHtml(p.accentAlt)}" stroke-width="18"/>`;
-  }
-  if (/\b(?:coffee|beverage|food|materials|craft)\b/.test(capabilities)) {
-    return `<ellipse cx="380" cy="390" rx="210" ry="300" fill="${escapeHtml(p.accent)}" transform="rotate(-22 380 390)"/><path d="M280 160c190 160 190 330 70 510" fill="none" stroke="${escapeHtml(p.ink)}" stroke-width="34"/><circle cx="820" cy="330" r="210" fill="${escapeHtml(p.surface)}" stroke="${escapeHtml(p.accentAlt)}" stroke-width="32"/><path d="M760 210c120 90 130 240 25 355" fill="none" stroke="${escapeHtml(p.accent)}" stroke-width="30" stroke-linecap="round"/>`;
-  }
-  if (/\b(?:software|saas|workflow|analytics|reporting)\b/.test(capabilities)) {
-    return `<rect x="130" y="150" width="420" height="250" rx="30" fill="${escapeHtml(p.surface)}" stroke="${escapeHtml(p.ink)}" stroke-width="12"/><rect x="650" y="230" width="420" height="250" rx="30" fill="${escapeHtml(p.accent)}"/><rect x="300" y="520" width="480" height="220" rx="30" fill="${escapeHtml(p.accentAlt)}"/><path d="M550 275h100M450 400v120M780 480l-80 40" fill="none" stroke="${escapeHtml(p.ink)}" stroke-width="22" stroke-linecap="round"/>`;
-  }
-  if (/\b(?:architecture|spatial|property|construction)\b/.test(capabilities)) {
-    return `<path d="M140 710V350l270-170 210 130 190-120 250 160v360Z" fill="${escapeHtml(p.surface)}" stroke="${escapeHtml(p.ink)}" stroke-width="18"/><path d="M410 180v530M620 310v400M810 190v520M140 500h920" fill="none" stroke="${escapeHtml(p.accent)}" stroke-width="20"/><rect x="690" y="390" width="120" height="220" fill="${escapeHtml(p.accentAlt)}"/>`;
-  }
-  return `<circle cx="350" cy="310" r="260" fill="${escapeHtml(p.accent)}" opacity=".82"/><path d="M630 110 1080 350 850 770 470 540Z" fill="${escapeHtml(p.accentAlt)}" opacity=".75"/><circle cx="820" cy="290" r="100" fill="${escapeHtml(p.surface)}" opacity=".88"/><path d="M120 720C340 520 500 870 760 650s320-30 370 70" fill="none" stroke="${escapeHtml(p.ink)}" stroke-width="28" stroke-linecap="round" opacity=".65"/>`;
-}
-
-function renderFallback(blueprint: WebsiteQualityBlueprint) {
-  const p = blueprint.brand.palette;
-  const subject = blueprint.business.visualSubjects.slice(0, 3).join(", ") || blueprint.brand.visualArchetype;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc"><title id="title">${escapeHtml(blueprint.brand.generatedName)} visual</title><desc id="desc">Designed artwork representing ${escapeHtml(subject)}.</desc><rect width="1200" height="900" rx="48" fill="${escapeHtml(p.background)}"/>${semanticFallbackGeometry(blueprint)}</svg>`;
-}
-
 function renderMediaFallback(blueprint: WebsiteQualityBlueprint, asset: WebsiteMediaAsset) {
   const p = blueprint.brand.palette;
   const label = asset.semanticTags.slice(0, 3).join(" / ") || blueprint.business.businessType;
@@ -420,26 +434,36 @@ function renderMediaJs() {
 
 function renderCss(blueprint: WebsiteQualityBlueprint) {
   const p = blueprint.brand.palette;
+  const flatVisuals = blueprint.brand.designConstraints.decorativeGradients === "avoid";
+  const minimalShadows = blueprint.brand.designConstraints.uiShadows === "minimal";
+  const accentHex = p.accentAlt.match(/^#([0-9a-f]{6})$/i)?.[1];
+  const accentContrast = accentHex && ((Number.parseInt(accentHex.slice(0, 2), 16) * 299 + Number.parseInt(accentHex.slice(2, 4), 16) * 587 + Number.parseInt(accentHex.slice(4, 6), 16) * 114) / 1000) > 150
+    ? "#000000"
+    : "#ffffff";
+  const backgroundHex = p.background.match(/^#([0-9a-f]{6})$/i)?.[1];
+  const darkCanvas = Boolean(backgroundHex && ((Number.parseInt(backgroundHex.slice(0, 2), 16) * 299 + Number.parseInt(backgroundHex.slice(2, 4), 16) * 587 + Number.parseInt(backgroundHex.slice(4, 6), 16) * 114) / 1000) < 96);
   return `:root {
-  color-scheme: light;
+  color-scheme: ${darkCanvas ? "dark" : "light"};
   --bg: ${p.background};
   --surface: ${p.surface};
   --ink: ${p.ink};
   --muted: ${p.muted};
   --accent: ${p.accent};
   --accent-alt: ${p.accentAlt};
+  --accent-contrast: ${accentContrast};
   --border: ${p.border};
-  --overlay-bg: color-mix(in srgb, ${p.ink} 88%, transparent);
-  --overlay-text: ${p.background};
-  --overlay-muted: color-mix(in srgb, ${p.background} 72%, transparent);
-  --overlay-border: color-mix(in srgb, ${p.background} 30%, transparent);
+  --overlay-bg: color-mix(in srgb, ${p.background} 88%, transparent);
+  --overlay-text: ${p.ink};
+  --overlay-muted: color-mix(in srgb, ${p.ink} 72%, transparent);
+  --overlay-border: color-mix(in srgb, ${p.ink} 30%, transparent);
   --font-display: ${blueprint.brand.typography.display};
   --font-body: ${blueprint.brand.typography.body};
+  --display-tracking: ${blueprint.brand.typography.displayTracking};
   --container: 1180px;
   --radius-sm: 8px;
   --radius-md: 16px;
   --radius-lg: 28px;
-  --shadow: 0 24px 70px color-mix(in srgb, var(--ink) 12%, transparent);
+  --shadow: ${minimalShadows ? "none" : "0 24px 70px color-mix(in srgb, var(--ink) 12%, transparent)"};
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-text: var(--ink);
@@ -466,19 +490,22 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 .site-header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: min(calc(100% - 2rem), var(--container)); margin: 0 auto; padding: .85rem 0; transition: background-color .2s ease, box-shadow .2s ease; }
 .site-header.is-scrolled { background: color-mix(in srgb, var(--bg) 90%, transparent); box-shadow: 0 1px 0 var(--border); backdrop-filter: blur(18px); }
 .brand { display: inline-flex; align-items: center; gap: .65rem; min-width: 0; font-family: var(--font-display); font-weight: 800; }
-.brand-mark { flex: 0 0 auto; }
+.brand-mark, .brand-logo { flex: 0 0 auto; }
+.brand-logo { object-fit: contain; }
 .primary-navigation { display: flex; align-items: center; gap: clamp(.7rem, 2vw, 1.35rem); font-size: .9rem; font-weight: 650; }
 .primary-navigation > a { padding: .65rem .1rem; color: var(--muted); text-transform: capitalize; }
 .primary-navigation > a:hover, .primary-navigation > a[aria-current="page"] { color: var(--ink); }
-.nav-cta, .button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent); color: var(--ink); padding: .72rem 1.15rem; font-weight: 800; transition: transform .18s ease, box-shadow .18s ease; }
-.nav-cta:hover, .button:hover { transform: translateY(-2px); box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 28%, transparent); }
+.nav-cta, .button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--accent-alt); border-radius: 999px; background: var(--accent-alt); color: var(--accent-contrast); padding: .72rem 1.15rem; font-weight: 800; transition: transform .18s ease, box-shadow .18s ease; }
+.nav-cta:hover, .button:hover { transform: translateY(-2px); box-shadow: ${minimalShadows ? "none" : "0 12px 28px color-mix(in srgb, var(--accent-alt) 28%, transparent)"}; }
 .menu-toggle { display: none; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); padding: 11px; }
 .menu-toggle span:not(.sr-only) { display: block; height: 2px; margin: 4px 0; background: var(--ink); transition: transform .2s ease, opacity .2s ease; }
 main { width: min(calc(100% - 2rem), var(--container)); margin: 0 auto; }
 .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, .86fr); align-items: center; gap: clamp(2rem, 6vw, 5rem); min-height: min(760px, calc(100vh - 7rem)); padding: clamp(3rem, 8vw, 7rem) 0; }
+[data-design-archetype*="cinematic"] .hero { width: 100vw; max-width: none; min-height: calc(100vh - 4rem); margin-left: calc(50% - 50vw); padding-inline: max(1rem, calc((100vw - var(--container)) / 2)); }
+[data-design-archetype*="cinematic"] .hero-stage { border-color: color-mix(in srgb, var(--ink) 18%, transparent); background: var(--surface); }
 .eyebrow { margin: 0 0 .7rem; color: var(--accent-alt); font-size: .76rem; font-weight: 850; text-transform: uppercase; }
 h1, h2, h3, p { margin-top: 0; }
-h1, h2, h3 { font-family: var(--font-display); letter-spacing: 0; }
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: var(--display-tracking); }
 h1 { max-width: 13ch; margin-bottom: 1rem; font-size: clamp(2.7rem, 7vw, 6.6rem); line-height: .98; }
 h2 { margin-bottom: .8rem; font-size: clamp(1.9rem, 4vw, 3.7rem); line-height: 1.05; }
 h3 { margin-bottom: .45rem; font-size: clamp(1.05rem, 2vw, 1.35rem); }
@@ -492,6 +519,26 @@ h3 { margin-bottom: .45rem; font-size: clamp(1.05rem, 2vw, 1.35rem); }
 .hero-visual { position: relative; min-height: 520px; overflow: hidden; }
 .hero-visual > img, .hero-visual > .media-frame { position: absolute; inset: 0; width: 100%; height: 100%; }
 .hero-visual > img, .hero-visual .media-frame img { width: 100%; height: 100%; object-fit: cover; }
+.hero-material-immersion { grid-template-columns: minmax(18rem, .72fr) minmax(22rem, 1.28fr); }
+.hero-destination-split .hero-stage { order: -1; }
+.hero-editorial-story { position: relative; grid-template-columns: minmax(0, 1fr); min-height: min(820px, calc(100vh - 5rem)); }
+.hero-editorial-story .hero-copy { position: relative; z-index: 2; max-width: 54rem; padding: clamp(2rem, 7vw, 7rem); }
+.hero-editorial-story .hero-stage { position: absolute; inset: 0; z-index: 0; opacity: .5; }
+.hero-editorial-story .hero-visual { min-height: 100%; }
+.hero-product-interface { grid-template-columns: minmax(20rem, .82fr) minmax(24rem, 1.18fr); }
+.material-spectrum { display: grid; grid-template-columns: 1.3fr .75fr 1fr; grid-template-rows: repeat(2, minmax(180px, 1fr)); min-height: 520px; gap: 2px; background: var(--border); }
+.material-swatch { display: flex; align-items: flex-end; min-width: 0; padding: 1rem; background: color-mix(in srgb, var(--accent) 72%, var(--surface)); }
+.material-swatch:nth-child(2n) { background: color-mix(in srgb, var(--accent-alt) 64%, var(--bg)); }
+.material-swatch:nth-child(3n) { background: color-mix(in srgb, var(--ink) 82%, var(--accent)); color: var(--surface); }
+.material-swatch:first-child { grid-row: span 2; }
+.material-swatch strong { max-width: 12ch; font-family: var(--font-display); font-size: clamp(1rem, 2vw, 1.55rem); line-height: 1.05; }
+.destination-window, .editorial-folio, .product-proof-panel { display: grid; align-content: end; min-height: 520px; padding: clamp(1.5rem, 5vw, 4rem); background: ${flatVisuals ? "var(--ink)" : "linear-gradient(150deg, color-mix(in srgb, var(--accent) 55%, var(--surface)), color-mix(in srgb, var(--ink) 90%, var(--accent-alt)))"}; color: var(--surface); }
+.destination-window strong, .editorial-folio strong { max-width: 12ch; font-family: var(--font-display); font-size: clamp(2.2rem, 6vw, 5.8rem); line-height: .95; }
+.editorial-folio { grid-template-columns: auto 1fr; gap: 1rem 2rem; align-content: center; }
+.editorial-folio > span { font-size: .8rem; font-weight: 900; }
+.editorial-folio > p { grid-column: 2; }
+.product-proof-panel { align-content: center; gap: .7rem; background: color-mix(in srgb, var(--surface) 92%, var(--accent)); color: var(--ink); }
+.product-proof-panel > div { display: grid; grid-template-columns: 3rem 1fr; gap: 1rem; border-top: 1px solid var(--border); padding: 1rem 0; }
 .media-frame { position: relative; display: block; overflow: hidden; margin: 0; border-radius: calc(var(--radius-md) - 4px); background: color-mix(in srgb, var(--surface) 78%, var(--accent)); aspect-ratio: 3 / 2; }
 .media-frame img { display: block; min-height: 0; width: 100%; height: 100%; object-fit: cover; }
 .media-frame.is-media-fallback img { object-fit: cover; }
@@ -500,7 +547,7 @@ h3 { margin-bottom: .45rem; font-size: clamp(1.05rem, 2vw, 1.35rem); }
 .media-credit a { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); text-underline-offset: 2px; }
 .entity-media, .carousel-media { margin-bottom: 1rem; aspect-ratio: 4 / 3; }
 .gallery-media { min-height: 300px; }
-.scene-section { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(16rem, .72fr) minmax(22rem, 1.1fr); min-height: clamp(38rem, 78vh, 54rem); width: min(calc(100% - 2rem), var(--container)); align-items: center; gap: clamp(2rem, 6vw, 6rem); margin: 0 auto; overflow: clip; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+${blueprint.webgl.enabled ? `.scene-section { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(16rem, .72fr) minmax(22rem, 1.1fr); min-height: clamp(38rem, 78vh, 54rem); width: min(calc(100% - 2rem), var(--container)); align-items: center; gap: clamp(2rem, 6vw, 6rem); margin: 0 auto; overflow: clip; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .scene-content { position: relative; z-index: 2; padding-block: clamp(4rem, 10vw, 8rem); }
 .scene-content > p { max-width: 58ch; color: var(--muted); }
 .scene-steps { display: grid; gap: .8rem; margin: 2rem 0 0; padding: 0; list-style: none; }
@@ -518,22 +565,29 @@ h3 { margin-bottom: .45rem; font-size: clamp(1.05rem, 2vw, 1.35rem); }
 .scene-section.is-scene-ready .scene-viewport canvas { opacity: 1; }
 .scene-section.is-scene-ready .scene-fallback { opacity: 0; }
 .scene-section.is-scene-fallback .scene-viewport canvas { display: none; }
-.scene-section.is-scene-failed .scene-viewport canvas { display: none; }
+.scene-section.is-scene-failed .scene-viewport canvas { display: none; }` : ""}
 .stage-caption { position: relative; z-index: 2; display: flex; justify-content: space-between; gap: 1rem; max-width: none; border-top: 1px solid var(--border); background: var(--surface); color: var(--ink); padding: .8rem 1rem; }
 .stage-caption span { color: var(--muted); font-size: .75rem; }
 .content-section { padding: clamp(3.5rem, 8vw, 7rem) 0; border-top: 1px solid var(--border); }
+.density-airy { padding-block: clamp(5rem, 11vw, 9rem); }
+.density-dense { padding-block: clamp(2.5rem, 5vw, 4.5rem); }
+.layout-asymmetric-editorial .section-heading { grid-template-columns: minmax(0, 1.2fr) minmax(14rem, .45fr); }
+.layout-asymmetric-editorial:nth-of-type(even) .section-heading { grid-template-columns: minmax(14rem, .45fr) minmax(0, 1.2fr); }
+.layout-swatch-mosaic .gallery-grid, .layout-swatch-mosaic .entity-grid { grid-template-columns: 1.35fr .65fr 1fr; }
+.layout-modular-product .entity-grid, .layout-modular-product .metric-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.layout-split-destination .gallery-grid { grid-template-columns: 1.4fr .6fr; }
 .section-heading { display: grid; grid-template-columns: minmax(0, .8fr) minmax(16rem, .55fr); gap: 1rem 3rem; align-items: end; margin-bottom: clamp(1.5rem, 4vw, 3rem); }
 .section-heading .eyebrow { grid-column: 1 / -1; margin: 0; }
 .section-heading h2 { margin: 0; }
 .entity-grid, .trust-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
-.entity-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 1rem; box-shadow: 0 12px 34px color-mix(in srgb, var(--ink) 7%, transparent); }
+.entity-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 1rem; box-shadow: ${minimalShadows ? "none" : "0 12px 34px color-mix(in srgb, var(--ink) 7%, transparent)"}; }
 .entity-card p { color: var(--muted); }
-.entity-art, .gallery-art { display: grid; min-height: 190px; margin-bottom: 1rem; place-items: end start; border-radius: calc(var(--radius-md) - 4px); padding: 1rem; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 72%, var(--surface)), color-mix(in srgb, var(--accent-alt) 65%, var(--bg))); color: var(--ink); font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; }
-.art-2 { background: linear-gradient(155deg, var(--surface), color-mix(in srgb, var(--accent-alt) 62%, var(--bg))); }
-.art-3 { background: radial-gradient(circle at 70% 25%, var(--surface) 0 12%, transparent 13%), linear-gradient(135deg, var(--accent-alt), var(--accent)); }
-.art-4 { background: linear-gradient(45deg, color-mix(in srgb, var(--ink) 84%, var(--accent)), color-mix(in srgb, var(--accent) 55%, var(--surface))); color: var(--surface); }
-.art-5 { background: radial-gradient(circle at 30% 30%, var(--accent) 0 18%, transparent 19%), linear-gradient(130deg, var(--surface), var(--accent-alt)); }
-.art-6 { background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 32%, var(--surface)), color-mix(in srgb, var(--accent-alt) 74%, var(--bg))); }
+.entity-art, .gallery-art { display: grid; min-height: 190px; margin-bottom: 1rem; place-items: end start; border-radius: calc(var(--radius-md) - 4px); padding: 1rem; background: ${flatVisuals ? "color-mix(in srgb, var(--accent) 16%, var(--surface))" : "linear-gradient(135deg, color-mix(in srgb, var(--accent) 72%, var(--surface)), color-mix(in srgb, var(--accent-alt) 65%, var(--bg)))"}; color: var(--ink); font-family: var(--font-display); font-size: 1.4rem; font-weight: 900; }
+.art-2 { background: ${flatVisuals ? "var(--surface)" : "linear-gradient(155deg, var(--surface), color-mix(in srgb, var(--accent-alt) 62%, var(--bg)))"}; }
+.art-3 { background: ${flatVisuals ? "color-mix(in srgb, var(--accent-alt) 18%, var(--surface))" : "radial-gradient(circle at 70% 25%, var(--surface) 0 12%, transparent 13%), linear-gradient(135deg, var(--accent-alt), var(--accent))"}; }
+.art-4 { background: ${flatVisuals ? "var(--ink)" : "linear-gradient(45deg, color-mix(in srgb, var(--ink) 84%, var(--accent)), color-mix(in srgb, var(--accent) 55%, var(--surface)))"}; color: var(--surface); }
+.art-5 { background: ${flatVisuals ? "color-mix(in srgb, var(--ink) 8%, var(--surface))" : "radial-gradient(circle at 30% 30%, var(--accent) 0 18%, transparent 19%), linear-gradient(130deg, var(--surface), var(--accent-alt))"}; }
+.art-6 { background: ${flatVisuals ? "color-mix(in srgb, var(--accent) 10%, var(--surface))" : "linear-gradient(165deg, color-mix(in srgb, var(--accent) 32%, var(--surface)), color-mix(in srgb, var(--accent-alt) 74%, var(--bg)))"}; }
 .item-meta { margin-bottom: .4rem; color: var(--accent-alt) !important; font-size: .76rem; font-weight: 850; text-transform: uppercase; }
 .carousel { overflow: hidden; }
 .carousel-track { display: flex; gap: 1rem; transition: transform .35s ease; touch-action: pan-y; }
@@ -552,6 +606,15 @@ td { color: var(--muted); }
 .process-list { display: grid; gap: 1rem; margin: 0; padding: 0; list-style: none; }
 .process-list li { display: grid; grid-template-columns: 3rem 1fr; gap: 1rem; padding: 1.2rem 0; border-top: 1px solid var(--border); }
 .process-list > li > span { display: grid; width: 2.4rem; height: 2.4rem; place-items: center; border-radius: 50%; background: var(--accent); font-weight: 900; }
+.editorial-ledger { border-top: 1px solid var(--border); }
+.editorial-ledger article { display: grid; grid-template-columns: 3rem minmax(0, 1fr) auto; gap: 1rem; padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
+.editorial-ledger article > span, .editorial-ledger article > strong { color: var(--accent-alt); font-size: .76rem; font-weight: 850; }
+.editorial-ledger article p { max-width: 64ch; margin: 0; color: var(--muted); }
+.metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; background: var(--border); }
+.metric-row > div { min-width: 0; background: var(--surface); padding: clamp(1rem, 3vw, 2rem); }
+.metric-row dt { color: var(--muted); font-size: .78rem; font-weight: 800; text-transform: uppercase; }
+.metric-row dd { margin: .5rem 0; font-family: var(--font-display); font-size: clamp(1.4rem, 3vw, 2.7rem); font-weight: 850; }
+.metric-row p { color: var(--muted); }
 .faq-list { border-top: 1px solid var(--border); }
 .faq-item { border-bottom: 1px solid var(--border); }
 .faq-item h3 { margin: 0; }
@@ -574,6 +637,9 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
 .signal-band { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: clamp(2rem, 5vw, 4rem) 0; border-radius: var(--radius-md); background: var(--ink); color: var(--surface); padding: clamp(1.2rem, 4vw, 2.4rem); }
 .signal-band p { margin: 0; }
 .site-footer { display: grid; grid-template-columns: 1.4fr repeat(3, minmax(0, .75fr)); gap: 2rem; padding: clamp(3rem, 7vw, 6rem) max(1rem, calc((100vw - var(--container)) / 2)); border-top: 1px solid var(--border); background: var(--surface); }
+.footer-editorial { grid-template-columns: minmax(0, 1.8fr) repeat(2, minmax(0, .6fr)); }
+.footer-editorial > div:nth-child(3) { display: none; }
+.footer-conversion-led { border-top: 6px solid var(--accent); }
 .site-footer h2 { font-size: 1rem; }
 .site-footer ul { display: grid; gap: .55rem; margin: 0; padding: 0; color: var(--muted); list-style: none; }
 .footer-bottom { display: flex; grid-column: 1 / -1; justify-content: space-between; gap: 1rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .82rem; }
@@ -582,7 +648,7 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
 .reveal.is-visible { opacity: 1; transform: none; }
 @media (max-width: 900px) {
   .menu-toggle { display: block; }
-  .primary-navigation { position: fixed; inset: 0 0 0 auto; z-index: 60; display: flex; width: min(86vw, 360px); max-width: 100%; flex-direction: column; align-items: stretch; justify-content: center; padding: 5rem 2rem 2rem; background: var(--surface); box-shadow: -30px 0 80px color-mix(in srgb, var(--ink) 22%, transparent); visibility: hidden; transform: translateX(100%); transition: transform .25s ease, visibility 0s linear .25s; }
+  .primary-navigation { position: fixed; inset: 0 0 0 auto; z-index: 60; display: flex; width: min(86vw, 360px); max-width: 100%; flex-direction: column; align-items: stretch; justify-content: center; padding: 5rem 2rem 2rem; background: var(--surface); box-shadow: ${minimalShadows ? "none" : "-30px 0 80px color-mix(in srgb, var(--ink) 22%, transparent)"}; visibility: hidden; transform: translateX(100%); transition: transform .25s ease, visibility 0s linear .25s; }
   .primary-navigation.is-open { visibility: visible; transform: none; transition-delay: 0s; }
   .primary-navigation > a { padding: .8rem; }
   .menu-toggle[aria-expanded="true"] { position: fixed; right: 1rem; top: 1rem; z-index: 70; }
@@ -590,23 +656,30 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
   .menu-toggle[aria-expanded="true"] span:nth-child(3) { opacity: 0; }
   .menu-toggle[aria-expanded="true"] span:nth-child(4) { transform: translateY(-6px) rotate(-45deg); }
   .hero { grid-template-columns: 1fr; min-height: auto; }
-  .scene-section { grid-template-columns: 1fr; min-height: auto; }
+  .hero-destination-split .hero-stage { order: initial; }
+  .hero-editorial-story .hero-stage { position: relative; opacity: 1; }
+  .hero-editorial-story .hero-copy { padding-inline: 0; }
+  ${blueprint.webgl.enabled ? `.scene-section { grid-template-columns: 1fr; min-height: auto; }
   .scene-content { padding-bottom: 0; }
   .scene-viewport { min-height: 420px; }
-  .scene-semantic-cards { max-width: 42rem; }
+  .scene-semantic-cards { max-width: 42rem; }` : ""}
   .hero-visual { min-height: 420px; }
-  .entity-grid, .trust-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .entity-grid, .trust-grid, .metric-row, .layout-modular-product .entity-grid, .layout-modular-product .metric-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .site-footer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .footer-bottom { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
   .section-heading, .form-grid { grid-template-columns: 1fr; }
   .section-heading .eyebrow { grid-column: auto; }
-  .entity-grid, .trust-grid, .gallery-grid, .site-footer { grid-template-columns: 1fr; }
+  .entity-grid, .trust-grid, .gallery-grid, .site-footer, .metric-row, .layout-swatch-mosaic .gallery-grid, .layout-swatch-mosaic .entity-grid, .layout-split-destination .gallery-grid, .layout-modular-product .entity-grid, .layout-modular-product .metric-row { grid-template-columns: 1fr; }
+  .material-spectrum { grid-template-columns: 1fr 1fr; min-height: 360px; }
+  .material-swatch:first-child { grid-row: auto; grid-column: span 2; }
+  .editorial-ledger article { grid-template-columns: 2rem 1fr; }
+  .editorial-ledger article > strong { grid-column: 2; }
   .hero-visual { min-height: 340px; }
-  .scene-section { width: min(calc(100% - 2rem), var(--container)); gap: 1rem; }
+  ${blueprint.webgl.enabled ? `.scene-section { width: min(calc(100% - 2rem), var(--container)); gap: 1rem; }
   .scene-viewport { min-height: 320px; }
-  .scene-semantic-cards { grid-template-columns: 1fr; }
+  .scene-semantic-cards { grid-template-columns: 1fr; }` : ""}
   .signal-band, .footer-bottom { align-items: flex-start; flex-direction: column; }
   .gallery-1 { grid-row: auto; }
   .site-footer { padding-inline: 1rem; }
@@ -619,10 +692,10 @@ input, select, textarea { width: 100%; border: 1px solid var(--border); border-r
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .reveal { opacity: 1; transform: none; }
-  .scene-viewport canvas { display: none !important; }
-  .scene-fallback { opacity: 1 !important; }
+  ${blueprint.webgl.enabled ? `.scene-viewport canvas { display: none !important; }
+  .scene-fallback { opacity: 1 !important; }` : ""}
 }
-${renderWebsiteCinematicCss()}
+${blueprint.cinematic.enabled ? renderWebsiteCinematicCss() : ""}
 `;
 }
 
@@ -721,7 +794,6 @@ function renderJs(blueprint: WebsiteQualityBlueprint) {
 export function renderWebsiteQualityFiles(blueprint: WebsiteQualityBlueprint) {
   const files: Record<string, string> = {
     "assets/favicon.svg": renderLogo(blueprint),
-    "assets/hero-fallback.svg": renderFallback(blueprint),
     "assets/logo.svg": renderLogo(blueprint),
     "main.js": renderJs(blueprint),
     "robots.txt": "User-agent: *\nAllow: /\nSitemap: ./sitemap.xml\n",

@@ -32,7 +32,7 @@ export type WebsiteMediaAsset = {
   licenseNote?: string;
   provider: WebsiteMediaProvider;
   reliability: "curated" | "placeholder" | "prototype";
-  role: "card" | "hero" | "team";
+  role: "card" | "hero" | "logo" | "team";
   semanticTags: string[];
   url: string;
   width: number;
@@ -251,10 +251,7 @@ export function buildWebsiteMediaRegistry(input: {
     return [unsplash({ alt: "Sports car photographed on a road", domain, id: "car-hero", photoId: "photo-1503376780353-7e6692767b70", role: "hero", tags: ["car", "automotive", "vehicle"] })];
   }
   if (domain === "beauty") {
-    return [
-      prototypeAsset({ alt: "Sample mascara product for an editable beauty catalog", domain, id: "mascara-sample", provider: "dummyjson", role: "card", tags: ["beauty", "cosmetics", "mascara"], url: "https://cdn.dummyjson.com/product-images/beauty/essence-mascara-lash-princess/thumbnail.webp" }),
-      unsplash({ alt: "Beauty products arranged for an editorial skincare story", domain, id: "beauty-hero", photoId: "photo-1596462502278-27bfdc403348", role: "hero", tags: ["beauty", "cosmetics", "skincare"] })
-    ];
+    return [unsplash({ alt: "Beauty products arranged for an editorial cosmetics story", domain, id: "beauty-hero", photoId: "photo-1596462502278-27bfdc403348", role: "hero", tags: ["beauty", "cosmetics", "product discovery"] })];
   }
   if (domain === "fashion") {
     return [

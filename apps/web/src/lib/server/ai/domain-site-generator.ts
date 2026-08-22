@@ -25,6 +25,7 @@ import {
   type WebsiteQualityBlueprint
 } from "@/lib/server/ai/website-quality-blueprint";
 import { renderWebsiteQualityFiles } from "@/lib/server/ai/website-quality-renderer";
+import type { CompositionPlan } from "@/lib/server/ai/composition-engine";
 import { GSAP_VERSION, THREE_VERSION } from "@/lib/server/ai/website-scene-renderer";
 import type { WebsiteCinematicAssetInput } from "@/lib/server/ai/website-cinematic-asset-analyzer";
 import { renderProjectDesignMd } from "@/lib/server/design/direction/project-design-md";
@@ -32,6 +33,15 @@ import {
   reviewGeneratedWebsiteDesign,
   type DesignQualityReview
 } from "@/lib/server/design/direction/design-quality-kernel";
+import {
+  buildWebsiteVisualSourcePreflight,
+  summarizeWebsiteVisualQA,
+  type WebsiteVisualQAReport
+} from "@/lib/server/ai/website-visual-qa";
+import {
+  createWebsiteGrowthSourceSnapshot,
+  renderWebsiteGrowthSourceSnapshot
+} from "@/lib/server/ai/website-growth-handoff";
 
 export type SiteDomain =
   | "car rental"
@@ -82,6 +92,7 @@ export type PlannedWebsiteGeneration = {
   tokensStudioExportAvailable: boolean;
   validation: WebsiteValidationResult;
   validatorPlanAligned: boolean;
+  visualQA: WebsiteVisualQAReport;
 };
 
 const profiles: Record<SiteDomain, DomainProfile> = {
@@ -2191,8 +2202,10 @@ function layoutCssForClass(layoutClass: string) {
 
 export function generateComposedSiteFiles(input: {
   composition: CompositionStrategy;
+  compositionPlan?: CompositionPlan;
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
+  explicitAssetPaths?: string[];
   proposalContext?: ProposalContext;
   workspaceAssets?: WebsiteCinematicAssetInput[];
 }): Record<string, string> {
@@ -2201,8 +2214,10 @@ export function generateComposedSiteFiles(input: {
 
 export function generatePlannedWebsiteFiles(input: {
   composition: CompositionStrategy;
+  compositionPlan?: CompositionPlan;
   generatorContract?: GeneratorContract;
   intent: IntentIntelligence;
+  explicitAssetPaths?: string[];
   proposalContext?: ProposalContext;
   workspaceAssets?: WebsiteCinematicAssetInput[];
 }): PlannedWebsiteGeneration {
@@ -2214,10 +2229,13 @@ export function generatePlannedWebsiteFiles(input: {
   const qualityBlueprint = buildWebsiteQualityBlueprint({
     brief,
     composition: input.composition,
+    compositionPlan: input.compositionPlan,
     direction: creativeDirection,
+    explicitAssetPaths: input.explicitAssetPaths,
     intent: input.intent,
     plan,
-    projectBrand: projectDesignContract?.identity.userBrand,
+    projectBrand: input.intent.brandName,
+    projectDesignContract,
     prompt: input.proposalContext?.sourcePrompt ?? input.intent.summary,
     workspaceAssets: input.workspaceAssets
   });
@@ -2231,8 +2249,12 @@ export function generatePlannedWebsiteFiles(input: {
     : "none";
   const plannedFiles = renderWebsiteQualityFiles(qualityBlueprint);
   if (projectDesignContract) {
+    const outlinedAction = projectDesignContract.colors.primaryAction.value.toLowerCase() === projectDesignContract.colors.background.value.toLowerCase();
     plannedFiles["DESIGN.md"] = renderProjectDesignMd(projectDesignContract);
-    plannedFiles["styles.css"] = `${plannedFiles["styles.css"] ?? ""}\n\n/* Hassali ProjectDesignContract: ${projectDesignContract.fingerprint} */\n`;
+    plannedFiles["styles.css"] = `${plannedFiles["styles.css"] ?? ""}\n\n/* Hassali ProjectDesignContract: ${projectDesignContract.fingerprint} */\n:root {\n  --radius-sm: ${projectDesignContract.geometry.cardRadius};\n  --radius-md: ${projectDesignContract.geometry.cardRadius};\n  --radius-lg: ${projectDesignContract.geometry.cardRadius};\n  --radius-card: ${projectDesignContract.geometry.cardRadius};\n}\n.button, button, [class*="button"] { border-radius: ${projectDesignContract.geometry.buttonRadius}; }\n`;
+    if (outlinedAction) {
+      plannedFiles["styles.css"] += `\n.nav-cta, .button { border-color: ${projectDesignContract.colors.textPrimary.value}; color: ${projectDesignContract.colors.textPrimary.value}; }\n`;
+    }
   }
   plannedFiles["HASSALI.md"] = brief ? [
     "# HASSALI.md",
@@ -2263,7 +2285,7 @@ export function generatePlannedWebsiteFiles(input: {
     `exactPageCount: ${brief.exactPageCount ?? brief.requestedPages.length}`,
     `requiredFiles: ${brief.requiredFiles.join(", ")}`,
     `expectedVocabulary: ${brief.expectedVocabulary.join(", ")}`,
-    `trustSignals: ${brief.trustSignals.join(", ")}`,
+    `trustSignals: ${brief.trustSignals.join(", ") || "optional_unknown"}`,
     `ctaPatterns: ${brief.ctaPatterns.join(", ")}`,
     `contentTone: ${brief.contentTone}`,
     `conversionGoal: ${brief.conversionGoal}`,
@@ -2310,6 +2332,9 @@ export function generatePlannedWebsiteFiles(input: {
     `cinematicPolicy: ${qualitySummary.cinematic}`,
     `cinematicSourceAssets: ${qualityBlueprint.cinematic.sequences.flatMap((sequence) => sequence.sourceFrames).join(", ") || "none"}`,
     `assetIntelligence: ${qualitySummary.assets}`,
+    `assetPlan: ${qualitySummary.assetPlan}`,
+    `assetPlanActions: ${qualityBlueprint.assetPlan.assets.map((asset) => `${asset.role}:${asset.source}:${asset.status}`).join(" | ") || "none"}`,
+    `assetGenerationRequests: ${qualityBlueprint.assetPlan.generationRequests.length}`,
     `archiveStatus: ${qualityBlueprint.assets.archiveStatus}`,
     `cinematicCachePolicy: ${qualityBlueprint.cinematic.sequences.map((sequence) => `${sequence.id}:${sequence.cache.desktopLimit}/${sequence.cache.mobileLimit}`).join(", ") || "none"}`,
     `mediaPolicy: semantic registry with generated local fallback for every remote asset`,
@@ -2360,6 +2385,8 @@ export function generatePlannedWebsiteFiles(input: {
     `sceneDependencies: ${sceneDependencies}`,
     `cinematicPolicy: ${qualitySummary.cinematic}`,
     `cinematicSourceAssets: ${qualityBlueprint.cinematic.sequences.flatMap((sequence) => sequence.sourceFrames).join(", ") || "none"}`,
+    `assetPlan: ${qualitySummary.assetPlan}`,
+    `assetPlanActions: ${qualityBlueprint.assetPlan.assets.map((asset) => `${asset.role}:${asset.source}:${asset.status}`).join(" | ") || "none"}`,
     `mediaPolicy: semantic registry with generated local fallback for every remote asset`,
     `mediaAssets: ${qualityMediaRecords.join(" | ") || "local generated assets only"}`,
     "",
@@ -2369,6 +2396,48 @@ export function generatePlannedWebsiteFiles(input: {
     "- Do not mix unrelated domains into public copy.",
     "- Keep static preview files local and approval-first."
   ].join("\n");
+  const growthSourceSnapshot = createWebsiteGrowthSourceSnapshot({
+    assetPlan: qualityBlueprint.assetPlan,
+    authoritativeDomain: brief?.domainId ?? qualityBlueprint.business.domainId ?? (plan.sourceOfTruthDomain === "unknown" ? null : plan.sourceOfTruthDomain),
+    compositionPlan: input.compositionPlan,
+    contentContract: qualityBlueprint.contentContract,
+    designContract: projectDesignContract,
+    displayName: brief?.displayName ?? brandName,
+    pageRoutes: qualityBlueprint.pages.map((page) => page.path),
+    productOrServiceEntities: qualityBlueprint.contentEntities.map((entity) => entity.label)
+  });
+  plannedFiles["HASSALI.md"] = `${plannedFiles["HASSALI.md"] ?? ""}\n\n## Growth Handoff Source\n\n${renderWebsiteGrowthSourceSnapshot(growthSourceSnapshot)}\n`;
+  const visualQA = buildWebsiteVisualSourcePreflight({
+    availableAssetPaths: input.workspaceAssets?.map((asset) => asset.path),
+    candidateId: qualityBlueprint.previewIdentity,
+    expectations: {
+      assetPaths: qualityBlueprint.assetPlan.assets
+        .filter((asset) => ["home", "index.html"].includes(asset.destination.page) && asset.destination.section === "hero" && asset.role !== "no_asset_required")
+        .map((asset) => asset.sourcePath)
+        .filter((path): path is string => Boolean(path)),
+      cinematicEnabled: qualityBlueprint.cinematic.enabled,
+      compositionGrid: qualityBlueprint.composition.gridStrategy,
+      compositionHero: qualityBlueprint.composition.heroArchitecture,
+      imageStrategy: qualityBlueprint.assetPlan.imageStrategy,
+      webglEnabled: qualityBlueprint.webgl.enabled
+    },
+    files: plannedFiles,
+    page: "index.html",
+    projectId: null
+  });
+  const visualQASummary = summarizeWebsiteVisualQA(visualQA);
+  plannedFiles["HASSALI.md"] = `${plannedFiles["HASSALI.md"] ?? ""}
+
+## Visual QA
+
+visualQAPreflight: ${visualQASummary.status}
+visualQADeterministicChecksPassed: ${visualQASummary.deterministicChecksPassed}
+visualQARenderStatus: ${visualQASummary.renderStatus}
+visualQAScreenshotReview: ${visualQASummary.screenshotReview}
+visualQAVisionReview: ${visualQASummary.visionReview}
+visualQARequiredViewports: narrow_mobile:360, mobile:390, tablet:768, desktop:1024, large_desktop:1440
+visualQATruth: source preflight does not prove rendered visual quality; screenshot and vision evidence remain pending until actually captured
+`;
   const designQualityReview = projectDesignContract
     ? reviewGeneratedWebsiteDesign({ contract: projectDesignContract, files: plannedFiles })
     : null;
@@ -2398,7 +2467,8 @@ export function generatePlannedWebsiteFiles(input: {
     sourceOfTruthPages: plan.sourceOfTruthPages,
     tokensStudioExportAvailable: plan.tokensStudioExportAvailable,
     validation,
-    validatorPlanAligned: validation.passed || validation.blockedReasons.every((reason) => !reason.includes("planner page"))
+    validatorPlanAligned: validation.passed || validation.blockedReasons.every((reason) => !reason.includes("planner page")),
+    visualQA
   };
 }
 

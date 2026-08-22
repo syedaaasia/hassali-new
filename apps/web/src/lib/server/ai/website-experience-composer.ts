@@ -143,12 +143,14 @@ export function composeWebsiteExperience(input: {
     });
   }
   const sceneTarget = signals.webglRequested || input.scene.requirement === "required"
-    ? allSections.find((section) =>
+      ? allSections.find((section) =>
         section.pagePath === input.scene.pagePath &&
+        !transactionalKinds.has(section.kind) &&
         !sequenceAssignments.has(`${section.pagePath}:${section.id}`) &&
         opportunity(section, input.businessCapabilities) === "high"
       ) ?? allSections.find((section) =>
         section.pagePath === input.scene.pagePath &&
+        !transactionalKinds.has(section.kind) &&
         !sequenceAssignments.has(`${section.pagePath}:${section.id}`)
       )
     : null;

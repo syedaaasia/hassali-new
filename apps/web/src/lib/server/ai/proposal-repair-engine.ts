@@ -3,6 +3,7 @@ import type { BusinessBlueprint } from "@/lib/server/ai/blueprint-matcher";
 import type { CompositionPlan } from "@/lib/server/ai/composition-engine";
 import type { ContextPriorityResult } from "@/lib/server/ai/context-priority-engine";
 import type { DomainValidationResult } from "@/lib/server/ai/domain-validator";
+import { includesSemanticSignal } from "@/lib/server/ai/domain-signal-matcher";
 import type { ExecutionPlan } from "@/lib/server/ai/execution-planner";
 import type { GeneratorContract } from "@/lib/server/ai/generator-contract";
 import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
@@ -139,12 +140,16 @@ function repairForbiddenTerms(content: string, contract: GeneratorContract) {
 
   for (const term of contract.forbiddenTerms) {
     if (term.length < 4) continue;
-    const pattern = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    if (!includesSemanticSignal(content, term)) continue;
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`\\b${escaped.replace(/\s+/g, "[\\s-]+")}\\b`, "gi");
 
-    if (pattern.test(repaired)) {
+    repaired = repaired.replace(/<script\b[\s\S]*?<\/script>|<style\b[\s\S]*?<\/style>|<[^>]+>|[^<]+/gi, (segment) => {
+      if (segment.startsWith("<") || !pattern.test(segment)) return segment;
+      pattern.lastIndex = 0;
       changed = true;
-      repaired = repaired.replace(pattern, dominantPhrase(contract));
-    }
+      return segment.replace(pattern, dominantPhrase(contract));
+    });
   }
 
   repaired = repaired.replace(/\bHelp [^.]{0,100} understand [^.]{0,140}\./gi, () => {
@@ -321,14 +326,9 @@ function activeCodeContractPath(input: BuildProposalRepairInput) {
 
 function requiredRepairFiles(input: BuildProposalRepairInput) {
   if (input.generatorContract.generatorMode === "website_generation") {
-    if (input.proposalContext?.mode === "WEBSITE" && input.proposalContext.requiredFiles.length) {
-      return input.proposalContext.requiredFiles;
-    }
-
-    const pagePaths = (input.proposalContext?.pages.length ? input.proposalContext.pages : input.generatorContract.requiredPages)
-      .map(pageToPath);
-
-    return unique(["index.html", ...pagePaths, "styles.css", "main.js", "HASSALI.md"]);
+    // WEBSITE files must come from the deterministic domain generator. Repair may
+    // refine generated files, but it must not invent a generic replacement site.
+    return [];
   }
 
   if (input.generatorContract.generatorMode === "code_generation") {

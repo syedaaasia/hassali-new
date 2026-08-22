@@ -1,5 +1,6 @@
 import { buildDomainBlueprint, isTechnicalBlueprint } from "@/lib/server/ai/capability-domain-blueprint";
 import type { DiagnosticContext } from "@/lib/server/ai/diagnostic-context";
+import { extractVisibleWebsiteText, includesSemanticSignal } from "@/lib/server/ai/domain-signal-matcher";
 import type { IntentIntelligence } from "@/lib/server/ai/intent-intelligence";
 import type { CompositionStrategy } from "@/lib/server/ai/reasoning-composition";
 import { isFullWebsiteReplacementRequest } from "@/lib/server/ai/website-edit-intent";
@@ -434,6 +435,12 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
     .map((change) => change.proposedContent ?? "")
     .join("\n")
     .toLowerCase();
+  const publicWebsiteText = extractVisibleWebsiteText(
+    input.changes
+      .filter((change) => change.path?.endsWith(".html"))
+      .map((change) => change.proposedContent ?? "")
+      .join("\n")
+  ).toLowerCase();
   const isWebsiteRequest =
     input.decision.requestType === "website_generation" ||
     input.decision.requestType === "multi_page_generation";
@@ -630,7 +637,7 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
             "terminal"
           ];
 
-      if (!isTechnical && developerLeakTerms.some((term) => allContent.includes(term))) {
+      if (!isTechnical && developerLeakTerms.some((term) => includesSemanticSignal(publicWebsiteText, term))) {
         score -= 40;
         issues.push("non-technical business proposal contains developer/tooling wording");
       }
@@ -638,7 +645,7 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
       const domainSignals = blueprint.validationTerms
         .map((term) => term.toLowerCase())
         .filter((term) => term.length > 3 && !["business", "website", "services"].includes(term));
-      const matchedDomainSignals = domainSignals.filter((signal) => allContent.includes(signal));
+      const matchedDomainSignals = domainSignals.filter((signal) => includesSemanticSignal(publicWebsiteText, signal));
 
       if (domainSignals.length > 0 && matchedDomainSignals.length < Math.min(2, domainSignals.length)) {
         score -= 32;
@@ -649,7 +656,9 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
 
       if (
         blueprint.ambiguity.isAmbiguous &&
-        (allContent.includes("bicycle") || allContent.includes("cycling") || allContent.includes("motorcycle") || allContent.includes("motorbike"))
+        ["bicycle", "cycling", "motorcycle", "motorbike"].some((signal) =>
+          includesSemanticSignal(publicWebsiteText, signal)
+        )
       ) {
         score -= 24;
         issues.push("ambiguous bike request overcommits to bicycle or motorbike language");
@@ -657,14 +666,14 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
 
       if (
         (businessText.includes("perfume") || businessText.includes("fragrance")) &&
-        !/(fragrance|scent|oud|floral|citrus|musk|perfume bottle|tester|gift set|signature scent)/i.test(allContent)
+        !/(fragrance|scent|oud|floral|citrus|musk|perfume bottle|tester|gift set|signature scent)/i.test(publicWebsiteText)
       ) {
         score -= 32;
         issues.push("perfume proposal lacks fragrance-specific vocabulary");
       }
 
       const unrelatedTerms = unrelatedCategoryTerms(businessText).filter((term) =>
-        allContent.includes(term)
+        includesSemanticSignal(publicWebsiteText, term)
       );
 
       if (unrelatedTerms.length > 0) {
@@ -680,12 +689,12 @@ export function scoreProposalQuality(input: ProposalQualityInput) {
         .map((signal) => signal.toLowerCase())
         .filter((signal) => signal.length > 3);
 
-      if (businessSignals.length > 0 && !businessSignals.some((signal) => allContent.includes(signal))) {
+      if (businessSignals.length > 0 && !businessSignals.some((signal) => includesSemanticSignal(publicWebsiteText, signal))) {
         score -= 18;
         issues.push("composition business context is not reflected");
       }
 
-      if (repeatedOccurrences(allContent, /\bconnect [^.]{0,120} through a practical next step/gi) > 2) {
+      if (repeatedOccurrences(publicWebsiteText, /\bconnect [^.]{0,120} through a practical next step/gi) > 2) {
         score -= 18;
         issues.push("proposal repeats the same section copy pattern");
       }

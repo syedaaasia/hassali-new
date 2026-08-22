@@ -1,5 +1,9 @@
 import type { WebsiteGenerationBrief } from "@/lib/server/ai/generation-brief";
 import type { SemanticDomainEvidence } from "@/lib/server/ai/industry-taxonomy";
+import {
+  extractExplicitWebsiteBrand,
+  stripWebsiteInstructionSpans
+} from "@/lib/server/ai/website-request-objective";
 
 export type WebsiteFactClassification =
   | "DESIGN_RECOMMENDATION"
@@ -72,6 +76,8 @@ type OfferFamily =
   | "beauty"
   | "electronics"
   | "floral"
+  | "paint"
+  | "portfolio"
   | "professional_service"
   | "retail"
   | "software"
@@ -95,10 +101,7 @@ function titleCase(value: string) {
 }
 
 function explicitBusinessName(prompt: string) {
-  const match =
-    prompt.match(/\b(?:named|called)\s+([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i) ??
-    prompt.match(/\b(?:brand|business|company)\s+name\s+(?:is\s+)?([a-z0-9][a-z0-9&' -]{1,60}?)(?=\s+(?:with|and|using|that|which|for|to|it|should|as)\b|[,.!?]|$)/i);
-  const value = cleanText(match?.[1] ?? "");
+  const value = cleanText(extractExplicitWebsiteBrand(prompt) ?? "");
 
   return value && !/^(?:business|company|website|site|brand|unknown)$/i.test(value) ? value : null;
 }
@@ -124,7 +127,9 @@ function offerFamily(prompt: string, semantic: SemanticDomainEvidence): OfferFam
     ...semantic.capabilities
   ].join(" ")).toLowerCase();
 
+  if (/\b(?:paint brand|paint company|paint manufacturer|coatings?|interior paint|exterior paint|primer|paint finishes)\b/.test(text)) return "paint";
   if (/\b(?:artist|painter|artwork|painting|paintings|sculptor|illustrator|art portfolio)\b/.test(text)) return "artwork";
+  if (semantic.capabilities.includes("portfolio") || /\b(?:photographer|photography|cinematographer|creative portfolio|project portfolio)\b/.test(text)) return "portfolio";
   if (/\b(?:bakery|bake|baked|bread|cake|cakes|pastry|pastries)\b/.test(text)) return "bakery";
   if (/\b(?:flower|flowers|floral|florist|bouquet|wedding flower)\b/.test(text)) return "floral";
   if (/\b(?:beauty|skincare|skin care|cosmetic|makeup|korean beauty)\b/.test(text)) return "beauty";
@@ -148,10 +153,13 @@ function explicitAudience(prompt: string) {
     prompt.match(/\bserving\s+(.+?)(?=[,.!?]|\s+(?:with|who|that|while)\b|$)/i) ??
     prompt.match(/\bhelps?\s+(.+?)\s+(?:to\s+)?(?:follow|manage|track|plan|find|sell|buy|book|compare)\b/i) ??
     prompt.match(/\bfor\s+(.+?)(?=\s+(?:who|that|looking|seeking|needing)\b|[,.!?]|$)/i);
-  const candidate = cleanText(match?.[1] ?? "");
+  const candidate = cleanText(stripWebsiteInstructionSpans(match?.[1] ?? ""));
 
   if (!candidate || /^(?:a|an|the)?\s*(?:website|site|software|portfolio|business|brand)$/i.test(candidate)) return null;
+  if (/\b(?:portfolio|website|site|design reference|attached|uploaded)\b/i.test(candidate)) return null;
   if (/^(?:a|an|the)\s+[\s\S]*\b(?:artist|brand|business|company|painter|portfolio|service|shop|store|supplier|website)\b/i.test(candidate)) return null;
+  if (/\b(?:brand|business|company|portfolio|service|shop|store|supplier|website)\s*$/i.test(candidate)) return null;
+  if (/^(?:premium\s+)?[\s\S]*\b(?:brand|company|portfolio|service|shop|store|supplier|website)\b(?:\s+(?:with|using|follow|featuring)\b|$)/i.test(candidate)) return null;
   return candidate;
 }
 
@@ -177,6 +185,22 @@ function familyDetails(input: {
   const semanticLabel = cleanText(input.semantic.niche ?? input.semantic.label)
     .replace(/\b(?:business|website)$/i, "")
     .trim();
+
+  if (input.family === "paint") {
+    return {
+      audience: "homeowners, designers, decorators, and trade professionals choosing paint for real spaces",
+      businessType: "paint and coatings brand",
+      coreOffer: "interior and exterior paint, color collections, finishes, primers, and application guidance",
+      mechanism: "explore color direction, compare finishes and surface needs, then confirm the right product details for the project",
+      outcome: "choose a paint direction and finish with clearer project context",
+      offerItems: [
+        { detail: "Explore color families and combinations for interior and exterior settings without inventing unavailable swatches.", meta: "Color inspiration", title: "Color collections" },
+        { detail: "Compare finish character and intended surface use, then confirm the current technical details before purchase.", meta: "Finish guidance", title: "Finishes for the space" },
+        { detail: "Start with the surface, setting, and desired result so primer and application guidance can be confirmed.", meta: "Project planning", title: "Prepare the project" }
+      ],
+      publicLabel: "Premium Paint Brand"
+    };
+  }
 
   if (input.family === "floral") {
     return {
@@ -208,6 +232,24 @@ function familyDetails(input: {
       publicLabel: "Artist Portfolio"
     };
   }
+  if (input.family === "portfolio") {
+    const work = products.length ? products.slice(0, 4) : ["selected work", "project stories", "visual studies"];
+    return {
+      audience: input.semantic.audiences[0] ?? "prospective clients, collaborators, editors, and creative teams",
+      businessType: /photograph/i.test(`${input.prompt} ${input.semantic.label}`) ? "photographer portfolio" : "creative portfolio",
+      coreOffer: "a curated body of work, project context, and a direct inquiry path",
+      mechanism: "move through selected work, understand the intent and role behind each project, and start a relevant conversation",
+      outcome: "understand the creative point of view and decide whether the work fits the next project",
+      offerItems: work.map((term, index) => ({
+        detail: index === 0
+          ? "A focused edit of work presented with clear visual rhythm and honest sample context."
+          : "A project-led view that can explain intent, role, process, and outcome without inventing client claims.",
+        meta: index === 0 ? "Portfolio work" : "Project story",
+        title: titleCase(term)
+      })),
+      publicLabel: /photograph/i.test(`${input.prompt} ${input.semantic.label}`) ? "Photographer Portfolio" : "Creative Portfolio"
+    };
+  }
   if (input.family === "bakery") {
     return {
       audience: "local customers choosing fresh bread, cakes, and pastries",
@@ -224,18 +266,28 @@ function familyDetails(input: {
     };
   }
   if (input.family === "beauty") {
+    const koreanBeauty = /\b(?:korean beauty|k[- ]?beauty)\b/i.test(input.prompt);
+    const skincareSpecific = koreanBeauty || /\b(?:skincare|skin care)\b/i.test(input.prompt);
     return {
-      audience: "shoppers comparing skincare and beauty products",
-      businessType: "Korean beauty ecommerce brand",
-      coreOffer: "Korean beauty and skincare product discovery",
-      mechanism: "browse product categories and compare routines without unverified ingredient or clinical claims",
-      outcome: "find relevant beauty products and understand what to confirm before purchase",
-      offerItems: [
-        { detail: "Browse skincare and beauty categories using the product details currently available.", meta: "Product discovery", title: "Explore the collection" },
-        { detail: "Compare product purpose, format, and routine position using the details that are actually available.", meta: "Routine context", title: "Build a clearer routine" },
-        { detail: "Review current product, delivery, and returns information before making a purchase decision.", meta: "Shopping details", title: "Confirm the details" }
-      ],
-      publicLabel: "Korean Beauty Collection"
+      audience: skincareSpecific ? "people comparing skincare and beauty products" : "people exploring beauty and cosmetics",
+      businessType: koreanBeauty ? "Korean beauty brand" : skincareSpecific ? "beauty and skincare brand" : "beauty and cosmetics brand",
+      coreOffer: koreanBeauty ? "Korean beauty and skincare product discovery" : skincareSpecific ? "beauty and skincare product discovery" : "beauty and cosmetics collections",
+      mechanism: skincareSpecific
+        ? "browse relevant categories and compare the product details supplied by the brand"
+        : "explore the brand's beauty direction and browse broad product categories without assuming a specific catalog",
+      outcome: "discover relevant beauty categories and find a clear next step",
+      offerItems: skincareSpecific
+        ? [
+            { detail: "Browse the skincare and beauty categories the brand chooses to present.", meta: "Product discovery", title: "Explore the collection" },
+            { detail: "Compare purpose, format, and the product details supplied by the brand.", meta: "Product details", title: "Find the right category" },
+            { detail: "Review current availability, delivery, and returns information before deciding.", meta: "Shopping information", title: "Plan the next step" }
+          ]
+        : [
+            { detail: "Explore beauty categories without assuming products the brand has not supplied.", meta: "Beauty collection", title: "Discover the collection" },
+            { detail: "Compare color, format, finish, and purpose where the brand provides those details.", meta: "Category guide", title: "Browse by category" },
+            { detail: "Continue to the brand's current product or contact information when it is available.", meta: "Next step", title: "Learn more" }
+          ],
+      publicLabel: koreanBeauty ? "Korean Beauty Collection" : "Beauty & Cosmetics Collection"
     };
   }
   if (input.family === "electronics") {
@@ -290,8 +342,12 @@ function familyDetails(input: {
     mechanism: "compare the available options, understand what is included, and use a direct inquiry path",
     outcome: `make a more informed ${businessType} decision`,
     offerItems: offerTerms.slice(0, 4).map((term) => ({
-      detail: `Review the available ${term.toLowerCase()} details and confirm current scope, availability, pricing, or terms directly.`,
-      meta: products.includes(term) ? "Product" : "Service",
+      detail: products.includes(term)
+        ? `Compare ${term.toLowerCase()} by intended use, relevant specification, and the current details that affect a suitable choice.`
+        : `Understand the scope of ${term.toLowerCase()}, what the process involves, and which details need direct confirmation.`,
+      meta: products.includes(term)
+        ? /collection|range|series/i.test(term) ? "Collection" : "Product category"
+        : "Service",
       title: titleCase(term)
     })).concat(offerTerms.length === 0 ? [{
       detail: `Understand the practical offer and confirm the details that matter before choosing this ${businessType}.`,
@@ -332,11 +388,12 @@ export function buildWebsiteContentContract(input: {
   const displayName = explicitBusinessName(input.prompt) ??
     currentPromptBusinessName(input.prompt, input.intentBrandName);
   const locationScope = explicitLocation(input.prompt);
-  const audience = explicitAudience(input.prompt) ?? details.audience;
+  const suppliedAudience = explicitAudience(input.prompt);
+  const audience = suppliedAudience ?? details.audience;
   const pages = input.brief?.requestedPages.length ? input.brief.requestedPages : input.semantic.suggestedPages;
   const hasContact = pages.some((page) => /contact|inquir|appointment/.test(page));
   const isCommerce = family === "beauty" || family === "retail" || input.semantic.businessModels.includes("retail");
-  const isPortfolio = family === "artwork";
+  const isPortfolio = family === "artwork" || family === "portfolio";
   const primaryTarget = isCommerce
     ? findPageTarget(pages, /product|shop|collection|catalog/, hasContact ? findPageTarget(pages, /contact/) : "index.html")
     : isPortfolio
@@ -348,6 +405,8 @@ export function buildWebsiteContentContract(input: {
     ? hasContact ? "Plan your event flowers" : "Explore wedding flowers"
     : family === "artwork"
       ? primaryTarget === "index.html" ? "View original artwork" : "See available artwork"
+      : family === "portfolio"
+        ? primaryTarget === "index.html" ? "View selected work" : "Explore the work"
       : family === "beauty"
         ? "Browse the collection"
         : family === "software"
@@ -379,6 +438,12 @@ export function buildWebsiteContentContract(input: {
       field: "locationScope",
       value: locationScope
     }] : []),
+    ...(suppliedAudience ? [{
+      classification: "USER_SUPPLIED_FACT" as const,
+      evidence: suppliedAudience,
+      field: "primaryAudience",
+      value: suppliedAudience
+    }] : []),
     ...userSuppliedClaims(input.prompt)
   ];
   const publicLabel = displayName ?? details.publicLabel;
@@ -386,8 +451,12 @@ export function buildWebsiteContentContract(input: {
     ? "Wedding flowers planned around the occasion"
     : family === "artwork"
       ? "Original artwork for thoughtful collections"
+      : family === "portfolio"
+        ? "Selected work, shaped with intention"
       : family === "beauty"
-        ? "Explore Korean beauty with clearer product context"
+        ? /\b(?:korean beauty|k[- ]?beauty)\b/i.test(input.prompt)
+          ? "Explore Korean beauty with clearer product context"
+          : "Explore beauty and cosmetics with clearer product context"
         : family === "software"
           ? "Keep every lead follow-up moving"
           : `${details.publicLabel} with a clear next step`;
@@ -396,6 +465,8 @@ export function buildWebsiteContentContract(input: {
   return {
     audienceProblem: family === "software"
       ? "important leads and next actions can be missed when follow-up is scattered"
+      : isPortfolio
+        ? "visitors need a clear view of the work, the thinking behind it, and a relevant way to inquire"
       : `visitors need enough relevant detail to judge whether ${details.coreOffer} fits their needs`,
     availableFacts: explicitFacts,
     businessIdentity: {
@@ -416,11 +487,17 @@ export function buildWebsiteContentContract(input: {
     contentDensity: pages.length > 4 ? "standard" : "focused",
     conversionGoal: input.brief?.conversionGoal ?? `help visitors ${details.outcome}`,
     coreOffer: details.coreOffer,
-    differentiators: [
-      sentence(details.mechanism),
-      "Current pricing, availability, timing, and terms are confirmed directly",
-      "Clear next steps without assumptions about current availability"
-    ],
+    differentiators: isPortfolio
+      ? [
+          sentence(details.mechanism),
+          "Project context stays clear about intent, role, process, and outcome",
+          "Selected work remains editable until verified projects are supplied"
+        ]
+      : [
+          sentence(details.mechanism),
+          "Current pricing, availability, timing, and terms are confirmed directly",
+          "Clear next steps without assumptions about current availability"
+        ],
     displayNameRequired: false,
     hero: {
       headline,
@@ -455,15 +532,23 @@ export function buildWebsiteContentContract(input: {
       ? input.brief.contentTone.split(",").map(cleanText).filter(Boolean)
       : family === "artwork"
         ? ["expressive", "clear", "collector-focused"]
+        : family === "portfolio"
+          ? ["visual", "specific", "project-led"]
         : family === "software"
           ? ["practical", "accessible", "work-focused"]
           : ["clear", "warm", "specific"],
     trustInputs: explicitFacts.filter((fact) => fact.field === "claim"),
-    trustStrategy: [
-      "Explain the offer and decision process clearly",
-      "Show representative products, services, or work without claiming availability",
-      "Invite direct confirmation of pricing, timing, availability, and terms"
-    ]
+    trustStrategy: isPortfolio
+      ? [
+          "Present selected work with clear project context",
+          "Keep generated sample projects explicitly editable",
+          "Offer a direct inquiry path without inventing client outcomes"
+        ]
+      : [
+          "Explain the offer and decision process clearly",
+          "Show representative products, services, or work without claiming availability",
+          "Invite direct confirmation of pricing, timing, availability, and terms"
+        ]
   };
 }
 

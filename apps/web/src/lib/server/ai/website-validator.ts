@@ -1,5 +1,6 @@
 import type { WebsitePlan } from "@/lib/server/ai/website-planner";
 import { getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
+import { extractVisibleWebsiteText } from "@/lib/server/ai/domain-signal-matcher";
 import type { WebsiteAssetIntelligence } from "@/lib/server/ai/website-asset-intelligence";
 import type { WebsiteCinematicExperience } from "@/lib/server/ai/website-cinematic-sequence-spec";
 import { validateWebsiteCinematicOutput } from "@/lib/server/ai/website-cinematic-validator";
@@ -148,25 +149,24 @@ export function validateWebsitePlanAndFiles(input: {
   files: Record<string, string>;
   plan: WebsitePlan;
 }): WebsiteValidationResult {
-  const allContent = Object.values(input.files).join("\n").toLowerCase();
   const sectionIds = input.plan.requiredSections.map((section) => section.id);
   const duplicateSections = duplicateValues(sectionIds);
-  const profile = getTaxonomyProfile(input.plan.sourceOfTruthDomain ?? input.plan.industry);
-  const vocabularyHits = (profile?.websiteVocabulary ?? [])
-    .filter((term) => allContent.includes(term.toLowerCase()));
-  const hasSpecificVocabulary = vocabularyHits.length >= Math.min(3, Math.max(1, profile?.websiteVocabulary.length ?? 0));
-  const rawGenericLayoutDetected =
-    sectionIds.join(",") === "hero,features,pricing,footer" ||
-    genericTerms.some((term) => allContent.includes(term));
-  const genericLayoutDetected = rawGenericLayoutDetected && !hasSpecificVocabulary;
   const publicHtml = Object.entries(input.files)
     .filter(([path]) => path.endsWith(".html"))
     .map(([, content]) => content)
     .join("\n");
+  const publicText = extractVisibleWebsiteText(publicHtml).toLowerCase();
+  const profile = getTaxonomyProfile(input.plan.sourceOfTruthDomain ?? input.plan.industry);
+  const vocabularyHits = (profile?.websiteVocabulary ?? [])
+    .filter((term) => publicText.includes(term.toLowerCase()));
+  const hasSpecificVocabulary = vocabularyHits.length >= Math.min(3, Math.max(1, profile?.websiteVocabulary.length ?? 0));
+  const rawGenericLayoutDetected =
+    sectionIds.join(",") === "hero,features,pricing,footer" ||
+    genericTerms.some((term) => publicText.includes(term));
+  const genericLayoutDetected = rawGenericLayoutDetected && !hasSpecificVocabulary;
   const remoteImageTags = publicHtml.match(/<img\b[^>]*\bsrc=["']https?:\/\/[^>]+>/gi) ?? [];
   const placeholderDetected = /alt=["'](?:hero|image|placeholder)["']/i.test(publicHtml) ||
     remoteImageTags.some((tag) => /picsum\.photos/i.test(tag) && /\b(?:hero|product|property|vehicle|watch|clinic|restaurant)\b/i.test(tag));
-  const publicText = publicHtml.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").toLowerCase();
   const exposedPlanningTerms = internalPlanningTerms.filter((term) => publicText.includes(term));
   const visitorCopyViolationCount = visitorCopyViolations.filter((pattern) => pattern.test(publicText)).length;
   const styles = input.files["styles.css"] ?? "";
@@ -188,6 +188,11 @@ export function validateWebsitePlanAndFiles(input: {
   const totalCanvasCount = sceneMountCount + cinematicMountCount;
   const sceneIds = Array.from(indexHtml.matchAll(/data-scene-id=["']([^"']+)["']/gi), (match) => match[1] ?? "").filter(Boolean);
   const duplicateSceneIds = duplicateValues(sceneIds);
+  const duplicateHtmlIds = Object.entries(input.files).flatMap(([path, content]) => {
+    if (!path.endsWith(".html")) return [];
+    const ids = Array.from(content.matchAll(/(?:^|\s)id=["']([^"']+)["']/gi), (match) => match[1] ?? "").filter(Boolean);
+    return duplicateValues(ids).map((id) => `${path}#${id}`);
+  });
   const sceneRecipe = indexHtml.match(/data-scene-recipe=["']([^"']+)["']/i)?.[1] ?? null;
   const sceneRequirement = indexHtml.match(/data-3d-requirement=["']([^"']+)["']/i)?.[1] ?? null;
   const sceneFallbackPath = indexHtml.match(/data-scene-fallback[^>]*src=["']\.\/([^"']+)["']/i)?.[1] ?? indexHtml.match(/src=["']\.\/([^"']+)["'][^>]*data-scene-fallback/i)?.[1] ?? null;
@@ -331,6 +336,7 @@ export function validateWebsitePlanAndFiles(input: {
     !sceneAccessible ? "The generated scene lacks accessible HTML meaning outside the canvas." : "",
     !sceneHasNoscript ? "The generated scene lacks meaningful no-JavaScript content." : "",
     duplicateSceneIds.length ? `Duplicate scene IDs detected: ${duplicateSceneIds.join(", ")}.` : "",
+    duplicateHtmlIds.length ? `Duplicate HTML IDs detected: ${duplicateHtmlIds.join(", ")}.` : "",
     sceneMountCount > 1 ? "The homepage contains duplicate scene canvas mounts." : "",
     !sceneScoped ? "The generated scene is not contained by a local stacking and overflow boundary." : "",
     !sceneContainerSized ? "The generated scene does not size itself from its mount container." : "",

@@ -8,6 +8,7 @@ import type { ProposalContext } from "@/lib/server/ai/proposal-context";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
 import { containsUnfinishedWorkMarker } from "@/lib/server/ai/unfinished-content";
+import { includesSemanticSignal, semanticEvidenceKey } from "@/lib/server/ai/domain-signal-matcher";
 
 export type ProposalQualityStatus = "blocked" | "passed" | "review_required" | "warning";
 export type ApprovalRecommendation = "approve" | "reject" | "review";
@@ -226,8 +227,70 @@ function entityTerms(input: BuildProposalQualityGateInput) {
   return unique([
     ...input.compositionPlan.productOrServiceEntities,
     ...input.businessBlueprint.dataEntities,
-    ...input.taskDecomposition.milestones.flatMap((milestone) => milestone.requiredInputs)
+    ...(input.contextPriority.authoritativeMode === "WEBSITE"
+      ? []
+      : input.taskDecomposition.milestones.flatMap((milestone) => milestone.requiredInputs))
   ]);
+}
+
+function attributeValues(source: string, name: string) {
+  return Array.from(source.matchAll(new RegExp(`\\b${name}=["']([^"']+)["']`, "gi")), (match) => match[1] ?? "");
+}
+
+function expectedSectionRoles(term: string) {
+  const normalized = normalize(term);
+  if (/hero|opening/.test(normalized)) return ["hero"];
+  if (/faq|question/.test(normalized)) return ["faq"];
+  if (/contact|inquiry|booking|reservation|sample/.test(normalized)) return ["form"];
+  if (/trust|proof|credib|assurance|verification/.test(normalized)) return ["trust"];
+  if (/process|how|application|workflow|method|craft|formulation/.test(normalized)) return ["process", "content"];
+  if (/inspiration|gallery|story|room|surface/.test(normalized)) return ["gallery", "content", "entities"];
+  if (/product|service|offer|collection|finish|primer|menu|room|feature|capabilit/.test(normalized)) return ["entities", "gallery", "comparison", "filter", "carousel"];
+  return [];
+}
+
+function conceptWords(value: string) {
+  const ignored = new Set(["and", "clear", "current", "details", "direct", "information", "the", "with"]);
+  return normalize(value).split(/[^a-z0-9]+/).filter((word) => word.length > 3 && !ignored.has(word)).map((word) => word.replace(/(?:ability|ation|ing|ed|es|s)$/i, ""));
+}
+
+function includesConcept(text: string, concept: string) {
+  const haystack = conceptWords(text);
+  const needles = conceptWords(concept);
+  if (!needles.length) return includesAny(text, [concept]);
+  return needles.filter((needle) => haystack.some((word) => word === needle || word.startsWith(needle) || needle.startsWith(word))).length >= Math.min(2, needles.length);
+}
+
+export function inspectWebsiteSemanticCompleteness(input: {
+  expectedEntities: string[];
+  expectedSections: string[];
+  expectedTrustSignals: string[];
+  files: Record<string, string>;
+}) {
+  const source = Object.entries(input.files)
+    .filter(([path]) => path.toLowerCase().endsWith(".html"))
+    .map(([, content]) => content)
+    .join("\n");
+  const visible = visibleWebsiteContent(input.files);
+  const sectionRoles = new Set(attributeValues(source, "data-section-role").map(normalize));
+  const entityLabels = attributeValues(source, "data-entity-label");
+  const trustSignals = attributeValues(source, "data-trust-signal");
+  const missingSections = unique(input.expectedSections).filter((section) => {
+    if (/\bhero\b/i.test(section) && /<section\b[^>]*class=["'][^"']*\bhero\b|<h1\b/i.test(source)) return false;
+    if (includesAny(visible, [section]) || entityLabels.some((label) => includesSemanticSignal(label, section))) return false;
+    const roles = expectedSectionRoles(section);
+    return roles.length === 0 || !roles.some((role) => sectionRoles.has(role));
+  });
+  const missingEntities = unique(input.expectedEntities).filter((entity) =>
+    !includesAny(visible, [entity]) &&
+    !entityLabels.some((label) => includesSemanticSignal(label, entity) || includesSemanticSignal(entity, label))
+  );
+  const missingTrustSignals = unique(input.expectedTrustSignals).filter((signal) =>
+    !includesAny(visible, [signal]) &&
+    !trustSignals.some((rendered) => normalize(rendered) === semanticEvidenceKey(signal)) &&
+    !(sectionRoles.has("trust") && includesConcept(visible, signal))
+  );
+  return { missingEntities, missingSections, missingTrustSignals };
 }
 
 function score(input: {
@@ -391,11 +454,18 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
   }
 
   const missingPages = expectedPageRoutes(input).filter((route) => !(route in files));
-  const missingSections =
-    mode === "WEBSITE" && intentFamily !== "targeted_text_replacement"
-      ? sectionTerms(input.compositionPlan).filter((section) => !includesAny(visibleContent, [section]))
-      : [];
-  const missingEntities = entityTerms(input).filter((entity) => !includesAny(mode === "WEBSITE" ? visibleContent : content, [entity]));
+  const websiteCompleteness = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement"
+    ? inspectWebsiteSemanticCompleteness({
+        expectedEntities: entityTerms(input),
+        expectedSections: sectionTerms(input.compositionPlan),
+        expectedTrustSignals: input.compositionPlan.trustSignals,
+        files
+      })
+    : { missingEntities: [], missingSections: [], missingTrustSignals: [] };
+  const missingSections = websiteCompleteness.missingSections;
+  const missingEntities = mode === "WEBSITE"
+    ? websiteCompleteness.missingEntities
+    : entityTerms(input).filter((entity) => !includesAny(content, [entity]));
   const hasRunnableCodeSource = mode === "CODE" && fileNames.some((path) =>
     path === "vite.config.ts" ||
     path === "vite.config.js" ||
@@ -408,10 +478,7 @@ export function buildProposalQualityGate(input: BuildProposalQualityGateInput): 
     mode === "CODE" && !hasRunnableCodeSource
       ? moduleTerms(input).filter((module) => !includesAny(content, [module]))
       : [];
-  const missingTrustSignals =
-    mode === "WEBSITE" && intentFamily !== "targeted_text_replacement"
-      ? input.compositionPlan.trustSignals.filter((signal) => !includesAny(visibleContent, [signal]))
-      : [];
+  const missingTrustSignals = websiteCompleteness.missingTrustSignals;
   const missingNavigation = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/<nav\b|navigation|navbar/i.test(websiteSource);
   const missingHero = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/\bhero\b|<h1\b/i.test(websiteSource);
   const missingCTA = mode === "WEBSITE" && intentFamily !== "targeted_text_replacement" && !/\b(?:book|order|shop|start|get|call|visit|request|schedule)\b/i.test(visibleContent);

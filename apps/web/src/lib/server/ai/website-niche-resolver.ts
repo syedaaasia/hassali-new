@@ -3,6 +3,10 @@ import {
   type UniversalIndustryNode,
   type WebsiteBusinessModel
 } from "@/lib/server/ai/website-industry-catalog";
+import {
+  analyzeWebsiteRequestObjective,
+  stripWebsiteInstructionSpans
+} from "@/lib/server/ai/website-request-objective";
 
 export type WebsiteSemanticResolution = {
   audiences: string[];
@@ -130,7 +134,7 @@ function hasSignal(text: string, signal: string) {
 }
 
 function cleanPhrase(value: string) {
-  return value
+  return stripWebsiteInstructionSpans(value)
     .replace(/(?:[.!?]\s+|\s+(?:(?:and|but)\s+)?(?:(?:please|kindly)\s+)?)(?:do\s+not|don't|must\s+not|never|avoid|exclude)\b[\s\S]*$/i, "")
     .replace(/\b(?:in|using|with)\s+(?:interactive\s+)?(?:3d|webgl|three(?:\.js)?|threejs)[\s\S]*$/i, "")
     .replace(/\b(?:with|using|including|featuring|that|which)\b[\s\S]*$/i, "")
@@ -143,6 +147,18 @@ function cleanPhrase(value: string) {
 }
 
 function extractBusinessPhrase(prompt: string) {
+  const objective = analyzeWebsiteRequestObjective(prompt);
+  if (objective.explicitBrandName) {
+    return {
+      brandName: objective.explicitBrandName,
+      phrase: objective.subject ?? objective.explicitBrandName,
+      source: "named_business" as const
+    };
+  }
+  if (objective.subject) {
+    return { brandName: null, phrase: cleanPhrase(objective.subject), source: "dynamic_niche" as const };
+  }
+
   const named = prompt.match(/\b(?:called|named)\s+([a-z0-9][a-z0-9 '&.+/-]{2,90}?)(?=\s+(?:with|using|in)\b|[,.!?]|$)/i)?.[1];
   if (named) return { brandName: cleanPhrase(named), phrase: cleanPhrase(named), source: "named_business" as const };
 
@@ -224,7 +240,8 @@ function semanticDomainLabel(phrase: string | null, canonical: CanonicalEvidence
   return `${words.join(" ")} Business`;
 }
 
-function suggestedStructure(models: WebsiteBusinessModel[]) {
+function suggestedStructure(models: WebsiteBusinessModel[], capabilities: string[]) {
+  if (capabilities.includes("portfolio")) return { pages: ["home", "work", "about", "contact"], sections: ["hero", "selected_work", "project_stories", "about", "contact"] };
   if (models.includes("saas")) return { pages: ["home", "features", "pricing", "about", "contact"], sections: ["hero", "features", "workflow", "proof", "pricing", "faq", "contact"] };
   if (models.includes("manufacturing")) return { pages: ["home", "products", "capabilities", "about", "contact"], sections: ["hero", "products", "capabilities", "materials", "process", "quality", "contact"] };
   if (models.includes("healthcare")) return { pages: ["home", "services", "about", "contact"], sections: ["hero", "services", "care_process", "trust", "faq", "contact"] };
@@ -260,7 +277,6 @@ export function resolveWebsiteNiche(input: { canonical?: CanonicalEvidence | nul
   const conceptMatches = matchingConcepts(text);
   const models = businessModels(text, primary);
   const levels = nicheLevels(extracted.phrase);
-  const structure = suggestedStructure(models);
   const conceptProducts = unique(conceptMatches.flatMap((concept) => concept.products ?? []));
   const conceptServices = unique(conceptMatches.flatMap((concept) => concept.services ?? []));
   const products = unique(conceptProducts.length ? conceptProducts : primary?.productSignals ?? []).slice(0, 9);
@@ -272,6 +288,7 @@ export function resolveWebsiteNiche(input: { canonical?: CanonicalEvidence | nul
     ...secondary.flatMap((candidate) => candidate.capabilities),
     ...models
   ]).slice(0, 18);
+  const structure = suggestedStructure(models, capabilities);
   const audiences = unique([
     ...conceptMatches.flatMap((concept) => concept.audiences ?? []),
     ...(primary?.audienceSignals ?? []),

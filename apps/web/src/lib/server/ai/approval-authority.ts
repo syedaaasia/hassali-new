@@ -1,4 +1,5 @@
 import type { ProposalContext } from "@/lib/server/ai/proposal-context";
+import { findSemanticSignals } from "@/lib/server/ai/domain-signal-matcher";
 
 export type ApprovalDecision = {
   approvalAllowed: boolean;
@@ -52,6 +53,13 @@ const applyUnsafePlaceholderPatterns = [
   /\bunknown with clear guidance\b/i,
   /\bSupport, warranty, shipping, and contact details for Current Prompt Website\b/i,
   /\bdocument dataset domain\s*=\s*Current Prompt Website\b/i
+];
+const unresolvedWebsiteMetadataPatterns = [
+  /^domainId:\s*(?:null|unknown|unclassified|current prompt website)\s*$/im,
+  /^authoritativeDomain:\s*(?:null|unknown|unclassified)\s*$/im,
+  /["']authoritativeDomain["']\s*:\s*null/i,
+  /^qualitySemanticHierarchy:\s*(?:unknown(?::unknown)+|null(?::null)+)/im,
+  /^expectedVocabulary:\s*$/im
 ];
 
 function normalize(value: string) {
@@ -218,18 +226,23 @@ export function buildApprovalDecision(input: {
         criticalIssues.push(`unexpected website page ${path}`);
       }
     }
+    const hassali = files["HASSALI.md"] ?? files["HASSALI.website.md"] ?? "";
+    if (hassali && unresolvedWebsiteMetadataPatterns.some((pattern) => pattern.test(hassali))) {
+      criticalIssues.push("unresolved canonical WEBSITE metadata cannot be approved");
+    }
+    for (const [path, content] of Object.entries(files).filter(([path]) => path.endsWith(".html"))) {
+      const ids = Array.from(content.matchAll(/(?:^|\s)id=["']([^"']+)["']/gi), (match) => match[1] ?? "").filter(Boolean);
+      if (new Set(ids).size !== ids.length) criticalIssues.push(`duplicate HTML id in ${path}`);
+    }
   }
 
   const generatedText = Object.entries(files)
     .filter(([path]) => path.toLowerCase().endsWith(".html"))
     .map(([path, content]) => `FILE:${path}\n${content}`)
-    .join("\n")
-    .toLowerCase();
+    .join("\n");
 
-  for (const signal of forbiddenSignalsFor(input.proposalContext)) {
-    if (generatedText.includes(signal)) {
-      criticalIssues.push(`wrong-domain generated output contains ${signal}`);
-    }
+  for (const signal of findSemanticSignals(generatedText, forbiddenSignalsFor(input.proposalContext))) {
+    criticalIssues.push(`wrong-domain generated output contains ${signal}`);
   }
 
   const warnings = reviewWarnings(input.proposal);

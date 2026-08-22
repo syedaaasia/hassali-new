@@ -7,7 +7,8 @@ import {
 } from "@/lib/attachments";
 import {
   createProjectBinaryAssetEnvelope,
-  parseProjectBinaryAssetEnvelope
+  parseProjectBinaryAssetEnvelope,
+  ProjectBinaryAssetError
 } from "@/lib/project-binary-asset";
 import { compileStaticPreview } from "@/lib/static-preview-compiler";
 import {
@@ -356,6 +357,47 @@ test("project assets use stable mode paths, render in static preview, and export
     Buffer.from(png)
   );
   assert.equal(shouldExcludeProjectExportPath(".hassali/attachments/private/content.bin"), true);
+});
+
+test("ordinary JPEG-sized project assets validate linearly without a RegExp stack overflow", () => {
+  const jpeg = new Uint8Array(286 * 1024);
+  jpeg.set([0xff, 0xd8, 0xff, 0xe0], 0);
+  jpeg.set([0xff, 0xd9], jpeg.length - 2);
+  const change = createProjectAssetChange({
+    attachment: {
+      analysisCapabilities: ["vision"], conversationId: "c", createdAt: "x", extractedTextAvailable: false,
+      id: "jpeg", kind: "image", mimeType: "image/jpeg", originalName: "Business-Web-Banner-20.jpg", previewAvailable: true,
+      projectId: "p", safeName: "Business-Web-Banner-20.jpg", sizeBytes: jpeg.byteLength, status: "ready", storageScope: "conversation"
+    },
+    bytes: jpeg,
+    existingPaths: [],
+    mode: "WEBSITE"
+  });
+  assert.equal(change.path, "assets/Business-Web-Banner-20.jpg");
+  const parsed = parseProjectBinaryAssetEnvelope(change.proposedContent);
+  assert.equal(parsed?.mimeType, "image/jpeg");
+  assert.equal(Buffer.from(parsed?.base64 ?? "", "base64").byteLength, jpeg.byteLength);
+  assert.doesNotMatch(change.summary, /base64|HASSALI_BINARY_ASSET/i);
+});
+
+test("project binary validation rejects malformed, oversized, and metadata-mismatched assets", () => {
+  for (const base64 of ["", "AAA", "AA=A", "AAAA===", "AAAA$AAA"]) {
+    assert.throws(
+      () => createProjectBinaryAssetEnvelope({ base64, mimeType: "image/jpeg" }),
+      (error) => error instanceof ProjectBinaryAssetError
+    );
+  }
+  assert.throws(
+    () => createProjectAssetChange({
+      attachment: {
+        analysisCapabilities: ["vision"], conversationId: "c", createdAt: "x", extractedTextAvailable: false,
+        id: "mismatch", kind: "image", mimeType: "image/jpeg", originalName: "hero.jpg", previewAvailable: true,
+        projectId: "p", safeName: "hero.jpg", sizeBytes: 99, status: "ready", storageScope: "conversation"
+      },
+      bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), existingPaths: [], mode: "WEBSITE"
+    }),
+    (error) => error instanceof ProjectBinaryAssetError
+  );
 });
 
 test("asset proposals remain explicit and attachment relevance excludes topic shifts", () => {

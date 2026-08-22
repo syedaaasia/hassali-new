@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { HassaliAttachment } from "@/lib/attachments";
-import { createProjectBinaryAssetEnvelope } from "@/lib/project-binary-asset";
+import { attachmentLimits, type HassaliAttachment } from "@/lib/attachments";
+import { createProjectBinaryAssetEnvelope, ProjectBinaryAssetError } from "@/lib/project-binary-asset";
 
 const imageExtensions = new Set([".jpeg", ".jpg", ".png", ".webp"]);
 
@@ -29,6 +29,12 @@ export function createProjectAssetChange(input: {
   existingPaths: string[];
   mode: "CODE" | "WEBSITE";
 }) {
+  if (input.bytes.byteLength === 0 || input.bytes.byteLength > attachmentLimits.individualFileBytes) {
+    throw new ProjectBinaryAssetError("The project asset is empty or exceeds the attachment size limit.");
+  }
+  if (input.attachment.sizeBytes !== input.bytes.byteLength) {
+    throw new ProjectBinaryAssetError("The project asset no longer matches its verified attachment metadata.");
+  }
   const projectPath = projectAssetPath({
     existingPaths: input.existingPaths,
     mode: input.mode,

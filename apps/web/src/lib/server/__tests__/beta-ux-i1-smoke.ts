@@ -199,8 +199,8 @@ test("approval selector is plain text below the full-width composer and reaches 
 test("standing approval suppresses manual controls and blocked proposals never expose Approve", () => {
   assert.match(rightSidebar, /standingApprovalPending/);
   assert.match(rightSidebar, /Applying with the current project approval policy/);
-  assert.match(rightSidebar, /!isApprovalBlocked && !standingApprovalPending && !isProposalApplied/);
-  assert.match(rightSidebar, /!standingApprovalPending && !isProposalApplied/);
+  assert.match(rightSidebar, /!isApprovalBlocked && !standingApprovalPending && proposalLifecycle\.status === "pending"/);
+  assert.match(rightSidebar, /!standingApprovalPending && proposalLifecycle\.status === "pending"/);
   assert.match(rightSidebar, /canApplyWithProjectApprovalPolicy\(approvalPolicy, proposal\)/);
 });
 

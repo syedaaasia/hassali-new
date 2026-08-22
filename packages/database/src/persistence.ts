@@ -107,6 +107,9 @@ export type ProjectFileListResult = Array<{
   id: string;
   path: string;
 }>;
+type ApplyUserProjectFileBatchResult =
+  | { files: ProjectFileListResult; revision: string; status: "applied" | "unchanged" }
+  | { files: ProjectFileListResult; status: "claim_lost" | "missing" | "stale" };
 
 const defaultStarterFiles: StarterFile[] = [
   {
@@ -647,7 +650,7 @@ export async function applyUserProjectFileBatch(
   },
   db: Db = getDatabaseClient()
 ) {
-  return db.transaction(async (tx) => {
+  return db.transaction(async (tx): Promise<ApplyUserProjectFileBatchResult> => {
     const ownedProjectResult = await tx.execute<{ id: string }>(sql`
       select projects.id
       from projects
@@ -733,9 +736,20 @@ export async function applyUserProjectFileBatch(
       where project_id = ${input.projectId}
       order by path asc
     `);
+    const nextRevision = projectContentRevision(result.rows.map((file) => ({
+      content: file.content,
+      path: file.path
+    })));
+    if ((input.writes.length > 0 || input.deletes.length > 0) && nextRevision === currentRevision) {
+      return { files: mapFileRows(result.rows), revision: currentRevision, status: "unchanged" as const };
+    }
     const approval = JSON.stringify({
       completedAt: new Date().toISOString(),
-      result: input.proposalApproval.result,
+      result: {
+        ...input.proposalApproval.result,
+        canonicalProjectFiles: mapFileRows(result.rows),
+        canonicalProjectRevision: nextRevision
+      },
       status: "completed"
     });
     const completed = await tx.execute<{ id: string }>(sql`
@@ -749,7 +763,7 @@ export async function applyUserProjectFileBatch(
     if (!completed.rows[0]) {
       throw new Error("The durable proposal approval claim was lost before commit.");
     }
-    return { files: mapFileRows(result.rows), status: "applied" as const };
+    return { files: mapFileRows(result.rows), revision: nextRevision, status: "applied" as const };
   });
 }
 
@@ -1615,6 +1629,8 @@ export async function beginOwnedChatProposalApproval(
         status: "completed" as const
       };
     }
+    if (approval.status === "rejected") return { status: "rejected" as const };
+    if (approval.status === "failed") return { status: "failed" as const };
     const currentFileResult = await tx.execute<{
       content: string;
       content_hash: null | string;
@@ -1746,6 +1762,107 @@ export async function releaseOwnedChatProposalApproval(
     returning chat_messages.id
   `);
   return Boolean(result.rows[0]);
+}
+
+export async function failOwnedChatProposalApproval(
+  input: {
+    claimToken: string;
+    error: string;
+    externalUserId: string;
+    projectId: string;
+    proposalId: string;
+  },
+  db: Db = getDatabaseClient()
+) {
+  const approval = JSON.stringify({
+    error: input.error.slice(0, 1_000),
+    failedAt: new Date().toISOString(),
+    status: "failed"
+  });
+  const result = await db.execute<{ id: string }>(sql`
+    update chat_messages
+    set metadata = jsonb_set(metadata, '{proposalApproval}', ${approval}::jsonb, true)
+    from chat_sessions, projects, workspaces, users
+    where chat_messages.session_id = chat_sessions.id
+      and projects.id = chat_sessions.project_id
+      and workspaces.id = projects.workspace_id
+      and users.id = workspaces.owner_id
+      and projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+      and chat_messages.role = 'assistant'
+      and chat_messages.metadata -> 'proposal' ->> 'id' = ${input.proposalId}
+      and chat_messages.metadata -> 'proposalApproval' ->> 'status' = 'executing'
+      and chat_messages.metadata -> 'proposalApproval' ->> 'claimToken' = ${input.claimToken}
+    returning chat_messages.id
+  `);
+  return Boolean(result.rows[0]);
+}
+
+export async function rejectOwnedChatProposal(
+  input: { externalUserId: string; projectId: string; proposalId: string },
+  db: Db = getDatabaseClient()
+) {
+  const approval = JSON.stringify({ rejectedAt: new Date().toISOString(), status: "rejected" });
+  const result = await db.execute<{ id: string }>(sql`
+    update chat_messages
+    set metadata = jsonb_set(metadata, '{proposalApproval}', ${approval}::jsonb, true)
+    from chat_sessions, projects, workspaces, users
+    where chat_messages.session_id = chat_sessions.id
+      and projects.id = chat_sessions.project_id
+      and workspaces.id = projects.workspace_id
+      and users.id = workspaces.owner_id
+      and projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+      and chat_messages.role = 'assistant'
+      and chat_messages.metadata -> 'proposal' ->> 'id' = ${input.proposalId}
+      and coalesce(chat_messages.metadata -> 'proposalApproval' ->> 'status', 'pending') not in ('completed', 'executing', 'rejected')
+    returning chat_messages.id
+  `);
+  return Boolean(result.rows[0]);
+}
+
+export async function loadOwnedChatProposalApprovalState(
+  input: { externalUserId: string; projectId: string; proposalId: string },
+  db: Db = getDatabaseClient()
+) {
+  const result = await db.execute<{ metadata: unknown }>(sql`
+    select chat_messages.metadata
+    from chat_messages
+    inner join chat_sessions on chat_sessions.id = chat_messages.session_id
+    inner join projects on projects.id = chat_sessions.project_id
+    inner join workspaces on workspaces.id = projects.workspace_id
+    inner join users on users.id = workspaces.owner_id
+    where projects.id = ${input.projectId}
+      and users.external_id = ${input.externalUserId}
+      and chat_messages.role = 'assistant'
+      and chat_messages.metadata -> 'proposal' ->> 'id' = ${input.proposalId}
+    order by chat_messages.created_at desc
+    limit 1
+  `);
+  const metadata = result.rows[0]?.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const record = metadata as Record<string, unknown>;
+  const approval = record.proposalApproval && typeof record.proposalApproval === "object" && !Array.isArray(record.proposalApproval)
+    ? record.proposalApproval as Record<string, unknown>
+    : {};
+  const status = String(approval.status ?? "pending");
+  if (status === "completed") {
+    return { result: approval.result && typeof approval.result === "object" && !Array.isArray(approval.result) ? approval.result as Record<string, unknown> : {}, status: "applied" as const, updatedAt: String(approval.completedAt ?? "") };
+  }
+  if (status === "rejected") return { status: "rejected" as const, updatedAt: String(approval.rejectedAt ?? "") };
+  if (status === "failed") return { error: String(approval.error ?? "The proposal could not be applied."), status: "failed" as const, updatedAt: String(approval.failedAt ?? "") };
+  if (status === "executing") {
+    const claimedAt = Date.parse(String(approval.claimedAt ?? ""));
+    if (Number.isFinite(claimedAt) && Date.now() - claimedAt < proposalApprovalLeaseMs) {
+      return { status: "applying" as const, updatedAt: String(approval.claimedAt ?? "") };
+    }
+  }
+  const expectedRevision = typeof record.serverProjectRevision === "string" ? record.serverProjectRevision : "";
+  if (expectedRevision) {
+    const currentRevision = await loadOwnedProjectRevision(input, db);
+    if (currentRevision && currentRevision !== expectedRevision) return { status: "expired" as const };
+  }
+  return { status: "pending" as const };
 }
 
 export async function loadChatHistory(

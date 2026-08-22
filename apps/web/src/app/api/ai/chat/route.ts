@@ -2,6 +2,7 @@ import {
   deleteOwnedChatMessage,
   listUserProjectFiles,
   loadOwnedChatHandoff,
+  loadOwnedChatProposal,
   loadOwnedHandoffResponse,
   loadOwnedProjectRevision,
   resolveChatPersistenceContext,
@@ -89,6 +90,7 @@ import {
   validateDomain,
   type DomainValidationResult
 } from "@/lib/server/ai/domain-validator";
+import { findSemanticSignals } from "@/lib/server/ai/domain-signal-matcher";
 import {
   buildProposalQualityGate,
   type ProposalQualityGateResult
@@ -98,6 +100,7 @@ import {
   generatePlannedWebsiteFiles,
   type SiteDomain
 } from "@/lib/server/ai/domain-site-generator";
+import { summarizeWebsiteAssetPlan } from "@/lib/server/ai/website-asset-plan";
 import {
   assertWebsiteGenerationContract,
   type CodeGenerationBrief
@@ -230,6 +233,11 @@ import {
   type WebsiteEditPlan
 } from "@/lib/server/ai/website-edit-planner";
 import { validateWebsitePlanAndFiles } from "@/lib/server/ai/website-validator";
+import { repairGeneratedWebsiteStructure } from "@/lib/server/ai/website-structural-repair";
+import {
+  isHardProposalFailure,
+  isRepairableProposalFailure
+} from "@/lib/server/ai/proposal-risk-classification";
 import {
   runSelfReview,
   type SelfReviewFile,
@@ -284,6 +292,7 @@ import {
   resolveMultimodalAttachmentContext
 } from "@/lib/server/attachments/attachment-context";
 import { buildMultimodalVerification } from "@/lib/server/attachments/multimodal-verification";
+import { buildDocumentEvidenceContext } from "@/lib/server/attachments/document-intelligence";
 import {
   decideVisualAsset,
   formatPublicVisualAnswer,
@@ -293,6 +302,12 @@ import {
   createProjectAssetChange,
   shouldPromoteUploadedImages
 } from "@/lib/server/project-asset-pipeline";
+import {
+  boundedAssetEditDrift,
+  classifyWebsiteImageAttachmentIntent,
+  replaceWebsiteSectionImage
+} from "@/lib/server/ai/website-asset-edit";
+import type { WebsiteCinematicAssetInput } from "@/lib/server/ai/website-cinematic-asset-analyzer";
 import {
   isWorkspaceBindingError,
   resolveProjectWorkspace
@@ -311,16 +326,41 @@ import {
   buildProjectDesignContract,
   projectDesignVisibleSummary
 } from "@/lib/server/design/direction/design-direction-kernel";
-import { compactProjectDesignContract } from "@/lib/server/design/direction/project-design-contract";
-import { renderProjectDesignMd } from "@/lib/server/design/direction/project-design-md";
+import {
+  compactProjectDesignContract,
+  type ProjectDesignContract
+} from "@/lib/server/design/direction/project-design-contract";
+import {
+  createWebsiteProposalRepairAuthority,
+  parseWebsiteProposalRepairAuthority,
+  preserveWebsiteProposalContextForRepair,
+  repairDesignAuthorityDrift,
+  repairMayReplaceDesign,
+  type WebsiteProposalRepairAuthority
+} from "@/lib/server/ai/proposal-repair-authority";
+import { isDesignMdAttachmentName } from "@/lib/server/design/reference/reference-intent";
+import { hassaliChatContractHeader, hassaliChatContractVersion, hassaliReloadRequiredMessage } from "@/lib/chat-contract";
 
 export const runtime = "nodejs";
+
+function createProposalId() {
+  return `proposal-${crypto.randomUUID()}`;
+}
 
 const fallbackModel = "openai/gpt-4o-mini";
 const userSelectableProposalModelIds = new Set(
   getHassaliModelOptions().map((option) => option.value.toLowerCase())
 );
 const handoffMarker = "\nHASSALI_MODE_HANDOFF:";
+
+function websiteBusinessAttachmentContext(
+  context: Awaited<ReturnType<typeof resolveMultimodalAttachmentContext>> | null,
+  prompt: string
+) {
+  if (!context) return "";
+  const businessDocuments = context.documentArtifacts.filter((artifact) => !isDesignMdAttachmentName(artifact.filename));
+  return businessDocuments.length ? buildDocumentEvidenceContext(businessDocuments, prompt) : "";
+}
 
 async function refineOwnedCodePlanWithRepository(
   plan: AdaptiveCodePlan,
@@ -682,7 +722,7 @@ function createCodeAppCollisionProposal(input: {
     approvalRecommendation: "reject",
     blockedReason: "CODE_APP_COLLISION: Different CODE app detected in the same project.",
     changes: [],
-    id: `proposal-${Date.now()}`,
+    id: createProposalId(),
     mode: input.mode,
     previewMode: "answer_only",
     previewMetadata: {
@@ -866,6 +906,7 @@ type DiffProposal = {
   proposalRepairConfidence?: number;
   proposalRepairStatus?: "failed" | "keep_blocked" | "not_needed" | "partial_repair" | "repaired";
   proposalRepairStrategy?: string;
+  repairAuthority?: Record<string, unknown>;
   proposalRevalidationPassed?: boolean;
   proposalUnresolvedIssueCount?: number;
   qualityBlockCount?: number;
@@ -934,10 +975,18 @@ type DiffProposal = {
   virtualProtectedFiles?: string[];
   virtualReferenceRepairCount?: number;
   websiteRepairInputCount?: number;
+  websiteStructuralRepairAttempts?: number;
+  websiteStructuralRepairCount?: number;
   websiteRequestScope?: WebsiteEditIntent["requestScope"];
   websiteValidationPassed?: boolean;
   websiteValidatorInputCount?: number;
   websiteVisualStrategy?: string;
+  websiteVisualQADeterministicPassed?: boolean;
+  websiteVisualQAIssueCount?: number;
+  websiteVisualQARenderStatus?: "failed" | "not_attempted" | "rendered";
+  websiteVisualQAScreenshotReview?: "not_available" | "not_evaluated" | "rendered";
+  websiteVisualQAStatus?: "failed" | "incomplete" | "passed" | "review_required";
+  websiteVisualQAVisionReview?: "not_available" | "not_evaluated" | "passed" | "review_required";
 };
 
 type CodeAppPreview = {
@@ -1005,7 +1054,7 @@ function createBlockedDesignReferenceProposal(input: {
     approvalRecommendation: "reject",
     blockedReason: reason,
     changes: [],
-    id: `proposal-${Date.now()}`,
+    id: createProposalId(),
     mode: input.mode,
     previewMode: "answer_only",
     projectId: input.projectId,
@@ -1344,7 +1393,7 @@ function createCodeAppPreview(
 
 function extractEffectiveUserRequest(prompt: string) {
   const originalRequestMatch = prompt.match(
-    /Original request:\s*\n([\s\S]*?)(?:\n\nPrevious proposal was blocked because:|\n\nWarnings:|\n\nRequired corrections:|$)/i
+    /Original request:\s*\n([\s\S]*?)(?:\n\nPrevious proposal was blocked because:|\n\nWarnings:|\n\nProposal type:|\n\nRequired corrections:|\n\nHASSALI_REPAIR_CONTEXT_JSON:|$)/i
   );
 
   return originalRequestMatch?.[1]?.trim() || prompt;
@@ -1391,7 +1440,7 @@ const colorThemes: Record<
     accentSoft: "rgba(17, 24, 39, 0.16)",
     canvas: "#f8fafc",
     ink: "#0b1120",
-    secondary: "#6b7280",
+    secondary: "#111111",
     surface: "rgba(255, 255, 255, 0.78)",
     search: [/\bblack\b/gi, /#0b1120/gi, /#111827/gi, /#050505/gi]
   },
@@ -1564,9 +1613,10 @@ function extractThemeEdit(prompt: string) {
   const directChangeMatch = promptText.match(
     new RegExp(`\\b(?:change|update|switch|turn|replace)\\b\\s+(${colorAlternation})(?:\\s+(?:color|colors|colour|colours|theme|palette|gradient))?\\s+(?:to|into|with)\\s+(?:gradient\\s+)?(${colorAlternation})\\b`)
   );
-  const mentionedColors = [...knownColorNames, ...Object.keys(colorAliases)]
-    .filter((color) => new RegExp(`\\b${color}\\b`, "i").test(promptText))
-    .map((color) => normalizeColorName(color))
+  const mentionedColors = Array.from(
+    promptText.matchAll(new RegExp(`\\b(${colorAlternation})\\b`, "g")),
+    (match) => normalizeColorName(match[1])
+  )
     .filter((color): color is string => Boolean(color));
   const oldColor =
     normalizeColorName(fromToMatch?.[1]) ?? normalizeColorName(directChangeMatch?.[1]);
@@ -1575,14 +1625,15 @@ function extractThemeEdit(prompt: string) {
       ? [normalizeColorName(fromToMatch?.[2]) as string]
       : normalizeColorName(directChangeMatch?.[2])
         ? [normalizeColorName(directChangeMatch?.[2]) as string]
-        : mentionedColors.length > 1 && /\b(?:change|update|switch|turn|replace)\b/.test(promptText)
-          ? [mentionedColors[mentionedColors.length - 1]]
-          : mentionedColors;
+        : mentionedColors;
 
   return {
     fullTheme:
-      !oldColor &&
-      /\b(?:make|set|turn|update)\b[\s\S]{0,80}\b(?:theme|palette|site|website)\b/.test(promptText),
+      /\b(?:background|surface)\b/.test(promptText) ||
+      (
+        !oldColor &&
+        /\b(?:make|set|turn|update)\b[\s\S]{0,80}\b(?:theme|palette|site|website)\b/.test(promptText)
+      ),
     oldColor,
     targetColors: Array.from(new Set(targetColors.filter((color) => color !== oldColor)))
   };
@@ -1644,9 +1695,10 @@ function applyThemeToCss(css: string, targetColors: string[], oldColor: string |
   let nextCss = replaced.css;
 
   if (fullTheme) {
-    nextCss = upsertCssVariable(nextCss, "--canvas", primaryTheme.canvas);
-    nextCss = upsertCssVariable(nextCss, "--surface", primaryTheme.surface);
-    nextCss = upsertCssVariable(nextCss, "--ink", primaryTheme.ink);
+    const blackBackground = primary === "black" || targetColors.includes("black");
+    nextCss = upsertCssVariable(nextCss, "--canvas", blackBackground ? "#050505" : primaryTheme.canvas);
+    nextCss = upsertCssVariable(nextCss, "--surface", blackBackground ? "#111111" : primaryTheme.surface);
+    nextCss = upsertCssVariable(nextCss, "--ink", blackBackground ? "#f8fafc" : primaryTheme.ink);
   } else {
     if (!hasCssVariable(nextCss, "--canvas")) {
       nextCss = upsertCssVariable(nextCss, "--canvas", "#f8fafc");
@@ -2233,6 +2285,26 @@ function decisionForProposalContext(decision: DecisionPlan, proposalContext?: Pr
   return decision;
 }
 
+function extractStructuredRepairContext(prompt: string) {
+  const marker = "HASSALI_REPAIR_CONTEXT_JSON:\n";
+  const start = prompt.indexOf(marker);
+  if (start < 0) return null;
+  const line = prompt.slice(start + marker.length).split("\n", 1)[0]?.trim() ?? "";
+  if (!line || line.length > 12_000) return null;
+  try {
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    if (typeof parsed.proposalId !== "string" || typeof parsed.priorRepairCount !== "number") return null;
+    return {
+      failureCodes: Array.isArray(parsed.failureCodes) ? parsed.failureCodes.filter((value): value is string => typeof value === "string").slice(0, 16) : [],
+      priorRepairCount: Math.max(0, Math.floor(parsed.priorRepairCount)),
+      proposalId: parsed.proposalId,
+      requestedIntent: typeof parsed.requestedIntent === "string" ? parsed.requestedIntent.slice(0, 64) : null
+    };
+  } catch {
+    return null;
+  }
+}
+
 function createRenameProposal(input: {
   diagnostic: DiagnosticContext;
   mode: "SUGGEST" | "EXECUTE";
@@ -2267,7 +2339,7 @@ function createRenameProposal(input: {
 
   return {
     changes,
-    id: `proposal-${Date.now()}`,
+    id: createProposalId(),
     mode: input.mode,
     projectId: input.diagnostic.projectId,
     status: "pending",
@@ -2287,7 +2359,7 @@ function createTargetedCodeEditRecoveryProposal(input: {
     approvalRecommendation: "reject",
     blockedReason: "CODE_TARGETED_EDIT_GENERATION_FAILED: A safe targeted edit could not be produced.",
     changes: [],
-    id: `proposal-${Date.now()}`,
+    id: createProposalId(),
     mode: input.mode,
     projectId: input.diagnostic.projectId,
     shouldBlockExecution: true,
@@ -2307,7 +2379,9 @@ function createLocalProposal(
   intent: IntentIntelligence,
   composition: CompositionStrategy,
   generatorContract?: GeneratorContract,
-  proposalContext?: ProposalContext
+  proposalContext?: ProposalContext,
+  compositionPlan?: CompositionPlan,
+  currentWebsiteAssets?: { assets: WebsiteCinematicAssetInput[]; explicitAssetPaths: string[] }
 ): DiffProposal {
   const renameRequest = isFullWebsiteReplacementRequest(prompt) || isDesignDirectionRevisionRequest(prompt)
     ? null
@@ -2423,7 +2497,7 @@ function createLocalProposal(
         approvalRecommendation: "reject",
         blockedReason: `CODE_PRODUCT_FIDELITY_FAILED: ${productFidelity.failures.join(" ")}`,
         changes: [],
-        id: `proposal-${Date.now()}`,
+    id: createProposalId(),
         mode,
         projectId: diagnostic.projectId,
         shouldBlockExecution: true,
@@ -2455,7 +2529,7 @@ function createLocalProposal(
         approvalRecommendation: "reject",
         blockedReason: `PREVIEW_METADATA_INVALID: Missing or invalid ${reactPreviewFailures.join(", ")}.`,
         changes: [],
-        id: `proposal-${Date.now()}`,
+    id: createProposalId(),
         mode,
         projectId: diagnostic.projectId,
         shouldBlockExecution: true,
@@ -2477,7 +2551,7 @@ function createLocalProposal(
         summary: file.summary
       })),
       appPreview,
-      id: `proposal-${Date.now()}`,
+    id: createProposalId(),
       mode,
       previewMode: "code_plan",
       previewType: "code_app_preview",
@@ -2624,7 +2698,7 @@ Required checks before approval:
         summary: file.summary
       })),
       appPreview,
-      id: `proposal-${Date.now()}`,
+    id: createProposalId(),
       mode,
       previewMode: "code_plan",
       previewType: "code_app_preview",
@@ -2755,7 +2829,7 @@ No package install is required.
         proposedContent: file.content,
         summary: file.summary
       })),
-      id: `proposal-${Date.now()}`,
+    id: createProposalId(),
       mode,
       projectId: diagnostic.projectId,
       status: "pending",
@@ -2796,7 +2870,7 @@ No package install is required.
         proposedContent: file.content,
         summary: file.summary
       })),
-      id: `proposal-${Date.now()}`,
+    id: createProposalId(),
       mode,
       projectId: diagnostic.projectId,
       status: "pending",
@@ -2868,7 +2942,7 @@ img {
             ]
           : [])
       ],
-      id: `proposal-${Date.now()}`,
+    id: createProposalId(),
       mode,
       projectId: diagnostic.projectId,
       status: "pending",
@@ -2913,7 +2987,7 @@ img {
             ]
           : [])
       ],
-      id: `proposal-${Date.now()}`,
+    id: createProposalId(),
       mode,
       projectId: diagnostic.projectId,
       status: "pending",
@@ -2946,7 +3020,7 @@ img {
             ]
           : [])
       ],
-      id: `proposal-${Date.now()}`,
+    id: createProposalId(),
       mode,
       projectId: diagnostic.projectId,
       status: "pending",
@@ -3028,7 +3102,7 @@ if ("IntersectionObserver" in window) {
 
     return {
       changes,
-      id: `proposal-${Date.now()}`,
+      id: createProposalId(),
       mode,
       projectId: diagnostic.projectId,
       status: "pending",
@@ -3067,7 +3141,7 @@ if ("IntersectionObserver" in window) {
           summary: "Refines existing styling with restrained premium hover states."
         }
       ],
-      id: `proposal-${Date.now()}`,
+      id: createProposalId(),
       mode,
       projectId: diagnostic.projectId,
       status: "pending",
@@ -3079,7 +3153,7 @@ if ("IntersectionObserver" in window) {
     if (generatorContract?.contractBlocks.length) {
       return {
         changes: [],
-        id: `proposal-${Date.now()}`,
+        id: createProposalId(),
         mode,
         projectId: diagnostic.projectId,
         proposalRoutingMode: "blocked",
@@ -3098,15 +3172,22 @@ if ("IntersectionObserver" in window) {
     const websiteComposition = compositionForCurrentWebsiteBrief(composition, proposalContext);
     const websiteGeneration = generatePlannedWebsiteFiles({
       composition: websiteComposition,
+      compositionPlan,
       generatorContract,
       intent,
       proposalContext,
-      workspaceAssets: workspace.fileList.map((path) => ({
-        content: contentForPath(workspace, path),
-        path
-      }))
+      explicitAssetPaths: currentWebsiteAssets?.explicitAssetPaths,
+      workspaceAssets: [
+        ...workspace.fileList.map((path) => ({
+          content: contentForPath(workspace, path),
+          path
+        })),
+        ...(currentWebsiteAssets?.assets ?? [])
+      ]
     });
-    const websiteFiles = websiteGeneration.files;
+    const structuralRepair = repairGeneratedWebsiteStructure(websiteGeneration.files);
+    const websiteFiles = structuralRepair.files;
+    const assetActionSummary = summarizeWebsiteAssetPlan(websiteGeneration.qualityBlueprint.assetPlan).join("; ") || "No image changes";
     const generatedFileNames = Object.keys(websiteFiles);
     const websiteBriefName = proposalContext?.websiteGenerationBrief?.displayName ?? websiteComposition.businessType;
     const standardFiles = Object.entries(websiteFiles).map(([path, content]) => ({
@@ -3183,7 +3264,10 @@ if ("IntersectionObserver" in window) {
         };
     const normalizedValidation = validateWebsitePlanAndFiles({
       assets: websiteGeneration.qualityBlueprint.assets,
-      availableAssetPaths: workspace.fileList,
+      availableAssetPaths: [
+        ...workspace.fileList,
+        ...(currentWebsiteAssets?.explicitAssetPaths ?? [])
+      ],
       cinematic: websiteGeneration.qualityBlueprint.cinematic,
       experience: websiteGeneration.qualityBlueprint.experience,
       experienceQuality: websiteGeneration.qualityBlueprint.experienceQuality,
@@ -3192,18 +3276,18 @@ if ("IntersectionObserver" in window) {
     });
     const publicWebsiteFiles = Object.entries(normalizedFiles)
       .filter(([path]) => path.toLowerCase().endsWith(".html"))
-      .map(([, content]) => content.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<script[\s\S]*?<\/script>/gi, ""));
+      .map(([, content]) => content);
     const forbiddenHits = generatorContract
-      ? generatorContract.forbiddenTerms.filter((term) =>
+      ? findSemanticSignals(publicWebsiteFiles.join("\n"), generatorContract.forbiddenTerms.filter((term) =>
           !proposalContext?.requiredFiles.some((path) => path.toLowerCase().includes(term.toLowerCase())) &&
           !proposalContext?.pages.some((page) => page.toLowerCase() === term.toLowerCase()) &&
-          !proposalContext?.websiteGenerationBrief?.ctaPatterns.some((cta) => cta.toLowerCase().includes(term.toLowerCase())) &&
-          publicWebsiteFiles.some((content) => content.toLowerCase().includes(term.toLowerCase()))
-        )
+          !proposalContext?.websiteGenerationBrief?.ctaPatterns.some((cta) => cta.toLowerCase().includes(term.toLowerCase()))
+        ))
       : [];
     const copyValidation = websiteGeneration.qualityBlueprint.copyValidation;
     const blockingCopyFindings = copyValidation.findings.filter((finding) => finding.severity === "BLOCK");
     const designQualityReview = websiteGeneration.designQualityReview;
+    const blockingVisualQAFindings = websiteGeneration.visualQA.issues.filter((finding) => finding.severity === "critical" || finding.severity === "major");
     const websiteMetadata = {
       designTokenCount: websiteGeneration.designTokenCount,
       designTokenTheme: websiteGeneration.designTokenTheme,
@@ -3241,6 +3325,15 @@ if ("IntersectionObserver" in window) {
       ],
       websiteAssetArchiveStatus: websiteGeneration.qualityBlueprint.assets.archiveStatus,
       websiteAssetCount: websiteGeneration.qualityBlueprint.assets.records.length,
+      websiteAssetPlanActions: websiteGeneration.qualityBlueprint.assetPlan.assets.map((asset) => ({
+        destination: `${asset.destination.page}/${asset.destination.section}`,
+        role: asset.role,
+        source: asset.source,
+        status: asset.status
+      })),
+      websiteAssetPlanStatus: websiteGeneration.qualityBlueprint.assetPlan.unresolved.length ? "planned_with_unresolved_assets" : "ready",
+      websiteAssetStrategy: websiteGeneration.qualityBlueprint.assetPlan.imageStrategy,
+      websiteAssetUnresolvedCount: websiteGeneration.qualityBlueprint.assetPlan.unresolved.length,
       websiteBusinessIdentity: websiteGeneration.qualityBlueprint.contentContract.businessIdentity.displayName,
       websiteBusinessType: websiteGeneration.qualityBlueprint.contentContract.businessType,
       websiteContentContractCreated: true,
@@ -3258,6 +3351,8 @@ if ("IntersectionObserver" in window) {
       websiteLayoutType: websiteGeneration.plan.layoutType,
       websiteNormalizedActionCount: contractAssertion.normalizedActionCount,
       websiteRepairInputCount: contractAssertion.repairInputCount,
+      websiteStructuralRepairAttempts: structuralRepair.attempts,
+      websiteStructuralRepairCount: structuralRepair.repairs.length,
       websiteRequestScope: websiteBrief?.requestScope ?? ("full_generation" as const),
       websitePreviewAssetPaths: Object.keys(websiteFiles).filter((path) => path !== "HASSALI.md" && path !== "DESIGN.md"),
       websitePreviewEntryRoute: "index.html",
@@ -3268,6 +3363,12 @@ if ("IntersectionObserver" in window) {
       websiteValidationPassed: normalizedValidation.passed,
       websiteValidatorInputCount: contractAssertion.validatorInputCount,
       websiteVisualStrategy: websiteGeneration.plan.visualStrategy,
+      websiteVisualQADeterministicPassed: websiteGeneration.visualQA.deterministicChecksPassed,
+      websiteVisualQAIssueCount: websiteGeneration.visualQA.issues.length,
+      websiteVisualQARenderStatus: websiteGeneration.visualQA.renderStatus,
+      websiteVisualQAScreenshotReview: websiteGeneration.visualQA.screenshotReview,
+      websiteVisualQAStatus: websiteGeneration.visualQA.status,
+      websiteVisualQAVisionReview: websiteGeneration.visualQA.visionReview,
       validationProfile: generationVirtualFilesystem.profile,
       validationFilePaths: generationProjectedFiles.map((file) => file.path),
       virtualAfterFileCount: generationVirtualFilesystem.after.size,
@@ -3281,7 +3382,7 @@ if ("IntersectionObserver" in window) {
       return {
         ...websiteMetadata,
         changes: [...normalizedChanges, ...deleteChanges],
-        id: `proposal-${Date.now()}`,
+        id: createProposalId(),
         mode,
         projectId: diagnostic.projectId,
         proposalRoutingMode: "blocked",
@@ -3292,7 +3393,7 @@ if ("IntersectionObserver" in window) {
               ? "website_generation_contract"
               : "website_structure_block",
           message: `${issue.code} ${issue.message}`,
-          severity: "high"
+          severity: "medium"
         })),
         requiresExtraReview: true,
         shouldBlockExecution: true,
@@ -3301,28 +3402,37 @@ if ("IntersectionObserver" in window) {
       };
     }
 
-    if (!normalizedValidation.passed || forbiddenHits.length > 0 || blockingCopyFindings.length > 0 || designQualityReview?.blocking) {
+    if (!normalizedValidation.passed || forbiddenHits.length > 0 || blockingCopyFindings.length > 0 || designQualityReview?.blocking || blockingVisualQAFindings.length > 0) {
       const blockedReasons = [
         ...normalizedValidation.blockedReasons,
         ...(forbiddenHits.length
           ? [`Generated content still contained forbidden terms: ${forbiddenHits.slice(0, 8).join(", ")}.`]
           : []),
         ...blockingCopyFindings.map((finding) => `${finding.code}: ${finding.message} Evidence: ${finding.evidence}`),
-        ...(designQualityReview?.findings.filter((finding) => finding.severity === "block").map((finding) => `${finding.code}: ${finding.message} Evidence: ${finding.evidence}`) ?? [])
+        ...(designQualityReview?.findings.filter((finding) => finding.severity === "block").map((finding) => `${finding.code}: ${finding.message} Evidence: ${finding.evidence}`) ?? []),
+        ...blockingVisualQAFindings.map((finding) => `VISUAL_QA ${finding.category}: ${finding.message} ${finding.likelyCause}`)
       ];
 
       return {
         ...websiteMetadata,
         changes: [...normalizedChanges, ...deleteChanges],
-        id: `proposal-${Date.now()}`,
+        id: createProposalId(),
         mode,
         projectId: diagnostic.projectId,
         proposalRoutingMode: "blocked",
-        proposalRoutingReasons: blockedReasons.map((reason) => ({
-          code: "website_validation_block",
-          message: reason,
-          severity: "high"
-        })),
+        proposalRoutingReasons: blockedReasons.map((reason) => {
+          const domainSemanticMismatch = /(?:forbidden terms?|domain vocabulary|business (?:domain|content)|unrelated industry)/i.test(reason);
+          const visitorCopyQuality = /(?:COPY_|visitor-facing|public copy|internal language)/i.test(reason);
+          return {
+            code: domainSemanticMismatch
+              ? "website_domain_semantic_block"
+              : visitorCopyQuality
+                ? "website_content_quality_block"
+                : "website_validation_block",
+            message: reason,
+            severity: domainSemanticMismatch || visitorCopyQuality ? "medium" as const : "high" as const
+          };
+        }),
         requiresExtraReview: true,
         shouldBlockExecution: true,
         status: "pending",
@@ -3332,18 +3442,18 @@ if ("IntersectionObserver" in window) {
 
     return {
       ...websiteMetadata,
-      id: `proposal-${Date.now()}`,
+      id: createProposalId(),
       mode,
       projectId: diagnostic.projectId,
       status: "pending",
       summary:
         mode === "EXECUTE"
           ? hasStandardWebFiles(diagnostic.fileList)
-            ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")} and rebuild the static preview.`
-            : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")} and build the static preview.`
+            ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")} and rebuild the static preview. Asset plan: ${assetActionSummary}. Visual QA source preflight passed; rendered viewport review remains pending until Preview renders.`
+            : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")} and build the static preview. Asset plan: ${assetActionSummary}. Visual QA source preflight passed; rendered viewport review remains pending until Preview renders.`
           : hasStandardWebFiles(diagnostic.fileList)
-            ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")}.`
-            : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")}.`,
+            ? `Using contract-driven generation for ${websiteBriefName}. I will update ${generatedFileNames.join(", ")}. Asset plan: ${assetActionSummary}. Visual QA source preflight passed; rendered viewport review remains pending until Preview renders.`
+            : `Using contract-driven generation for ${websiteBriefName}. I will create ${generatedFileNames.join(", ")}. Asset plan: ${assetActionSummary}. Visual QA source preflight passed; rendered viewport review remains pending until Preview renders.`,
       changes: [...normalizedChanges, ...deleteChanges]
     };
   }
@@ -3353,7 +3463,7 @@ if ("IntersectionObserver" in window) {
   const proposedContent = `${workspace.activeFileContent.trimEnd()}\n\n// Hassali suggestion: ${prompt}\n`;
 
   return {
-    id: `proposal-${Date.now()}`,
+    id: createProposalId(),
     mode,
     projectId: diagnostic.projectId,
     status: "pending",
@@ -3423,7 +3533,8 @@ function parseDiffProposalContent(content: string) {
 function createResponseHeaders(sessionId?: string | null) {
   const headers: Record<string, string> = {
     "Cache-Control": "no-store",
-    "Content-Type": "text/plain; charset=utf-8"
+    "Content-Type": "text/plain; charset=utf-8",
+    [hassaliChatContractHeader]: hassaliChatContractVersion
   };
 
   if (sessionId) {
@@ -3951,7 +4062,8 @@ function compactCompositionPlan(compositionPlan: CompositionPlan) {
     requiredSections: compositionPlan.requiredSections,
     secondaryCTA: compositionPlan.secondaryCTA,
     trustSignals: compositionPlan.trustSignals,
-    visualIntent: compositionPlan.visualIntent
+    visualIntent: compositionPlan.visualIntent,
+    websiteStructure: compositionPlan.websiteStructure
   };
 }
 
@@ -4374,6 +4486,8 @@ function attachProposalRoutingMetadata(
         reason.code === "website_generation_empty" ||
         reason.code === "website_generation_contract" ||
         reason.code === "website_structure_block" ||
+        reason.code === "website_domain_semantic_block" ||
+        reason.code === "website_content_quality_block" ||
         reason.code === "website_validation_block"
       )
     )
@@ -4487,6 +4601,9 @@ function attachProposalRoutingMetadata(
       : routing.reasons,
     proposalRoutingWarnings: [...routing.warnings, ...extraWarnings],
     previewDriftDetected: domainValidation ? domainValidation.detectedPreviewDrift.length > 0 : undefined,
+    repairAuthority: proposalContext
+      ? createWebsiteProposalRepairAuthority(proposalContext) ?? undefined
+      : undefined,
     requiredPageCount: generatorContract?.requiredPageCount,
     memoryIgnoredForNewProject: proposalContext?.isNewBuild,
     sourceOfTruthDomain: proposalContext?.domain ?? proposal.sourceOfTruthDomain,
@@ -4864,23 +4981,69 @@ function selfReviewSystemRisksFromProposal(proposal: DiffProposal): SelfReviewSy
         recommendedFix: "Use validator repair hints to regenerate domain-correct files.",
         repairStrategy: "regenerate_output_to_satisfy_domain_validator",
         ruleId: "VAL001",
-        severity: reason.severity === "high" ? "high" : "medium",
+        severity: "medium",
         title: "Validator Risk"
       });
       continue;
     }
 
-    if (reason.severity === "high") {
+    if (reason.code === "website_domain_semantic_block") {
       risks.push({
-        category: "proposal_risk",
+        category: "domain_consistency",
+        code: reason.code,
+        description: "Some generated content does not match the business.",
+        evidence: reason.message,
+        recommendedFix: "Repair only the conflicting business content and preserve the approved design and project contract.",
+        repairStrategy: "repair_domain_semantics_preserve_design_authority",
+        ruleId: "DOMAIN_CONFLICT001",
+        severity: "medium",
+        title: "Blocked — Needs repair"
+      });
+      continue;
+    }
+
+    if (reason.code === "website_content_quality_block") {
+      risks.push({
+        category: "validator_risk",
+        code: reason.code,
+        description: "Visitor-facing copy needs repair before approval.",
+        evidence: reason.message,
+        recommendedFix: "Replace internal or low-quality wording while preserving the current design and business contract.",
+        repairStrategy: "repair_public_copy_preserve_design_authority",
+        ruleId: "COPY001",
+        severity: "medium",
+        title: "Blocked — Needs repair"
+      });
+      continue;
+    }
+
+    if (isRepairableProposalFailure(reason.code)) {
+      risks.push({
+        category: "validator_risk",
         code: reason.code,
         description: reason.message,
         evidence: reason.message,
-        recommendedFix: "Review the high-severity proposal risk before approval.",
-        repairStrategy: "resolve_high_severity_proposal_risk",
-        ruleId: "RISK001",
-        severity: "high",
-        title: "High Severity Proposal Risk"
+        recommendedFix: "Run the bounded deterministic repair stage, then revalidate the generated proposal.",
+        repairStrategy: "repair_generated_output_then_revalidate",
+        ruleId: "VAL001",
+        severity: "medium",
+        title: "Generated Output Needs Repair"
+      });
+      continue;
+    }
+
+    if (reason.severity === "high") {
+      const hardSafety = isHardProposalFailure(reason.code);
+      risks.push({
+        category: hardSafety ? "proposal_risk" : "validator_risk",
+        code: reason.code,
+        description: reason.message,
+        evidence: reason.message,
+        recommendedFix: hardSafety ? "Resolve the safety or authority violation before approval." : "Repair and revalidate the proposal before approval.",
+        repairStrategy: hardSafety ? "resolve_high_severity_proposal_risk" : "repair_validation_failure_then_revalidate",
+        ruleId: hardSafety ? "RISK001" : "VAL001",
+        severity: hardSafety ? "high" : "medium",
+        title: hardSafety ? "High Severity Proposal Risk" : "Proposal Validation Block"
       });
     }
   }
@@ -4923,19 +5086,44 @@ function selfReviewSystemRisksFromProposal(proposal: DiffProposal): SelfReviewSy
 
   if (
     proposal.shouldBlockExecution &&
-    risks.every((risk) => risk.severity !== "high" && risk.severity !== "critical")
+    risks.every((risk) => risk.severity !== "high" && risk.severity !== "critical") &&
+    !risks.some((risk) =>
+      risk.code === "website_domain_semantic_block" ||
+      risk.code === "website_content_quality_block"
+    )
   ) {
-    risks.push({
-      category: "metadata_consistency",
-      code: "should_block_execution",
-      description: "Proposal metadata marks execution as blocked, but no high-severity risk was bridged.",
-      evidence: proposal.blockedReason ?? "shouldBlockExecution=true",
-      recommendedFix: "Preserve the blocking reason in review metadata before presenting a perfect self-review score.",
-      repairStrategy: "align_self_review_with_existing_blocking_metadata",
-      ruleId: "META001",
-      severity: "high",
-      title: "Blocking Metadata Mismatch"
-    });
+    const canonicalBlockEvidence = proposal.blockedReason ||
+      proposal.selfReviewStatus === "FAIL" ||
+      proposal.proposalQualityStatus === "blocked" ||
+      proposal.domainValidationStatus === "blocked" ||
+      proposal.generatorContractStatus === "blocked" ||
+      (proposal.proposalRoutingReasons ?? []).some((reason) => reason.severity === "high");
+    const hardCanonicalBlock = (proposal.proposalRoutingReasons ?? []).some((reason) =>
+      reason.severity === "high" && isHardProposalFailure(reason.code)
+    );
+    risks.push(canonicalBlockEvidence
+      ? {
+          category: "proposal_risk",
+          code: "canonical_block_preserved",
+          description: proposal.blockedReason ?? "A canonical validation layer blocked this proposal.",
+          evidence: proposal.blockedReason ?? (proposal.proposalRoutingReasons ?? []).filter((reason) => reason.severity === "high").map((reason) => reason.message).join("; "),
+          recommendedFix: "Resolve the original blocking validator finding and revalidate the proposal.",
+          repairStrategy: "resolve_original_canonical_block",
+          ruleId: hardCanonicalBlock ? "RISK001" : "VAL001",
+          severity: hardCanonicalBlock ? "high" : "medium",
+          title: hardCanonicalBlock ? "Canonical Proposal Block" : "Unresolved Proposal Validation"
+        }
+      : {
+          category: "metadata_consistency",
+          code: "should_block_execution_without_cause",
+          description: "Proposal metadata marks execution as blocked without a canonical blocking cause.",
+          evidence: "shouldBlockExecution=true",
+          recommendedFix: "Restore the missing canonical blocking cause or clear the inconsistent block flag.",
+          repairStrategy: "align_block_flag_with_canonical_decision",
+          ruleId: "META001",
+          severity: "high",
+          title: "Blocking Metadata Mismatch"
+        });
   }
 
   return risks;
@@ -5226,6 +5414,7 @@ function createWebsiteEditProposal(input: {
   projectId: string | null;
   prompt: string;
   proposalContext: ProposalContext;
+  supplementalChanges?: ProposalChange[];
 }): DiffProposal {
   const validationProfile = input.plan.mode === "blocked"
     ? "clarification_only"
@@ -5239,9 +5428,10 @@ function createWebsiteEditProposal(input: {
     ...input.context.requiredFiles.filter((path) => !deletedPaths.has(path)),
     ...input.plan.changes
       .filter((change) => change.action !== "delete_file")
-      .map((change) => change.path)
+      .map((change) => change.path),
+    ...(input.supplementalChanges ?? []).flatMap((change) => change.path ? [change.path] : [])
   ]));
-  const initialProposalChanges: ProposalChange[] = input.plan.changes.map((change) => {
+  const initialProposalChanges: ProposalChange[] = [...input.plan.changes.map((change) => {
     if (change.action === "delete_file") {
       return {
         action: "delete_file" as const,
@@ -5258,7 +5448,7 @@ function createWebsiteEditProposal(input: {
       proposedContent,
       summary: change.summary
     };
-  });
+  }), ...(input.supplementalChanges ?? [])];
   const initialVirtualFilesystem = buildWebsiteVirtualFilesystem({
     actions: initialProposalChanges,
     canonicalDomain: input.context.domainId,
@@ -5294,7 +5484,7 @@ function createWebsiteEditProposal(input: {
     changes: proposalChanges,
     detectedDomain: input.context.domainId,
     domainSource: "existing_project",
-    id: `proposal-${Date.now()}`,
+    id: createProposalId(),
     mode: input.mode,
     previewMode: "static_preview",
     previewMetadata: {
@@ -5785,7 +5975,8 @@ async function createFallbackProposalResponse(input: {
     input.intent,
     proposalComposition,
     input.generatorContract,
-    input.proposalContext
+    input.proposalContext,
+    input.compositionPlan
   );
   const proposalWithIntent = addCompositionDebugSummary(
     withProjectContractUpdate({
@@ -5954,6 +6145,7 @@ export async function POST(request: Request) {
     approvalPolicy?: unknown;
     attachmentIds?: unknown;
     chatSessionId?: unknown;
+    clientContractVersion?: unknown;
     handoff?: unknown;
     messages?: unknown;
     mode?: unknown;
@@ -5965,7 +6157,15 @@ export async function POST(request: Request) {
     projectNotes?: unknown;
     researchPolicy?: unknown;
     workspace?: unknown;
+    workspaceProjectId?: unknown;
   } | null;
+
+  if (body?.clientContractVersion !== hassaliChatContractVersion) {
+    return Response.json(
+      { code: "CLIENT_CONTRACT_STALE", error: hassaliReloadRequiredMessage },
+      { headers: { "Cache-Control": "no-store", [hassaliChatContractHeader]: hassaliChatContractVersion }, status: 409 }
+    );
+  }
 
   const messages = Array.isArray(body?.messages)
       ? body.messages.filter(isChatMessage).map<ChatRequestMessage>((message) => ({
@@ -6011,6 +6211,13 @@ export async function POST(request: Request) {
     ? body.approvalPolicy
     : defaultProjectApprovalPolicy;
   const requestedProjectId = typeof body?.projectId === "string" ? body.projectId : null;
+  const workspaceProjectId = typeof body?.workspaceProjectId === "string" ? body.workspaceProjectId : null;
+  if (requestedProjectId !== workspaceProjectId) {
+    return Response.json(
+      { code: "PROJECT_CONTEXT_STALE", error: "The selected project changed before this request was sent. Wait for it to finish loading and try again." },
+      { headers: { "Cache-Control": "no-store", [hassaliChatContractHeader]: hassaliChatContractVersion }, status: 409 }
+    );
+  }
   const projectNotesContext = explicitProjectNotesContext(body?.projectNotes, productMode);
   const boundedProjectDesignNotes = productMode === "WEBSITE" && typeof body?.projectDesignNotes === "string"
     ? body.projectDesignNotes.trim().slice(0, maximumExplicitProjectNotesContextLength)
@@ -6029,6 +6236,10 @@ export async function POST(request: Request) {
       };
   const latestUserPrompt = [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
   const rawEffectiveUserPrompt = extractEffectiveUserRequest(latestUserPrompt);
+  const structuredRepairContext = extractStructuredRepairContext(latestUserPrompt);
+  if (structuredRepairContext && structuredRepairContext.priorRepairCount > 2) {
+    return createTextStream("Hassali stopped after two bounded repair attempts. The proposal remains blocked; inspect the exact unresolved findings before trying a revised request.");
+  }
   const attachmentIds = Array.isArray(body?.attachmentIds)
     ? body.attachmentIds.filter((value): value is string => typeof value === "string")
     : [];
@@ -6129,43 +6340,63 @@ export async function POST(request: Request) {
     visionCompleted: multimodalContext?.visionCompleted,
     visionText: multimodalContext?.visionText
   });
+  const mutationEvidenceContext = productMode === "WEBSITE"
+    ? websiteBusinessAttachmentContext(multimodalContext, behavior.resolvedRequest)
+    : multimodalVerification.contextText;
   const effectiveUserPrompt = productMode === "ASK"
     ? behavior.resolvedRequest
-    : [behavior.resolvedRequest, multimodalVerification.contextText].filter(Boolean).join("\n\n");
+    : [behavior.resolvedRequest, mutationEvidenceContext].filter(Boolean).join("\n\n");
   const askReasoningPrompt = behavior.resolvedRequest;
   if (multimodalContext?.failureMessage && !multimodalVerification.contextText) {
     return createTextStream(multimodalContext.failureMessage, undefined, {
       "x-hassali-attachment-failure": multimodalContext.failureCode ?? "ATTACHMENT_PROCESSING_FAILED"
     });
   }
-  const currentAttachmentAssetChanges = productMode !== "ASK" &&
-    shouldPromoteUploadedImages(rawEffectiveUserPrompt)
-    ? multimodalContext?.records
-      .filter((record) => record.metadata.kind === "image")
-      .reduce<DiffProposal["changes"]>((changes, record) => {
-        const change = createProjectAssetChange({
-          attachment: record.metadata,
-          bytes: record.bytes,
-          existingPaths: [
-            ...requestedWorkspace.fileList,
-            ...changes.flatMap((entry) => entry.path ? [entry.path] : [])
-          ],
-          mode: productMode
-        });
-        changes.push({
-          ...change,
-          diffPreview: `Binary asset ${record.metadata.mimeType}, ${record.metadata.sizeBytes} bytes.`
-        });
-        return changes;
-      }, []) ?? []
-    : [];
+  let currentAttachmentAssetChanges: DiffProposal["changes"] = [];
+  try {
+    currentAttachmentAssetChanges = productMode !== "ASK" && shouldPromoteUploadedImages(rawEffectiveUserPrompt)
+      ? multimodalContext?.records
+        .filter((record) => record.metadata.kind === "image")
+        .reduce<DiffProposal["changes"]>((changes, record) => {
+          const change = createProjectAssetChange({
+            attachment: record.metadata,
+            bytes: record.bytes,
+            existingPaths: [
+              ...requestedWorkspace.fileList,
+              ...changes.flatMap((entry) => entry.path ? [entry.path] : [])
+            ],
+            mode: productMode
+          });
+          changes.push({
+            ...change,
+            diffPreview: `Binary asset ${record.metadata.mimeType}, ${record.metadata.sizeBytes} bytes.`
+          });
+          return changes;
+        }, []) ?? []
+      : [];
+  } catch {
+    return createTextStream("Hassali couldn't prepare that image for the website. Nothing was changed.", undefined, {
+      "x-hassali-attachment-failure": "ASSET_PROCESSING_FAILED"
+    });
+  }
+  const websiteImageAttachmentIntent = productMode === "WEBSITE" && currentAttachmentAssetChanges.length > 0
+    ? classifyWebsiteImageAttachmentIntent(rawEffectiveUserPrompt)
+    : "unresolved";
+  const explicitWebsiteAssetReplacement = websiteImageAttachmentIntent === "asset_replacement" &&
+    hasWorkspaceWebsiteFiles(requestedWorkspace);
   const withCurrentAttachmentAssets = (proposal: DiffProposal): DiffProposal => {
     if (!currentAttachmentAssetChanges.length) return proposal;
     const firstAssetPath = currentAttachmentAssetChanges[0]?.path ?? "";
     const publicAssetReference = productMode === "CODE"
       ? `/${firstAssetPath.replace(/^public\//, "")}`
       : firstAssetPath;
-    let referenceAdded = false;
+    let referenceAdded = proposal.changes.some((change) =>
+      typeof change.proposedContent === "string" &&
+      /(?:index\.html|src\/App\.(?:jsx|tsx))$/i.test(change.path ?? "") &&
+      change.proposedContent.includes(publicAssetReference)
+    );
+    const targetedHeroReplacement = productMode === "WEBSITE" &&
+      /\b(?:replace|use|set|change)\b[\s\S]{0,70}\b(?:hero|header)\b[\s\S]{0,40}\b(?:image|photo|picture|asset)\b|\b(?:image|photo|picture|asset)\b[\s\S]{0,40}\b(?:hero|header)\b/i.test(rawEffectiveUserPrompt);
     const changes = proposal.changes.map((change) => {
       if (
         referenceAdded ||
@@ -6176,6 +6407,22 @@ export async function POST(request: Request) {
         !/<\/main>/i.test(change.proposedContent)
       ) {
         return change;
+      }
+      if (targetedHeroReplacement && productMode === "WEBSITE" && /index\.html$/i.test(change.path)) {
+        const replacement = replaceWebsiteSectionImage({
+          alt: "User-supplied hero visual",
+          assetPath: publicAssetReference,
+          html: change.proposedContent,
+          section: "hero"
+        });
+        if (replacement.changed) {
+          referenceAdded = true;
+          return {
+            ...change,
+            proposedContent: replacement.html,
+            summary: `${change.summary} Replace the hero image with approved project asset ${publicAssetReference}; preserve unrelated sections.`
+          };
+        }
       }
       const markup = productMode === "WEBSITE"
         ? `<figure class="hassali-project-asset"><img src="${publicAssetReference}" alt="User-supplied project visual" loading="lazy"></figure>`
@@ -6449,6 +6696,28 @@ export async function POST(request: Request) {
     sessionId: requestedSessionId,
     taskObjective: effectiveUserPrompt
   });
+  if (requestedProjectId && !persistence) {
+    return respond(Response.json(
+      { code: "PROJECT_CONTEXT_UNAVAILABLE", error: "Hassali could not verify the selected project. No proposal was created." },
+      { headers: { "Cache-Control": "no-store", [hassaliChatContractHeader]: hassaliChatContractVersion }, status: 503 }
+    ));
+  }
+  let inheritedRepairAuthority: WebsiteProposalRepairAuthority | null = null;
+  if (structuredRepairContext && productMode === "WEBSITE" && requestedProjectId && persistence) {
+    const rejectedProposal = await loadOwnedChatProposal({
+      externalUserId: persistence.externalUserId,
+      projectId: requestedProjectId,
+      proposalId: structuredRepairContext.proposalId
+    }).catch(() => null);
+    inheritedRepairAuthority = parseWebsiteProposalRepairAuthority(
+      (rejectedProposal as Record<string, unknown> | null)?.repairAuthority
+    );
+    if (structuredRepairContext.requestedIntent === "generation" && !inheritedRepairAuthority) {
+      return respond(createTextStream(
+        "Hassali could not verify the rejected proposal's WEBSITE design authority. No replacement proposal was created; regenerate the original request with its design reference attached."
+      ));
+    }
+  }
   const sharedMemoryContext = persistence
     ? await buildOwnedSharedMemoryContext({
         conversationId: persistence.sessionId,
@@ -6484,34 +6753,38 @@ export async function POST(request: Request) {
         totalCharacters: sharedMemoryContext.diagnostics.totalCharacters
       }
     : null;
-  const designDirectionRequest = productMode === "WEBSITE" &&
-    (mode === "SUGGEST" || mode === "EXECUTE") &&
-    !nonMutatingFinalAction &&
-    (
-      classifyWebsiteRequestScope(behavior.resolvedRequest) === "full_generation" ||
-      isFullWebsiteReplacementRequest(behavior.resolvedRequest) ||
-      isDesignDirectionRevisionRequest(behavior.resolvedRequest) ||
-      hasDesignReferenceSignal({
-        attachmentNames: multimodalContext?.records.map((record) => record.metadata.safeName),
-        prompt: behavior.resolvedRequest
-      })
-    )
-    ? await buildDesignReferenceIntake({
-        attachments: multimodalContext?.records,
-        memory: sharedMemoryContext,
-        projectNotes: boundedProjectDesignNotes,
-        prompt: behavior.resolvedRequest,
-        signal: taskSignal,
-        visionText: multimodalContext?.visionText,
-        visualArtifacts: multimodalContext?.visualArtifacts,
-        workspace: {
-          activeFileContent: workspace.activeFileContent,
-          activePath: workspace.activePath,
-          fileContents: workspace.fileContents,
-          fileList: workspace.fileList
-        }
-      })
-    : null;
+  const designDirectionRequest = inheritedRepairAuthority &&
+    !repairMayReplaceDesign(structuredRepairContext?.failureCodes ?? [])
+    ? inheritedRepairAuthority.designDirectionRequest
+    : !explicitWebsiteAssetReplacement &&
+      productMode === "WEBSITE" &&
+      (mode === "SUGGEST" || mode === "EXECUTE") &&
+      !nonMutatingFinalAction &&
+      (
+        classifyWebsiteRequestScope(behavior.resolvedRequest) === "full_generation" ||
+        isFullWebsiteReplacementRequest(behavior.resolvedRequest) ||
+        isDesignDirectionRevisionRequest(behavior.resolvedRequest) ||
+        hasDesignReferenceSignal({
+          attachmentNames: multimodalContext?.records.map((record) => record.metadata.safeName),
+          prompt: behavior.resolvedRequest
+        })
+      )
+      ? await buildDesignReferenceIntake({
+          attachments: multimodalContext?.records,
+          memory: sharedMemoryContext,
+          projectNotes: boundedProjectDesignNotes,
+          prompt: behavior.resolvedRequest,
+          signal: taskSignal,
+          visionText: multimodalContext?.visionText,
+          visualArtifacts: multimodalContext?.visualArtifacts,
+          workspace: {
+            activeFileContent: workspace.activeFileContent,
+            activePath: workspace.activePath,
+            fileContents: workspace.fileContents,
+            fileList: workspace.fileList
+          }
+        })
+      : null;
   if (productMode !== "ASK" && nonMutatingFinalAction) {
     let specialistPersistence = persistence;
     const expertAnswer = await runAskBrain({
@@ -6635,16 +6908,19 @@ export async function POST(request: Request) {
     mode: productMode,
     prompt: effectiveUserPrompt
   });
-  const projectDesignContract = designDirectionRequest
-    ? buildProjectDesignContract({
-        domain: translatedIntent.domain ?? translatedIntent.businessType,
-        request: designDirectionRequest,
-        workspace: {
-          fileContents: workspace.fileContents,
-          fileList: workspace.fileList
-        }
-      })
-    : null;
+  const projectDesignContract: ProjectDesignContract | null = inheritedRepairAuthority &&
+    !repairMayReplaceDesign(structuredRepairContext?.failureCodes ?? [])
+    ? inheritedRepairAuthority.projectDesignContract
+    : designDirectionRequest
+      ? buildProjectDesignContract({
+          domain: translatedIntent.domain ?? translatedIntent.businessType,
+          request: designDirectionRequest,
+          workspace: {
+            fileContents: workspace.fileContents,
+            fileList: workspace.fileList
+          }
+        })
+      : null;
   const blueprint = matchBusinessBlueprint({
     contract: activeProjectContract,
     productMode,
@@ -6731,6 +7007,7 @@ export async function POST(request: Request) {
     executionPlan,
     productMode,
     projectContract: activeProjectContract,
+    projectDesignContract,
     taskDecomposition: decomposition,
     translatedIntent
   });
@@ -6758,7 +7035,7 @@ export async function POST(request: Request) {
     taskDecomposition: decomposition,
     translatedIntent
   });
-  const proposalContext = adaptProposalContextForScopedCodeEdit(
+  const baseProposalContext = adaptProposalContextForScopedCodeEdit(
     isolateProposalContextForMixedCodeWorkspace(buildProposalContext({
       contract: activeProjectContract,
       designDirectionRequest,
@@ -6771,6 +7048,9 @@ export async function POST(request: Request) {
     effectiveUserPrompt,
     workspace
   );
+  const proposalContext = inheritedRepairAuthority
+    ? preserveWebsiteProposalContextForRepair(baseProposalContext, inheritedRepairAuthority)
+    : baseProposalContext;
   const generatorContract = enforceGeneratorContractWithProposalContext(
     initialGeneratorContract,
     proposalContext
@@ -7581,23 +7861,27 @@ export async function POST(request: Request) {
     const websiteEditContext = buildWebsiteEditContext(workspace);
 
     if (websiteEditContext.hasWebsiteFiles) {
-      const websiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
-      const plannedWebsiteEdit = planWebsiteEdit(websiteEditContext, websiteEditIntent);
-      const websiteEditPlan = plannedWebsiteEdit.mode === "planned" && projectDesignContract && designDirectionRequest
+      const classifiedWebsiteEditIntent = classifyWebsiteEditIntent(effectiveUserPrompt);
+      const attachmentAssetPath = currentAttachmentAssetChanges[0]?.path;
+      const websiteEditIntent: WebsiteEditIntent = explicitWebsiteAssetReplacement && attachmentAssetPath
         ? {
-            ...plannedWebsiteEdit,
-            changes: [
-              ...plannedWebsiteEdit.changes.filter((change) => change.path !== "DESIGN.md"),
-              {
-                content: renderProjectDesignMd(projectDesignContract),
-                path: "DESIGN.md",
-                summary: "Updates the portable Project Design Contract for the approved visual change."
-              }
-            ],
-            targetFiles: Array.from(new Set([...plannedWebsiteEdit.targetFiles, "DESIGN.md"]))
+            ...classifiedWebsiteEditIntent,
+            confidence: 0.98,
+            editType: "asset_replacement",
+            extractedValues: {
+              ...classifiedWebsiteEditIntent.extractedValues,
+              assetPath: attachmentAssetPath
+            },
+            requestScope: "section_edit",
+            risks: [],
+            shouldClarify: false,
+            targetFiles: ["index.html"],
+            targetPages: ["home"]
           }
-        : plannedWebsiteEdit;
-      const proposal = attachDesignReferenceContext(withCurrentAttachmentAssets(createWebsiteEditProposal({
+        : classifiedWebsiteEditIntent;
+      const plannedWebsiteEdit = planWebsiteEdit(websiteEditContext, websiteEditIntent);
+      const websiteEditPlan = plannedWebsiteEdit;
+      const assembledWebsiteEditProposal = createWebsiteEditProposal({
         context: websiteEditContext,
         generatorContract,
         intent: websiteEditIntent,
@@ -7605,8 +7889,36 @@ export async function POST(request: Request) {
         plan: websiteEditPlan,
         projectId: requestedProjectId,
         prompt: effectiveUserPrompt,
-        proposalContext
-      })), designDirectionRequest);
+        proposalContext,
+        supplementalChanges: explicitWebsiteAssetReplacement ? currentAttachmentAssetChanges : undefined
+      });
+      const candidateProposal = attachDesignReferenceContext(
+        explicitWebsiteAssetReplacement
+          ? {
+              ...assembledWebsiteEditProposal,
+              summary: `${assembledWebsiteEditProposal.summary}\n\nAttached project assets: ${currentAttachmentAssetChanges.map((change) => change.path).join(", ")}. The requested hero and its approved project asset are reviewed together. These files remain approval-first.`
+            }
+          : withCurrentAttachmentAssets(assembledWebsiteEditProposal),
+        designDirectionRequest
+      );
+      const assetEditDrift = explicitWebsiteAssetReplacement
+        ? boundedAssetEditDrift(candidateProposal.changes)
+        : null;
+      const proposal = assetEditDrift
+        ? {
+            ...candidateProposal,
+            approvalDisabled: true,
+            approvalRecommendation: "reject" as const,
+            blockedReason: assetEditDrift,
+            proposalRoutingMode: "blocked" as const,
+            proposalRoutingReasons: [
+              ...(candidateProposal.proposalRoutingReasons ?? []),
+              { code: "asset_edit_design_drift", message: assetEditDrift, severity: "high" as const }
+            ],
+            shouldBlockExecution: true,
+            summary: `${candidateProposal.summary}\n\nBlocked — Needs repair: the bounded asset edit attempted to change the project's design authority.`
+          }
+        : candidateProposal;
       const visibleSummary =
         websiteEditPlan.mode === "blocked"
           ? "I reviewed the existing website edit request, but it is not safe to apply as-is."
@@ -7721,6 +8033,7 @@ export async function POST(request: Request) {
     (mode === "SUGGEST" || mode === "EXECUTE") &&
     (Boolean(renameRequest) ||
       Boolean(codeAppCollision) ||
+      (productMode === "WEBSITE" && currentAttachmentAssetChanges.length > 0) ||
       (!scopedExistingCodeEdit &&
         (shouldUseDeterministicDecision(decision) ||
           (productMode === "WEBSITE" && isFullWebsiteReplacementRequest(effectiveUserPrompt)) ||
@@ -7743,7 +8056,14 @@ export async function POST(request: Request) {
       intent,
       proposalComposition,
       generatorContract,
-      proposalContext
+      proposalContext,
+      compositionPlan,
+      productMode === "WEBSITE" && currentAttachmentAssetChanges.length
+        ? {
+            assets: currentAttachmentAssetChanges.flatMap((change) => change.path ? [{ content: change.proposedContent, path: change.path }] : []),
+            explicitAssetPaths: currentAttachmentAssetChanges.flatMap((change) => change.path ? [change.path] : [])
+          }
+        : undefined
     );
     if (directInvoiceArtifact) {
       const visibleSummary = "I prepared an invoice template proposal for review. Nothing changes until you approve it.";
@@ -8071,12 +8391,12 @@ export async function POST(request: Request) {
           kernel,
           prompt: effectiveUserPrompt,
           proposal: {
-          id: `proposal-${Date.now()}`,
-          mode,
-          projectId: requestedProjectId,
-          status: "pending",
-          summary: `${diagnostic.diagnosis} ${parsed.summary}`,
-          changes: parsed.changes.map((change) => {
+            id: createProposalId(),
+            mode,
+            projectId: requestedProjectId,
+            status: "pending",
+            summary: `${diagnostic.diagnosis} ${parsed.summary}`,
+            changes: parsed.changes.map((change) => {
             if (isRuntimeProposalAction(change.action)) {
               return {
                 action: change.action,
@@ -8142,7 +8462,30 @@ export async function POST(request: Request) {
       proposal: routedProposal,
       translatedIntent
     });
-    const proposal: DiffProposal = withCurrentAttachmentAssets(evaluatedProposal.proposal);
+    let proposal: DiffProposal = withCurrentAttachmentAssets(evaluatedProposal.proposal);
+    const repairDesignDrift = inheritedRepairAuthority
+      ? repairDesignAuthorityDrift({
+          actual: proposalContext.projectDesignContract,
+          expected: inheritedRepairAuthority.projectDesignContract,
+          failureCodes: structuredRepairContext?.failureCodes ?? []
+        })
+      : null;
+    if (repairDesignDrift) {
+      proposal = {
+        ...proposal,
+        approvalDisabled: true,
+        approvalRecommendation: "reject",
+        blockedReason: repairDesignDrift,
+        proposalRoutingMode: "blocked",
+        proposalRoutingReasons: [
+          ...(proposal.proposalRoutingReasons ?? []),
+          { code: "repair_design_authority_drift", message: repairDesignDrift, severity: "high" }
+        ],
+        requiresExtraReview: true,
+        shouldBlockExecution: true,
+        summary: `${proposal.summary}\n\nBlocked — Needs repair: the successor proposal did not preserve the rejected proposal's authoritative design reference.`
+      };
+    }
 
     if (
       proposal.shouldBlockExecution &&

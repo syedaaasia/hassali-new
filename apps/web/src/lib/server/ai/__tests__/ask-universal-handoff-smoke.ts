@@ -76,9 +76,10 @@ function existingCodeWorkspace(activeFileContent = "export default function App(
 }
 
 async function chatPost(body: Record<string, unknown>) {
+  const { hassaliChatContractVersion } = await import("@/lib/chat-contract");
   const { POST } = await import("@/app/api/ai/chat/route");
   return POST(new Request("http://localhost/api/ai/chat", {
-    body: JSON.stringify(body),
+    body: JSON.stringify({ clientContractVersion: hassaliChatContractVersion, ...body }),
     headers: { "content-type": "application/json" },
     method: "POST"
   }));

@@ -139,6 +139,7 @@ function sceneRecipe(text: string): Website3DSceneRecipe {
   if (/\b(?:tv|television|oled|qled|display|projector|home\s+cinema|screen)\b/.test(text)) return "screen_light_stage";
   if (/\b(?:watch|timepiece|horology|mechanical\s+movement|precision\s+instrument|industrial\s+instrument)\b/.test(text)) return "mechanical_precision";
   if (/\b(?:crm|saas|financial\s+workflow|workflow\s+software|payment\s+system|productivity\s+software|invoice\s+workflow)\b/.test(text)) return "card_data_journey";
+  if (/\b(?:paint|coating|pigment|color\s+finish|surface\s+finish|material\s+finish)\b/.test(text)) return "material_orbit";
   if (/\b(?:architecture|architectural|property|real\s+estate|interior\s+design|construction|building\s+forms?)\b/.test(text)) return "architectural_volume";
   if (/\b(?:skincare|skin\s+care|beauty|cosmetic|fragrance|perfume|packaging)\b/.test(text)) {
     return /\b(?:ingredient|material|orbit|molecule|formula)\b/.test(text) ? "material_orbit" : "product_pedestal";
@@ -165,7 +166,10 @@ function specializeProfile(profileValue: RecipeProfile, semantic: WebsiteSemanti
   const subjectParts = semantic.visualSubjects.length
     ? semantic.visualSubjects.slice(0, 3)
     : [...semantic.products, ...semantic.services].slice(0, 3);
-  const subject = subjectParts.join(", ") || semantic.semanticDomain;
+  const inferredSubject = subjectParts.join(", ");
+  const subject = inferredSubject && normalize(inferredSubject) !== normalize(semantic.semanticDomain)
+    ? inferredSubject
+    : profileValue.subject;
   const geometryLanguage = semantic.visualSubjects.length
     ? semantic.visualSubjects.slice(0, 4)
     : profileValue.composition.geometryLanguage;
@@ -191,8 +195,8 @@ function specializeProfile(profileValue: RecipeProfile, semantic: WebsiteSemanti
       ...profileValue.fallback,
       description: `Designed static artwork representing ${subject}.`
     },
-    narrative: `${semantic.semanticDomain} is explained through ${subject}, using the reusable scene family without pretending to reproduce a real product.`,
-    purpose: `Make ${semantic.semanticDomain} easier to understand through a focused spatial explanation of ${subject}.`,
+    narrative: `${subject} comes into focus through an original spatial study of form, material, light, and motion.`,
+    purpose: `Give ${semantic.semanticDomain} a distinctive, accessible spatial chapter centered on ${subject}.`,
     subject
   };
 }

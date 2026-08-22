@@ -343,9 +343,13 @@ test("telemetry keeps file sync success separate from preview failure", () => {
     }],
     proposalId: "proposal-a",
     runtimeResult: {
+      applied: true,
+      canonicalProjectFiles: [{ content: "export default function App() { return null; }", path: "src/App.tsx" }],
+      canonicalProjectRevision: "revision-b",
       fileContents: {
         "src/App.tsx": "export default function App() { return null; }"
       },
+      ok: true,
       postApplyPreview: {
         commandSource: "package_script",
         existingProcessReused: false,

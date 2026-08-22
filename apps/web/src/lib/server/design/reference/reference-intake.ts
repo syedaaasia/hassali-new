@@ -15,10 +15,12 @@ import {
   createCatalogReferenceProvider,
   createDesignMdReferenceProvider,
   createExistingProjectReferenceProvider,
+  createInternalDesignKnowledgeProvider,
   createLiveWebsiteReferenceProvider,
   createUploadedVisualReferenceProvider,
   createUserDescriptionReferenceProvider
 } from "./reference-profile";
+import { retrieveDesignKnowledge } from "@/lib/server/design/knowledge/design-knowledge-library";
 
 type AttachmentRecord = { bytes: Uint8Array; metadata: HassaliAttachment };
 
@@ -45,8 +47,17 @@ function designMemoryConstraints(memory: MemoryContextCapsule | null | undefined
   if (!memory || memory.policy.state !== "active") return [];
   return Object.values(memory.sections).flat()
     .map((item) => item.content.trim())
-    .filter((content) => /\b(?:brands?|buttons?|cards?|colors?|corners?|design|editorial|fonts?|layout|motion|radius|spacing|theme|typography|visual|website)\b/i.test(content))
+    .filter((content) =>
+      /\b(?:website|websites|web design|brand design|design system|visual direction|typography|layout|interface|ui|rounded|square|sharp)\b/i.test(content) &&
+      !/\b(?:car|cars|suzuki|family|health|food|medical|favorite color)\b/i.test(content)
+    )
     .slice(0, 6);
+}
+
+function shouldUseAutomaticDesignKnowledge(prompt: string) {
+  return /\b(?:build|create|design|make)\b[\s\S]{0,100}\b(?:website|site|landing page|portfolio)\b/i.test(prompt) &&
+    /\b(?:cinematic|editorial|brutalist|playful|minimal|luxury|technical|commerce|product-led|photography-first)\b/i.test(prompt) &&
+    !/\b(?:original|do not copy|don't copy|dont copy)\b/i.test(prompt);
 }
 
 function currentConstraints(prompt: string) {
@@ -115,11 +126,46 @@ export type BuildDesignReferenceIntakeInput = {
 export async function buildDesignReferenceIntake(input: BuildDesignReferenceIntakeInput): Promise<DesignDirectionRequest> {
   const now = input.now ?? (() => new Date());
   const attachments = attachmentInputs(input.attachments ?? []);
-  const intent = classifyDesignReferenceIntent({
+  const classifiedIntent = classifyDesignReferenceIntent({
     attachments: attachments.inputs,
     prompt: input.prompt,
     workspaceHasVisualSystem: hasWorkspaceVisualSystem(input.workspace)
   });
+  const hasExplicitReference = classifiedIntent.references.some((reference) =>
+    ["named-brand", "public-url", "uploaded-design-md", "uploaded-image", "uploaded-screenshot"].includes(reference.sourceType)
+  );
+  const automatic = hasExplicitReference || !shouldUseAutomaticDesignKnowledge(input.prompt)
+    ? []
+    : retrieveDesignKnowledge({ maximum: 1, prompt: input.prompt });
+  const automaticReferences: DesignReference[] = automatic.map(({ profile }) => ({
+    canonicalUrl: null,
+    confidence: profile.confidence,
+    fidelity: classifiedIntent.fidelity,
+    id: `internal-design-${profile.fingerprint.slice(0, 12)}`,
+    limitations: ["Internal design knowledge is visual-reference-only."],
+    name: profile.id,
+    pageTarget: null,
+    provenance: {
+      capturedAt: null,
+      fingerprint: profile.fingerprint,
+      license: "MIT",
+      private: true,
+      providerId: "internal-design-knowledge",
+      revision: null,
+      sourceLabel: "Private Hassali design knowledge",
+      sourceUrl: null
+    },
+    resolutionStatus: "resolved",
+    role: "global",
+    sourceType: "internal-design-knowledge",
+    userSuppliedUrl: null
+  }));
+  const intent = {
+    ...classifiedIntent,
+    references: automaticReferences.length
+      ? [...automaticReferences, ...classifiedIntent.references.filter((reference) => reference.sourceType !== "user-description")]
+      : classifiedIntent.references
+  };
   const contentByReferenceId = new Map<string, string>();
   for (const reference of intent.references) {
     if (reference.sourceType !== "uploaded-design-md") continue;
@@ -129,6 +175,7 @@ export async function buildDesignReferenceIntake(input: BuildDesignReferenceInta
   const registry = new DesignReferenceProviderRegistry()
     .register(createCatalogReferenceProvider())
     .register(createDesignMdReferenceProvider(contentByReferenceId))
+    .register(createInternalDesignKnowledgeProvider())
     .register(createUploadedVisualReferenceProvider())
     .register(createExistingProjectReferenceProvider())
     .register(createUserDescriptionReferenceProvider())
@@ -203,15 +250,19 @@ export async function buildDesignReferenceIntake(input: BuildDesignReferenceInta
 
 export function designReferenceVisibleSummary(request: DesignDirectionRequest | null) {
   if (!request) return "";
-  const primary = request.references[0];
+  const visibleReferences = request.references.filter((reference) => reference.sourceType !== "internal-design-knowledge");
+  const primary = visibleReferences[0];
+  if (!primary && request.references.some((reference) => reference.sourceType === "internal-design-knowledge")) {
+    return "Design direction: tailored visual system\nEvidence: Hassali design intelligence";
+  }
   if (!primary) return "";
-  const sourceLabels = [...new Set(request.references.map((reference) => reference.sourceType))];
-  const referenceLabel = request.references.length === 1
+  const sourceLabels = [...new Set(visibleReferences.map((reference) => reference.sourceType))];
+  const referenceLabel = visibleReferences.length === 1
     ? `${primary.name}${primary.role === "global" ? "" : ` (${primary.role})`}`
-    : request.references.map((reference) => `${reference.name} (${reference.role})`).join(", ");
+    : visibleReferences.map((reference) => `${reference.name} (${reference.role})`).join(", ");
   const lines = [
     `Reference: ${referenceLabel}`,
-    `Fidelity: ${request.fidelity}`,
+    `Requested fidelity: ${request.fidelity}`,
     `Evidence: ${sourceLabels.join(" + ")}`,
     request.userBrand ? `User brand: ${request.userBrand}` : null,
     request.unknowns.length ? `Reference limits: ${request.unknowns.slice(0, 2).join(" ")}` : null

@@ -1,10 +1,12 @@
 import type { MemoryContextCapsule } from "@/lib/server/shared-memory/shared-memory";
+import type { DesignKnowledgeProfile } from "@/lib/server/design/knowledge/design-knowledge-profile";
 
 export type ReferenceSourceType =
   | "existing-project"
   | "existing-project-page"
   | "external-design-reference"
   | "hassali-reference-catalog"
+  | "internal-design-knowledge"
   | "multiple-reference"
   | "named-brand"
   | "public-url"
@@ -55,6 +57,7 @@ export type DesignReference = {
   provenance: ReferenceProvenance;
   resolutionStatus: ReferenceResolutionStatus;
   role: ReferenceRole;
+  sourceAttachmentId?: string | null;
   sourceType: ReferenceSourceType;
   userSuppliedUrl: string | null;
 };
@@ -76,6 +79,7 @@ export type ReferenceDesignProfile = {
   evidenceStatus: ReferenceEvidenceStatus;
   id: string;
   imagery: ReferenceFact[];
+  knowledge?: DesignKnowledgeProfile;
   layout: ReferenceFact[];
   limitations: string[];
   motion: ReferenceFact[];
@@ -187,13 +191,13 @@ export function compactDesignDirectionRequest(request: DesignDirectionRequest | 
   if (!request) return null;
   return {
     conflicts: request.conflicts.map((conflict) => conflict.summary),
-    evidence: request.profiles.map((profile) => ({
+    evidence: request.profiles.filter((profile) => !request.references.some((reference) => reference.id === profile.referenceId && reference.sourceType === "internal-design-knowledge")).map((profile) => ({
       confidence: profile.confidence,
       evidenceStatus: profile.evidenceStatus,
       referenceId: profile.referenceId
     })),
     fidelity: request.fidelity,
-    references: request.references.map((reference) => ({
+    references: request.references.filter((reference) => reference.sourceType !== "internal-design-knowledge").map((reference) => ({
       fidelity: reference.fidelity,
       name: reference.name,
       resolutionStatus: reference.resolutionStatus,

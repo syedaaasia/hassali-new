@@ -21,7 +21,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       signInForceRedirectUrl="/dashboard"
       signUpForceRedirectUrl="/dashboard"
     >
-      <html lang="en" className="dark">
+      <html lang="en" className="darker">
         <body className="font-sans antialiased">{children}</body>
       </html>
     </ClerkProvider>

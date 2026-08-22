@@ -1,12 +1,14 @@
 export type WebsiteEditType =
   | "add_carousel"
   | "add_testimonials"
+  | "asset_replacement"
   | "business_name"
   | "color_palette"
   | "component_geometry"
   | "contact_info"
   | "cta_text"
   | "hero_style"
+  | "navigation_label"
   | "page_edit"
   | "page_replacement"
   | "remove_page"
@@ -14,9 +16,12 @@ export type WebsiteEditType =
   | "remove_motion"
   | "remove_webgl"
   | "set_cinematic"
+  | "set_scroll_effects"
   | "set_webgl"
   | "section_edit"
   | "service_copy"
+  | "text_content"
+  | "typography"
   | "unknown";
 
 export type WebsiteRequestScope =
@@ -36,11 +41,15 @@ export type WebsiteEditIntent = {
   editType: WebsiteEditType;
   extractedValues: {
     address?: string;
+    assetPath?: string;
     businessName?: string;
     colorIntent?: string;
     email?: string;
     experienceSectionTarget?: string;
+    fontIntent?: string;
     geometryIntent?: "rounded" | "square";
+    navigationLabelFrom?: string;
+    navigationLabelTo?: string;
     pageToRemove?: string;
     pageTarget?: string;
     phone?: string;
@@ -49,6 +58,8 @@ export type WebsiteEditIntent = {
     services?: string[];
     styleIntent?: string;
     sectionTarget?: string;
+    textTarget?: "hero_copy" | "hero_heading" | "page_heading";
+    textValue?: string;
   };
   mode: "WEBSITE_EDIT";
   originalPrompt: string;
@@ -59,7 +70,7 @@ export type WebsiteEditIntent = {
   targetPages: string[];
 };
 
-const editVerbPattern = /\b(?:change|update|make|use|turn|enable|convert|add|remove|rename|replace|rewrite|rebuild|redesign|improve|polish|edit|darken|lighten)\b/i;
+const editVerbPattern = /\b(?:change|update|make|use|set|put|place|swap|turn|enable|convert|add|remove|rename|replace|rewrite|rebuild|redesign|improve|polish|edit|darken|lighten)\b/i;
 const businessNameFactPattern = /^(?:our\s+(?:(?:business|brand|company|site|website)\s+)?name|(?:my|the)\s+(?:business|brand|company|site|website)\s+name)\s+(?:is|should be)\s+\S/i;
 
 const pagePattern = /\b(?:homepage|home|about(?: us)?|services?|products?|pricing|contact|blog|checkout|cart)(?:\s+page)?\b|\bgallery\s+page\b/i;
@@ -100,7 +111,7 @@ export function classifyWebsiteRequestScope(prompt: string): WebsiteRequestScope
   }
   if (pagePattern.test(text)) return "page_edit";
   if (sectionPattern.test(text)) return "section_edit";
-  if (/\b(?:theme|palette|color|colour|dark mode|glassmorphism|luxury|premium|apple style)\b/i.test(text)) return "style_theme_edit";
+  if (/\b(?:theme|palette|color|colour|typography|font|typeface|dark mode|glassmorphism|luxury|premium|apple style|scroll effect|scroll animation|parallax)\b/i.test(text)) return "style_theme_edit";
   if (/\b(?:rewrite|replace|update|fix|add)\b[\s\S]{0,60}\b(?:copy|text|grammar|faq|description|content)\b/i.test(text)) return "content_edit";
   if (businessNameFactPattern.test(text)) return "targeted_edit";
   if (/^(?:fix|improve|update|change|make better|make it better)(?:\s+(?:my|the|this))?\s*(?:website|site|it|this)?[.!?]*$/i.test(text)) {
@@ -192,6 +203,9 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
     /\b(?:our\s+(?:(?:business|brand|company|site|website)\s+)?name|(?:my|the)\s+(?:business|brand|company|site|website)\s+name)\s+(?:is|should be)\s+(.+?)(?=\s+(?:and|but)\s+(?:use|make|change|update|add|remove|set|keep)\b|$)/i
   ));
   const primaryCta = extractQuotedOrTrailingValue(prompt, /\b(?:cta|button text|main cta)\s+(?:to|say|as|with)\s+(.+)$/i);
+  const navigationLabelChange = prompt.match(
+    /\b(?:change|rename|replace)\s+(?:the\s+)?(?:(?:navigation|nav|menu)\s+(?:label|link)\s+)?["'`]?((?:home|about(?:\s+us)?|services?|products?|work|portfolio|pricing|contact|blog))["'`]?\s+(?:to|with)\s+["'`]?([^"'`.!?]+)["'`]?(?:[.!?]|$)/i
+  );
   const pageToRemove = extractQuotedOrTrailingValue(prompt, /\bremove\s+(?:the\s+)?([a-z0-9 -]+?)\s+page\b/i);
   const services = extractServices(prompt);
   const wantsTestimonials = /\b(?:add|include)\b[\s\S]{0,60}\b(?:testimonials|reviews|customer feedback)\b/i.test(prompt);
@@ -223,7 +237,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
       .replace(/\s+/g, "_");
   const wantsHeroStyle = /\bhero\b[\s\S]{0,80}\b(?:darker|lighter|luxury|premium|warmer|cleaner)\b/i.test(prompt) ||
     /\bmake\s+(?:it|my website|my site|the website|the site)\s+(?:look\s+)?(?:more\s+)?(?:luxury|premium|warmer|cleaner)\b/i.test(prompt);
-  const wantsColor = /\b(?:color|colors|palette|accent|blue|white|gold|darker|warmer)\b/i.test(prompt) &&
+  const wantsColor = /(?:#[0-9a-f]{3,8}\b|\b(?:color|colors|colour|colours|palette|accent|black|white|gray|grey|red|orange|yellow|green|blue|purple|pink|gold|silver|darker|lighter|warmer|cooler)\b)/i.test(prompt) &&
     !phone &&
     !email &&
     !address &&
@@ -238,6 +252,21 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const wantsComponentGeometry = Boolean(
     geometryIntent && /\b(?:gallery|product|service|feature|pricing)?\s*cards?\b/i.test(prompt)
   );
+  const wantsTypography = /\b(?:change|update|set|use|replace|make|improve)\b[^.!?;]{0,70}\b(?:typography|font(?: family| style)?|typeface|heading font|body font)\b|\b(?:typography|font(?: family| style)?|typeface)\b[^.!?;]{0,50}\b(?:to|as|with|serif|sans|modern|editorial|elegant|bold)/i.test(prompt);
+  const wantsScrollEffects = /\b(?:add|use|enable|make|create|apply)\b[^.!?;]{0,80}\b(?:scroll[- ](?:effects?|animations?|reveals?)|parallax|scroll-driven|on-scroll)\b/i.test(activationText);
+  const textChange = prompt.match(/\b(?:change|replace|update|set|rewrite)\s+(?:the\s+)?(?:(hero)\s+)?(headline|heading|title|text|copy)\s+(?:to|as|with|say)\s+(.+)$/i);
+  const rawTextValue = textChange?.[3]?.trim() ?? "";
+  const quotedTextValue = rawTextValue.match(/^["'`]([\s\S]*?)["'`](?:\s|[.!?]|$)/)?.[1];
+  const textValue = (quotedTextValue ?? rawTextValue.replace(/\s+\b(?:do\s+not|don't|dont|keep|preserve|change\s+only)\b[\s\S]*$/i, ""))
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "");
+  const textTarget = textChange
+    ? textChange[1]
+      ? /^(?:text|copy)$/i.test(textChange[2] ?? "")
+        ? "hero_copy" as const
+        : "hero_heading" as const
+      : "page_heading" as const
+    : undefined;
 
   let editType: WebsiteEditType = "unknown";
 
@@ -248,16 +277,20 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   else if (transitionToCinematic) editType = "set_cinematic";
   else if (wantsCinematic) editType = "set_cinematic";
   else if (wantsWebgl) editType = "set_webgl";
+  else if (wantsScrollEffects) editType = "set_scroll_effects";
   else if (wantsCarousel) editType = "add_carousel";
   else if (phone || email || address || /\bcontact details\b/i.test(prompt)) editType = "contact_info";
   else if (explicitBusinessName) editType = "business_name";
   else if (primaryCta) editType = "cta_text";
+  else if (navigationLabelChange?.[1] && navigationLabelChange[2]) editType = "navigation_label";
   else if (wantsTestimonials) editType = "add_testimonials";
   else if (pageToRemove) editType = "remove_page";
   else if (services.length || /\b(?:add prices|prices to the services|service names)\b/i.test(prompt)) editType = "service_copy";
   else if (wantsHeroStyle) editType = "hero_style";
+  else if (wantsTypography) editType = "typography";
   else if (wantsColor) editType = "color_palette";
   else if (wantsComponentGeometry) editType = "component_geometry";
+  else if (textValue && textTarget) editType = "text_content";
   else if (requestScope === "large_partial_replacement" && pageTarget) editType = "page_replacement";
   else if (requestScope === "page_edit" && pageTarget) editType = "page_edit";
   else if (requestScope === "section_edit" && sectionTarget) editType = "section_edit";
@@ -265,7 +298,7 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
   const targetPages =
     editType === "remove_page" && pageToRemove ? [normalizePageName(pageToRemove)] :
     editType === "service_copy" ? ["services", "home"] :
-    editType === "set_webgl" || editType === "set_cinematic" ? ["home"] :
+    editType === "set_webgl" || editType === "set_cinematic" || editType === "set_scroll_effects" ? ["home"] :
     editType === "add_carousel" || editType === "add_testimonials" || editType === "hero_style" || editType === "cta_text" ? ["home"] :
     editType === "page_edit" || editType === "page_replacement" ? [pageTarget ?? "home"] :
     [];
@@ -275,8 +308,12 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
     editType === "remove_motion" ? ["index.html", "scene.js", "sequence.js", "sequence-manifest.js", "HASSALI.md"] :
     editType === "set_webgl" ? ["index.html", "scene.js", "HASSALI.md"] :
     editType === "set_cinematic" ? ["index.html", "sequence.js", "sequence-manifest.js", "HASSALI.md"] :
+    editType === "set_scroll_effects" ? ["index.html", "styles.css", "main.js", "HASSALI.md"] :
     editType === "add_carousel" ? ["index.html", "styles.css", "main.js"] :
     editType === "hero_style" || editType === "color_palette" ? ["styles.css", "HASSALI.md"] :
+    editType === "typography" ? ["styles.css", "DESIGN.md", "HASSALI.md"] :
+    editType === "navigation_label" ? [] :
+    editType === "text_content" ? ["index.html"] :
     editType === "component_geometry" ? ["styles.css", "DESIGN.md"] :
     editType === "remove_page" && pageToRemove ? [pageToPath(pageToRemove), "HASSALI.md"] :
     editType === "service_copy" ? ["services.html", "index.html", "HASSALI.md"] :
@@ -295,7 +332,10 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
       colorIntent: editType === "color_palette" ? prompt : undefined,
       email,
       experienceSectionTarget,
+      fontIntent: editType === "typography" ? prompt : undefined,
       geometryIntent,
+      navigationLabelFrom: navigationLabelChange?.[1]?.trim(),
+      navigationLabelTo: navigationLabelChange?.[2]?.trim(),
       pageToRemove: pageToRemove ? normalizePageName(pageToRemove) : undefined,
       pageTarget,
       phone,
@@ -303,7 +343,9 @@ export function classifyWebsiteEditIntent(prompt: string): WebsiteEditIntent {
       primaryCta,
       services,
       sectionTarget,
-      styleIntent: editType === "hero_style" ? lowerPrompt : undefined
+      styleIntent: editType === "hero_style" ? lowerPrompt : undefined,
+      textTarget,
+      textValue
     },
     mode: "WEBSITE_EDIT",
     originalPrompt: prompt,

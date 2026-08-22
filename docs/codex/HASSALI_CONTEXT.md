@@ -316,7 +316,7 @@ The reusable acceptance scenarios live in `docs/codex/HASSALI_TEST_MATRIX.md`.
 
 Roadmap names describe intended bounded runs, not completed implementation claims.
 
-The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference intake and Run 5 I2 design-direction kernel are implemented; Run 5 I3-I5, Growth, and Run 6 remain planned rather than implemented.
+The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference intake and the uncommitted I2 design-direction/I3 asset-studio/I4 visual-QA/I5 Growth-handoff engineering are implemented; combined ordinary-user browser acceptance remains pending before closure.
 
 1. **Premium Workspace and Codex Efficiency Foundation** - polish the creation workspace and establish concise engineering context.
 2. **Live Execution Timeline, Git Workflow and Verified Delivery** - make approved work, evidence, and delivery state easy to inspect.
@@ -353,6 +353,9 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Memory M6 checkpoint: `MEMORY-M6: add cross-mode shared memory`
 - Run 05 I1 checkpoint: `WEBSITE-I1: add visual reference intake and clone intelligence`
 - Run 05 I2 checkpoint: `WEBSITE-I2: add design direction and quality kernel`
+- Run 05 I2 parity closure: pending ordinary-user browser acceptance; no closure checkpoint yet.
+- Run 05 I3 engineering: typed asset planning and durable approval lifecycle are in the preserved dirty tree; combined I2+I3 browser acceptance and closure checkpoint remain pending.
+- Run 05 I4 engineering: typed visual reports, five-viewport geometry contracts, bounded candidate repair, static Preview geometry diagnostics, and post-apply visual-verification truth are in the preserved dirty tree; combined I2+I3+I4 acceptance remains pending.
 - The repository HEAD is authoritative; confirm it with Git before every task.
 
 ## WEBSITE Design Direction
@@ -365,3 +368,35 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - The WEBSITE builder consumes contract color, type, spacing, layout, geometry, component, imagery, motion, responsive, and accessibility decisions through the existing creative-direction and quality-blueprint path.
 - Generated WEBSITE output is blocked for fabricated social proof, material semantic-color drift, or a missing contract fingerprint; generic unsupported styling patterns remain visible warnings.
 - Existing project `DESIGN.md` and CSS may inform revisions, but current user instructions remain authoritative and every revision receives a new version and fingerprint.
+- The server-only design knowledge library compiles its licensed `DESIGN.md` corpus into bounded normalized profiles; internal source names never become visitor copy or normal proposal text.
+- Uploaded `DESIGN.md` variants are visual-system evidence only. They are excluded from business-intent classification, and an explicit current upload outranks automatic design retrieval.
+- Business/domain intent and visual direction are separate authority channels: current new-build business intent wins over stale project domain, while explicit existing-site edits preserve the owned contract domain.
+- Automatic design retrieval is bounded and creative-build-only. Unrelated personal memory, source-document instructions, and provider output cannot become domain or approval authority.
+- The chat route and browser share a versioned request contract. Stale clients and project-context mismatches fail before generation with a reload-required response rather than producing a proposal from stale code.
+
+## WEBSITE Asset Studio and Approval Truth
+
+- `WebsiteAssetPlan` is built from content, design, and composition contracts plus explicit uploads and existing project media before rendering; supplied assets outrank curated or generated alternatives.
+- Assets carry reusable role, destination, source/provenance, crop, responsive, permission, fallback, generation-brief, and status semantics. A composition may explicitly choose no hero image.
+- Current uploaded images become approval-first project binary assets and enter the WEBSITE renderer through stable project-relative paths. Targeted hero replacement preserves unrelated sections.
+- Image-generation briefs use the provider-neutral visual contract. Missing provider capability remains unresolved and cannot be reported as generated or applied.
+- Durable proposal metadata distinguishes pending/applying/applied/failed/rejected and derives stale state from project revision. Reject and apply remain owner/project/proposal scoped and duplicate apply remains idempotent.
+- The proposal UI loads backend lifecycle state after reload; `Approving...`, `Applying changes...`, and `Applied` do not imply one another.
+
+## WEBSITE Visual QA
+
+- Source preflight catches missing viewport behavior, local assets, planned composition/asset drift, and unauthorized engine output, but it never claims rendered visual success.
+- `VisualQAReport` keeps candidate, page, viewport, evidence, issue source/severity, repair eligibility, and verification state explicit. The standard matrix is 360, 390, 768, 1024, and 1440 pixels.
+- Static WEBSITE Preview measures its actual sandboxed DOM through the existing postMessage bridge and surfaces overflow, off-screen content, broken images, content overflow, and undersized targets as Preview diagnostics.
+- Higher-level visual/reference judgment is provider-neutral and optional. Missing screenshot or vision evidence remains `not_evaluated`/`not_available`, never PASS.
+- Responsive repair modifies candidate `styles.css` only within allowed categories/paths, preserves targeted-edit scope, re-renders, and stops after two repair cycles.
+- Applied files, Preview-content fidelity, and screenshot visual verification are separate states. An applied project with failed Preview reports failure without rewriting application truth.
+
+## WEBSITE Growth Handoff
+
+- WEBSITE contracts contain a bounded machine-readable Growth source snapshot covering business facts, offers, audience, conversion intent, design references, and approved asset provenance.
+- The authoritative `WebsiteGrowthHandoff` is derived on demand from ownership-verified canonical applied files and their content revision. Pending, rejected, failed, and stale proposals cannot produce it.
+- Material assertions remain `confirmed`, `derived`, `inferred`, `unsupported`, or `unknown`; unsupported generated marketing claims are never reusable external truth.
+- Conversion paths are checked against actual applied HTML destinations. Missing CTA targets, unclear offers/audiences, unsupported proof, absent analytics, and incomplete SEO remain explicit readiness findings.
+- Approved project assets use project-relative references only. Secrets, environment files, private notes, unrelated Memory, absolute paths, and unapproved proposal content are excluded.
+- I5 supplies structured context for future Growth, ASK, and analytics. It does not scrape prospects, send outreach, create campaigns, install analytics, or execute Growth work.

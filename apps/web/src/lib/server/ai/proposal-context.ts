@@ -51,7 +51,7 @@ export type PromptOwnershipDecision = {
 export type ValidationSeverity = "critical" | "major" | "minor";
 
 const newBuildPattern = /\b(?:create|build|generate|make|design|start|new)\b[\s\S]{0,120}\b(?:website|site|app|crm|saas|dashboard|system|tool|landing page)\b/i;
-const refinementPattern = /\b(?:update|improve|continue|modify|edit|change|redesign|refine|fix|rewrite|rebuild|replace|recreate|redo|overhaul)\b/i;
+const refinementPattern = /\b(?:update|improve|continue|modify|edit|change|make|redesign|refine|fix|rewrite|rebuild|replace|recreate|redo|overhaul)\b/i;
 
 function promptRequestsPython(prompt: string) {
   return /\b(?:python|py|streamlit|flask|fastapi|django|tkinter|pyside|pyqt)\b/i.test(prompt);

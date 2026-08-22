@@ -11,6 +11,8 @@ import {
   type ReferenceFact
 } from "./design-reference-contract";
 import { parseDesignMd } from "./design-md-parser";
+import { resolveDesignKnowledgeReference } from "@/lib/server/design/knowledge/design-knowledge-library";
+import type { DesignKnowledgeProfile } from "@/lib/server/design/knowledge/design-knowledge-profile";
 
 function fact(value: string, evidenceId: string, status: ReferenceEvidenceStatus): ReferenceFact {
   return { evidenceIds: [evidenceId], status, value };
@@ -27,6 +29,7 @@ function profile(input: {
   confidence: number;
   evidenceStatus: ReferenceEvidenceStatus;
   limitations?: string[];
+  knowledge?: DesignKnowledgeProfile;
   reference: DesignReference;
 }): ReferenceDesignProfile {
   const get = (key: keyof NonNullable<typeof input.facts>) => uniqueFacts(input.facts?.[key] ?? []);
@@ -41,6 +44,7 @@ function profile(input: {
     evidenceStatus: input.evidenceStatus,
     id: `profile-${input.reference.id}`,
     imagery: get("imagery"),
+    knowledge: input.knowledge,
     layout: get("layout"),
     limitations: input.limitations ?? [],
     motion: get("motion"),
@@ -106,6 +110,56 @@ export function createCatalogReferenceProvider(): DesignReferenceProvider {
     sourceTypes: ["hassali-reference-catalog", "named-brand"],
     async resolve(input) {
       const resolution = resolveCatalogReference(input.reference.name);
+      const internal = resolveDesignKnowledgeReference(input.reference.name);
+      if (internal && resolution.entry) {
+        const catalog = catalogProfile(input.reference, resolution.entry);
+        return {
+          profile: {
+            ...catalog,
+            confidence: Math.max(catalog.confidence, internal.confidence),
+            knowledge: internal,
+            limitations: [...catalog.limitations, "The internal profile is visual-reference-only and is not official brand guidance."]
+          },
+          reference: {
+            ...input.reference,
+            canonicalUrl: resolution.entry.sourceUrl,
+            provenance: {
+              ...input.reference.provenance,
+              capturedAt: resolution.entry.lastVerified,
+              fingerprint: internal.fingerprint,
+              license: "MIT",
+              sourceUrl: resolution.entry.sourceUrl
+            },
+            resolutionStatus: resolution.entry.profileStatus
+          }
+        };
+      }
+      if (internal) {
+        const parsed = parseDesignMd({
+          content: [internal.description, ...internal.atmosphere, ...internal.layout, ...internal.imagery].join("\n\n"),
+          sourceId: input.reference.id
+        });
+        return {
+          profile: profile({
+            confidence: internal.confidence,
+            evidenceStatus: "inferred",
+            facts: parsed,
+            knowledge: internal,
+            limitations: ["The internal profile is visual-reference-only and is not official brand guidance."],
+            reference: input.reference
+          }),
+          reference: {
+            ...input.reference,
+            provenance: {
+              ...input.reference.provenance,
+              capturedAt: input.now().toISOString(),
+              fingerprint: internal.fingerprint,
+              license: "MIT"
+            },
+            resolutionStatus: "resolved"
+          }
+        };
+      }
       if (!resolution.entry) {
         return {
           profile: null,
@@ -146,7 +200,52 @@ export function createDesignMdReferenceProvider(contentByReferenceId: Map<string
           confidence: 0.92,
           evidenceStatus: "directly-specified",
           facts: parsed,
+          knowledge: parsed.knowledge,
           limitations: parsed.warnings,
+          reference: input.reference
+        }),
+        reference: {
+          ...input.reference,
+          name: parsed.knowledge.name || input.reference.name,
+          provenance: {
+            ...input.reference.provenance,
+            capturedAt: input.now().toISOString(),
+            fingerprint: parsed.fingerprint,
+            sourceLabel: `Current-turn uploaded design document: ${input.reference.name}`
+          },
+          resolutionStatus: "resolved"
+        }
+      };
+    }
+  };
+}
+
+export function createInternalDesignKnowledgeProvider(): DesignReferenceProvider {
+  return {
+    id: "internal-design-knowledge",
+    sourceTypes: ["internal-design-knowledge"],
+    async resolve(input) {
+      const knowledge = resolveDesignKnowledgeReference(input.reference.name);
+      if (!knowledge) return { profile: null, reference: { ...input.reference, resolutionStatus: "not-found" } };
+      const parsed = parseDesignMd({
+        content: [
+          `# ${knowledge.name}`,
+          `## Visual Theme & Atmosphere\n${knowledge.atmosphere.join("\n")}`,
+          `## Colors\n${Object.entries(knowledge.colors).map(([key, value]) => `${key}: ${value}`).join("\n")}`,
+          `## Typography\n${Object.values(knowledge.typography).map((token) => `${token.name}: ${token.family ?? ""}; ${token.size ?? ""}; ${token.weight ?? ""}`).join("\n")}`,
+          `## Layout\n${knowledge.layout.join("\n")}`,
+          `## Components\n${Object.keys(knowledge.components).join("\n")}`,
+          `## Responsive\n${knowledge.responsive.join("\n")}`
+        ].join("\n\n"),
+        sourceId: input.reference.id
+      });
+      return {
+        profile: profile({
+          confidence: knowledge.confidence,
+          evidenceStatus: "inferred",
+          facts: parsed,
+          knowledge,
+          limitations: ["Internal design knowledge is visual-reference-only and cannot supply business facts."],
           reference: input.reference
         }),
         reference: {
@@ -154,7 +253,8 @@ export function createDesignMdReferenceProvider(contentByReferenceId: Map<string
           provenance: {
             ...input.reference.provenance,
             capturedAt: input.now().toISOString(),
-            fingerprint: parsed.fingerprint
+            fingerprint: knowledge.fingerprint,
+            license: "MIT"
           },
           resolutionStatus: "resolved"
         }

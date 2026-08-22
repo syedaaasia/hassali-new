@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { POST } from "@/app/api/ai/chat/route";
+import { hassaliChatContractVersion } from "@/lib/chat-contract";
 
 type Proposal = {
   changes: Array<{ path?: string; proposedContent?: string }>;
@@ -12,6 +14,7 @@ type Proposal = {
 async function generate(prompt: string) {
   const response = await POST(new Request("http://localhost/api/ai/chat", {
     body: JSON.stringify({
+      clientContractVersion: hassaliChatContractVersion,
       messages: [{ content: prompt, role: "user" }],
       mode: "EXECUTE",
       model: "tencent/hy3:free",
@@ -103,4 +106,11 @@ for (const item of cases) {
   console.log(`PASS route ${item.name}`);
 }
 
-console.log(`WEBSITE route copy smoke: ${cases.length}/${cases.length} passed`);
+const routeSource = readFileSync(new URL("../../../../app/api/ai/chat/route.ts", import.meta.url), "utf8");
+assert.match(routeSource, /loadOwnedChatProposal\s*\(/, "repair must load the rejected proposal from canonical persistence");
+assert.match(routeSource, /parseWebsiteProposalRepairAuthority\s*\(/, "repair must parse persisted WEBSITE authority");
+assert.match(routeSource, /preserveWebsiteProposalContextForRepair\s*\(/, "repair must preserve authoritative WEBSITE context");
+assert.match(routeSource, /repairDesignAuthorityDrift\s*\(/, "repair must fail closed when design authority drifts");
+console.log("PASS route persisted repair authority");
+
+console.log(`WEBSITE route copy smoke: ${cases.length + 1}/${cases.length + 1} passed`);

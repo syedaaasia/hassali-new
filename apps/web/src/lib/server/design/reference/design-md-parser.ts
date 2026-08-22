@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { parseDesignKnowledgeDocument } from "@/lib/server/design/knowledge/design-knowledge-parser";
+import type { DesignKnowledgeProfile } from "@/lib/server/design/knowledge/design-knowledge-profile";
 import { designReferenceLimits, type ReferenceFact } from "./design-reference-contract";
 
 export type ParsedDesignMd = {
@@ -10,6 +12,7 @@ export type ParsedDesignMd = {
   dontRules: ReferenceFact[];
   fingerprint: string;
   imagery: ReferenceFact[];
+  knowledge: DesignKnowledgeProfile;
   layout: ReferenceFact[];
   motion: ReferenceFact[];
   responsive: ReferenceFact[];
@@ -18,7 +21,7 @@ export type ParsedDesignMd = {
   warnings: string[];
 };
 
-type Dimension = Exclude<keyof ParsedDesignMd, "fingerprint" | "warnings">;
+type Dimension = Exclude<keyof ParsedDesignMd, "fingerprint" | "knowledge" | "warnings">;
 
 const headingDimensions: Array<{ dimension: Dimension; pattern: RegExp }> = [
   { dimension: "atmosphere", pattern: /\b(?:atmosphere|brand personality|mood|theme|visual language|visual style|visual tone)\b/i },
@@ -35,7 +38,7 @@ const headingDimensions: Array<{ dimension: Dimension; pattern: RegExp }> = [
   { dimension: "doRules", pattern: /^do$|\b(?:do rules?|guidance|principles?|prompt guide|requirements?)\b/i }
 ];
 
-function emptyParsed(fingerprint: string): ParsedDesignMd {
+function emptyParsed(fingerprint: string, knowledge: DesignKnowledgeProfile): ParsedDesignMd {
   return {
     accessibility: [],
     atmosphere: [],
@@ -45,6 +48,7 @@ function emptyParsed(fingerprint: string): ParsedDesignMd {
     dontRules: [],
     fingerprint,
     imagery: [],
+    knowledge,
     layout: [],
     motion: [],
     responsive: [],
@@ -83,7 +87,8 @@ function inferDimension(statement: string): Dimension | null {
 export function parseDesignMd(input: { content: string; sourceId: string }): ParsedDesignMd {
   const bounded = input.content.slice(0, designReferenceLimits.maxDesignMdBytes);
   const fingerprint = createHash("sha256").update(bounded).digest("hex").slice(0, 16);
-  const parsed = emptyParsed(fingerprint);
+  const knowledge = parseDesignKnowledgeDocument({ content: bounded, sourcePath: `${input.sourceId}/DESIGN.md` });
+  const parsed = emptyParsed(fingerprint, knowledge);
   if (input.content.length > bounded.length) parsed.warnings.push("DESIGN.md was truncated at the bounded input limit.");
 
   let current: Dimension | null = null;
@@ -112,6 +117,24 @@ export function parseDesignMd(input: { content: string; sourceId: string }): Par
 
   const hexColors = [...bounded.matchAll(/#[0-9a-f]{3,8}\b/gi)].map((match) => match[0].toUpperCase());
   for (const color of [...new Set(hexColors)].slice(0, 20)) addUnique(parsed.colors, fact(`Color token ${color}`, input.sourceId));
+  for (const [name, value] of Object.entries(knowledge.colors).slice(0, 24)) {
+    addUnique(parsed.colors, fact(`Color token ${name}: ${value}`, input.sourceId));
+  }
+  for (const token of Object.values(knowledge.typography).slice(0, 18)) {
+    addUnique(parsed.typography, fact([
+      `Typography token ${token.name}`,
+      token.family ? `family=${token.family}` : "",
+      token.size ? `size=${token.size}` : "",
+      token.weight ? `weight=${token.weight}` : "",
+      token.lineHeight ? `line-height=${token.lineHeight}` : "",
+      token.letterSpacing ? `letter-spacing=${token.letterSpacing}` : ""
+    ].filter(Boolean).join("; "), input.sourceId));
+  }
+  for (const [name, value] of Object.entries(knowledge.geometry)) addUnique(parsed.surfaces, fact(`Radius token ${name}: ${value}`, input.sourceId));
+  for (const [name, value] of Object.entries(knowledge.spacing)) addUnique(parsed.layout, fact(`Spacing token ${name}: ${value}`, input.sourceId));
+  for (const component of Object.values(knowledge.components).slice(0, 16)) {
+    addUnique(parsed.components, fact(`Component ${component.name}: ${Object.entries(component.resolvedProperties).map(([key, value]) => `${key}=${value}`).join("; ")}`, input.sourceId));
+  }
 
   if (!parsed.motion.length) {
     parsed.motion.push({ evidenceIds: [input.sourceId], status: "unavailable", value: "No motion guidance was directly specified." });

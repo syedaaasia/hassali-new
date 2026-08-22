@@ -71,16 +71,23 @@ function semanticTags(path: string, capabilities: string[], visualSubjects: stri
 
 function classifyRole(input: {
   asset: WebsiteCinematicAssetInput;
+  explicitlySupplied: boolean;
   sequencePaths: Set<string>;
   semanticMatches: string[];
 }): { reasons: string[]; role: WebsiteAssetRole } {
   const path = normalize(input.asset.path);
   const pathTerms = terms(path);
+  if (path.startsWith("/") || path.split("/").includes("..")) {
+    return { reasons: ["Asset path is not project-relative and was excluded."], role: "unrelated" };
+  }
   if (/\.zip$/i.test(path)) return { reasons: ["Archive extraction belongs to the binary upload layer."], role: "archive" };
   if (input.sequencePaths.has(path)) return { reasons: ["Numbered image belongs to a detected cinematic sequence."], role: "cinematic_frame" };
   if (!imagePattern.test(path)) return { reasons: ["Asset is not a supported website image."], role: "unrelated" };
   if (pathTerms.some((term) => /^(?:brand|favicon|logo|mark|wordmark)$/.test(term))) {
     return { reasons: ["Filename indicates brand identity artwork."], role: "logo" };
+  }
+  if (input.explicitlySupplied) {
+    return { reasons: ["The current user explicitly supplied this image for the requested WEBSITE change."], role: "hero_candidate" };
   }
   if (pathTerms.some((term) => /^(?:hero|banner|cover|masthead)$/.test(term))) {
     return { reasons: ["Filename indicates a primary hero image."], role: "hero_candidate" };
@@ -100,6 +107,7 @@ function classifyRole(input: {
 export function analyzeWebsiteAssets(input: {
   assets: WebsiteCinematicAssetInput[];
   capabilities: string[];
+  explicitAssetPaths?: string[];
   visualSubjects: string[];
 }): WebsiteAssetIntelligence {
   const cinematic = analyzeWebsiteCinematicAssets(input.assets);
@@ -108,7 +116,12 @@ export function analyzeWebsiteAssets(input: {
   );
   const records = input.assets.map((asset): WebsiteAssetRecord => {
     const matches = semanticTags(asset.path, input.capabilities, input.visualSubjects);
-    const classified = classifyRole({ asset, semanticMatches: matches, sequencePaths });
+    const classified = classifyRole({
+      asset,
+      explicitlySupplied: (input.explicitAssetPaths ?? []).some((path) => normalize(path) === normalize(asset.path)),
+      semanticMatches: matches,
+      sequencePaths
+    });
     return {
       aspectRatio: asset.width && asset.height ? Number((asset.width / asset.height).toFixed(3)) : null,
       height: asset.height ?? null,
@@ -167,7 +180,7 @@ export function workspaceMediaFromAssetIntelligence(
 ): WebsiteMediaAsset[] {
   const duplicatePaths = new Set(intelligence.duplicates.flatMap((group) => group.duplicatePaths));
   const eligible = intelligence.records.filter((record) =>
-    ["hero_candidate", "illustration", "product", "supporting"].includes(record.role) &&
+    ["hero_candidate", "illustration", "logo", "product", "supporting"].includes(record.role) &&
     (!duplicatePaths.has(record.path) || record.role === "hero_candidate")
   );
   const hero = eligible.find((record) => record.role === "hero_candidate") ?? eligible.find((record) => record.role === "product");
@@ -192,7 +205,7 @@ export function workspaceMediaFromAssetIntelligence(
       licenseNote: "Project-supplied asset; publication rights must be confirmed by the project owner.",
       provider: "workspace",
       reliability: "curated",
-      role: record.path === hero?.path ? "hero" : index < 6 ? "card" : "team",
+      role: record.role === "logo" ? "logo" : record.path === hero?.path ? "hero" : index < 6 ? "card" : "team",
       semanticTags: record.semanticTags.length ? record.semanticTags : [businessType.toLowerCase()],
       url: `./${record.path.replace(/^\.\//, "")}`,
       width

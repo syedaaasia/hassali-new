@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { POST } from "@/app/api/ai/chat/route";
+import { hassaliChatContractVersion } from "@/lib/chat-contract";
 
 type ChatMessage = {
   content: string;
@@ -19,6 +20,7 @@ async function post(input: {
 }) {
   return POST(new Request("http://localhost/api/ai/chat", {
     body: JSON.stringify({
+      clientContractVersion: hassaliChatContractVersion,
       messages: input.messages,
       mode: input.productMode === "ASK" ? "ASK" : "EXECUTE",
       model: "tencent/hy3:free",

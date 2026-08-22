@@ -22,6 +22,12 @@ export const emptyPreviewManifest: PreviewManifest = {
   requiredFiles: []
 };
 
+export function isManifestCompatibleWithMode(manifest: PreviewManifest, mode: HassaliMode) {
+  if (mode === "ASK") return manifest.type === null;
+  if (mode === "WEBSITE") return manifest.type === "static_website";
+  return manifest.type === "react_vite_app" || manifest.type === "next_app" || manifest.type === "python_app" || manifest.type === "mobile" || manifest.type === "architecture";
+}
+
 export function deriveManifest(
   committedFiles: Map<string, VfsFile>,
   preferredMode?: HassaliMode
@@ -68,9 +74,11 @@ export function deriveManifest(
       };
     }
     if (hasPythonEntry && (hasStreamlitSignal || pathSet.has("requirements.txt"))) return pythonManifest;
+    return emptyPreviewManifest;
   }
 
-  if (preferredMode === "WEBSITE" && hasStaticWebsite) return websiteManifest;
+  if (preferredMode === "WEBSITE") return hasStaticWebsite ? websiteManifest : emptyPreviewManifest;
+  if (preferredMode === "ASK") return emptyPreviewManifest;
 
   if (hasWebsiteContract && hasStaticWebsite) {
     return websiteManifest;

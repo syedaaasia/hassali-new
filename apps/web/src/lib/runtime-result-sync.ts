@@ -13,6 +13,12 @@ export type RuntimeProposalChange = {
 export type RuntimeApprovalResponse = {
   applied?: boolean;
   appliedSteps?: string[];
+  canonicalProjectFiles?: Array<{
+    content: string;
+    id?: string;
+    path: string;
+  }>;
+  canonicalProjectRevision?: string | null;
   codeExecution?: {
     completionStatus: "BLOCKED" | "CANCELLED" | "COMPLETE_VERIFIED" | "COMPLETE_WITH_LIMITATIONS" | "FAILED";
     executionPolicy: "AUTOPILOT_EXPERIMENTAL" | "CALM" | "FLOW";
@@ -177,6 +183,28 @@ export type RuntimeApprovalResponse = {
     route: string;
     summary: string;
   } | null;
+  websiteGrowthHandoffStatus?: {
+    generated: boolean;
+    reason?: string;
+    revision?: string;
+    summary?: {
+      audience: string | null;
+      business: string | null;
+      claimCount: number;
+      conversionBlockerCount: number;
+      offerCount: number;
+      readiness: "blocked" | "needs_input" | "ready";
+      unsupportedClaimCount: number;
+    } | null;
+  } | null;
+  websiteVisualVerification?: {
+    filesApplied: boolean;
+    previewContentVerified: boolean;
+    screenshotVerified: boolean;
+    status: "failed" | "verification_incomplete" | "verified";
+    summary: string;
+    visualQAReportId: string | null;
+  } | null;
   mobileRuntime?: {
     candidateCommands: string[];
     capabilities: string[];
@@ -306,6 +334,17 @@ export function syncRuntimeApprovalResult(
 ): RuntimeResultSyncOutput {
   const warnings: string[] = [];
   const errors: string[] = [];
+  const canonicalRevision = input.runtimeResult?.canonicalProjectRevision?.trim() ?? "";
+  const canonicalFiles = (input.runtimeResult?.canonicalProjectFiles ?? [])
+    .map((file) => ({ content: file.content, path: normalizePath(file.path) }))
+    .filter((file): file is { content: string; path: string } => Boolean(file.path) && typeof file.content === "string");
+  const hasCanonicalProof = Boolean(
+    input.runtimeResult?.applied === true &&
+    input.runtimeResult?.ok === true &&
+    canonicalRevision &&
+    canonicalFiles.length === (input.runtimeResult?.canonicalProjectFiles?.length ?? 0) &&
+    canonicalFiles.length > 0
+  );
   const runtimeWrittenFiles = [
     ...(input.runtimeResult?.writtenFiles ?? []),
     ...writtenFilesFromEvents(input.runtimeResult)
@@ -333,31 +372,19 @@ export function syncRuntimeApprovalResult(
     warnings.push(input.runtimeResult.runtimeWarning);
   }
 
-  const writtenFileSet = new Set(uniqueRuntimeWrittenFiles);
-  const shouldUseFallback = fileChanges.length > 0 && writtenFileSet.size === 0;
-
-  if (shouldUseFallback) {
-    warnings.push("Runtime response did not include writtenFiles; using approved proposal changes as the sync source.");
-    fileChanges.forEach((change) => writtenFileSet.add(change.path));
+  if (!hasCanonicalProof) {
+    errors.push("Approval response did not include a verified authoritative project revision and canonical file read-back.");
   }
 
-  const fileUpdates = fileChanges.flatMap((change) => {
-    if (!writtenFileSet.has(change.path)) {
-      return [];
+  const canonicalByPath = new Map(canonicalFiles.map((file) => [file.path, file.content]));
+  for (const change of fileChanges) {
+    if (typeof change.proposedContent === "string" && canonicalByPath.get(change.path) !== change.proposedContent) {
+      errors.push(`Canonical read-back did not match the approved mutation for ${change.path}.`);
     }
+  }
 
-    const authoritativeContent = input.runtimeResult?.fileContents?.[change.path];
-    const content = typeof authoritativeContent === "string"
-      ? authoritativeContent
-      : change.proposedContent;
-
-    if (typeof content !== "string") {
-      warnings.push(`Runtime wrote ${change.path}, but the proposal did not include local content to sync.`);
-      return [];
-    }
-
-    return [{ content, path: change.path }];
-  });
+  const fileUpdates = hasCanonicalProof ? canonicalFiles : [];
+  const writtenFileSet = new Set(uniqueRuntimeWrittenFiles);
 
   for (const path of writtenFileSet) {
     if (!fileUpdates.some((update) => update.path === path)) {
@@ -365,17 +392,21 @@ export function syncRuntimeApprovalResult(
     }
   }
 
+  const canonicalPathSet = new Set(canonicalFiles.map((file) => file.path));
+  const canonicalDeletedFiles = hasCanonicalProof
+    ? Object.keys(input.currentFiles)
+        .map(normalizePath)
+        .filter((path): path is string => typeof path === "string" && path.length > 0)
+        .filter((path) => !canonicalPathSet.has(path))
+    : [];
+  const authoritativeDeletes = Array.from(new Set([...deletedFiles, ...canonicalDeletedFiles]));
   const syncedFiles = fileUpdates.map((update) => update.path);
   const syncStatus: RuntimeSyncStatus =
     errors.length > 0
       ? "failed"
-      : fileChanges.length === 0 && deletedFiles.length === 0
-        ? "skipped"
-        : syncedFiles.length === fileChanges.length
-          ? "synced"
-          : syncedFiles.length > 0
-            ? "partial"
-            : "failed";
+      : hasCanonicalProof
+        ? "synced"
+        : "failed";
   const runtimeMetadata: RuntimeSyncMetadata = {
     livePreviewCapabilities: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.capabilities ?? [],
     livePreviewClassification: input.runtimeResult?.liveRuntimePreview?.previewRuntime?.classification,
@@ -428,11 +459,11 @@ export function syncRuntimeApprovalResult(
   };
 
   return {
-    deletedFiles,
+    deletedFiles: authoritativeDeletes,
     errors,
     fileUpdates,
-    proposalApplied: syncStatus === "synced" || syncStatus === "skipped",
-    refreshedPreview: fileUpdates.some((update) => previewFilePattern.test(update.path)) || deletedFiles.some((path) => previewFilePattern.test(path)),
+    proposalApplied: hasCanonicalProof && syncStatus === "synced",
+    refreshedPreview: fileUpdates.some((update) => previewFilePattern.test(update.path) && input.currentFiles[update.path]?.content !== update.content) || authoritativeDeletes.some((path) => previewFilePattern.test(path)),
     runtimeMetadata,
     selectedFileUpdated: Boolean(
       input.activePath && syncedFiles.includes(normalizePath(input.activePath) ?? "")

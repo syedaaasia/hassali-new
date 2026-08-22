@@ -29,7 +29,7 @@ export type WebsiteCopyValidationResult = {
 };
 
 const placeholderPattern = /\b(?:lorem ipsum|\[business name\]|your tagline here|example testimonial|123 main street|hello@example\.com|current prompt website|contact\s*\/\s*unknown)\b/i;
-const internalLanguagePattern = /\b(?:premium cinematic interface|conversion-focused solution|immersive digital experience|cutting-edge animations|visually stunning premium website|quality blueprint|selected composition|design strategy)\b/i;
+const internalLanguagePattern = /\b(?:premium cinematic interface|conversion-focused solution|immersive digital experience|cutting-edge animations|visually stunning premium website|quality blueprint|selected composition|design strategy|claims kept bounded|without inventing a catalog|without relying on invented history|verified product evidence|representative content|generator fallback|provider fallback)\b/i;
 const universalHeroPattern = /^(?:elevate your experience|transform your business|discover excellence|where innovation meets quality|solutions designed for you|your journey starts here)$/i;
 const testimonialPattern = /(?:testimonial|customer stor(?:y|ies)|what (?:our )?clients say)[\s\S]{0,240}["\u201c][^"\u201d]+["\u201d][\s\u2014-]+[A-Z][a-z]+(?:\s+[A-Z]\.)?/i;
 const unsupportedStaticActionPattern = /\b(?:book now|buy now|checkout|reserve now|sign up|start (?:a )?free trial)\b/i;

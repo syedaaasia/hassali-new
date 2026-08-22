@@ -10,6 +10,12 @@ import type {
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
 import { classifyDomainIntent, getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
+import {
+  extractVisibleWebsiteText,
+  findSemanticSignals,
+  includesSemanticSignal,
+  semanticSignalCount
+} from "@/lib/server/ai/domain-signal-matcher";
 
 export type DomainValidationMode = "pre_proposal_context" | "proposal_content";
 export type DomainValidationSeverity = ValidationSeverity;
@@ -142,21 +148,31 @@ function unique(values: string[]) {
 const sharedWebsiteVocabulary = new Set([
   "availability",
   "booking",
+  "care",
+  "collection",
   "contact",
+  "customer",
   "customer support",
   "delivery",
+  "display",
   "gallery",
   "hours",
   "menu",
+  "model",
+  "package",
   "pickup",
+  "product",
   "repairs",
   "reservations",
+  "service",
+  "stock",
   "support",
+  "table",
   "warranty"
 ]);
 
 function includesSignal(text: string, signal: string) {
-  return normalize(text).includes(normalize(signal));
+  return includesSemanticSignal(text, signal);
 }
 
 function domainVocabulary(domain: string | null) {
@@ -211,10 +227,7 @@ function contentFromFiles(files?: Record<string, string>) {
 function visibleWebsiteContentFromFiles(files?: Record<string, string>) {
   return Object.entries(files ?? {})
     .filter(([path]) => path.toLowerCase().endsWith(".html"))
-    .map(([path, content]) => `\nFILE:${path}\n${content
-      .replace(/<style[\s\S]*?<\/style>/gi, "")
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<[^>]+>/g, " ")}`)
+    .map(([path, content]) => `\nFILE:${path}\n${extractVisibleWebsiteText(content)}`)
     .join("\n");
 }
 
@@ -223,12 +236,26 @@ function profileFor(domain: string | null) {
   if (domain && profiles[domain]) return profiles[domain];
   const taxonomyProfile = getTaxonomyProfile(domain);
   if (taxonomyProfile) {
-    const ownVocabulary = new Set(taxonomyProfile.websiteVocabulary.map((term) => normalize(term)));
+    const ownVocabulary = new Set([
+      ...taxonomyProfile.websiteVocabulary,
+      ...taxonomyProfile.expectedEntities,
+      ...taxonomyProfile.commonSections
+    ].map((term) => normalize(term)));
+    const belongsToOwnDomain = (term: string) => {
+      const normalized = normalize(term);
+      return [...ownVocabulary].some((own) =>
+        own === normalized ||
+        own.startsWith(`${normalized} `) ||
+        own.endsWith(` ${normalized}`) ||
+        normalized.startsWith(`${own} `) ||
+        normalized.endsWith(` ${own}`)
+      );
+    };
     return {
       forbidden: [
         ...taxonomyProfile.conflicts
           .flatMap((conflict) => getTaxonomyProfile(conflict)?.websiteVocabulary ?? [conflict.replace(/_/g, " ")])
-          .filter((term) => !ownVocabulary.has(normalize(term))),
+          .filter((term) => !belongsToOwnDomain(term)),
         ...taxonomyProfile.conflicts.map((conflict) => conflict.replace(/_/g, " "))
       ],
       required: taxonomyProfile.websiteVocabulary
@@ -258,15 +285,11 @@ function detectGenericCopy(text: string) {
 }
 
 function detectForbidden(text: string, forbiddenSignals: string[]) {
-  return forbiddenSignals.filter((signal) => includesSignal(text, signal));
+  return findSemanticSignals(text, forbiddenSignals);
 }
 
 function signalOccurrenceCount(text: string, signal: string) {
-  const normalizedText = normalize(text);
-  const normalizedSignal = normalize(signal);
-  if (!normalizedSignal) return 0;
-
-  return normalizedText.split(normalizedSignal).length - 1;
+  return semanticSignalCount(text, signal);
 }
 
 function hasStrongDomainContradiction(text: string, signals: string[]) {

@@ -15,11 +15,20 @@ import {
   classifyDesignReferenceIntent,
   classifyReferenceFidelity,
   hasDesignReferenceSignal,
+  isDesignMdAttachmentName,
   isDesignDirectionRevisionRequest
 } from "../reference-intent";
 import { createLiveWebsiteReferenceProvider } from "../reference-profile";
 
 const now = () => new Date("2026-08-14T10:00:00.000Z");
+
+test("DESIGN attachment recognition accepts browser copy suffixes", () => {
+  assert.equal(isDesignMdAttachmentName("DESIGN.md"), true);
+  assert.equal(isDesignMdAttachmentName("DESIGN (1).md"), true);
+  assert.equal(isDesignMdAttachmentName("paint-design-v2.md"), true);
+  assert.equal(isDesignMdAttachmentName("notes.md"), false);
+  assert.equal(hasDesignReferenceSignal({ attachmentNames: ["DESIGN (1).md"], prompt: "Follow this document exactly." }), true);
+});
 
 test("REF-INTENT preserves named reference, user brand, and close-replica fidelity", () => {
   const intent = classifyDesignReferenceIntent({

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { extractExplicitWebsiteBrand } from "@/lib/server/ai/website-request-objective";
 import { resolveCatalogReference } from "./design-reference-catalog";
 import type {
   DesignReference,
@@ -24,11 +25,32 @@ export type DesignReferenceIntent = {
 const knownReferencePattern = /\b(?:ferrari|snap\s?chat|sound\s?cloud|apple|nike|spotify|stripe|linear|notion|airbnb|shopify|vercel)\b/gi;
 const urlPattern = /https?:\/\/[^\s<>{}"']+/gi;
 
+export function isDesignMdAttachmentName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized.endsWith(".md")) return false;
+  const stem = normalized.slice(0, -3).replace(/\s*\(\d+\)\s*$/, "");
+  return /(?:^|[-_.\s])design(?:[-_.\s]|$)/.test(stem);
+}
+
+export function isStructuredDesignMdContent(content: string | null | undefined) {
+  if (!content?.trim()) return false;
+  const bounded = content.slice(0, 48_000);
+  const designDimensions = [
+    /(?:^|\n)\s*(?:#{1,6}\s*)?(?:colors?|palette|semantic tokens?)\s*:?\s*(?:\n|$)/i,
+    /(?:^|\n)\s*(?:#{1,6}\s*)?(?:typography|type system|fonts?)\s*:?\s*(?:\n|$)/i,
+    /(?:^|\n)\s*(?:#{1,6}\s*)?(?:layout|composition|spacing|section rhythm)\s*:?\s*(?:\n|$)/i,
+    /(?:^|\n)\s*(?:#{1,6}\s*)?(?:imagery|photography|visual language|components?)\s*:?\s*(?:\n|$)/i
+  ].filter((pattern) => pattern.test(bounded)).length;
+  const tokenEvidence = /#[0-9a-f]{6}\b/i.test(bounded) || /fontFamily\s*:|font-family\s*:|fontSize\s*:/i.test(bounded);
+  return designDimensions >= 2 && tokenEvidence;
+}
+
 function idFor(value: string) {
   return createHash("sha256").update(value).digest("hex").slice(0, 12);
 }
 
 export function classifyReferenceFidelity(prompt: string): ReferenceFidelity {
+  if (/\bfollow\b[\s\S]{0,60}\b(?:design(?:\.md)?|document)\b[\s\S]{0,40}\bexact(?:ly)?\b|\bfollow (?:this|the) (?:design(?:\.md)?|document) exact(?:ly)?\b/i.test(prompt)) return "close-replica";
   if (/\b(?:clone|recreate|replicate)\b|\bas close as possible\b|\bexact(?:ly)? like\b/i.test(prompt)) return "reference-clone";
   if (/\b(?:very|extremely|really) close\b|\bcopy (?:this|the) layout closely\b|\bclose replica\b/i.test(prompt)) return "close-replica";
   if (/\b(?:look|looks|looking) like\b|\bstyle(?:d)? (?:of|like)\b|\bvisual style\b|\bmatch (?:the )?(?:style|design)\b/i.test(prompt)) return "style-match";
@@ -37,7 +59,7 @@ export function classifyReferenceFidelity(prompt: string): ReferenceFidelity {
 
 export function hasDesignReferenceSignal(input: { attachmentNames?: string[]; prompt: string }) {
   return Boolean(
-    input.attachmentNames?.some((name) => /design.*\.md$|\.(?:avif|gif|jpe?g|png|webp)$/i.test(name)) ||
+    input.attachmentNames?.some((name) => isDesignMdAttachmentName(name) || /\.(?:avif|gif|jpe?g|png|webp)$/i.test(name)) ||
     /https?:\/\//i.test(input.prompt) ||
     /\b(?:clone|copy|recreate|replicate|reference|screenshot|design\.md|visual style|style-match|inspired by|vibes?|look like|looks like|match the (?:existing|current|rest of)|existing project|current project)\b/i.test(input.prompt) ||
     /\b(?:rounded|square|sharp)\s+(?:cards?|corners?)\b|\b(?:cards?|corners?)\s+(?:rounded|square|sharp)\b/i.test(input.prompt) ||
@@ -85,11 +107,33 @@ function referenceRole(prompt: string, start: number, end: number): { pageTarget
 }
 
 function userBrandFrom(prompt: string) {
-  const explicit = prompt.match(/\b(?:my own fictional brand|fictional brand|my fictional company|fictional company|my company|brand named|company named)\s+([A-Z][A-Za-z0-9&' -]{1,48}?)(?=\s*(?:[.,]|$|\b(?:with|using|but|that|for)\b))/);
-  if (explicit?.[1]) return explicit[1].trim();
+  return extractExplicitWebsiteBrand(prompt);
+}
 
-  const projectName = prompt.match(/\b(?:for|called)\s+([A-Z][A-Za-z0-9&' -]{1,48}?)(?=\s+(?:very close|inspired by|with|using|that|but|website|site|landing page|app)\b)/i);
-  return projectName?.[1]?.trim() ?? null;
+function escapePattern(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function namedReferenceIsAttachedDocumentCoreference(input: {
+  attachmentNames: string[];
+  name: string;
+  prompt: string;
+}) {
+  const normalizedName = input.name.toLowerCase().replace(/\s+/g, "");
+  const matchingAttachment = input.attachmentNames.some((attachmentName) =>
+    attachmentName.toLowerCase().replace(/\s+/g, "").includes(normalizedName)
+  );
+  if (!matchingAttachment) return false;
+  const escaped = input.name.split(/\s+/).filter(Boolean).map(escapePattern).join("\\s*");
+  const identifiesDocument = new RegExp(
+    `(?:\\b(?:this|the|attached|uploaded)\\s+${escaped}\\s+(?:design\\s+)?(?:document|file|design(?:\\.md)?)\\b|\\b${escaped}\\s+(?:design\\s+)?(?:document|file|design(?:\\.md)?)\\b)`,
+    "i"
+  ).test(input.prompt);
+  const explicitlyAdditional = new RegExp(
+    `\\b(?:also|plus|mix|combine|but)\\b[\\s\\S]{0,60}\\b${escaped}\\b|\\b(?:typography|fonts?|colors?|palette|layout|motion)\\b[\\s\\S]{0,36}\\b(?:like|from|of)\\s+${escaped}\\b`,
+    "i"
+  ).test(input.prompt);
+  return identifiesDocument && !explicitlyAdditional;
 }
 
 function reference(input: {
@@ -101,6 +145,7 @@ function reference(input: {
   resolutionStatus: DesignReference["resolutionStatus"];
   role: ReferenceRole;
   sourceLabel: string;
+  sourceAttachmentId?: string | null;
   sourceType: ReferenceSourceType;
   sourceUrl?: string | null;
   userSuppliedUrl?: string | null;
@@ -126,6 +171,7 @@ function reference(input: {
     },
     resolutionStatus: input.resolutionStatus,
     role: input.role,
+    sourceAttachmentId: input.sourceAttachmentId ?? null,
     sourceType: input.sourceType,
     userSuppliedUrl: input.userSuppliedUrl ?? null
   };
@@ -197,7 +243,8 @@ export function classifyDesignReferenceIntent(input: {
   }
 
   for (const attachment of input.attachments ?? []) {
-    const isDesignMd = /(?:^|[-_.])design(?:[-_.]|$).*\.md$|^design\.md$/i.test(attachment.name);
+    const isDesignMd = isDesignMdAttachmentName(attachment.name) ||
+      (/\.(?:md|markdown|txt)$/i.test(attachment.name) && isStructuredDesignMdContent(attachment.content));
     if (isDesignMd) {
       references.push(reference({
         fidelity,
@@ -206,6 +253,7 @@ export function classifyDesignReferenceIntent(input: {
         resolutionStatus: attachment.content ? "resolved" : "partial",
         role: "global",
         sourceLabel: `Uploaded ${attachment.name}`,
+        sourceAttachmentId: attachment.id,
         sourceType: "uploaded-design-md"
       }));
     } else if (attachment.kind === "image") {
@@ -216,6 +264,7 @@ export function classifyDesignReferenceIntent(input: {
         resolutionStatus: "partial",
         role: "global",
         sourceLabel: `Uploaded visual ${attachment.name}`,
+        sourceAttachmentId: attachment.id,
         sourceType: /screenshot/i.test(input.prompt) ? "uploaded-screenshot" : "uploaded-image"
       }));
     }
@@ -251,9 +300,19 @@ export function classifyDesignReferenceIntent(input: {
       ? "Reference cloning cannot be used to create deceptive credential collection."
       : null;
 
+  const attachmentNames = (input.attachments ?? []).map((attachment) => attachment.name);
+  const coreferenceResolved = references.filter((entry) =>
+    entry.sourceType !== "named-brand" ||
+    !namedReferenceIsAttachedDocumentCoreference({
+      attachmentNames,
+      name: entry.name,
+      prompt: input.prompt
+    })
+  );
+
   return {
     fidelity,
-    references: references.filter((entry, index, all) =>
+    references: coreferenceResolved.filter((entry, index, all) =>
       all.findIndex((other) => other.sourceType === entry.sourceType && other.name.toLowerCase() === entry.name.toLowerCase() && other.role === entry.role) === index
     ),
     securityBlockReason,

@@ -28,6 +28,12 @@ import {
   type RuntimeApprovalResponse,
   syncRuntimeApprovalResult
 } from "@/lib/runtime-result-sync";
+import {
+  normalizeProposalLifecycleSnapshot,
+  proposalLifecycleIsActionable,
+  proposalLifecycleLabel,
+  type ProposalLifecycleSnapshot
+} from "@/lib/proposal-lifecycle";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
@@ -310,12 +316,8 @@ function blockedProposalWarnings(proposal: DiffProposal) {
     : (proposal.proposalRoutingWarnings ?? []).map((warning) => warning.message);
 }
 
-function formatPromptList(items: string[], fallback: string) {
-  return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : `- ${fallback}`;
-}
-
 function extractOriginalRequest(content: string) {
-  const match = content.match(/Original request:\s*\n([\s\S]*?)\n\nPrevious proposal was blocked because:/);
+  const match = content.match(/Original request:\s*\n([\s\S]*?)\n\n(?:Previous proposal was blocked because:|Proposal type:)/);
 
   return match?.[1]?.trim() || content;
 }
@@ -357,7 +359,35 @@ function regenerationIntentFor(request: string) {
   return "small_edit";
 }
 
-function createSaferProposalPrompt(proposal: DiffProposal, originalRequest: string) {
+function compactRepairAuthorityForPrompt(proposal: DiffProposal) {
+  const authority = proposal.repairAuthority;
+  if (!authority || typeof authority !== "object") return null;
+  const design = authority.projectDesignContract && typeof authority.projectDesignContract === "object"
+    ? authority.projectDesignContract as Record<string, unknown>
+    : null;
+  const references = Array.isArray(design?.references)
+    ? design.references.flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const reference = value as Record<string, unknown>;
+        return [{
+          name: typeof reference.name === "string" ? reference.name : null,
+          referenceId: typeof reference.referenceId === "string" ? reference.referenceId : null,
+          sourceAttachmentId: typeof reference.sourceAttachmentId === "string" ? reference.sourceAttachmentId : null,
+          sourceFingerprint: typeof reference.sourceFingerprint === "string" ? reference.sourceFingerprint : null
+        }];
+      }).slice(0, 8)
+    : [];
+  return {
+    authoritativeBusinessType: typeof authority.authoritativeBusinessType === "string" ? authority.authoritativeBusinessType : null,
+    authoritativeDomain: typeof authority.authoritativeDomain === "string" ? authority.authoritativeDomain : null,
+    designFingerprint: typeof design?.fingerprint === "string" ? design.fingerprint : null,
+    designReferences: references,
+    pages: Array.isArray(authority.pages) ? authority.pages.filter((value): value is string => typeof value === "string").slice(0, 16) : [],
+    requiredFiles: Array.isArray(authority.requiredFiles) ? authority.requiredFiles.filter((value): value is string => typeof value === "string").slice(0, 24) : []
+  };
+}
+
+function createSaferProposalPrompt(proposal: DiffProposal, originalRequest: string, priorRepairCount: number) {
   const reasons = blockedProposalReasons(proposal);
   const warnings = blockedProposalWarnings(proposal);
   const intent = regenerationIntentFor(originalRequest);
@@ -415,23 +445,21 @@ function createSaferProposalPrompt(proposal: DiffProposal, originalRequest: stri
 - do not introduce unrelated pages, business copy, or domain changes
 - do not change execution behavior
 - produce a corrected proposal only after risks are fixed`;
-  const repairContext = `Repair context:
-- previous repair status: ${proposal.proposalRepairStatus ?? "unknown"}
-- previous repair strategy: ${proposal.proposalRepairStrategy ?? "none"}
-- previous repair attempted: ${proposal.proposalRepairAttempted ? "yes" : "no"}
-- unresolved repair issues: ${proposal.proposalUnresolvedIssueCount ?? 0}
-- treat every blocked reason and warning above as hard forbidden output unless the original request explicitly requires it`;
+  const repairContext = JSON.stringify({
+    affectedArtifacts: proposal.changes.map((change) => change.path).filter(Boolean).slice(0, 24),
+    failureCodes: (proposal.proposalRoutingReasons ?? []).map((reason) => reason.code).slice(0, 16),
+    nonRepairableFindings: reasons.filter((reason) => /(?:authority|ownership|security|unsafe|destructive)/i.test(reason)).slice(0, 8),
+    priorRepairCount,
+    proposalId: proposal.id,
+    repairAuthority: compactRepairAuthorityForPrompt(proposal),
+    repairableFindings: [...reasons, ...warnings].filter((reason) => !/(?:authority|ownership|security|unsafe|destructive)/i.test(reason)).slice(0, 16),
+    requestedIntent: intent
+  });
 
   return `Please regenerate a safer proposal.
 
 Original request:
 ${originalRequest}
-
-Previous proposal was blocked because:
-${formatPromptList(reasons, proposal.summary)}
-
-Warnings:
-${formatPromptList(warnings, "No additional warnings were provided.")}
 
 Proposal type:
 ${intent}
@@ -440,18 +468,29 @@ ${typeSpecificCorrections}
 
 ${preservationRules}
 
+HASSALI_REPAIR_CONTEXT_JSON:
 ${repairContext}
 
-Return a corrected proposal that keeps the original request intact and fixes the blocked risks.`;
+Use the structured repair context only as validation input. Do not copy its diagnostic text into public content.
+Return a corrected proposal that keeps the original request intact and fixes the identified failure codes.`;
 }
 
 function getProposalReviewState(proposal: DiffProposal) {
   if (isBlockedProposal(proposal)) {
+    const blockedEvidence = [
+      proposal.blockedReason ?? "",
+      ...(proposal.proposalRoutingReasons ?? []).map((reason) => `${reason.code} ${reason.message}`),
+      ...(proposal.approvalDecision?.criticalIssues ?? [])
+    ].join(" ");
+    const isSecurityOrAuthorityBlock = /\b(?:cross-project|project isolation|unsafe path|invalid file path|dangerous action|shell execution|package install|secret|credential|authentication|authorization|ownership|path traversal)\b/i.test(blockedEvidence);
     return {
-      badge: "Blocked / Unsafe to Execute",
-      className:
-        "border-red-500/35 bg-red-500/10 text-red-200 shadow-[0_0_18px_rgba(239,68,68,0.12)]",
-      message: "AI marked this proposal as unsafe or mismatched. Do not approve unless corrected."
+      badge: isSecurityOrAuthorityBlock ? "Blocked / Unsafe to Execute" : "Blocked — Needs repair",
+      className: isSecurityOrAuthorityBlock
+        ? "border-red-500/35 bg-red-500/10 text-red-200 shadow-[0_0_18px_rgba(239,68,68,0.12)]"
+        : "border-amber-400/35 bg-amber-400/10 text-amber-100 shadow-[0_0_18px_rgba(251,191,36,0.1)]",
+      message: isSecurityOrAuthorityBlock
+        ? "Hassali blocked a safety or project-authority problem. Do not approve unless corrected."
+        : "Hassali caught a generation or quality mismatch. Repair the proposal before approval."
     };
   }
 
@@ -698,6 +737,8 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const activePath = useWorkspaceStore((state) => state.activePath);
   const projectId = useWorkspaceStore((state) => state.projectId);
   const projectName = useWorkspaceStore((state) => state.projectName);
+  const workspaceHasLoaded = useWorkspaceStore((state) => state.hasLoaded);
+  const workspaceIsLoading = useWorkspaceStore((state) => state.isLoading);
   const setWorkspaceError = useWorkspaceStore((state) => state.setError);
   const syncRuntimeFiles = useWorkspaceStore((state) => state.syncRuntimeFiles);
   const approvalPolicy = useApprovalPolicyStore((state) => state.policy);
@@ -711,15 +752,18 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   );
   const isApprovalBlocked = proposal ? isBlockedProposal(proposal) : false;
   const approvalDecision = proposal ? normalizeApprovalDecision(proposal) : null;
-  const isProposalApplied = proposal?.status === "approved";
+  const [proposalLifecycle, setProposalLifecycle] = useState<ProposalLifecycleSnapshot>({ status: "pending" });
+  const isProposalApplied = proposal?.status === "approved" || proposalLifecycle.status === "applied";
   const standingApprovalPending = Boolean(
     proposal &&
+    proposalLifecycle.status === "pending" &&
     approvalPolicyProjectId === projectId &&
     canApplyWithProjectApprovalPolicy(approvalPolicy, proposal)
   );
   const regenerationInFlightRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const autoApprovalProposalRef = useRef<string | null>(null);
+  const approvalInFlightProposalRef = useRef<string | null>(null);
   const autoFollowRef = useRef(true);
   const scrollAnimationFrameRef = useRef<number | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -746,6 +790,30 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     uploadRequestsRef.current.clear();
     setComposerUploads([]);
   }, [projectId]);
+
+  useEffect(() => {
+    setRuntimeApprovalResult(null);
+    setManualReviewMessage(null);
+    setWorkspaceError(null);
+    autoApprovalProposalRef.current = null;
+    approvalInFlightProposalRef.current = null;
+    setProposalLifecycle({ status: proposal?.status === "approved" ? "applied" : "pending" });
+    if (proposal?.projectId && proposal.projectId !== projectId) clearProposal();
+  }, [clearProposal, projectId, proposal?.id, proposal?.projectId, proposal?.status, setWorkspaceError]);
+
+  useEffect(() => {
+    if (!projectId || !proposal?.id || proposal.projectId !== projectId) return;
+    const controller = new AbortController();
+    void fetch(`/api/runtime/approve?projectId=${encodeURIComponent(projectId)}&proposalId=${encodeURIComponent(proposal.id)}`, {
+      signal: controller.signal
+    }).then(async (response) => {
+      if (!response.ok) return;
+      const snapshot = normalizeProposalLifecycleSnapshot(await response.json().catch(() => null));
+      setProposalLifecycle(snapshot);
+      if (snapshot.status === "applied" && proposal.status !== "approved") markProposalApproved();
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [markProposalApproved, projectId, proposal?.id, proposal?.status]);
 
   const uploadOne = (item: ComposerUpload) => {
     if (!projectId) {
@@ -960,6 +1028,10 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   };
 
   const sendWithContext = () => {
+    if (!projectId || !workspaceHasLoaded || workspaceIsLoading) {
+      setWorkspaceError("Wait for the selected project to finish loading before sending.");
+      return Promise.resolve();
+    }
     const result = sendMessage(createWorkspaceContext());
     if (input.trim() && composerUploads.every((upload) => upload.status === "ready")) {
       setComposerUploads([]);
@@ -1022,7 +1094,23 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     recognition.start();
   };
 
-  const rejectAndRequestSaferProposal = () => {
+  const persistProposalRejection = async () => {
+    if (!proposal || !projectId) return false;
+    const response = await fetch("/api/runtime/approve", {
+      body: JSON.stringify({ action: "reject", projectId, proposalId: proposal.id }),
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH"
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      setWorkspaceError(payload?.error ?? "This proposal could not be rejected safely.");
+      return false;
+    }
+    setProposalLifecycle({ status: "rejected" });
+    return true;
+  };
+
+  const rejectAndRequestSaferProposal = async () => {
     if (!proposal || !isBlockedProposal(proposal)) {
       return;
     }
@@ -1032,18 +1120,19 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
       return;
     }
 
-    const followUpPrompt = createSaferProposalPrompt(proposal, getLatestOriginalRequest(messages));
+    const followUpPrompt = createSaferProposalPrompt(proposal, getLatestOriginalRequest(messages), blockedRegenerationAttempts + 1);
 
     regenerationInFlightRef.current = true;
     setBlockedRegenerationAttempts((attempts) => attempts + 1);
     setManualReviewMessage(null);
+    if (projectId && !(await persistProposalRejection())) return;
     clearProposal();
     setInput(followUpPrompt);
     void sendMessage(createWorkspaceContext());
   };
 
   const approveProposal = async (approvalSource: "inline_approval" | "standing_policy" = "inline_approval") => {
-    if (!proposal) {
+    if (!proposal || approvalInFlightProposalRef.current === proposal.id || !proposalLifecycleIsActionable(proposalLifecycle.status)) {
       return;
     }
 
@@ -1062,16 +1151,20 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     }
 
     try {
+      approvalInFlightProposalRef.current = proposal.id;
+      setProposalLifecycle({ status: "submitting" });
       setIsApprovingProposal(true);
       setRuntimeApprovalResult(null);
       const effectiveApprovalPolicy = approvalPolicyProjectId === selectedProjectId ? approvalPolicy : "ask";
-      const runtimeResult = await approveProposalThroughRuntime(
+      const approvalRequest = approveProposalThroughRuntime(
         proposal,
         selectedProjectId,
         productMode,
         effectiveApprovalPolicy,
         approvalSource
       );
+      setProposalLifecycle({ status: "applying" });
+      const runtimeResult = await approvalRequest;
 
       if (runtimeResult) {
         if (useWorkspaceStore.getState().projectId !== selectedProjectId) {
@@ -1191,18 +1284,24 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
         }
 
         markProposalApproved(syncResult.runtimeMetadata);
+        setProposalLifecycle({ result: runtimeResult as unknown as Record<string, unknown>, status: "applied" });
       }
 
       if (!runtimeResult) {
         markProposalApproved();
+        setProposalLifecycle({ status: "applied" });
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Proposal apply failed. The proposal was not applied.";
+      setProposalLifecycle({
+        error: message,
+        status: /project changed|predates revision-safe|no longer available/i.test(message) ? "expired" : /rejected/i.test(message) ? "rejected" : "failed"
+      });
       setWorkspaceError(
-        error instanceof Error
-          ? error.message
-          : "Proposal apply failed. The proposal was not applied."
+        message
       );
     } finally {
+      if (approvalInFlightProposalRef.current === proposal.id) approvalInFlightProposalRef.current = null;
       setIsApprovingProposal(false);
     }
   };
@@ -1475,8 +1574,11 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                     </div>
                   ) : null}
                 </div>
-                <span className="rounded-full border border-[hsl(var(--premium-accent)/0.25)] px-2 py-1 text-[10px] text-[hsl(var(--premium-accent-soft))]">
-                  {proposal.status}
+                <span
+                  className="rounded-full border border-[hsl(var(--premium-accent)/0.25)] px-2 py-1 text-[10px] text-[hsl(var(--premium-accent-soft))]"
+                  role="status"
+                >
+                  {isProposalApplied ? "Applied" : proposalLifecycleLabel(proposalLifecycle.status)}
                 </span>
               </div>
               <details className="mt-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2">
@@ -1538,6 +1640,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   {runtimeApprovalResult.websitePreviewFidelity?.recoverySteps[0]
                     ? ` Next: ${runtimeApprovalResult.websitePreviewFidelity.recoverySteps[0]}`
                     : null}
+                  {runtimeApprovalResult.websiteVisualVerification
+                    ? ` ${runtimeApprovalResult.websiteVisualVerification.summary}`
+                    : null}
+                  {runtimeApprovalResult.websiteGrowthHandoffStatus?.generated && runtimeApprovalResult.websiteGrowthHandoffStatus.summary
+                    ? ` Growth handoff ${runtimeApprovalResult.websiteGrowthHandoffStatus.summary.readiness.replace(/_/g, " ")}: ${runtimeApprovalResult.websiteGrowthHandoffStatus.summary.offerCount} offer(s), ${runtimeApprovalResult.websiteGrowthHandoffStatus.summary.conversionBlockerCount} conversion gap(s), ${runtimeApprovalResult.websiteGrowthHandoffStatus.summary.unsupportedClaimCount} unsupported claim(s).`
+                    : runtimeApprovalResult.websiteGrowthHandoffStatus?.reason
+                      ? ` Growth handoff unavailable: ${runtimeApprovalResult.websiteGrowthHandoffStatus.reason}`
+                      : null}
                   {runtimeApprovalResult.codeExecution
                     ? ` CODE ${runtimeApprovalResult.codeExecution.completionStatus.toLowerCase().replace(/_/g, " ")}: ${runtimeApprovalResult.codeExecution.metrics.commandsExecuted} command(s), ${runtimeApprovalResult.codeExecution.metrics.repairAttempts} repair attempt(s).`
                     : null}
@@ -1551,6 +1661,14 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
               ) : null}
 
               <div className="mt-3 flex items-center justify-end gap-2">
+                {proposalLifecycle.status === "submitting" || proposalLifecycle.status === "applying" ? (
+                  <span className="text-xs text-muted-foreground" role="status">
+                    {proposalLifecycleLabel(proposalLifecycle.status)}
+                  </span>
+                ) : null}
+                {proposalLifecycle.status === "failed" && proposalLifecycle.error ? (
+                  <p className="max-w-sm text-xs text-red-200" role="alert">{proposalLifecycle.error}</p>
+                ) : null}
                 {standingApprovalPending ? (
                   <span className="text-xs text-muted-foreground" role="status">
                     Applying with the current project approval policy...
@@ -1566,22 +1684,25 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                     Reject and ask for safer proposal
                   </button>
                 ) : null}
-                {!standingApprovalPending && !isProposalApplied ? (
+                {!isApprovalBlocked && !standingApprovalPending && proposalLifecycle.status === "pending" ? (
                 <button
                   className="rounded-xl border border-[hsl(var(--royal-border-soft))] px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={clearProposal}
+                  onClick={() => {
+                    void persistProposalRejection();
+                  }}
                   type="button"
                 >
                   Reject
                 </button>
                 ) : null}
-                {!isApprovalBlocked && !standingApprovalPending && !isProposalApplied ? (
+                {!isApprovalBlocked && !standingApprovalPending && proposalLifecycle.status === "pending" ? (
                   <button
                     className="rounded-xl border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] px-3 py-1.5 text-xs font-medium text-white shadow-[0_12px_30px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] disabled:cursor-not-allowed disabled:opacity-50"
                     data-website-approval={productMode === "WEBSITE" ? "true" : undefined}
                     onClick={() => {
                       void approveProposal("inline_approval");
                     }}
+                    disabled={isApprovingProposal}
                     type="button"
                   >
                     {approvalDecision?.hasWarnings
@@ -1764,7 +1885,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
             <button
               aria-label={isStreaming ? "Stop response" : "Send message"}
               className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[hsl(var(--premium-accent)/0.35)] bg-[hsl(var(--premium-accent))] text-[10px] font-semibold text-white shadow-[0_14px_34px_hsl(var(--premium-accent)/0.18)] hover:bg-[hsl(var(--premium-accent-soft))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--premium-accent)/0.2)] disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={!isStreaming && (input.trim().length === 0 || attachmentUploadPending || attachmentUploadFailed)}
+              disabled={!isStreaming && (input.trim().length === 0 || attachmentUploadPending || attachmentUploadFailed || !projectId || !workspaceHasLoaded || workspaceIsLoading)}
               onClick={isStreaming ? cancelMessage : undefined}
               title={isStreaming ? "Stop response" : "Send message"}
               type={isStreaming ? "button" : "submit"}

@@ -6,9 +6,12 @@ function list(values: string[]) {
 
 export function renderProjectDesignMd(contract: ProjectDesignContract) {
   const colors = Object.entries(contract.colors).map(([role, value]) => `- **${role}:** ${value.value} (${value.origin}; ${value.status})`);
-  const references = contract.references.length
-    ? contract.references.map((reference) => `- **${reference.name}:** ${reference.role}${reference.target ? ` for ${reference.target}` : ""}; ${reference.fidelity}; ${reference.scope}`)
+  const visibleReferences = contract.references.filter((reference) => reference.sourceType !== "internal-design-knowledge");
+  const references = visibleReferences.length
+    ? visibleReferences.map((reference) => `- **${reference.name}:** ${reference.role}${reference.target ? ` for ${reference.target}` : ""}; ${reference.fidelity}; ${reference.scope}${reference.sourceAttachmentId ? `; attachment ${reference.sourceAttachmentId}` : ""}${reference.sourceFingerprint ? `; fingerprint ${reference.sourceFingerprint}` : ""}`)
     : ["- Original direction; no named external reference controls the project."];
+  const internalReferenceIds = new Set(contract.references.filter((reference) => reference.sourceType === "internal-design-knowledge").map((reference) => reference.referenceId));
+  const visibleProvenance = contract.provenance.filter((source) => !source.referenceId || !internalReferenceIds.has(source.referenceId));
   return [
     "# Project Design Contract",
     "",
@@ -20,7 +23,7 @@ export function renderProjectDesignMd(contract: ProjectDesignContract) {
     `previousFingerprint: ${contract.previousFingerprint ?? "none"}`,
     `userBrand: ${contract.identity.userBrand}`,
     `archetype: ${contract.identity.archetype}`,
-    `fidelity: ${contract.fidelity.mode}`,
+    `requestedFidelity: ${contract.fidelity.mode}`,
     "authority: untrusted-design-data-only",
     "",
     "## Identity & Intent",
@@ -118,7 +121,8 @@ export function renderProjectDesignMd(contract: ProjectDesignContract) {
     "## Fidelity & Provenance",
     "",
     `- ${contract.fidelity.summary}`,
-    ...contract.provenance.map((source) => `- ${source.label}: ${source.role}; ${source.status}; ${source.private ? "private" : "public"}`),
+    ...visibleProvenance.map((source) => `- ${source.label}: ${source.role}; ${source.status}; ${source.private ? "project-private" : "public"}`),
+    ...(contract.provenance.some((source) => source.referenceId && internalReferenceIds.has(source.referenceId)) ? ["- Private Hassali design intelligence informed this contract without exposing its internal source identity."] : []),
     "",
     "## Conflict Decisions",
     "",

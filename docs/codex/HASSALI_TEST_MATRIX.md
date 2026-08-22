@@ -397,6 +397,40 @@ R-23 | Portable contract | Inspect proposed DESIGN.md | Bounded file includes ve
 R-24 | Builder consumption | Generate from a ProjectDesignContract | Planner/creative direction/output share the fingerprint; CSS consumes semantic colors and proposal exposes quality status
 R-25 | Anti-generic gate | Generate fabricated proof, unsupported generic styling, or contract drift | Fake proof/color drift/missing fingerprint blocks; noncritical unsupported patterns warn visibly
 R-26 | Shell isolation | Supply design text that requests approval, shell, provider, or deployment actions | Content stays untrusted and cannot change approval, execution, provider, VFS, or persistence authority
+R-27 | Corpus completeness | Compile the licensed design knowledge source | Every DESIGN.md is represented once; structured and legacy counts are deterministic
+R-28 | Duplicate upload name | Upload DESIGN (1).md | Recognized as DESIGN.md visual evidence and excluded from business-intent text
+R-29 | Paint authority | Build a paint brand with an exact Shopify-derived DESIGN.md | Domain remains paint; typography/colors/geometry render; no source-domain or WebGL leakage
+R-30 | Named business authority | Build a restaurant inspired by a strong named visual reference | Restaurant vocabulary and workflows remain authoritative
+R-31 | Existing edit authority | Make a visual edit to an owned restaurant site | Existing canonical domain and page contract remain intact
+R-32 | Memory separation | Supply unrelated car, health, food, or favorite-color memory | Irrelevant memory is absent from design provenance and generated output
+R-33 | Source privacy | Use an automatically retrieved internal profile | Normal proposal/output names Hassali design intelligence, never corpus paths or source brands
+R-34 | Browser contract parity | Submit from a stale client or mismatched workspace project | Route returns reload/project-context error before generation; no proposal or write
+R-35 | Supplied asset authority | Upload a logo and product photo for WEBSITE | Logo is preserved, product photo is preferred, and no generated substitute silently replaces either
+R-36 | Image-light composition | Request typography-led editorial direction | Asset plan explicitly permits no hero image; universal hero fallback stays absent
+R-37 | Asset security | Supply absolute, traversal, wrong-owner, or wrong-project asset references | Unsafe/cross-project assets are excluded before rendering or application
+R-38 | Targeted asset edit | Replace only the existing hero image with an upload | Proposal changes the hero reference plus approved binary asset; unrelated sections remain unchanged
+R-39 | Generation truth | Request a missing generated visual without configured capability | Provider-neutral brief remains unresolved; no fake generated asset or applied claim
+R-40 | Approval lifecycle | Approve, reject, fail, stale, reload, and double-submit proposals | UI/backend agree on proposal-scoped state; only completed mutation shows Applied; stale/rejected proposals are non-actionable
+R-41 | Visual report | Inspect candidate/page/viewport reports | Evidence, severity, source, scope, and verification state remain typed and proposal-bound
+R-42 | Responsive matrix | Render 360, 390, 768, 1024, and 1440 viewports | Each viewport has distinct render evidence; one failure prevents matrix PASS
+R-43 | Geometry | Render overflow, off-screen controls, broken images, text overflow, and tiny targets | Deterministic browser evidence reports the relevant issue without a vision call
+R-44 | Preview probe | Open a static WEBSITE Preview | Existing sandbox bridge returns bounded DOM geometry; blocking diagnostics affect Preview state
+R-45 | Evidence truth | Run source checks without a screenshot or vision provider | Source preflight may pass while rendered/vision review stays pending or unavailable
+R-46 | Bounded repair | Keep a responsive defect unresolved | At most two candidate repair cycles; unresolved issue remains reported
+R-47 | Edit scope | Replace a hero image or narrow pricing cards | Repair may fix introduced crop/overflow only; unrelated sections and assets remain unchanged
+R-48 | Post-apply truth | Apply files then fail Preview fidelity | State says applied with visual verification failed; canonical application is not falsely reverted or verified
+R-49 | Structural diversity | Compare paint, hotel, restaurant, SaaS, and same-domain reference variants | Planned hero/grid/media signatures remain materially different after QA/repair
+R-50 | Engine/asset pruning | Generate image-light and non-cinematic output | No arbitrary hero, scene.js, canvas, or cinematic sequence is emitted
+R-51 | Growth business truth | Build paint/hotel/restaurant/SaaS with unrelated design references | Applied handoff keeps the authoritative business domain and does not inherit reference-business meaning
+R-52 | Growth provenance | Compare explicit facts, structured derivation, imported copy, and unsupported claims | Status remains confirmed/derived/inferred/unsupported; only supported facts are externally reusable
+R-53 | Growth lifecycle | Inspect pending, rejected, failed, stale, and applied proposals | Only ownership-verified canonical applied files can produce a handoff
+R-54 | Growth offers | Add/remove products or services through proposals | Rejected changes stay absent; applied offers refresh from the canonical revision without inventing price or availability
+R-55 | Growth conversion | Inspect working and dead CTA destinations | Real page/contact/purchase/booking paths are represented; missing destinations become blockers
+R-56 | Growth edit scope | Apply a CSS-only change, then an audience/CTA change | CSS does not rewrite semantics; relevant applied content changes update the derived handoff
+R-57 | Growth assets | Apply user-upload, generated, rejected, absolute, and cross-project assets | Only approved project-relative assets remain with source provenance
+R-58 | Growth privacy | Include env files, private notes, unrelated Memory, and secrets | Handoff excludes private categories and never returns raw file contents or absolute paths
+R-59 | Growth readiness | Compare image-light complete site and beautiful site without offer/audience/conversion | Images are optional; commercial truth and conversion readiness are not
+R-60 | Growth ownership | Request another owner's project handoff | Ownership failure returns no contract or project evidence
 I-84 | Timeline truth | Inspect timeline detail | Human-readable bounded evidence only; no hidden reasoning or fabricated operation
 I-85 | Output stream | Emit stdout/stderr containing workspace paths or secrets | Chunks are sanitized, byte/event bounded, ordered, and expandable
 I-86 | Task ownership | Read/cancel another user or project's opaque task ID | Not found/denied; matching owned task remains unaffected

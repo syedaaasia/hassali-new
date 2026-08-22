@@ -25,8 +25,18 @@ import {
   resolveStaticPreviewPagePath,
   type StaticPreviewDiagnostic
 } from "@/lib/static-preview-compiler";
+import {
+  evaluateStaticPreviewVisualQA,
+  type StaticPreviewVisualQAObservation
+} from "@/lib/static-preview-visual-qa";
 import { useWorkspaceStore } from "@/lib/workspace-store";
-import type { PreviewManifest, VfsFile } from "@/lib/preview-manifest";
+import {
+  deriveManifest,
+  emptyPreviewManifest,
+  isManifestCompatibleWithMode,
+  type PreviewManifest,
+  type VfsFile
+} from "@/lib/preview-manifest";
 import { verifyWebsitePreviewFidelity } from "@/lib/website-preview-fidelity";
 
 type UnifiedPreviewType = "application" | "architecture" | "component" | "dashboard" | "mobile" | "none" | "website";
@@ -224,70 +234,10 @@ function manifestWithCommittedFallback(
 ): PreviewManifest {
   const approvedManifest = manifestFromApprovedMetadata(approvedPreviewMetadata);
 
-  if (approvedManifest) return approvedManifest;
-
-  const paths = new Set([...committedFiles.keys()]);
-  const pythonManifest = paths.has("app.py") && paths.has("requirements.txt")
-    ? {
-        type: "python_app" as const,
-        framework: "python_streamlit" as const,
-        entryPoint: "app.py",
-        requiredFiles: ["app.py", "requirements.txt"]
-      }
-    : null;
-  const hasViteConfig = paths.has("vite.config.ts") || paths.has("vite.config.js");
-  const hasReactEntry = paths.has("src/main.tsx") || paths.has("src/main.jsx");
-  const hasNextConfig = paths.has("next.config.ts") || paths.has("next.config.js");
-
-  if (productMode === "WEBSITE" && paths.has("index.html")) {
-    return {
-      type: "static_website",
-      framework: "static_html",
-      entryPoint: "index.html",
-      requiredFiles: ["index.html"]
-    };
-  }
-
-  if (productMode === "CODE" && pythonManifest) {
-    return pythonManifest;
-  }
-
-  if (manifest.type !== null) {
-    return manifest;
-  }
-
-  if (productMode === "CODE" && hasViteConfig && hasReactEntry && paths.has("index.html")) {
-    return {
-      type: "react_vite_app",
-      framework: "react_vite",
-      entryPoint: "index.html",
-      requiredFiles: ["package.json", "vite.config.ts", "index.html", "src/main.tsx", "src/App.tsx"]
-    };
-  }
-
-  if (productMode === "CODE" && hasNextConfig) {
-    return {
-      type: "next_app",
-      framework: "next_app",
-      entryPoint: "app/page.tsx",
-      requiredFiles: ["package.json", "next.config.ts"]
-    };
-  }
-
-  if (pythonManifest) {
-    return pythonManifest;
-  }
-
-  if (paths.has("index.html")) {
-    return {
-      type: "static_website",
-      framework: "static_html",
-      entryPoint: "index.html",
-      requiredFiles: ["index.html"]
-    };
-  }
-
-  return manifest;
+  if (approvedManifest && isManifestCompatibleWithMode(approvedManifest, productMode)) return approvedManifest;
+  if (isManifestCompatibleWithMode(manifest, productMode)) return manifest;
+  if (productMode === "ASK") return emptyPreviewManifest;
+  return deriveManifest(committedFiles, productMode);
 }
 
 function StaticWebsitePreview({
@@ -306,6 +256,7 @@ function StaticWebsitePreview({
   serverVerified: boolean | null;
 }) {
   const [currentPage, setCurrentPage] = useState("index.html");
+  const [renderDiagnostics, setRenderDiagnostics] = useState<StaticPreviewDiagnostic[]>([]);
   const iframeWindowRef = useRef<unknown>(null);
   const files = useMemo(
     () => Object.fromEntries([...committedFiles].map(([path, file]) => [path, file.content])),
@@ -343,14 +294,16 @@ function StaticWebsitePreview({
 
   useEffect(() => {
     setCurrentPage("index.html");
+    setRenderDiagnostics([]);
   }, [committedFiles]);
 
   useEffect(() => {
     onDiagnostics([
       ...compilation.diagnostics,
+      ...renderDiagnostics,
       ...(fidelityDiagnostic ? [fidelityDiagnostic] : [])
     ]);
-  }, [compilation.diagnostics, fidelityDiagnostic, onDiagnostics]);
+  }, [compilation.diagnostics, fidelityDiagnostic, onDiagnostics, renderDiagnostics]);
 
   useEffect(() => {
     const messageTarget = globalThis as unknown as {
@@ -358,9 +311,16 @@ function StaticWebsitePreview({
       removeEventListener: (type: "message", handler: (event: MessageEvent) => void) => void;
     };
     const handler = (event: MessageEvent) => {
-      if (event.data?.type !== "HASSALI_STATIC_PREVIEW_NAVIGATE") return;
       if (event.source !== iframeWindowRef.current || event.origin !== "null") return;
       if (String(event.data.projectId ?? "") !== (projectId ?? "")) return;
+
+      if (event.data?.type === "HASSALI_STATIC_PREVIEW_VISUAL_QA") {
+        const observation = event.data.observation as StaticPreviewVisualQAObservation | undefined;
+        if (!observation || observation.page !== currentPage) return;
+        setRenderDiagnostics(evaluateStaticPreviewVisualQA(observation));
+        return;
+      }
+      if (event.data?.type !== "HASSALI_STATIC_PREVIEW_NAVIGATE") return;
 
       const target = resolveStaticPreviewPagePath({
         activeHtmlPath: currentPage,

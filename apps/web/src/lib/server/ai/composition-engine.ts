@@ -5,6 +5,7 @@ import type { TranslatedIntentSpec } from "@/lib/server/ai/intent-translator";
 import type { ProjectContract } from "@/lib/server/ai/project-contract";
 import type { TaskDecomposition } from "@/lib/server/ai/task-decomposer";
 import { classifyDomainIntent, getTaxonomyProfile } from "@/lib/server/ai/industry-taxonomy";
+import type { ProjectDesignContract } from "@/lib/server/design/direction/project-design-contract";
 
 export type CompositionStatus = "answer_only" | "planned" | "targeted";
 export type CompositionKind =
@@ -40,6 +41,23 @@ export type SectionPlan = {
   visualIntent: string;
 };
 
+export type WebsiteCompositionStructure = {
+  componentFamilies: Array<"comparison" | "editorial" | "gallery" | "ledger" | "process" | "stats">;
+  conversionPlacement: "closing" | "hero-and-closing" | "inline-and-closing";
+  density: "airy" | "balanced" | "dense";
+  footerStrategy: "conversion-led" | "editorial" | "utility";
+  gridStrategy: "asymmetric-editorial" | "modular-product" | "split-destination" | "swatch-mosaic";
+  heroArchitecture: "destination-split" | "editorial-story" | "material-immersion" | "product-interface";
+  mediaRelationship: "atmospheric" | "evidence-led" | "product-proof" | "typographic";
+  proofPlacement: "early" | "mid-story" | "near-conversion";
+  responsiveStrategy: "collapse-ledger" | "reflow-editorial" | "stack-product" | "swatch-scroll";
+  sectionSequence: string[];
+  specialEngines: {
+    cinematic: boolean;
+    webgl: boolean;
+  };
+};
+
 export type CompositionPlan = {
   acceptanceChecks: string[];
   assetIntent: string[];
@@ -62,6 +80,7 @@ export type CompositionPlan = {
   secondaryCTA: string | null;
   trustSignals: string[];
   visualIntent: string[];
+  websiteStructure: WebsiteCompositionStructure | null;
 };
 
 type BuildCompositionInput = {
@@ -71,6 +90,7 @@ type BuildCompositionInput = {
   executionPlan: ExecutionPlan;
   productMode: "ASK" | "CODE" | "WEBSITE";
   projectContract: ProjectContract | null;
+  projectDesignContract?: ProjectDesignContract | null;
   taskDecomposition: TaskDecomposition;
   translatedIntent: TranslatedIntentSpec;
 };
@@ -115,6 +135,34 @@ function pageToPath(page: string) {
 }
 
 const profiles: DomainCompositionProfile[] = [
+  {
+    assetIntent: ["paint swatches", "finished interiors", "surface detail", "color families", "sample cards"],
+    contentAngles: ["color exploration", "surface performance", "finish selection", "sample confidence"],
+    domain: "paint_brand",
+    entities: ["color collections", "interior paint", "exterior paint", "finishes", "sample cards", "project inspiration"],
+    forbiddenSections: ["television", "furniture catalog", "legal practice", "generic software dashboard"],
+    layoutIntent: ["material immersion", "swatch mosaic", "surface stories", "finish comparison", "sample conversion"],
+    optionalSections: ["color stories", "designer projects", "surface guide"],
+    primaryCTA: "Explore colors",
+    requiredSections: ["color immersion", "collections", "surfaces and rooms", "finishes", "craft and formulation", "project inspiration", "samples and contact"],
+    secondaryCTA: "Order samples",
+    trustSignals: ["finish guidance", "sample availability", "surface suitability", "direct specification confirmation"],
+    visualIntent: ["material-led", "color immersive", "premium editorial", "tactile surfaces"]
+  },
+  {
+    assetIntent: ["property exterior", "rooms", "amenities", "dining", "destination"],
+    contentAngles: ["sense of place", "room experience", "hospitality details", "booking confidence"],
+    domain: "hotel_guesthouse",
+    entities: ["rooms", "suites", "amenities", "breakfast", "location", "guest experience"],
+    forbiddenSections: ["paint swatches", "software pricing", "furniture catalog", "restaurant ordering flow"],
+    layoutIntent: ["destination opening", "room editorial", "amenity ledger", "location story", "booking conversion"],
+    optionalSections: ["local guide", "seasonal stays", "guest journal"],
+    primaryCTA: "Check availability",
+    requiredSections: ["destination", "rooms and suites", "guest experience", "amenities", "dining", "location", "availability"],
+    secondaryCTA: "Explore rooms",
+    trustSignals: ["direct booking guidance", "clear amenities", "location detail", "guest policies"],
+    visualIntent: ["place-led", "photographic editorial", "quiet hospitality", "generous pacing"]
+  },
   {
     assetIntent: ["fabric texture", "sofa restoration", "chair restoration", "before and after projects", "workshop"],
     contentAngles: ["craft restoration", "fabric selection", "repair process", "free estimate"],
@@ -406,7 +454,8 @@ function answerComposition(input: BuildCompositionInput): CompositionPlan {
     requiredSections: [],
     secondaryCTA: null,
     trustSignals: [],
-    visualIntent: []
+    visualIntent: [],
+    websiteStructure: null
   };
 }
 
@@ -432,7 +481,8 @@ function targetedComposition(input: BuildCompositionInput): CompositionPlan {
     requiredSections: [],
     secondaryCTA: null,
     trustSignals: [],
-    visualIntent: []
+    visualIntent: [],
+    websiteStructure: null
   };
 }
 
@@ -464,14 +514,54 @@ function codeComposition(input: BuildCompositionInput, profile: DomainCompositio
     requiredSections,
     secondaryCTA: profile.secondaryCTA,
     trustSignals: profile.trustSignals,
-    visualIntent: profile.visualIntent
+    visualIntent: profile.visualIntent,
+    websiteStructure: null
   };
+}
+
+export function deriveWebsiteCompositionStructure(input: {
+  designContract?: ProjectDesignContract | null;
+  domain: string;
+  prompt: string;
+  sectionSequence: string[];
+}): WebsiteCompositionStructure {
+  const designEvidence = [
+    input.designContract?.identity.archetype,
+    input.designContract?.layout.hero,
+    input.designContract?.layout.grid,
+    ...(input.designContract?.layout.sectionRhythm ?? [])
+  ].filter(Boolean).join(" ").toLowerCase();
+  const denseEditorial = /dense|editorial|asymmetr|sharp|typographic|technical/.test(designEvidence);
+  const airyLuxury = /airy|luxury|photograph|spacious|whitespace|minimal/.test(designEvidence);
+  const specialEngines = {
+    cinematic: /\b(?:frame sequence|cinematic sequence|scroll sequence|video sequence)\b/i.test(input.prompt),
+    webgl: /\b(?:webgl|three\.js|three js|interactive 3d|3d scene)\b/i.test(input.prompt)
+  };
+  const shared = { sectionSequence: input.sectionSequence, specialEngines };
+
+  if (input.domain === "paint_brand") {
+    return { ...shared, componentFamilies: ["gallery", "comparison", "editorial", "process"], conversionPlacement: "inline-and-closing", density: denseEditorial ? "dense" : "balanced", footerStrategy: "conversion-led", gridStrategy: "swatch-mosaic", heroArchitecture: "material-immersion", mediaRelationship: "evidence-led", proofPlacement: "mid-story", responsiveStrategy: "swatch-scroll" };
+  }
+  if (input.domain === "hotel_guesthouse") {
+    return { ...shared, componentFamilies: ["gallery", "editorial", "ledger", "stats"], conversionPlacement: "hero-and-closing", density: denseEditorial ? "dense" : "airy", footerStrategy: "editorial", gridStrategy: denseEditorial ? "asymmetric-editorial" : "split-destination", heroArchitecture: denseEditorial ? "editorial-story" : "destination-split", mediaRelationship: airyLuxury ? "atmospheric" : "evidence-led", proofPlacement: "near-conversion", responsiveStrategy: denseEditorial ? "reflow-editorial" : "collapse-ledger" };
+  }
+  if (input.domain === "restaurant" || input.domain === "seafood_restaurant") {
+    return { ...shared, componentFamilies: denseEditorial ? ["editorial", "ledger", "gallery"] : ["gallery", "editorial", "comparison"], conversionPlacement: "hero-and-closing", density: denseEditorial ? "dense" : airyLuxury ? "airy" : "balanced", footerStrategy: "editorial", gridStrategy: denseEditorial ? "asymmetric-editorial" : "split-destination", heroArchitecture: denseEditorial ? "editorial-story" : "destination-split", mediaRelationship: airyLuxury ? "atmospheric" : "evidence-led", proofPlacement: "mid-story", responsiveStrategy: "reflow-editorial" };
+  }
+  return { ...shared, componentFamilies: ["stats", "process", "editorial", "comparison"], conversionPlacement: "hero-and-closing", density: denseEditorial ? "dense" : "balanced", footerStrategy: "utility", gridStrategy: "modular-product", heroArchitecture: "product-interface", mediaRelationship: "product-proof", proofPlacement: "early", responsiveStrategy: "stack-product" };
 }
 
 function websiteComposition(input: BuildCompositionInput, profile: DomainCompositionProfile): CompositionPlan {
   const requiredSections = profile.requiredSections.map((title, index) => sectionPlan(title, profile, index + 1));
   const optionalSections = profile.optionalSections.map((title, index) => sectionPlan(title, profile, requiredSections.length + index + 1));
   const pages = pagePlans(input, profile, requiredSections);
+
+  const structure = deriveWebsiteCompositionStructure({
+    designContract: input.projectDesignContract,
+    domain: profile.domain,
+    prompt: input.currentPrompt,
+    sectionSequence: profile.requiredSections
+  });
 
   return {
     acceptanceChecks: [
@@ -499,7 +589,8 @@ function websiteComposition(input: BuildCompositionInput, profile: DomainComposi
     requiredSections,
     secondaryCTA: profile.secondaryCTA,
     trustSignals: profile.trustSignals,
-    visualIntent: unique([...profile.visualIntent, input.translatedIntent.style ?? "", input.translatedIntent.visualLanguage ?? "", input.translatedIntent.theme ?? ""])
+    visualIntent: unique([...profile.visualIntent, input.translatedIntent.style ?? "", input.translatedIntent.visualLanguage ?? "", input.translatedIntent.theme ?? ""]),
+    websiteStructure: structure
   };
 }
 
