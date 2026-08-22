@@ -360,6 +360,7 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Run 06 checkpoint: `ASK-RUN6: build universal assistant orchestration`
 - Run 07 checkpoint: `CODE-RUN7: build verified software factory`
 - Run 08 checkpoint: `EXPERIENCE-RUN8: add rich media and verified shipping`
+- Run 09 checkpoint: `GRAPH-RUN9: add shared intelligence graph kernel`
 - The repository HEAD is authoritative; confirm it with Git before every task.
 
 ## WEBSITE Design Direction
@@ -395,6 +396,17 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Explicitly requested user media outranks curated media. Attachment presence alone grants no visual authority. Generated media remains provider-neutral and degrades truthfully when unavailable.
 - WEBSITE and CODE downloads read the ownership-verified canonical project files. The exporter filters caches, environment files, and sensitive paths, blocks private-key content, writes a SHA-256 shipping manifest, reopens the ZIP, and verifies every path, size, and hash before returning it.
 - Package identity is deterministic for the same canonical revision and file set. Package-integrity verification is separate from project/runtime verification, which remains `not_recorded` unless evidence is supplied.
+
+## Graph Kernel
+
+- `lib/server/graph-kernel/` is a small in-memory, JSON-serializable relationship layer. It connects authoritative IDs and evidence; it does not replace conversation, project, revision, verification, or shipping owners.
+- Stable node and edge identities derive from scope, type, and redacted authoritative identity. Nodes retain mode, scope, provenance, fact state, privacy, authority references, source revision, and current/historical/invalidated status.
+- Indexed upsert, typed connect, scoped query, neighbor lookup, revision rollover, stale-derived invalidation, validation, and breadth-first traversal are deterministic and bounded to depth 3 / 60 nodes.
+- ASK objective/constraint/entity, WEBSITE project/revision/asset, CODE task/file/verification, and Run 8 artifact/manifest/file projections are adapters over existing state. They do not execute actions or persist a second source of truth.
+- Current revision edges advance without rewriting history; superseded revisions remain historical and derived facts tied to stale revisions invalidate.
+- Serialization defaults to provider-eligible/public nodes, rejects malformed versions/endpoints, redacts secret-like labels, omits secret/body/source metadata, and never embeds source bodies or binary assets.
+- Contradictions between non-authoritative inferred facts are represented explicitly. Domain owners still resolve confirmed authority conflicts.
+- Optional graph enrichment failure preserves a valid core result and adds no graph-derived claims.
 
 ## WEBSITE Visual QA
 

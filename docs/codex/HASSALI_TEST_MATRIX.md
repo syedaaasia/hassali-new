@@ -457,6 +457,23 @@ X-10 | Package integrity | Alter a packaged file after manifest creation | Verif
 X-11 | ASK artifact | Create a valid CSV from supplied rows | ASK-owned validated artifact; no CODE workspace or mutation authority
 X-12 | Mode isolation | Create ASK artifact and WEBSITE/CODE packages | Each retains its own mode, canonical source, and artifact identity
 X-13 | Rich degradation | Fail optional artifact rendering after valid answer | Core answer remains valid with a truthful bounded warning
+G-01 | Basic graph | Connect objective, constraint, and capability | Stable identity and typed bounded traversal
+G-02 | Deduplication | Upsert the same authoritative project twice | One canonical node
+G-03 | Scope | Use identical file names in two projects | IDs and relationships remain project-scoped
+G-04 | Revision | Advance WEBSITE N to N+1 | N+1 current and supersedes N; N remains historical
+G-05 | Asset provenance | Project curated hero from current WEBSITE revision | Revision uses asset; curated provenance retained without bytes
+G-06 | CODE evidence | Project passed and failed verification criteria | Only passed evidence creates VERIFIED_BY
+G-07 | Shipping lineage | Project Run 8 artifact and manifest | Artifact derives from canonical revision; manifest contains hashed files
+G-08 | ASK constraints | Parse $500/no-inventory objective fixture | Current-input objective and both constraints; no memory dependency
+G-09 | Follow-up | Add bundle-size priority to React/Vue comparison | Relevant compact subgraph only
+G-10 | Mode isolation | Build ASK, WEBSITE, and CODE projections | No implicit cross-mode/project context
+G-11 | Invalidation | Supersede revision backing derived claim | Stale claim invalidated; history preserved
+G-12 | Contradiction | Add equal inferred Alpha/Beta claims | Both remain and CONTRADICTS is explicit
+G-13 | Bounds | Traverse graph beyond limits | Stable max depth/node limit; no recursion loop
+G-14 | Malformed state | Deserialize missing endpoint or version 2 | Reject deterministically
+G-15 | Privacy | Add secret-like label and metadata | Value redacted; secret/body/source fields omitted
+G-16 | Authority | Project CODE file | Project, revision, relative path, and hash references; no source body
+G-17 | Optional failure | Throw during graph enrichment | Verified core result preserved with truthful warning
 F-01 | Provider config | Select unconfigured model | Required env/status shown; no active-model claim
 F-02 | Provider fallback | Selected provider fails | Only bounded approved fallback; source/provider truth retained
 F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no stale output or timers
