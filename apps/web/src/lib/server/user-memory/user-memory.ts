@@ -207,9 +207,10 @@ export function classifyUserMemoryIntent(prompt: string, sourceRole: "assistant"
   if (/^(?:what|tell me what)\s+(?:do\s+)?you\s+(?:remember|know)\s+about\s+me[?!.]*$/i.test(trimmed)) {
     return { kind: "recall", query: "", scope: "all" };
   }
-  const personQuery = trimmed.match(/^(?:who\s+is|how\s+is)\s+(.+?)(?:\s+related\s+to\s+me)?[?!.]*$/i);
+  const personQuery = trimmed.match(/^(?:who\s+is|how\s+is)\s+(.+?)\s+(?:to\s+me|related\s+to\s+me)[?!.]*$/i) ??
+    trimmed.match(/^do\s+you\s+remember\s+who\s+(.+?)\s+is[?!.]*$/i);
   if (personQuery) return { kind: "recall", query: normalizeMemoryText(personQuery[1] ?? ""), scope: "person" };
-  const recordQuery = trimmed.match(/^(?:what(?:'s|\s+is)|do\s+you\s+remember)\s+(?:that\s+)?(?:my\s+)?(.+?)[?!.]*$/i);
+  const recordQuery = trimmed.match(/^(?:what(?:'s|\s+is)\s+my|do\s+you\s+remember(?:\s+that)?\s+my)\s+(.+?)[?!.]*$/i);
   if (recordQuery) return { kind: "recall", query: normalizeMemoryText(recordQuery[1] ?? ""), scope: "record" };
 
   const explicit = trimmed.match(/^(?:please\s+)?remember(?:\s+that)?\s+(.+)$/i);

@@ -20,13 +20,16 @@ import {
   type IntelligenceBudgetContext,
   type IntelligenceCostScope
 } from "./intelligence-budget";
+import { normalizeIntelligenceResultQuality } from "./intelligence-result-quality";
 
 export type IntelligenceRoutingPrivacy = "allow-cloud" | "local-only" | "prefer-local";
 export type IntelligenceTaskTier = "complex" | "simple" | "specialist" | "standard";
+export type IntelligenceRoutingTaskType = "coding" | "general" | "reasoning" | "writing";
 
 export type IntelligenceRoutingReasonCode =
   | "BYOK_AVAILABLE"
   | "CODE_MODE_FIT"
+  | "CODING_TASK_FIT"
   | "DEFAULT_RELIABLE"
   | "FALLBACK_AFTER_MODEL_UNAVAILABLE"
   | "FALLBACK_AFTER_NETWORK"
@@ -51,6 +54,7 @@ export type AutoRoutingPreferences = {
   privacy: IntelligenceRoutingPrivacy;
   scopeId?: string;
   taskTier?: IntelligenceTaskTier;
+  taskType?: IntelligenceRoutingTaskType;
 };
 
 export type IntelligenceRouteCandidate = {
@@ -105,6 +109,7 @@ type CachedModels = {
 };
 
 const retryableFallbackCategories = new Set([
+  "malformed-provider-response",
   "model-unavailable",
   "network",
   "provider-unavailable",
@@ -187,9 +192,13 @@ function tierScore(value: unknown) {
   return 10;
 }
 
-function modeFitness(request: IntelligenceRequest, model: IntelligenceModelDescriptor) {
+function modeFitness(
+  request: IntelligenceRequest,
+  model: IntelligenceModelDescriptor,
+  taskType: IntelligenceRoutingTaskType = "general"
+) {
   const raw = model.rawProviderMetadata ?? {};
-  if (request.mode === "CODE") return tierScore(raw.codingTier);
+  if (request.mode === "CODE" || taskType === "coding") return tierScore(raw.codingTier);
   if (request.mode === "WEBSITE") return tierScore(raw.designTier);
   return tierScore(raw.reasoningTier);
 }
@@ -240,7 +249,7 @@ function cooldownDuration(category: IntelligenceFailure["category"]) {
   if (category === "authentication" || category === "authorization" || category === "quota") return 120_000;
   if (category === "rate-limit") return 30_000;
   if (category === "model-unavailable" || category === "provider-unavailable") return 20_000;
-  if (category === "network" || category === "timeout") return 10_000;
+  if (category === "malformed-provider-response" || category === "network" || category === "timeout") return 10_000;
   return 0;
 }
 
@@ -352,8 +361,9 @@ export class AutoIntelligenceRouter {
         score += preferred.filter(
           (capability) => capabilitySupport(source.adapter, model, capability) === "supported"
         ).length * 4;
-        score += modeFitness(request, model);
+        score += modeFitness(request, model, preferences.taskType);
         if (request.mode === "CODE") reasons.push("CODE_MODE_FIT");
+        if (preferences.taskType === "coding") reasons.push("CODING_TASK_FIT");
         if (request.mode === "WEBSITE") reasons.push("WEBSITE_MODE_FIT");
         if (source.health.status === "ready") reasons.push("HEALTHY_SOURCE");
         if (request.requiredCapabilities.includes("vision")) reasons.push("VISION_REQUIRED");
@@ -370,8 +380,11 @@ export class AutoIntelligenceRouter {
         if (explicit) {
           score += 100;
           reasons.push("USER_OVERRIDE");
-        } else if (preferences.preferredModelId?.toLowerCase() === model.modelId.toLowerCase()) {
-          score += 35;
+        } else if (
+          source.health.status === "ready" &&
+          preferences.preferredModelId?.toLowerCase() === model.modelId.toLowerCase()
+        ) {
+          score += 80;
         }
         if (source.adapter.defaultModelId?.toLowerCase() === model.modelId.toLowerCase()) score += 20;
         const cost = knownCost(model);
@@ -515,7 +528,10 @@ export class AutoIntelligenceRouter {
       },
       requestedModel: candidate.modelId
     });
-    const primaryResult = await invokeCandidate(resolution.decision.primary);
+    const primaryResult = normalizeIntelligenceResultQuality(
+      request,
+      await invokeCandidate(resolution.decision.primary)
+    );
     if (primaryResult.ok || !retryableFallbackCategories.has(primaryResult.failure.category) || !resolution.decision.fallback) {
       if (!primaryResult.ok) rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
       return { attempts: 1, decision: resolution.decision, fallbackUsed: false, primaryFailureCategory: null, result: primaryResult };
@@ -525,7 +541,7 @@ export class AutoIntelligenceRouter {
       ...resolution.decision.fallback,
       reasonCodes: [...resolution.decision.fallback.reasonCodes, fallbackReason(primaryResult.failure.category)]
     };
-    const fallbackResult = await invokeCandidate(fallback);
+    const fallbackResult = normalizeIntelligenceResultQuality(request, await invokeCandidate(fallback));
     if (!fallbackResult.ok) rememberFailure(scopeId, fallback, fallbackResult.failure);
     return {
       attempts: 2,

@@ -22,6 +22,10 @@ import {
   runAskBrain,
   type AskModelSelectionPolicy
 } from "@/lib/server/ai/ask-brain-orchestrator";
+import {
+  compactAskRequestUnderstanding,
+  understandAskRequest
+} from "@/lib/server/ai/ask-request-understanding";
 import { createDatabaseUserMemoryStore } from "@/lib/server/user-memory/database-user-memory-store";
 import { handleAskUserMemory } from "@/lib/server/user-memory/user-memory";
 import { createDatabaseProjectMemoryStore } from "@/lib/server/project-memory/database-project-memory-store";
@@ -6479,6 +6483,12 @@ export async function POST(request: Request) {
         runtime: askRuntimeContext
       })
     : classifiedAskFreshnessDecision;
+  const askRequestUnderstanding = understandAskRequest({
+    freshnessRequired: askFreshnessDecision.researchRequired,
+    hasSuppliedEvidence: Boolean(multimodalContext?.records.length || multimodalContext?.contextText.trim()),
+    messages,
+    prompt: effectiveUserPrompt
+  });
   const detectedAskLiveIntent = detectAskLiveIntent(askReasoningPrompt);
   const askLiveIntent = ["build_request", "current_time", "weather"].includes(detectedAskLiveIntent)
     ? detectedAskLiveIntent
@@ -6718,7 +6728,9 @@ export async function POST(request: Request) {
       ));
     }
   }
-  const sharedMemoryContext = persistence
+  const sharedMemoryContext = persistence && (
+    productMode !== "ASK" || askRequestUnderstanding.memoryRequirement !== "irrelevant"
+  )
     ? await buildOwnedSharedMemoryContext({
         conversationId: persistence.sessionId,
         externalUserId: persistence.externalUserId,
@@ -6803,6 +6815,7 @@ export async function POST(request: Request) {
         modelSelectionPolicy,
         productMode,
         projectId: requestedProjectId,
+        requestUnderstanding: askRequestUnderstanding,
         userId: specialistPersistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
@@ -6810,6 +6823,7 @@ export async function POST(request: Request) {
       researchRetriever: retrieveAskResearchSources,
       prompt: askReasoningPrompt,
       projectName: workspace.projectName ?? null,
+      requestUnderstanding: askRequestUnderstanding,
       workspace
     });
     updateAskSourceTelemetry(expertAnswer.decision);
@@ -7395,7 +7409,12 @@ export async function POST(request: Request) {
     ? createHassaliIdentityAnswer({ model, prompt: effectiveUserPrompt })
     : null;
 
-  if (productMode === "ASK" && !memoryIndependentSelfKnowledgeAnswer && !memoryIndependentIdentityAnswer) {
+  if (
+    productMode === "ASK" &&
+    askRequestUnderstanding.memoryRequirement !== "irrelevant" &&
+    !memoryIndependentSelfKnowledgeAnswer &&
+    !memoryIndependentIdentityAnswer
+  ) {
     const memoryOwnerId = persistence?.externalUserId ?? (await auth()).userId;
     if (memoryOwnerId) {
       persistence = await persistPendingUserMessage(persistence);
@@ -7654,6 +7673,7 @@ export async function POST(request: Request) {
         modelSelectionPolicy,
         productMode,
         projectId: requestedProjectId,
+        requestUnderstanding: askRequestUnderstanding,
         userId: persistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
@@ -7661,6 +7681,7 @@ export async function POST(request: Request) {
       researchRetriever: retrieveAskResearchSources,
       prompt: askReasoningPrompt,
       projectName: workspace.projectName ?? null,
+      requestUnderstanding: askRequestUnderstanding,
       workspace
     });
     updateAskSourceTelemetry(askBrain.decision);
@@ -7699,6 +7720,7 @@ export async function POST(request: Request) {
           askRuntimeContext,
           askBrain: askBrain.decision,
           askBrainIntent: askBrain.classification.intent,
+          askRequestUnderstanding: compactAskRequestUnderstanding(askRequestUnderstanding),
           deterministic: askBrain.decision.path === "deterministic_required" || askBrain.decision.path === "deterministic_preferred",
           intelligenceTools: compactChatToolResults(intelligenceToolResults),
           model,
@@ -7791,6 +7813,7 @@ export async function POST(request: Request) {
         modelSelectionPolicy,
         productMode,
         projectId: requestedProjectId,
+        requestUnderstanding: askRequestUnderstanding,
         userId: persistence?.externalUserId ?? null
       }),
       providerCallOwnsRouting: true,
@@ -7798,6 +7821,7 @@ export async function POST(request: Request) {
       researchRetriever: retrieveAskResearchSources,
       prompt: askReasoningPrompt,
       projectName: workspace.projectName ?? null,
+      requestUnderstanding: askRequestUnderstanding,
       workspace
     });
     updateAskSourceTelemetry(askBrain.decision);
@@ -7835,6 +7859,7 @@ export async function POST(request: Request) {
         askRuntimeContext,
         askBrain: askBrain.decision,
         askBrainIntent: askBrain.classification.intent,
+        askRequestUnderstanding: compactAskRequestUnderstanding(askRequestUnderstanding),
         deterministic: askBrain.decision.path === "deterministic_required" || askBrain.decision.path === "deterministic_preferred",
         intelligenceTools: compactChatToolResults(intelligenceToolResults),
         intelligenceKernel: compactIntelligenceKernel(kernel),

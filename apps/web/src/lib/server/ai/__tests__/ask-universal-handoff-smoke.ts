@@ -424,7 +424,8 @@ test("locked models do not silently substitute", async () => {
     }));
     assert.equal(calls.length, 1);
     assert.equal(result.decision.fallbackModel, null);
-    assert.match(result.answer, /locked/i);
+    assert.match(result.answer, /couldn't complete that answer reliably/i);
+    assert.doesNotMatch(result.answer, /locked|selected model|provider/i);
   } finally {
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = previousKey;

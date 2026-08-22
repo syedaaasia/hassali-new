@@ -1501,7 +1501,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
   setInput: (input) => set({ input }),
-  setModel: (model) => set({ model, modelSelectionPolicy: "locked" }),
+  setModel: (model) => set({ model, modelSelectionPolicy: "automatic" }),
   setModelSelectionPolicy: (modelSelectionPolicy) => set({ modelSelectionPolicy }),
   activateHandoff: (handoff) => {
     canonicalProjectState.setMode(handoff.targetMode);

@@ -44,8 +44,8 @@ test("USERMEM-03 temporary states are ignored even when explicitly presented for
 test("PEOPLE-01 relationship and alias records are recallable case-insensitively", async () => {
   const store = new InMemoryUserMemoryStore();
   await turn(store, "Remember that Avery Sample, who I call Ave, is my test sibling");
-  const byName = await turn(store, "Who is avery sample?");
-  const byAlias = await turn(store, "Who is AVE?");
+  const byName = await turn(store, "Who is avery sample to me?");
+  const byAlias = await turn(store, "Who is AVE to me?");
   assert.match(byName.directAnswer ?? "", /test sibling/i);
   assert.match(byAlias.directAnswer ?? "", /test sibling/i);
 });
@@ -55,7 +55,7 @@ test("PEOPLE-02 same-name people remain distinct and ambiguous recall asks for s
   await turn(store, "Remember that Rowan Demo is my test cousin");
   await turn(store, "Remember that Rowan Demo is my test colleague");
   assert.equal((await store.listPeople()).length, 2);
-  const answer = await turn(store, "Who is Rowan Demo?");
+  const answer = await turn(store, "Who is Rowan Demo to me?");
   assert.match(answer.directAnswer ?? "", /more than one/i);
   assert.match(answer.directAnswer ?? "", /test cousin/i);
   assert.match(answer.directAnswer ?? "", /test colleague/i);
@@ -119,7 +119,7 @@ test("FORGET-02 forgetting a person removes aliases and relationship memories", 
   await turn(store, "Remember that Avery Sample, who I call Ave, is my test sibling");
   await turn(store, "Forget Avery Sample");
   assert.equal((await store.listPeople()).length, 0);
-  assert.match((await turn(store, "Who is Ave?")).directAnswer ?? "", /don't have/i);
+  assert.match((await turn(store, "Who is Ave to me?")).directAnswer ?? "", /don't have/i);
 });
 
 test("RETRIEVE-01 lexical context is relevant, bounded, current, and excludes sensitive records", async () => {

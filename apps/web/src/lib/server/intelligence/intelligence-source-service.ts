@@ -433,6 +433,7 @@ async function routingPreferences(input: {
   explicitOverride?: AutoRoutingPreferences["explicitOverride"];
   preferredModelId?: string | null;
   taskTier?: AutoRoutingPreferences["taskTier"];
+  taskType?: AutoRoutingPreferences["taskType"];
   userId: string | null;
 }): Promise<AutoRoutingPreferences> {
   if (!input.userId) {
@@ -443,7 +444,8 @@ async function routingPreferences(input: {
       preferredModelId: input.preferredModelId,
       privacy: "allow-cloud",
       scopeId: "environment-default",
-      taskTier: input.taskTier
+      taskTier: input.taskTier,
+      taskType: input.taskType
     };
   }
   const preferences = await ensureUserState(input.userId);
@@ -462,7 +464,8 @@ async function routingPreferences(input: {
     preferredModelId: input.preferredModelId,
     privacy: preferences.privacy,
     scopeId: input.userId,
-    taskTier: input.taskTier
+    taskTier: input.taskTier,
+    taskType: input.taskType
   };
 }
 
@@ -473,6 +476,7 @@ export async function invokeAutoIntelligence(input: {
   preferredModelId?: string | null;
   request: IntelligenceRequest;
   taskTier?: AutoRoutingPreferences["taskTier"];
+  taskType?: AutoRoutingPreferences["taskType"];
   userId: string | null;
 }) {
   const registry = input.userId
@@ -495,6 +499,7 @@ export async function streamAutoIntelligence(input: {
   preferredModelId?: string | null;
   request: IntelligenceRequest;
   taskTier?: AutoRoutingPreferences["taskTier"];
+  taskType?: AutoRoutingPreferences["taskType"];
   userId: string | null;
 }) {
   const registry = input.userId

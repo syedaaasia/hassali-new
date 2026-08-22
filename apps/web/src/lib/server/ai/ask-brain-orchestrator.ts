@@ -45,6 +45,10 @@ import {
   type AskResearchPolicy
 } from "./ask-research-engine";
 import {
+  compactAskRequestUnderstanding,
+  type AskRequestUnderstanding
+} from "./ask-request-understanding";
+import {
   intelligenceResponseText,
   invokeCurrentIntelligence,
   legacyProviderFailureCategory
@@ -132,6 +136,7 @@ export type AskBrainDecision = {
   requestedModel: string;
   requestedCount: number | null;
   requestedEntityCount: number;
+  requestUnderstanding: ReturnType<typeof compactAskRequestUnderstanding> | null;
   resolvedModel: string | null;
   executionProvider: string | null;
   computeSource: IntelligenceComputeSource | null;
@@ -177,6 +182,7 @@ export type AskBrainInput = {
   productMode: "ASK" | "CODE" | "WEBSITE";
   prompt: string;
   projectName?: string | null;
+  requestUnderstanding?: AskRequestUnderstanding;
   workspace?: AskBrainWorkspaceContext;
   modelSelectionPolicy?: AskModelSelectionPolicy;
   providerCall?: AskProviderCall;
@@ -583,7 +589,8 @@ function categoryUsesWorkspace(category: AskSemanticCategory) {
 }
 
 function categoryUsesHistory(category: AskSemanticCategory, input: AskBrainInput) {
-  return Boolean(input.behavior?.referencedObjective) ||
+  return input.requestUnderstanding?.conversationContext === "recent_required" ||
+    Boolean(input.behavior?.referencedObjective) ||
     category === "rewriting" ||
     category === "project_question" ||
     category === "workspace_analysis";
@@ -663,6 +670,9 @@ function buildModelReference(
           referencedObjective: input.behavior.referencedObjective,
           resolvedRequest: input.behavior.resolvedRequest
         }
+      : null,
+    requestUnderstanding: input.requestUnderstanding
+      ? compactAskRequestUnderstanding(input.requestUnderstanding)
       : null,
     intelligenceContext: input.intelligenceContext
       ? truncate(input.intelligenceContext, 7000)
@@ -859,6 +869,7 @@ export function createAutoAskProviderCall(input: {
   modelSelectionPolicy: AskModelSelectionPolicy;
   productMode: "ASK" | "CODE" | "WEBSITE";
   projectId?: string | null;
+  requestUnderstanding?: AskRequestUnderstanding;
   userId: string | null;
 }): AskProviderCall {
   return async (call) => {
@@ -868,6 +879,13 @@ export function createAutoAskProviderCall(input: {
         ? { adapterId: "openrouter", modelId: call.model }
         : null,
       preferredModelId: input.modelSelectionPolicy === "automatic" ? call.model : null,
+      taskType: input.requestUnderstanding?.taskType === "coding"
+        ? "coding"
+        : input.requestUnderstanding?.taskType === "writing"
+          ? "writing"
+          : input.requestUnderstanding?.taskType === "comparison" || input.requestUnderstanding?.taskType === "follow_up"
+            ? "reasoning"
+            : "general",
       request: {
         abortSignal: call.abortSignal,
         features: call.webSearch ? { webResearch: { maxResults: 3 } } : undefined,
@@ -1119,27 +1137,27 @@ function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntent
     return "Hi, one farm currently has pink strawberry, candy, and raspberry options available. The Netherlands farm may have more options too, but they are closed right now. I will call them first thing tomorrow morning and update you as soon as I confirm.";
   }
 
-  return "I do not have a reliable answer from the selected model right now. Please retry; I would rather be explicit than substitute unrelated generic advice.";
+  return "I couldn't complete that answer reliably right now. Please try again.";
 }
 
 function providerFailureAnswer(input: AskBrainInput, category: string | null) {
   const priorFailure = [...input.messages].reverse().find((message) => message.role === "assistant" && message.responseKind === "provider_failure");
   const unresolvedQuestion = [...input.messages].reverse().find((message) => message.role === "user" && message.content.trim() !== input.prompt.trim());
   const visibleMessage = category === "provider_rate_limited"
-    ? "Free model capacity is busy right now. Please try again shortly."
+    ? "Answer capacity is busy right now. Please try again shortly."
     : category === "provider_timeout"
-      ? "The selected model took too long to respond. Please try again."
+      ? "I couldn't complete that answer in time. Please try again."
       : category === "provider_insufficient_credits"
-        ? "This model requires provider credits that are not currently available."
+        ? "I couldn't complete that answer with the currently available capacity."
         : category === "provider_not_configured"
-          ? "The selected model is not configured in this environment."
+          ? "I couldn't complete that answer reliably right now. Please try again."
           : category === "provider_network_error"
-            ? "Hassali could not reach the model service. Please try again."
+            ? "I couldn't reach an answer service right now. Please try again."
             : category === "provider_response_invalid"
-              ? "The selected model returned no usable answer, and no compatible fallback completed the request. Retry shortly or choose another configured model."
+              ? "I couldn't complete that answer reliably right now. Please try again."
               : category === "provider_request_rejected" || category === "provider_model_unavailable"
-                ? "The selected model is temporarily unavailable, and no compatible fallback completed the request. Retry shortly or choose another configured model."
-                : "The selected model could not answer right now. Please try again.";
+                ? "I couldn't complete that answer reliably right now. Please try again."
+                : "I couldn't complete that answer reliably right now. Please try again.";
 
   if (priorFailure && /\b(?:what do you mean|answer my original question|try again)\b/i.test(input.prompt)) {
     return `My previous message was not an answer to "${truncate(unresolvedQuestion?.content ?? "your question", 180)}". ${visibleMessage} You do not need to restate it.`;
@@ -1562,9 +1580,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
             fallbackReason = modelResult.category;
             providerFailureCategory = modelResult.category;
             retryAfter = modelResult.retryAfter ?? null;
-            answer = modelSelectionPolicy === "locked"
-              ? `${providerFailureAnswer(input, providerFailureCategory)} The model is locked, so Hassali did not substitute another model. Retry it or choose automatic fallback.`
-              : providerFailureAnswer(input, providerFailureCategory);
+            answer = providerFailureAnswer(input, providerFailureCategory);
           }
         }
       }
@@ -1735,6 +1751,9 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     requestedModel: provider.requestedModelId,
     requestedCount: input.behavior?.requestedCount ?? null,
     requestedEntityCount: input.behavior?.requestedEntities.length ?? 0,
+    requestUnderstanding: input.requestUnderstanding
+      ? compactAskRequestUnderstanding(input.requestUnderstanding)
+      : null,
     resolvedModel: provider.resolvedModelId,
     executionProvider: provider.executionProvider,
     computeSource,
