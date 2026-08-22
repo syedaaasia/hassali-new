@@ -299,7 +299,7 @@ export async function createHassaliSelfKnowledgeAnswer(input: {
     };
   }
   if (/\bGrowth\b[\s\S]{0,60}\b(?:built|implemented|available|current|ready)\b|\b(?:is|has)\b[\s\S]{0,20}\bGrowth\b/i.test(prompt)) {
-    return { answer: "No. Growth is planned, not implemented. Its roadmap covers business intelligence, competitors and ICP, prospect/enrichment workflows, campaigns/compliance/export adapters, and later reply/meeting learning loops.", recordIds: recordIds("roadmap.growth") };
+    return { answer: "Yes. Hassali has a server-side Growth intelligence foundation for canonical business truth, audience and offer strategy, bounded channel planning, claim and campaign validation, measurement, experiments, artifacts, and approval-bound handoffs. It prepares work but does not send outreach, scrape contacts, buy ads, or execute external campaigns.", recordIds: recordIds("roadmap.growth") };
   }
   if (/\bFFmpeg\b/i.test(prompt) && /\b(?:available|installed|local|locally|machine|right now)\b/i.test(prompt)) {
     const context = await buildHassaliSelfKnowledgeContext({ localToolResolver: input.localToolResolver, maxRecords: 4, mode: input.mode, prompt });

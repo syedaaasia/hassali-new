@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type RichExperienceMode = "ASK" | "CODE" | "WEBSITE";
+export type RichExperienceMode = "ASK" | "CODE" | "GROWTH" | "WEBSITE";
 
 export type RichArtifactKind =
   | "code"

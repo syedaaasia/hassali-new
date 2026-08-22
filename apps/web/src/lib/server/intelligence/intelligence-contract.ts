@@ -22,7 +22,7 @@ export type IntelligenceExecutionLocality = {
   network: "internet" | "loopback" | "none";
   trust: "configured-loopback" | "configured-trusted" | "provider-managed" | "unverified";
 };
-export type IntelligenceMode = "ASK" | "CODE" | "WEBSITE";
+export type IntelligenceMode = "ASK" | "CODE" | "GROWTH" | "WEBSITE";
 
 export type IntelligenceTextInputPart = {
   text: string;

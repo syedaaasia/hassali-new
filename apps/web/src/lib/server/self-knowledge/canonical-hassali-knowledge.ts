@@ -196,13 +196,13 @@ export const canonicalHassaliKnowledge: HassaliKnowledgeRecord[] = [
   }),
   record({
     category: "roadmap",
-    content: "Growth is planned and is not implemented. The planned sequence is G1 Business/Website Intelligence, G2 Competitors and ICP, G3 Prospect Intelligence/Lead Database/Enrichment, G4 Personalization/Campaigns/Compliance/Export/Sender Adapters, and G5 Replies/Meetings/Learning Loop.",
+    content: "Growth intelligence is implemented as a server foundation. It derives canonical business truth from an applied WEBSITE revision, keeps multiple audiences and offers distinct, selects bounded channels, validates claims and campaigns, creates integrity-backed artifacts, and prepares approval-bound WEBSITE, CODE, or LIVE handoffs. It does not send outreach, scrape contacts, buy ads, or execute external campaigns.",
     id: "roadmap.growth",
-    provenance: [{ kind: "roadmap", reference: "Memory M1 roadmap" }],
+    provenance: [{ kind: "runtime-implementation", reference: "apps/web/src/lib/server/growth-intelligence" }],
     roadmapPhase: "Growth",
-    status: "planned",
-    tags: ["growth", "prospects", "campaigns", "outreach", "planned"],
-    title: "Growth roadmap",
+    status: "implemented",
+    tags: ["growth", "audiences", "campaigns", "claims", "handoffs", "implemented"],
+    title: "Growth intelligence foundation",
     topic: "growth"
   }),
   record({

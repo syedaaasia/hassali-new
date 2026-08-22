@@ -305,7 +305,7 @@ I-81 | Artifact verification | Validate JSON, CSV header, ZIP structure/expected
 I-82 | Delivery claim | Compare verified, partial, blocked, and failed evidence | Wording and Git eligibility match evidence; push authority always separate
 I-83 | Live timeline | Approve a CODE execution | Ordered approval, inspection, command, verification, review, delivery, and Git events reflect actual work
 I-84 | Self identity | Ask what Hassali is | Canonical product identity and three shared-intelligence modes; no public web lookup
-I-85 | Self status | Ask about Run 4, Growth, or M2 | Run 4 is verified complete; Growth and M2+ remain planned/unavailable as applicable
+I-85 | Self status | Ask about Run 4, Growth, or Memory | Run 4 is verified complete; Growth foundation and implemented Memory scope are truthful about remaining execution limits
 I-86 | Self retrieval | Query by topic, mode, capability, status, or roadmap | Current provenance-backed records rank first; results deduplicate and stay bounded
 I-87 | Self conflict | Current implementation conflicts with stale/superseded prose | Runtime/security truth wins; superseded record stays out of default context
 I-88 | Local capability | Ask whether FFmpeg is supported vs available now | Static adapter support and current bounded runtime probe are reported separately
@@ -504,6 +504,25 @@ F-03 | Timeout/cancel | Cancel a slow response | Request and mascot stop; no sta
 F-04 | Runtime unsupported | Enable unsupported Preview | Clear limitation; static/summary Preview does not blank
 F-05 | Runtime failure | Approved command exits nonzero | Logs/error shown; no fake success
 F-06 | Validation failure | Generator returns unsafe files | Non-applyable diagnostic and no writes
+```
+
+## Growth Intelligence
+
+```text
+GR-01 | Canonical intake | Build from applied/stale/rejected/cross-project WEBSITE state | Only owned current applied WebsiteGrowthHandoff becomes business truth
+GR-02 | Audience integrity | Use wholesale floral project with several audiences | All audiences remain; one campaign target is explicit
+GR-03 | Claim truth | Propose ranking, guarantee, count, testimonial, scarcity, or regulated claim | Evidence required or campaign blocked; no invented proof
+GR-04 | Supported claim | Reuse confirmed externally reusable shipping claim | Claim retains evidence provenance
+GR-05 | Channel fit | Compare low-budget local service, B2B, and general campaigns | Small deterministic channel set fits audience, objective, budget, and constraints
+GR-06 | External safety | Ask to mass-send, scrape contacts, buy ads, or auto-execute | Redirect/block; artifact remains prepared and not executed
+GR-07 | SEO truth | Request keyword plan without a live data source | Qualitative intent only; volume/CPC/difficulty/ranking stay unavailable
+GR-08 | Conversion | Compare message, offer, CTA, and destination | Aligned campaign passes; material mismatch blocks
+GR-09 | Measurement | Create experiment and funnel calculation | Baselines remain unknown; experiment starts not_started; supplied counts calculate deterministically
+GR-10 | Memory scope | Supply matching and unrelated Growth memory | Only matching project GROWTH capsule enters bounded context
+GR-11 | Graph | Project objective, audience, offer, campaign, channel, artifact, claim evidence | Typed project-scoped relations retain source revision and provenance
+GR-12 | Handoffs | Prepare WEBSITE, CODE, and LIVE follow-ups | Recommendations require downstream approval; LIVE remains not_executed
+GR-13 | Artifact | Build validated and blocked Growth markdown | SHA-256 identity and Growth ownership retained; download follows validation
+GR-14 | Router | Fail primary Growth generation | Existing Auto router makes at most one eligible fallback and deterministic validation reruns
 ```
 
 ## Final Release Evidence

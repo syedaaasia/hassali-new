@@ -366,6 +366,7 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Run 09 checkpoint: `GRAPH-RUN9: add shared intelligence graph kernel`
 - Run 10 checkpoint: `MEMORY-RUN10: add durable knowledge and memory 2.0`
 - Run 11 checkpoint: `LOCAL-RUN11: add privacy-aware local and edge intelligence`
+- Run 12 checkpoint: `GROWTH-RUN12: add truthful growth intelligence system`
 - The repository HEAD is authoritative; confirm it with Git before every task.
 
 ## WEBSITE Design Direction
@@ -440,4 +441,13 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Material assertions remain `confirmed`, `derived`, `inferred`, `unsupported`, or `unknown`; unsupported generated marketing claims are never reusable external truth.
 - Conversion paths are checked against actual applied HTML destinations. Missing CTA targets, unclear offers/audiences, unsupported proof, absent analytics, and incomplete SEO remain explicit readiness findings.
 - Approved project assets use project-relative references only. Secrets, environment files, private notes, unrelated Memory, absolute paths, and unapproved proposal content are excluded.
-- I5 supplies structured context for future Growth, ASK, and analytics. It does not scrape prospects, send outreach, create campaigns, install analytics, or execute Growth work.
+- I5 supplies structured canonical context for Growth, ASK, and analytics. It does not scrape prospects, send outreach, install analytics, or execute Growth work.
+
+## Growth Intelligence
+
+- `lib/server/growth-intelligence/` is the provider-neutral, server-only Growth foundation. It consumes a current applied `WebsiteGrowthHandoff` after the existing owned accessor boundary; rejected, stale, pending, or cross-project WEBSITE state has no authority.
+- Growth keeps business truth, multiple audiences, offers, positioning, reusable claims, source revision, and evidence provenance distinct. A campaign targets one audience without deleting the others.
+- Deterministic request, channel, strategy, claim, campaign, SEO, funnel, experiment, context, graph, artifact, and handoff contracts surround optional model generation. The existing Auto router supplies at most its bounded eligible fallback, then deterministic validation reruns.
+- Unsupported rankings, guarantees, performance figures, testimonials, scarcity, endorsements, and regulated claims require evidence or block. SEO remains qualitative when volume, CPC, difficulty, and ranking data are unavailable.
+- Growth artifacts carry Growth ownership, canonical revision, SHA-256 integrity, and validation-aware Preview/download status. They do not claim sent, published, launched, or externally executed work.
+- WEBSITE and CODE handoffs are recommendations requiring their existing approval boundaries. LIVE is an explicit future handoff with `not_executed` status; Growth cannot scrape contacts, mass-send outreach, buy ads, or mutate external systems.

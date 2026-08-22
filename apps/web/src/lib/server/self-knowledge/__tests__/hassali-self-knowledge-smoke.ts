@@ -58,9 +58,9 @@ test("Run 4 is represented as verified and complete", () => {
   assert.match(record?.content ?? "", /complete at checkpoint 6ec7fb9/i);
 });
 
-test("planned capabilities cannot masquerade as implemented", () => {
-  assert.equal(hassaliSelfKnowledge.get("roadmap.growth")?.status, "planned");
-  assert.match(hassaliSelfKnowledge.get("roadmap.growth")?.content ?? "", /not implemented/i);
+test("implemented capabilities remain truthful about execution limits", () => {
+  assert.equal(hassaliSelfKnowledge.get("roadmap.growth")?.status, "implemented");
+  assert.match(hassaliSelfKnowledge.get("roadmap.growth")?.content ?? "", /does not send outreach/i);
   assert.equal(hassaliSelfKnowledge.get("limitation.personal-memory-not-implemented")?.status, "limited");
   assert.match(hassaliSelfKnowledge.get("limitation.personal-memory-not-implemented")?.content ?? "", /M3 bounded project\/conversation memory are implemented/i);
 });
@@ -166,10 +166,11 @@ test("Git push and Full project access answers remain fail-closed", async () => 
   assert.match(answer?.answer ?? "", /separate external action requiring explicit authority/);
 });
 
-test("Growth and Memory roadmap answers distinguish current from planned", async () => {
+test("Growth and Memory roadmap answers distinguish implemented scope from planned work", async () => {
   const growth = await createHassaliSelfKnowledgeAnswer({ mode: "ASK", prompt: "Is Growth already implemented in Hassali?" });
   const memory = await createHassaliSelfKnowledgeAnswer({ mode: "ASK", prompt: "What is the next Memory phase after M3?" });
-  assert.match(growth?.answer ?? "", /planned, not implemented/);
+  assert.match(growth?.answer ?? "", /server-side Growth intelligence foundation/);
+  assert.match(growth?.answer ?? "", /does not send outreach/);
   assert.match(memory?.answer ?? "", /M3 project and conversation memory are implemented/i);
   assert.match(memory?.answer ?? "", /M4 temporal\/conflict retrieval is next/i);
 });

@@ -43,6 +43,7 @@ export type IntelligenceRoutingReasonCode =
   | "FALLBACK_AFTER_PROVIDER_UNAVAILABLE"
   | "FALLBACK_AFTER_RATE_LIMIT"
   | "FALLBACK_AFTER_TIMEOUT"
+  | "GROWTH_MODE_FIT"
   | "HEALTHY_SOURCE"
   | "LOCAL_PREFERRED"
   | "LOCAL_RESOURCE_FIT"
@@ -167,6 +168,7 @@ function preferredCapabilities(request: IntelligenceRequest): IntelligenceCapabi
   const preferred: IntelligenceCapability[] = ["reasoning"];
   if (request.mode === "CODE") preferred.push("tools", "structuredOutput");
   if (request.mode === "WEBSITE") preferred.push("structuredOutput");
+  if (request.mode === "GROWTH") preferred.push("reasoning", "structuredOutput");
   return preferred.filter((capability) => !request.requiredCapabilities.includes(capability));
 }
 
@@ -385,6 +387,7 @@ export class AutoIntelligenceRouter {
         if (request.mode === "CODE") reasons.push("CODE_MODE_FIT");
         if (preferences.taskType === "coding") reasons.push("CODING_TASK_FIT");
         if (request.mode === "WEBSITE") reasons.push("WEBSITE_MODE_FIT");
+        if (request.mode === "GROWTH") reasons.push("GROWTH_MODE_FIT");
         if (source.health.status === "ready") reasons.push("HEALTHY_SOURCE");
         if (request.requiredCapabilities.includes("vision")) reasons.push("VISION_REQUIRED");
         if (source.adapter.computeSource === "byok-cloud") reasons.push("BYOK_AVAILABLE");

@@ -2,7 +2,7 @@ import type { GrowthTruthStatus } from "@/lib/server/ai/website-growth-handoff";
 
 export const GRAPH_KERNEL_VERSION = 1 as const;
 
-export type GraphMode = "ASK" | "CODE" | "SHARED" | "WEBSITE";
+export type GraphMode = "ASK" | "CODE" | "GROWTH" | "SHARED" | "WEBSITE";
 export type GraphFactState = GrowthTruthStatus;
 export type GraphItemStatus = "current" | "historical" | "invalidated";
 export type GraphPrivacy = "private" | "provider_eligible" | "public";
@@ -55,12 +55,14 @@ export type GraphEdgeKind =
   | "HAS_CONSTRAINT"
   | "MODIFIES"
   | "PACKAGED_BY"
+  | "PROMOTES"
   | "PRODUCED"
   | "RELATED_TO"
   | "REQUIRES"
   | "SUPERSEDES"
   | "SUPPORTED_BY"
   | "TARGETS"
+  | "TESTS"
   | "USES"
   | "VERIFIED_BY";
 
