@@ -457,3 +457,13 @@ The pre-launch Memory sequence and Runs 5-12 are implemented at their recorded c
 - Unsupported rankings, guarantees, performance figures, testimonials, scarcity, endorsements, and regulated claims require evidence or block. SEO remains qualitative when volume, CPC, difficulty, and ranking data are unavailable.
 - Growth artifacts carry Growth ownership, canonical revision, SHA-256 integrity, and validation-aware Preview/download status. They do not claim sent, published, launched, or externally executed work.
 - WEBSITE and CODE handoffs are recommendations requiring their existing approval boundaries. LIVE is an explicit future handoff with `not_executed` status; Growth cannot scrape contacts, mass-send outreach, buy ads, or mutate external systems.
+
+## Founder Acceptance Repair 1
+
+- ASK freshness follows the requested objective, not isolated temporal words. Timeless reasoning and stable knowledge use normal model authority; current external facts and named-source existence use retrieval when required.
+- Current-conversation facts and corrections outrank stale assistant text and unrelated personal Memory. Deterministic response constraints cover bounded word counts, bullet counts, and forbidden words without hard-coded prompt answers.
+- The product sidebar exposes Growth, GitHub, and Settings while keeping ASK, WEBSITE, and CODE as the only composer modes. The visible duplicate Workspace destination is removed; its ownership, VFS, Preview, and execution architecture remain intact.
+- Darker is the default neutral black/white/charcoal theme. Dark retains the Hassali blue-charcoal identity. Chat and Project Notes use quiet dividers instead of outer message cards.
+- Project Notes persist owner/project-scoped `HASSALI SUMMARY` and `MY NOTES` separately. Natural ASK note actions never create proposals, and note context remains explicit, bounded, and off by default.
+- The Growth sidebar uses the existing Run 12 contracts and current applied `WebsiteGrowthHandoff`; it persists project state and prepares artifacts without external execution.
+- GitHub OAuth is capability-gated by server configuration and encrypted credential storage. Repository discovery, project attachment, and bounded filtered path context are owner/project scoped; CODE mutation, commit, push, and deployment retain their existing approval authorities.

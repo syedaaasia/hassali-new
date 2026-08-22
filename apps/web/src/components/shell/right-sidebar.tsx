@@ -24,6 +24,7 @@ import { canApplyWithProjectApprovalPolicy } from "@/lib/approval-policy";
 import { useApprovalPolicyStore } from "@/lib/approval-policy-store";
 import { getHassaliModelOptions } from "@/lib/model-registry";
 import { boundedProjectNotesContext, useProjectNotesStore } from "@/lib/project-notes-store";
+import { applyProjectNoteAction, parseProjectNoteAction } from "@/lib/project-notes-intelligence";
 import {
   type RuntimeApprovalResponse,
   syncRuntimeApprovalResult
@@ -36,6 +37,7 @@ import {
 } from "@/lib/proposal-lifecycle";
 import { useRuntimeStore } from "@/lib/runtime-store";
 import { folderPlaceholderFileName, useWorkspaceStore } from "@/lib/workspace-store";
+import { useProductAreaStore } from "@/lib/product-area-store";
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
 import {
   attachmentKindLabel,
@@ -725,6 +727,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const setModelSelectionPolicy = useChatStore((state) => state.setModelSelectionPolicy);
   const activateHandoff = useChatStore((state) => state.activateHandoff);
   const setProductMode = useChatStore((state) => state.setProductMode);
+  const setProductArea = useProductAreaStore((state) => state.setArea);
   const clearProposal = useChatStore((state) => state.clearProposal);
   const markProposalApproved = useChatStore((state) => state.markProposalApproved);
   const cancelMessage = useChatStore((state) => state.cancelMessage);
@@ -745,6 +748,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
   const approvalPolicyProjectId = useApprovalPolicyStore((state) => state.activeProjectId);
   const notesProjectId = useProjectNotesStore((state) => state.activeProjectId);
   const projectNotes = useProjectNotesStore((state) => state.notes);
+  const setProjectNotes = useProjectNotesStore((state) => state.setNotes);
   const useProjectNotesAsContext = useProjectNotesStore((state) => state.useAsContext);
   const activeFile = files[activePath];
   const visibleFileList = Object.keys(files).filter(
@@ -1031,6 +1035,10 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
     if (!projectId || !workspaceHasLoaded || workspaceIsLoading) {
       setWorkspaceError("Wait for the selected project to finish loading before sending.");
       return Promise.resolve();
+    }
+    const noteAction = productMode === "ASK" ? parseProjectNoteAction(input) : null;
+    if (noteAction && noteAction.kind !== "show" && notesProjectId === projectId) {
+      setProjectNotes(applyProjectNoteAction(projectNotes, noteAction).notes);
     }
     const result = sendMessage(createWorkspaceContext());
     if (input.trim() && composerUploads.every((upload) => upload.status === "ready")) {
@@ -1348,6 +1356,7 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                 data-mode-option={item.label}
                 key={item.label}
                 onClick={() => {
+                  setProductArea("chat");
                   setProductMode(item.label);
                   setRuntimeApprovalResult(null);
                   applyRuntimePayload({
@@ -1414,10 +1423,10 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                 initial={{ opacity: 0, y: 4 }}
                 key={message.id}
                 transition={{ duration: 0.16, ease: "easeOut" }}
-                className={`mx-auto w-full max-w-4xl rounded-2xl border px-4 py-3 text-[13px] leading-6 ${
+                className={`mx-auto w-full max-w-4xl border-b border-white/[0.055] px-2 py-4 text-[13px] leading-6 last:border-b-0 ${
                   message.role === "user"
-                    ? "border-[hsl(var(--premium-accent)/0.25)] bg-[hsl(var(--premium-accent)/0.1)] text-[hsl(var(--premium-paper))] [.light_&]:text-[#000000]"
-                    : "border-white/10 bg-white/[0.035] text-[#e8dfcf] [.light_&]:border-slate-200 [.light_&]:bg-white [.light_&]:text-slate-900"
+                    ? "text-[hsl(var(--premium-paper))] [.light_&]:border-slate-200 [.light_&]:text-[#000000]"
+                    : "text-[#e8dfcf] [.light_&]:border-slate-200 [.light_&]:text-slate-900"
                 }`}
               >
                 <div className="mb-1 flex items-center justify-between gap-2 font-medium text-foreground">

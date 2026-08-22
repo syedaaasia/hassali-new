@@ -1,5 +1,6 @@
 import type { AskRuntimeContext } from "./ask-context";
 import { classifyAskIntent } from "./ask-serious-assistant";
+import { isSourceExistenceRequest, isTimelessReasoningRequest } from "./ask-epistemic-foundation";
 
 export type AskFreshnessClass =
   | "current_state"
@@ -114,6 +115,7 @@ const privateFilePattern = /\b(?:uploaded|attached|private)\s+(?:contract|docume
 const linkedSourcePattern = /\b(?:this|the)\s+(?:linked|web)\s+(?:report|page|paper|source|article)|\baccording to this\s+(?:paper|report|page|source)\b/i;
 const currentRolePattern = /\b(?:current|currently|right now)\b[\s\S]{0,45}\b(?:ceo|chief executive|president|prime minister|minister|governor|chair(?:person|man|woman)?|officeholder|holds? (?:the )?role)\b|\bwho\s+(?:currently\s+)?(?:is|holds)\b[\s\S]{0,45}\b(?:ceo|chief executive|president|prime minister|minister|governor|chair(?:person|man|woman)?|role|office)\b/i;
 const currentValuePattern = /\b(?:current|latest|today'?s|right now|real[- ]time)\s+(?:price|value|rate|exchange rate|stock price|crypto price|schedule|availability)\b/i;
+const currentRankingPattern = /\b(?:current(?:ly)?|latest|today|right now)\b[\s\S]{0,60}\b(?:richest|largest|highest|most valuable|top-ranked|leading)\b/i;
 const versionPattern = /\b(?:latest|newest|current|stable|recommended)\b[\s\S]{0,70}\b(?:version|release|sdk|api|framework|library|next\.?js|react|node(?:\.js)?|typescript)\b|\bwhat changed\b[\s\S]{0,60}\b(?:latest|newest|current)\b/i;
 const liveEventPattern = /\b(?:what happened|latest situation|latest news|headlines?|who won|match result|score|live event|weather|forecast)\b/i;
 const weatherPattern = /\b(?:weather|temperature|forecast|rain|humidity|wind speed)\b/i;
@@ -256,7 +258,8 @@ export function decideAskFreshness(input: {
   const researchProhibited = noBrowsePattern.test(prompt);
   const privateFileRequested = privateFilePattern.test(prompt);
   const userSourceRequested = Boolean(referencedUrl) || linkedSourcePattern.test(prompt);
-  const conceptException = conceptCurrentPattern.test(prompt) || conceptualLatestPattern.test(prompt) || historicalPattern.test(prompt);
+  const conceptException = conceptCurrentPattern.test(prompt) || conceptualLatestPattern.test(prompt) || historicalPattern.test(prompt) || isTimelessReasoningRequest(prompt);
+  const sourceExistenceRequest = isSourceExistenceRequest(prompt);
   const currentDateUtility = intent.intent === "date_time_question";
   const safetyRefusal = intent.intent === "auth_or_security_guidance" &&
     /\b(?:steal|exfiltrate|dump|harvest)\b[\s\S]{0,80}\b(?:passwords?|credentials?|cookies?|tokens?|sessions?)\b/i.test(prompt);
@@ -280,6 +283,13 @@ export function decideAskFreshness(input: {
     directAnswerAllowed = Boolean(input.hasPrivateFileContent);
     preferredSourceTypes = ["selected private file"];
     reasons.push(input.hasPrivateFileContent ? "The requested private file text is present in bounded context." : "The request depends on private file text that is not available.");
+  } else if (sourceExistenceRequest && !userSourceRequested) {
+    freshnessClass = "unknown";
+    sourceRequirement = "multi_source_verification_required";
+    researchRequired = true;
+    directAnswerAllowed = false;
+    preferredSourceTypes = ["publisher or academic index", "independent scholarly source"];
+    reasons.push("The request asserts a named publication whose existence must be verified before its findings can be summarized.");
   } else if (userSourceRequested) {
     freshnessClass = "user_provided_source";
     sourceRequirement = "user_source_required";
@@ -327,7 +337,7 @@ export function decideAskFreshness(input: {
     preferredSourceTypes = ["current primary statement", "reputable independent report"];
     recencyRequirement = "event-date evidence within 3 days";
     reasons.push("The requested event depends on a resolved current or relative date.");
-  } else if (!conceptException && (currentRolePattern.test(prompt) || currentValuePattern.test(prompt))) {
+  } else if (!conceptException && (currentRolePattern.test(prompt) || currentValuePattern.test(prompt) || currentRankingPattern.test(prompt))) {
     freshnessClass = "current_state";
     sourceRequirement = "official_source_required";
     researchRequired = true;

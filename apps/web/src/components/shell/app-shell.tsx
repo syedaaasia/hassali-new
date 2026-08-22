@@ -6,16 +6,19 @@ import { LeftSidebar } from "@/components/shell/left-sidebar";
 import { PreviewPanel } from "@/components/shell/preview-panel";
 import { ProjectNotesPanel } from "@/components/shell/project-notes-panel";
 import { RightSidebar } from "@/components/shell/right-sidebar";
+import { GrowthPanel } from "@/components/shell/growth-panel";
 import { TopBar } from "@/components/shell/top-bar";
 import { WorkspaceHydrator } from "@/components/shell/workspace-hydrator";
 import { createInitialAppShellPanelState, toggleProjectPanelState } from "@/lib/app-shell-state";
 import { useChatStore } from "@/lib/chat-store";
 import { useRuntimeStore } from "@/lib/runtime-store";
+import { useProductAreaStore } from "@/lib/product-area-store";
 import { useEffect, useState } from "react";
 import styles from "./workspace.module.css";
 
 export function AppShell() {
   const productMode = useChatStore((state) => state.productMode);
+  const productArea = useProductAreaStore((state) => state.area);
   const isPreviewOpen = useRuntimeStore((state) => state.isPreviewOpen);
   const setPreviewOpen = useRuntimeStore((state) => state.setPreviewOpen);
   const allowsTools = productMode !== "ASK";
@@ -44,11 +47,11 @@ export function AppShell() {
       <TopBar />
       <div className="relative z-10 flex min-h-0 flex-1 gap-2 overflow-hidden p-1.5 pt-0">
         <LeftSidebar collapsed={panelState.projectPanelCollapsed} onToggleCollapsed={toggleSidebar} />
-        <div className={`${styles.primarySurface} flex min-w-0 flex-[1.8] flex-col overflow-hidden rounded-2xl border backdrop-blur-xl`}>
-          <RightSidebar
+        <div className={`${styles.primarySurface} flex min-w-0 flex-[1.8] flex-col overflow-hidden backdrop-blur-xl`}>
+          {productArea === "growth" ? <GrowthPanel /> : <RightSidebar
             isEditorOpen={allowsTools && isEditorOpen}
             onToggleEditor={() => setIsEditorOpen((current) => !current)}
-          />
+          />}
         </div>
         {allowsTools && isEditorOpen ? (
           <div className={`${styles.toolSurface} hidden w-[19rem] shrink-0 flex-col overflow-hidden rounded-2xl border backdrop-blur-xl lg:flex xl:w-[21rem] 2xl:w-[23rem]`}>
@@ -57,7 +60,7 @@ export function AppShell() {
           </div>
         ) : null}
         {shouldShowPreview ? <PreviewPanel /> : null}
-        {productMode === "ASK" ? <ProjectNotesPanel /> : null}
+        {productMode === "ASK" && productArea === "chat" ? <ProjectNotesPanel /> : null}
       </div>
       <div
         aria-hidden="true"

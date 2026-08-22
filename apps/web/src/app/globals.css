@@ -49,19 +49,19 @@
 
 .dark {
   color-scheme: dark;
-  --background: 0 0% 0%;
+  --background: 222 22% 7%;
   --foreground: 48 21% 95%;
-  --surface: 0 0% 6%;
+  --surface: 220 18% 11%;
   --surface-foreground: 48 21% 95%;
-  --muted: 0 0% 10%;
-  --muted-foreground: 30 7% 64%;
+  --muted: 219 15% 16%;
+  --muted-foreground: 215 11% 68%;
   --accent: 12 67% 60%;
   --accent-foreground: 0 0% 100%;
-  --border: 0 0% 17%;
-  --royal-black: 0 0% 0%;
-  --royal-surface: 0 0% 6%;
-  --royal-panel: 0 0% 8%;
-  --royal-panel-raised: 0 0% 12%;
+  --border: 216 14% 22%;
+  --royal-black: 224 24% 6%;
+  --royal-surface: 222 20% 9%;
+  --royal-panel: 220 18% 12%;
+  --royal-panel-raised: 218 16% 16%;
   --royal-border: 12 67% 60% / 0.2;
   --royal-border-soft: 0 0% 100% / 0.08;
   --gold: 12 67% 60%;
@@ -73,11 +73,11 @@
   --light-active-element: #e2e8f0;
   --light-opera-red: #DE7356;
   --light-rich-teal: #DE7356;
-  --premium-canvas: 0 0% 0%;
-  --premium-void: 0 0% 0%;
-  --premium-panel: 0 0% 7%;
-  --premium-panel-strong: 0 0% 10%;
-  --premium-border: 0 0% 100% / 0.075;
+  --premium-canvas: 222 22% 7%;
+  --premium-void: 224 24% 6%;
+  --premium-panel: 220 18% 11%;
+  --premium-panel-strong: 218 16% 15%;
+  --premium-border: 215 20% 82% / 0.1;
   --premium-paper: 48 21% 95%;
   --premium-muted: 34 10% 65%;
   --premium-accent: 12 67% 60%;
@@ -133,6 +133,10 @@
 html,
 body {
   min-height: 100%;
+}
+
+.darker body {
+  background: hsl(var(--background));
 }
 
 body {

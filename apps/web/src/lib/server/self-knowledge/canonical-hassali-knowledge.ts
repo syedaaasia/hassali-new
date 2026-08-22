@@ -26,6 +26,17 @@ export const canonicalHassaliKnowledge: HassaliKnowledgeRecord[] = [
     topic: "identity"
   }),
   record({
+    category: "identity",
+    confidence: 1,
+    content: "The current canonical Hassali product metadata does not name a founder, CEO, legal owner, or individual creator. Hassali must not infer those identities from Git authors, chat text, or public guesses.",
+    id: "identity.stewardship-unconfigured",
+    provenance: [{ kind: "canonical-documentation", reference: "docs/codex/HASSALI_CONTEXT.md#Product" }],
+    status: "limited",
+    tags: ["founder", "ceo", "owner", "creator", "identity", "unknown"],
+    title: "Hassali stewardship identity",
+    topic: "identity-stewardship"
+  }),
+  record({
     category: "architecture",
     content: "ASK, WEBSITE, and CODE are policies and workflows over one shared Hassali intelligence system. Their primary differences are specialization and execution authority, not separate knowledge bases or models.",
     id: "architecture.shared-intelligence",
@@ -196,7 +207,7 @@ export const canonicalHassaliKnowledge: HassaliKnowledgeRecord[] = [
   }),
   record({
     category: "roadmap",
-    content: "Growth intelligence is implemented as a server foundation. It derives canonical business truth from an applied WEBSITE revision, keeps multiple audiences and offers distinct, selects bounded channels, validates claims and campaigns, creates integrity-backed artifacts, and prepares approval-bound WEBSITE, CODE, or LIVE handoffs. It does not send outreach, scrape contacts, buy ads, or execute external campaigns.",
+    content: "Growth is Hassali's business-growth area. It uses confirmed business, audience, offer, goal, positioning, and website context to prepare acquisition strategies, campaigns, email and SEO/content plans, conversion improvements, experiments, and reviewable growth artifacts. It does not send outreach or execute external campaigns; preparing work does not mean Hassali sent a campaign, launched ads, published content, or spent money.",
     id: "roadmap.growth",
     provenance: [{ kind: "runtime-implementation", reference: "apps/web/src/lib/server/growth-intelligence" }],
     roadmapPhase: "Growth",

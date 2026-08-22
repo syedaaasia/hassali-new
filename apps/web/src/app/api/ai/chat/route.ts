@@ -1,5 +1,7 @@
 import {
   deleteOwnedChatMessage,
+  getOwnedGithubProjectConnection,
+  getOwnedProjectNotes,
   listUserProjectFiles,
   loadOwnedChatHandoff,
   loadOwnedChatProposal,
@@ -7,8 +9,15 @@ import {
   loadOwnedProjectRevision,
   resolveChatPersistenceContext,
   saveChatMessage,
+  upsertOwnedProjectNotes,
   type AiMode as PersistedAiMode
 } from "@hassali/database";
+import {
+  formatGitHubCodeContext,
+  getGitHubAccessToken,
+  listGitHubRepositoryPaths
+} from "@/lib/server/github/github-integration";
+import { applyProjectNoteAction, parseProjectNoteAction } from "@/lib/project-notes-intelligence";
 import { auth } from "@clerk/nextjs/server";
 import {
   boundedJsonFailure,
@@ -7003,6 +7012,35 @@ export async function POST(request: Request) {
         }
       })()
     : [];
+  const githubCodeContext = productMode === "CODE" && persistence
+    ? await (async () => {
+        try {
+          const repository = await getOwnedGithubProjectConnection({
+            externalUserId: persistence.externalUserId,
+            projectId: persistence.projectId
+          });
+          if (!repository) return null;
+          const token = await getGitHubAccessToken(persistence.externalUserId);
+          if (!token) return null;
+          const source = await listGitHubRepositoryPaths({
+            branch: repository.defaultBranch,
+            owner: repository.repositoryOwner,
+            repository: repository.repositoryName,
+            signal: taskSignal,
+            token
+          });
+          return formatGitHubCodeContext({
+            branch: repository.defaultBranch,
+            head: source.head,
+            paths: source.paths,
+            repository: `${repository.repositoryOwner}/${repository.repositoryName}`,
+            truncated: source.truncated
+          });
+        } catch {
+          return null;
+        }
+      })()
+    : null;
   const adaptiveCodePlan = productMode === "CODE"
     ? buildAdaptiveCodePlan({
         approvalPolicy,
@@ -7045,7 +7083,8 @@ export async function POST(request: Request) {
         semanticHints: [
           contextPriority.authoritativeIntentFamily,
           decomposition.taskKind,
-          ...translatedIntent.requestedFeatures
+          ...translatedIntent.requestedFeatures,
+          ...(githubCodeContext ? [githubCodeContext] : [])
         ]
       })
     : null;
@@ -7447,6 +7486,39 @@ export async function POST(request: Request) {
     return respond(createHandoffStream(answer, generatedHandoff, persistence?.sessionId, {
       "x-hassali-ask-provider-failure": "none",
       "x-hassali-ask-response-kind": generatedHandoff.targetMode === "ASK" ? "deterministic_answer" : "mode_boundary"
+    }));
+  }
+
+  const projectNoteAction = productMode === "ASK" ? parseProjectNoteAction(effectiveUserPrompt) : null;
+  if (projectNoteAction && persistence?.projectId) {
+    persistence = await persistPendingUserMessage(persistence);
+    if (!persistence) return respond(createTextStream("I couldn't verify the selected project's Notes, so I changed nothing."));
+    const notePersistence = persistence;
+    const existingNotes = await getOwnedProjectNotes({
+      externalUserId: notePersistence.externalUserId,
+      projectId: notePersistence.projectId
+    });
+    if (!existingNotes) {
+      return respond(createTextStream("I couldn't verify the selected project's Notes, so I changed nothing.", notePersistence.sessionId));
+    }
+    const result = applyProjectNoteAction(existingNotes.manualNotes, projectNoteAction);
+    if (projectNoteAction.kind !== "show" && result.notes !== existingNotes.manualNotes) {
+      await upsertOwnedProjectNotes({
+        externalUserId: notePersistence.externalUserId,
+        hassaliSummary: existingNotes.hassaliSummary,
+        manualNotes: result.notes,
+        projectId: notePersistence.projectId,
+        useAsContext: existingNotes.useAsContext
+      });
+    }
+    persistence = await persistRequestMessage(persistence, {
+      content: result.answer,
+      metadata: { deterministic: true, noteAction: projectNoteAction.kind, responseKind: "project_notes_response" },
+      role: "assistant"
+    });
+    return respond(createTextStream(result.answer, persistence?.sessionId, {
+      "x-hassali-ask-provider-failure": "none",
+      "x-hassali-ask-response-kind": "project_notes_response"
     }));
   }
 

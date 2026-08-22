@@ -141,11 +141,11 @@ test("Darker replaces Light as the default while existing Dark remains selectabl
   assert.equal(resolveThemeMode(undefined), "darker");
   assert.equal(resolveThemeMode("invalid"), "darker");
   const layout = readFileSync(path.resolve(root, "apps/web/src/app/layout.tsx"), "utf8");
-  const topBar = readFileSync(path.resolve(root, "apps/web/src/components/shell/top-bar.tsx"), "utf8");
+  const settings = readFileSync(path.resolve(root, "apps/web/src/components/shell/sidebar-settings.tsx"), "utf8");
   const css = readFileSync(path.resolve(root, "apps/web/src/app/globals.css"), "utf8");
   assert.match(layout, /<html lang="en" className="darker">/);
-  assert.match(topBar, /theme === "dark" \? "Darker" : "Dark"/);
-  assert.doesNotMatch(topBar, />Light</);
+  assert.match(settings, /value === "dark" \? "Dark" : "Darker"/);
+  assert.doesNotMatch(settings, />Light</);
   assert.match(css, /\.darker\s*\{[\s\S]*?--background: 0 0% 0%;[\s\S]*?--foreground: 0 0% 98%;/);
   assert.match(css, /\.dark\s*\{/);
   assert.doesNotMatch(css, /\.light\s*\{/);

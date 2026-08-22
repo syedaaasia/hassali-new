@@ -45,6 +45,13 @@ import {
   type AskResearchPolicy
 } from "./ask-research-engine";
 import {
+  askResponseConstraintInstruction,
+  extractAskResponseConstraints,
+  repairAskResponseLength,
+  validateAskResponseConstraints
+} from "./ask-response-constraints";
+import { createEpistemicDirectAnswer, isTimelessReasoningRequest } from "./ask-epistemic-foundation";
+import {
   compactAskRequestUnderstanding,
   type AskRequestUnderstanding
 } from "./ask-request-understanding";
@@ -385,7 +392,8 @@ function getRelevantWorkspaceText(input: AskBrainInput) {
 
 function isHardLengthOrFormatRequest(prompt: string) {
   return /\b(?:under|less than|max(?:imum)?|exactly)\s+\d+\s+words?\b/i.test(prompt) ||
-    /\b(?:bullet points only|bullets only|no explanation|direct answer only)\b/i.test(prompt);
+    /\b(?:exactly\s+\d+\s+bullets?|bullet points only|bullets only|no explanation|direct answer only)\b/i.test(prompt) ||
+    /\b(?:do not|don't|without)\s+(?:use|using)\s+(?:the\s+)?words?\b/i.test(prompt);
 }
 
 function isAdviceOnlyBuildQuestion(prompt: string) {
@@ -425,6 +433,10 @@ function chooseDecisionPath(
     return { path: "unsafe_refusal", reason: "Dangerous coding or credential-theft intent requires a deterministic refusal." };
   }
 
+  if (isTimelessReasoningRequest(prompt)) {
+    return { path: "model_reasoning_preferred", reason: "The request is a bounded timeless reasoning problem, not a live or personal high-stakes decision." };
+  }
+
   if (freshness.researchRequired && !freshness.researchProhibited) {
     return {
       path: "model_reasoning_preferred",
@@ -439,11 +451,10 @@ function chooseDecisionPath(
         reason: `${behavior.mode} should provide the requested specialist plan without creating or applying a proposal.`
       };
     }
-    if (
-      deterministicRequiredIntents.has(classification.intent) ||
-      classification.safetySensitivity === "high" ||
-      isHardLengthOrFormatRequest(prompt)
-    ) {
+    if (isHardLengthOrFormatRequest(prompt)) {
+      return { path: "model_reasoning_preferred", reason: "A constrained answer needs model composition followed by deterministic constraint validation." };
+    }
+    if (deterministicRequiredIntents.has(classification.intent) || classification.safetySensitivity === "high") {
       return { path: "deterministic_required", reason: "A tested deterministic handler owns this safety, setup, date/time, or exact-format answer." };
     }
     return { path: "model_reasoning_preferred", reason: `${behavior.mode} should answer this ${behavior.action.toLowerCase()} request without creating a proposal.` };
@@ -457,7 +468,10 @@ function chooseDecisionPath(
     return { path: "boundary_only", reason: "ASK mode cannot create files, apply changes, install packages, or start runtimes." };
   }
 
-  if (deterministicRequiredIntents.has(classification.intent) || classification.safetySensitivity === "high" || isHardLengthOrFormatRequest(prompt)) {
+  if (isHardLengthOrFormatRequest(prompt)) {
+    return { path: "model_reasoning_preferred", reason: "A constrained answer needs model composition followed by deterministic constraint validation." };
+  }
+  if (deterministicRequiredIntents.has(classification.intent) || classification.safetySensitivity === "high") {
     return { path: "deterministic_required", reason: "This prompt is best served by a tested deterministic safety, code, setup, or exact-format handler." };
   }
 
@@ -559,6 +573,7 @@ function reviewAnswer(answer: string, classification: AskIntentClassification, i
   if (contractValidation && !contractValidation.complete) {
     issues.push(...contractValidation.issues.map((issue) => `answer_contract:${issue}`));
   }
+  issues.push(...validateAskResponseConstraints(answer, extractAskResponseConstraints(input.prompt, input.messages)));
 
   return {
     contractValidation,
@@ -590,6 +605,7 @@ function categoryUsesWorkspace(category: AskSemanticCategory) {
 
 function categoryUsesHistory(category: AskSemanticCategory, input: AskBrainInput) {
   return input.requestUnderstanding?.conversationContext === "recent_required" ||
+    extractAskResponseConstraints(input.prompt, input.messages).source === "prior-turn" ||
     Boolean(input.behavior?.referencedObjective) ||
     category === "rewriting" ||
     category === "project_question" ||
@@ -635,6 +651,7 @@ function buildModelPrompt(input: AskBrainInput, category: AskSemanticCategory) {
     input.behavior
       ? `Resolved action: ${input.behavior.action}. Satisfy every material field in the bounded answer contract supplied as reference data.`
       : "",
+    askResponseConstraintInstruction(extractAskResponseConstraints(input.prompt, input.messages)),
     "",
     "Answer directly and practically in plain text."
   ].join("\n");
@@ -1370,6 +1387,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   }
 
   const deterministicAnswer = await createAskDirectAnswer(input.prompt, input.askRuntimeContext, input.messages);
+  const epistemicAnswer = createEpistemicDirectAnswer(input.prompt, input.messages);
   const localConversationalAnswer = createLocalConversationalAnswer(
     input.behavior?.objective ?? input.prompt
   );
@@ -1407,6 +1425,10 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     });
     fallbackOccurred = true;
     fallbackReason = freshness.researchProhibited ? "research_prohibited" : "required_source_unavailable";
+    providerStatus = "not_needed";
+  } else if (epistemicAnswer) {
+    answer = epistemicAnswer;
+    providerFailureCategory = null;
     providerStatus = "not_needed";
   } else if (deterministicLiveSourceAvailable && deterministicAnswer) {
     answer = deterministicAnswer;
@@ -1599,6 +1621,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
 
   answer = sanitizePublicPersonClaims(answer, input, category, webSearchRequested);
   let sanitized = sanitizeAskOutput(answer);
+  sanitized = { ...sanitized, value: repairAskResponseLength(sanitized.value, extractAskResponseConstraints(input.prompt, input.messages)) };
   let review = reviewAnswer(sanitized.value, classification, input);
 
   if (
@@ -1641,6 +1664,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     revisionFailureCategory = revision.failureCategory;
     revisionReason = revision.revisionReason;
     sanitized = sanitizeAskOutput(revision.content);
+    sanitized = { ...sanitized, value: repairAskResponseLength(sanitized.value, extractAskResponseConstraints(input.prompt, input.messages)) };
     review = reviewAnswer(sanitized.value, classification, input);
     if (revisionCallRan && revision.servedModel) {
       actualServedModel = revision.servedModel;

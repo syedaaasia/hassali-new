@@ -3,6 +3,7 @@ import {
   createAskSeriousAnswer,
   type AskConversationMessage
 } from "./ask-serious-assistant";
+import { createEpistemicDirectAnswer, isTimelessReasoningRequest } from "./ask-epistemic-foundation";
 
 export type AskCapability = "calculator" | "current_time" | "file_context" | "weather" | "web_search";
 
@@ -796,6 +797,9 @@ export async function createAskDirectAnswer(
   context: AskRuntimeContext,
   history?: AskConversationMessage[]
 ): Promise<string | null> {
+  const epistemicAnswer = createEpistemicDirectAnswer(prompt, history);
+  if (epistemicAnswer) return epistemicAnswer;
+  if (isTimelessReasoningRequest(prompt)) return null;
   const intent = detectAskLiveIntent(prompt);
 
   if (intent === "weather") {

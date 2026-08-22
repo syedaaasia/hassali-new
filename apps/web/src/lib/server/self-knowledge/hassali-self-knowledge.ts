@@ -257,7 +257,7 @@ export async function buildHassaliSelfKnowledgeContext(input: {
 
 export function isHassaliSelfKnowledgeQuestion(prompt: string) {
   const text = prompt.trim();
-  return /\bHassali\b/i.test(text) && /\b(?:what|who|can|does|did|is|are|how|which|explain|difference|status|roadmap|built|implemented|complete|completed|support|available|colors?|colours?|brand|next)\b/i.test(text) ||
+  return /\bHassali\b/i.test(text) && /\b(?:what|who|can|does|did|is|are|how|which|explain|difference|status|roadmap|built|implemented|complete|completed|support|available|colors?|colours?|brand|next|founder|ceo|creator|owner|owns?|made)\b/i.test(text) ||
     /\b(?:ASK|WEBSITE|CODE|Growth|Run 4|Full project access|Memory|M1|M2)\b/i.test(text) && /\b(?:what|can|does|did|is|are|difference|push|modify|built|implemented|complete|added|mean|next|after)\b/i.test(text);
 }
 
@@ -272,6 +272,12 @@ export async function createHassaliSelfKnowledgeAnswer(input: {
 }): Promise<{ answer: string; recordIds: string[] } | null> {
   if (!isHassaliSelfKnowledgeQuestion(input.prompt)) return null;
   const prompt = input.prompt;
+  if (/\b(?:founder|founded|ceo|creator|who (?:built|made|owns?)|owner(?:ship)?)\b/i.test(prompt)) {
+    return {
+      answer: "Hassali's canonical product metadata does not currently name a founder, CEO, legal owner, or individual creator. I won't guess that identity from chat history or repository authorship; it needs an authoritative product record.",
+      recordIds: recordIds("identity.stewardship-unconfigured")
+    };
+  }
   if (/\b(?:difference|different)\b[\s\S]{0,80}\bASK\b[\s\S]{0,80}\bWEBSITE\b[\s\S]{0,80}\bCODE\b|\bwhat (?:are|do) (?:the )?(?:ASK|WEBSITE|CODE)\b/i.test(prompt)) {
     return {
       answer: [
@@ -299,7 +305,7 @@ export async function createHassaliSelfKnowledgeAnswer(input: {
     };
   }
   if (/\bGrowth\b[\s\S]{0,60}\b(?:built|implemented|available|current|ready)\b|\b(?:is|has)\b[\s\S]{0,20}\bGrowth\b/i.test(prompt)) {
-    return { answer: "Yes. Hassali has a server-side Growth intelligence foundation for canonical business truth, audience and offer strategy, bounded channel planning, claim and campaign validation, measurement, experiments, artifacts, and approval-bound handoffs. It prepares work but does not send outreach, scrape contacts, buy ads, or execute external campaigns.", recordIds: recordIds("roadmap.growth") };
+    return { answer: "Growth is Hassali's business-growth area. It helps understand the business, audience, offers, goals, and positioning, then prepares customer-acquisition strategy, campaigns, email and SEO/content plans, conversion improvements, experiments, and reviewable growth artifacts. It does not send outreach or execute external campaigns; it only prepares reviewable work and does not claim ads launched, content published, or money spent.", recordIds: recordIds("roadmap.growth") };
   }
   if (/\bFFmpeg\b/i.test(prompt) && /\b(?:available|installed|local|locally|machine|right now)\b/i.test(prompt)) {
     const context = await buildHassaliSelfKnowledgeContext({ localToolResolver: input.localToolResolver, maxRecords: 4, mode: input.mode, prompt });

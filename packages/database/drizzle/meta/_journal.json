@@ -43,6 +43,13 @@
       "when": 1786664279658,
       "tag": "0005_daily_typhoid_mary",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787383740308,
+      "tag": "0006_overconfident_legion",
+      "breakpoints": true
     }
   ]
 }

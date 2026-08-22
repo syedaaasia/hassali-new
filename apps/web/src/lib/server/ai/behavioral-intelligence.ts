@@ -808,7 +808,8 @@ function buildAnswerContract(
       ...extractExplicitNegatives(resolvedRequest)
     ]),
     formatRequirements: extractFormatRequirements(resolvedRequest),
-    freshnessRequirement: /\b(?:current|currently|latest|today|right now|up[- ]to[- ]date)\b/i.test(resolvedRequest)
+    freshnessRequirement: /\b(?:current|currently|latest|today|right now|up[- ]to[- ]date)\b/i.test(resolvedRequest) &&
+      !/\b(?:if|suppose|imagine|puzzle|riddle|prove|which is heavier|how many|all but)\b/i.test(resolvedRequest)
       ? "current_if_available"
       : "none",
     minimumCompleteness: "all_material_parts",

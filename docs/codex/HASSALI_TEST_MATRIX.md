@@ -551,3 +551,19 @@ E-05 | Diff | Inspect status, stat, and changed-file diff | Scope clean; no secr
 E-06 | Git | Commit requested checkpoint | Correct message, no push, clean worktree
 E-07 | Report | Summarize proof surfaces | No visual/runtime claim without matching evidence
 ```
+
+## Founder Acceptance Repair 1
+
+```text
+FR-01 | ASK authority | Ask timeless reasoning containing today/yesterday/current-style words | No external freshness gate; useful model answer remains eligible
+FR-02 | Context isolation | Seed unrelated medical conversation then ask a pill interval puzzle | Prior medical content excluded; one-hour reasoning returned
+FR-03 | Conversation | Set and correct a conversation-only project database | Latest correction is authoritative; no CODE redirect or durable-memory requirement
+FR-04 | Constraints | Request exact words, bullet count, or forbidden words | One bounded model attempt/repair; final response validates deterministically
+FR-05 | Freshness | Ask current ranking/news or named-paper existence | Retrieval authority required; unavailable evidence yields an honest unknown
+FR-06 | Notes | Add/update/remove notes and refresh project | Manual notes persist separately from a deterministic 4-5 bullet summary
+FR-07 | Growth | Open Growth with current applied WEBSITE handoff | Existing Run 12 engine loads owner-scoped truth and never externally executes
+FR-08 | Navigation | Inspect expanded/collapsed sidebar and top bar | Growth/GitHub/Settings visible; no Workspace destination, P/F placeholders, literal chevron, or duplicate top Settings
+FR-09 | Themes | Compare default Darker with Dark | Darker neutral black; Dark blue-charcoal; token sets materially differ
+FR-10 | GitHub | Connect, list, attach, and load source metadata | OAuth state checked, token encrypted, repository owner scoped, sensitive/build paths excluded
+FR-11 | CODE authority | Use attached GitHub metadata in CODE then request commit/push | Read-only metadata informs planning; mutation/commit/push remain separately approved and fail closed
+```
