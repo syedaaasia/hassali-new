@@ -11,6 +11,11 @@ import {
   testIntelligenceSourceConnection
 } from "@/lib/server/intelligence/intelligence-source-service";
 import { intelligenceSettingsErrorResponse } from "@/lib/server/intelligence/intelligence-settings-http";
+import {
+  boundedJsonFailure,
+  productionRequestLimits,
+  readBoundedJson
+} from "@/lib/server/production-hardening/request-guard";
 
 function sameOrigin(request: Request) {
   const origin = request.headers.get("origin");
@@ -50,7 +55,12 @@ export async function PUT(request: Request) {
     const { userId } = await auth();
     if (!userId) return handledSettingsError("UNAUTHORIZED", "Unauthorized", 401);
     if (!sameOrigin(request)) return handledSettingsError("INVALID_ORIGIN", "Invalid request origin.", 403);
-    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const parsedBody = await readBoundedJson<Record<string, unknown>>(
+      request,
+      productionRequestLimits.settingsJsonBytes
+    );
+    if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+    const body = parsedBody.value;
     if (!isConfigurableIntelligenceSourceId(body?.sourceId)) {
       return handledSettingsError("UNKNOWN_SOURCE", "Unknown intelligence source.", 400);
     }
@@ -73,7 +83,12 @@ export async function PATCH(request: Request) {
     const { userId } = await auth();
     if (!userId) return handledSettingsError("UNAUTHORIZED", "Unauthorized", 401);
     if (!sameOrigin(request)) return handledSettingsError("INVALID_ORIGIN", "Invalid request origin.", 403);
-    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const parsedBody = await readBoundedJson<Record<string, unknown>>(
+      request,
+      productionRequestLimits.settingsJsonBytes
+    );
+    if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+    const body = parsedBody.value;
     if (isIntelligenceRoutingPrivacy(body?.privacy)) {
       await setIntelligenceRoutingPrivacy(userId, body.privacy);
     } else {
@@ -102,7 +117,12 @@ export async function POST(request: Request) {
     const { userId } = await auth();
     if (!userId) return handledSettingsError("UNAUTHORIZED", "Unauthorized", 401);
     if (!sameOrigin(request)) return handledSettingsError("INVALID_ORIGIN", "Invalid request origin.", 403);
-    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const parsedBody = await readBoundedJson<Record<string, unknown>>(
+      request,
+      productionRequestLimits.settingsJsonBytes
+    );
+    if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+    const body = parsedBody.value;
     if (!isConfigurableIntelligenceSourceId(body?.sourceId) || body.action !== "test") {
       return handledSettingsError("INVALID_TEST_REQUEST", "Invalid connection test request.", 400);
     }

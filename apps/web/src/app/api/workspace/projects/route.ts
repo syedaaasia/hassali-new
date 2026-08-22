@@ -1,5 +1,10 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { createProjectWithStarterFile, loadWorkspaceForExternalUser } from "@hassali/database";
+import {
+  boundedJsonFailure,
+  productionRequestLimits,
+  readBoundedJson
+} from "@/lib/server/production-hardening/request-guard";
 
 export async function POST(request: Request) {
   console.info("create project started");
@@ -9,7 +14,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => null)) as { name?: unknown } | null;
+  const parsedBody = await readBoundedJson<{ name?: unknown }>(
+    request,
+    productionRequestLimits.memoryJsonBytes
+  );
+  if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+  const body = parsedBody.value;
   const projectName =
     typeof body?.name === "string" && body.name.trim().length > 0
       ? body.name.trim().slice(0, 140)

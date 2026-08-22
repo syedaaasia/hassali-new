@@ -10,6 +10,11 @@ import {
   type AiMode as PersistedAiMode
 } from "@hassali/database";
 import { auth } from "@clerk/nextjs/server";
+import {
+  boundedJsonFailure,
+  productionRequestLimits,
+  readBoundedJson
+} from "@/lib/server/production-hardening/request-guard";
 import { parseModeHandoff, type ModeHandoff } from "@/lib/mode-handoff";
 import {
   buildAskRuntimeContext,
@@ -6168,7 +6173,7 @@ function createIntelligenceTextStream(
 export async function POST(request: Request) {
   const routeStartedAt = Date.now();
   const taskSignal = request.signal;
-  const body = (await request.json().catch(() => null)) as {
+  const parsedBody = await readBoundedJson<{
     approvalPolicy?: unknown;
     attachmentIds?: unknown;
     chatSessionId?: unknown;
@@ -6185,7 +6190,9 @@ export async function POST(request: Request) {
     researchPolicy?: unknown;
     workspace?: unknown;
     workspaceProjectId?: unknown;
-  } | null;
+  }>(request, productionRequestLimits.chatJsonBytes);
+  if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+  const body = parsedBody.value;
 
   if (body?.clientContractVersion !== hassaliChatContractVersion) {
     return Response.json(

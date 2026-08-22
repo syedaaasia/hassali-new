@@ -79,6 +79,11 @@ import {
   canApplyWithProjectApprovalPolicy,
   isProjectApprovalPolicy
 } from "@/lib/approval-policy";
+import {
+  boundedJsonFailure,
+  productionRequestLimits,
+  readBoundedJson
+} from "@/lib/server/production-hardening/request-guard";
 
 export const runtime = "nodejs";
 
@@ -100,7 +105,9 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const { userId } = await auth();
   if (!userId) return errorResponse("Unauthorized", 401);
-  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const parsedBody = await readBoundedJson<Record<string, unknown>>(request, productionRequestLimits.memoryJsonBytes);
+  if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+  const body = parsedBody.value;
   const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
   const proposalId = typeof body?.proposalId === "string" ? body.proposalId.trim() : "";
   if (body?.action !== "reject" || !projectId || !proposalId) return errorResponse("A valid proposal rejection request is required.", 400);
@@ -416,7 +423,9 @@ export async function POST(request: Request) {
     return errorResponse("Unauthorized", 401);
   }
 
-  const body = (await request.json().catch(() => null)) as RuntimeApprovalBody | null;
+  const parsedBody = await readBoundedJson<RuntimeApprovalBody>(request, productionRequestLimits.mutationJsonBytes);
+  if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+  const body = parsedBody.value;
 
   if (!body) {
     return errorResponse("Invalid runtime approval request.", 400);

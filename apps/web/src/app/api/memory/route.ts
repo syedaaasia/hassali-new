@@ -13,6 +13,11 @@ import {
 } from "@hassali/database";
 import { auth } from "@clerk/nextjs/server";
 import { containsForbiddenMemorySecret } from "@/lib/server/user-memory/user-memory";
+import {
+  boundedJsonFailure,
+  productionRequestLimits,
+  readBoundedJson
+} from "@/lib/server/production-hardening/request-guard";
 
 const noStoreHeaders = { "cache-control": "private, no-store" };
 const preferenceKeys = [
@@ -53,7 +58,9 @@ export async function GET() {
 export async function PATCH(request: Request) {
   const userId = await ownedUser();
   if (!userId) return responseError("Unauthorized", 401);
-  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const parsedBody = await readBoundedJson<Record<string, unknown>>(request, productionRequestLimits.memoryJsonBytes);
+  if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+  const body = parsedBody.value;
   if (!body || typeof body !== "object" || Array.isArray(body))
     return responseError("Invalid JSON body.", 400);
   try {
@@ -106,7 +113,9 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const userId = await ownedUser();
   if (!userId) return responseError("Unauthorized", 401);
-  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const parsedBody = await readBoundedJson<Record<string, unknown>>(request, productionRequestLimits.memoryJsonBytes);
+  if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+  const body = parsedBody.value;
   if (!body || typeof body !== "object" || Array.isArray(body))
     return responseError("Invalid JSON body.", 400);
   const action = body.action;

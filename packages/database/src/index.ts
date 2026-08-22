@@ -1,4 +1,4 @@
-export { createDatabaseClient, db, getDatabaseClient, type DatabaseClient } from "./client";
+export { createDatabaseClient, db, getDatabaseClient, probeDatabaseConnection, type DatabaseClient } from "./client";
 export * from "./intelligence-persistence";
 export * from "./memory-management-persistence";
 export * from "./persistence";

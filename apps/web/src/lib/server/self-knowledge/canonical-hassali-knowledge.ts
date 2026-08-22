@@ -48,7 +48,7 @@ export const canonicalHassaliKnowledge: HassaliKnowledgeRecord[] = [
   }),
   record({
     category: "mode",
-    content: "WEBSITE shares Hassali intelligence and specializes in approval-first website creation and editing. The current implementation preserves a static website Preview; Run 5 premium creative-studio upgrades remain planned.",
+    content: "WEBSITE shares Hassali intelligence and specializes in approval-first website creation and editing. Run 5 added visual-reference intake, design direction, asset planning, bounded edits, canonical revisions, visual QA, responsive repair, and the WEBSITE Growth handoff while preserving static Preview authority.",
     id: "mode.website",
     provenance: [{ kind: "canonical-documentation", reference: "docs/codex/HASSALI_CONTEXT.md#Product-modes" }],
     status: "verified",
@@ -207,34 +207,34 @@ export const canonicalHassaliKnowledge: HassaliKnowledgeRecord[] = [
   }),
   record({
     category: "roadmap",
-    content: "Memory M1 Hassali Self Knowledge, M2 User and People Memory, and M3 Project and Conversation Memory are implemented. M4 Temporal/Conflict/Retrieval Intelligence, M5 Memory Controls and Privacy, and M6 Cross-Mode Shared Memory remain planned.",
+    content: "Memory M1 through M6 are implemented: self knowledge, user and people memory, project and conversation memory, temporal/conflict retrieval, controls and privacy, and bounded cross-mode shared memory. Run 10 adds normalized knowledge records, provenance, corrections, forget, scoped retrieval, and Graph integration without replacing the owner-scoped stores.",
     id: "roadmap.memory",
     provenance: [{ kind: "roadmap", reference: "Memory phase M1-M6" }],
     roadmapPhase: "Memory",
-    status: "planned",
-    tags: ["memory", "m1", "m2", "m3", "m4", "m5", "m6", "next phase"],
-    title: "Memory roadmap",
+    status: "implemented",
+    tags: ["memory", "m1", "m2", "m3", "m4", "m5", "m6", "implemented"],
+    title: "Memory implementation",
     topic: "memory-roadmap"
   }),
   record({
     category: "limitation",
-    content: "M1 self knowledge, M2 user/people memory, and M3 bounded project/conversation memory are implemented. Advanced temporal/conflict retrieval (M4), full Memory Controls and Privacy UI (M5), and broad automatic cross-mode memory policy (M6) are not implemented.",
-    id: "limitation.personal-memory-not-implemented",
-    provenance: [{ kind: "roadmap", reference: "Memory phase M1 boundaries" }],
+    content: "Memory is intentionally bounded and privacy-scoped. It excludes secrets, respects disable, pause, and forget controls, does not grant action authority, and retrieves only relevant user, project, or conversation context rather than all stored history.",
+    id: "limitation.memory-bounded",
+    provenance: [{ kind: "runtime-implementation", reference: "apps/web/src/lib/server/shared-memory" }],
     status: "limited",
-    tags: ["personal memory", "user memory", "project memory", "conversation memory", "temporal reasoning", "limited"],
-    title: "Advanced memory capabilities remain limited",
+    tags: ["memory", "privacy", "bounded context", "forget", "authority"],
+    title: "Memory privacy and authority boundary",
     topic: "memory-limitations"
   }),
   record({
     category: "roadmap",
-    content: "Run 5 Premium WEBSITE Creative Studio and Run 6 Motion, Data Visualization, 3D, Deployment, and media-capability direction are planned. Reference technologies such as D3, Three.js, FFmpeg, Blender concepts, or external media providers are not automatically installed product dependencies.",
+    content: "Run 5 WEBSITE Creative Studio and Run 8 rich experiences and verified shipping are implemented. Optional technologies such as D3, Three.js, FFmpeg, Blender, external media providers, and deployment adapters remain capability-gated and are not automatically installed or claimed as available.",
     id: "roadmap.website-creative",
     provenance: [{ kind: "roadmap", reference: "docs/codex/HASSALI_CONTEXT.md#Current-roadmap" }],
     roadmapPhase: "Run 5 / Run 6",
-    status: "planned",
-    tags: ["run 5", "run 6", "website studio", "three.js", "media", "planned"],
-    title: "WEBSITE and creative roadmap",
+    status: "implemented",
+    tags: ["run 5", "run 8", "website studio", "three.js", "media", "capability gated"],
+    title: "WEBSITE and rich-experience capability state",
     topic: "creative-roadmap"
   })
 ];

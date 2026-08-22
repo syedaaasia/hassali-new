@@ -5,6 +5,7 @@ import {
   type ProjectExportMode
 } from "@/lib/server/project-export";
 import { createVerifiedProjectPackage } from "@/lib/server/verified-shipping";
+import { safeApiErrorResponse } from "@/lib/server/production-hardening/safe-api-error";
 
 export const runtime = "nodejs";
 
@@ -59,8 +60,6 @@ export async function GET(request: Request) {
       }
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "ZIP export failed.";
-
-    return Response.json({ error: message }, { status: 400 });
+    return safeApiErrorResponse(error, "ZIP export could not be completed safely.", request);
   }
 }

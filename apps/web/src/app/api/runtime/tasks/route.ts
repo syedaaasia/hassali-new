@@ -12,6 +12,11 @@ import {
   createTaskLocalCommit,
   inspectGitDeliveryState
 } from "@/lib/server/runtime/live-execution/git-delivery";
+import {
+  boundedJsonFailure,
+  productionRequestLimits,
+  readBoundedJson
+} from "@/lib/server/production-hardening/request-guard";
 
 export const runtime = "nodejs";
 
@@ -59,12 +64,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const { userId } = await auth();
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const body = await request.json().catch(() => null) as {
+  const parsedBody = await readBoundedJson<{
     action?: "cancel" | "local_commit";
     commitMessage?: string;
     projectId?: string;
     taskId?: string;
-  } | null;
+  }>(request, productionRequestLimits.memoryJsonBytes);
+  if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+  const body = parsedBody.value;
   const projectId = body?.projectId?.trim();
   const taskId = body?.taskId?.trim();
   if (!projectId || !taskId || !body?.action) {

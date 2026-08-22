@@ -314,7 +314,7 @@ export async function createHassaliSelfKnowledgeAnswer(input: {
     return { answer: "Yes. Hassali has a verified optional FFmpeg/ffprobe capability-detection and media-operation architecture. That does not mean the binaries are installed or execution is authorized; current machine availability must be checked dynamically.", recordIds: recordIds("capability.ffmpeg-architecture", "architecture.dynamic-local-capabilities") };
   }
   if (/\b(?:next|after M1|M2)\b[\s\S]{0,70}\b(?:memory|phase)\b|\b(?:memory|phase)\b[\s\S]{0,70}\b(?:next|after M1|M2)\b/i.test(prompt)) {
-    return { answer: "Memory M1 self knowledge, M2 user and people memory, and M3 project and conversation memory are implemented. M4 temporal/conflict retrieval is next; M5 controls/privacy and M6 broad cross-mode policy remain planned.", recordIds: recordIds("roadmap.memory", "limitation.personal-memory-not-implemented") };
+    return { answer: "Memory M1 through M6 are implemented, including temporal/conflict retrieval, controls and privacy, and bounded cross-mode context. Run 10 adds normalized knowledge records, provenance, corrections, forget, scoped retrieval, and Graph integration. Memory remains context, not action authority.", recordIds: recordIds("roadmap.memory", "limitation.memory-bounded") };
   }
   if (/\b(?:dashboard|identity)\b[\s\S]{0,60}\b(?:phrase|signature|slogan|wording)\b|\bBuild in\b/i.test(prompt)) {
     return { answer: "The current dashboard identity phrase is: Build in 🇵🇰 for 🌍.", recordIds: recordIds("brand.dashboard-phrase") };
@@ -332,7 +332,7 @@ export async function createHassaliSelfKnowledgeAnswer(input: {
     return { answer: "Hassali is a calm, lightweight AI Creation Workspace with shared intelligence across ASK, WEBSITE, and CODE. ASK reasons without mutating projects, WEBSITE specializes in approval-first website work, and CODE builds, executes, verifies, and delivers software under explicit user control.", recordIds: recordIds("identity.product", "architecture.shared-intelligence", "mode.ask", "mode.website", "mode.code") };
   }
   if (/\b(?:personal|user|people|project|conversation|long-term) memory\b/i.test(prompt)) {
-    return { answer: "Hassali has M1 self knowledge, M2 durable user and people memory, and M3 durable project records, incremental conversation summaries, episodes, checkpoints, and bounded source-message recall. Advanced temporal/conflict reasoning, full controls/privacy UI, and broad cross-mode policy remain planned for M4 through M6.", recordIds: recordIds("roadmap.memory", "limitation.personal-memory-not-implemented") };
+    return { answer: "Hassali has implemented M1-M6 memory plus Run 10 knowledge integration: durable user and project facts, conversation continuity, temporal/conflict reasoning, controls, privacy, corrections, forget, bounded cross-mode retrieval, provenance, and Graph relationships. Memory never grants execution authority.", recordIds: recordIds("roadmap.memory", "limitation.memory-bounded") };
   }
   return null;
 }

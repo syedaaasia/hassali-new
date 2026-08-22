@@ -9,6 +9,10 @@ import {
   isWorkspaceBindingError,
   resolveProjectWorkspace
 } from "@/lib/server/runtime/project-workspace-registry";
+import {
+  boundedJsonFailure,
+  checkDeclaredRequestSize
+} from "@/lib/server/production-hardening/request-guard";
 
 export const runtime = "nodejs";
 
@@ -23,6 +27,8 @@ export async function POST(request: Request) {
   const { userId } = await auth();
   if (!userId) return Response.json({ code: "UPLOAD_FAILED", error: "Unauthorized" }, { status: 401 });
   try {
+    const size = checkDeclaredRequestSize(request, attachmentLimits.individualFileBytes + 512 * 1024);
+    if (!size.ok) return boundedJsonFailure(size);
     const form = await request.formData();
     const file = form.get("file");
     const projectId = String(form.get("projectId") ?? "").trim();

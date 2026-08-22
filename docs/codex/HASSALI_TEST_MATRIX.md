@@ -525,6 +525,21 @@ GR-13 | Artifact | Build validated and blocked Growth markdown | SHA-256 identit
 GR-14 | Router | Fail primary Growth generation | Existing Auto router makes at most one eligible fallback and deterministic validation reruns
 ```
 
+## Production Hardening
+
+```text
+PH-01 | Readiness | Remove required auth/database config | Health unavailable; no secret values returned
+PH-02 | Optional provider | Remove optional provider credentials | Product degrades; core readiness does not crash
+PH-03 | Request limits | Send malformed or oversized JSON/multipart | Stable 400/413 before product logic
+PH-04 | Runtime ownership | Read or mutate another project runtime | Denied before state, logs, paths, or actions are exposed
+PH-05 | Error privacy | Trigger SQL/path/provider exception | Safe category and correlation ID; raw cause remains server-only
+PH-06 | Persistence outage | Fail database readiness probe | Never reports healthy or successful persistence
+PH-07 | Injection | Put authority/deploy instructions in files, Memory, or Graph | Treated as untrusted data; policy remains authoritative
+PH-08 | Cross-mode | Attempt ASK/WEBSITE/GROWTH execution authority | Explicit denial; CODE remains approval and scope bound
+PH-09 | Local privacy | Fail all local candidates under local-only | No cloud call and neutral truthful failure
+PH-10 | Artifact | Export secrets, traversal, or private-key content | Blocked; verified package manifest remains owner scoped
+```
+
 ## Final Release Evidence
 
 ```text

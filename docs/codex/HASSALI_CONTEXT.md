@@ -319,7 +319,7 @@ The reusable acceptance scenarios live in `docs/codex/HASSALI_TEST_MATRIX.md`.
 
 Roadmap names describe intended bounded runs, not completed implementation claims.
 
-The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference intake and the uncommitted I2 design-direction/I3 asset-studio/I4 visual-QA/I5 Growth-handoff engineering are implemented; combined ordinary-user browser acceptance remains pending before closure.
+The pre-launch Memory sequence and Runs 5-12 are implemented at their recorded checkpoints. Run 13 adds the bounded production-hardening gate before founder acceptance.
 
 1. **Premium Workspace and Codex Efficiency Foundation** - polish the creation workspace and establish concise engineering context.
 2. **Live Execution Timeline, Git Workflow and Verified Delivery** - make approved work, evidence, and delivery state easy to inspect.
@@ -356,9 +356,6 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Memory M6 checkpoint: `MEMORY-M6: add cross-mode shared memory`
 - Run 05 I1 checkpoint: `WEBSITE-I1: add visual reference intake and clone intelligence`
 - Run 05 I2 checkpoint: `WEBSITE-I2: add design direction and quality kernel`
-- Run 05 I2 parity closure: pending ordinary-user browser acceptance; no closure checkpoint yet.
-- Run 05 I3 engineering: typed asset planning and durable approval lifecycle are in the preserved dirty tree; combined I2+I3 browser acceptance and closure checkpoint remain pending.
-- Run 05 I4 engineering: typed visual reports, five-viewport geometry contracts, bounded candidate repair, static Preview geometry diagnostics, and post-apply visual-verification truth are in the preserved dirty tree; combined I2+I3+I4 acceptance remains pending.
 - Run 05 closure checkpoint: `WEBSITE-RUN5: complete authoritative website studio`
 - Run 06 checkpoint: `ASK-RUN6: build universal assistant orchestration`
 - Run 07 checkpoint: `CODE-RUN7: build verified software factory`
@@ -367,7 +364,16 @@ The pre-launch Memory sequence has completed M1-M6. Run 5 I1 visual-reference in
 - Run 10 checkpoint: `MEMORY-RUN10: add durable knowledge and memory 2.0`
 - Run 11 checkpoint: `LOCAL-RUN11: add privacy-aware local and edge intelligence`
 - Run 12 checkpoint: `GROWTH-RUN12: add truthful growth intelligence system`
+- Run 13 checkpoint: `HARDEN-RUN13: prepare Hassali for founder acceptance`
 - The repository HEAD is authoritative; confirm it with Git before every task.
+
+## Production hardening
+
+- `/api/health` reports required auth/database readiness separately from optional provider degradation and never returns configuration values.
+- High-risk JSON and multipart routes enforce declared and streamed byte ceilings before product logic. Malformed and oversized requests receive stable 4xx responses.
+- Runtime state, logs, status, actions, workspace mutation, approval, and export remain authenticated and project-owner scoped. Legacy runtime state never exposes server workspace paths.
+- User-facing API failures use stable categories, retryability, and correlation IDs without returning raw SQL, credentials, private paths, or provider internals.
+- PostgreSQL startup and idle waits are bounded. Canonical persistence failure cannot become a ready health state or successful mutation claim.
 
 ## WEBSITE Design Direction
 

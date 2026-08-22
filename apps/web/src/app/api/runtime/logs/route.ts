@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import { listUserProjectFiles } from "@hassali/database";
 import {
   getRuntimeStreamEvents,
   getRuntimeStreamSnapshot
@@ -19,6 +20,13 @@ export async function GET(request: Request) {
 
   if (!projectId) {
     return Response.json({ error: "projectId is required." }, { status: 400 });
+  }
+
+  try {
+    const files = await listUserProjectFiles({ externalUserId: userId, projectId });
+    if (!files) return Response.json({ error: "Project not found or access denied." }, { status: 404 });
+  } catch {
+    return Response.json({ error: "Project ownership could not be verified." }, { status: 503 });
   }
 
   const snapshot = getRuntimeStreamSnapshot(projectId);

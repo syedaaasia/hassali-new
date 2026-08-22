@@ -8,6 +8,12 @@ import {
   saveUserProjectFileContent
 } from "@hassali/database";
 import { normalizeSafeProjectPath } from "@/lib/utils/path";
+import {
+  boundedJsonFailure,
+  productionRequestLimits,
+  readBoundedJson
+} from "@/lib/server/production-hardening/request-guard";
+import { safeApiErrorResponse } from "@/lib/server/production-hardening/safe-api-error";
 
 const folderPlaceholderFileName = ".hassali-folder";
 
@@ -53,12 +59,14 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json().catch(() => null)) as {
+    const parsedBody = await readBoundedJson<{
       action?: unknown;
       content?: unknown;
       path?: unknown;
       projectId?: unknown;
-    } | null;
+    }>(request, productionRequestLimits.mutationJsonBytes);
+    if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+    const body = parsedBody.value;
 
     if (typeof body?.projectId !== "string") {
       return Response.json({ error: "projectId is required." }, { status: 400 });
@@ -96,9 +104,7 @@ export async function POST(request: Request) {
 
     return filesResponse(files);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "File creation failed.";
-
-    return Response.json({ error: message }, { status: 400 });
+    return safeApiErrorResponse(error, "File creation could not be completed safely.", request);
   }
 }
 
@@ -110,14 +116,16 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json().catch(() => null)) as {
+    const parsedBody = await readBoundedJson<{
       action?: unknown;
       content?: unknown;
       kind?: unknown;
       newPath?: unknown;
       path?: unknown;
       projectId?: unknown;
-    } | null;
+    }>(request, productionRequestLimits.mutationJsonBytes);
+    if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+    const body = parsedBody.value;
 
     if (typeof body?.projectId !== "string") {
       return Response.json({ error: "projectId is required." }, { status: 400 });
@@ -167,9 +175,7 @@ export async function PATCH(request: Request) {
 
     return filesResponse(files);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "File update failed.";
-
-    return Response.json({ error: message }, { status: 400 });
+    return safeApiErrorResponse(error, "File update could not be completed safely.", request);
   }
 }
 
@@ -181,11 +187,13 @@ export async function DELETE(request: Request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = (await request.json().catch(() => null)) as {
+    const parsedBody = await readBoundedJson<{
       kind?: unknown;
       path?: unknown;
       projectId?: unknown;
-    } | null;
+    }>(request, productionRequestLimits.memoryJsonBytes);
+    if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+    const body = parsedBody.value;
 
     if (typeof body?.projectId !== "string") {
       return Response.json({ error: "projectId is required." }, { status: 400 });
@@ -207,8 +215,6 @@ export async function DELETE(request: Request) {
 
     return filesResponse(files);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "File delete failed.";
-
-    return Response.json({ error: message }, { status: 400 });
+    return safeApiErrorResponse(error, "File deletion could not be completed safely.", request);
   }
 }

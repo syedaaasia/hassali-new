@@ -61,8 +61,8 @@ test("Run 4 is represented as verified and complete", () => {
 test("implemented capabilities remain truthful about execution limits", () => {
   assert.equal(hassaliSelfKnowledge.get("roadmap.growth")?.status, "implemented");
   assert.match(hassaliSelfKnowledge.get("roadmap.growth")?.content ?? "", /does not send outreach/i);
-  assert.equal(hassaliSelfKnowledge.get("limitation.personal-memory-not-implemented")?.status, "limited");
-  assert.match(hassaliSelfKnowledge.get("limitation.personal-memory-not-implemented")?.content ?? "", /M3 bounded project\/conversation memory are implemented/i);
+  assert.equal(hassaliSelfKnowledge.get("limitation.memory-bounded")?.status, "limited");
+  assert.match(hassaliSelfKnowledge.get("limitation.memory-bounded")?.content ?? "", /does not grant action authority/i);
 });
 
 test("knowledge records retain bounded provenance and status", () => {
@@ -171,8 +171,8 @@ test("Growth and Memory roadmap answers distinguish implemented scope from plann
   const memory = await createHassaliSelfKnowledgeAnswer({ mode: "ASK", prompt: "What is the next Memory phase after M3?" });
   assert.match(growth?.answer ?? "", /server-side Growth intelligence foundation/);
   assert.match(growth?.answer ?? "", /does not send outreach/);
-  assert.match(memory?.answer ?? "", /M3 project and conversation memory are implemented/i);
-  assert.match(memory?.answer ?? "", /M4 temporal\/conflict retrieval is next/i);
+  assert.match(memory?.answer ?? "", /M1 through M6 are implemented/i);
+  assert.match(memory?.answer ?? "", /Memory remains context, not action authority/i);
 });
 
 test("dashboard identity and Run 4 capability answers use canonical records", async () => {

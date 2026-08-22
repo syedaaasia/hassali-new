@@ -1,4 +1,5 @@
 import { drizzle } from "drizzle-orm/node-postgres";
+import { sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { z } from "zod";
 import * as schema from "./schema/index";
@@ -20,6 +21,8 @@ function readDatabaseUrl() {
 export function createDatabaseClient(connectionString = readDatabaseUrl()) {
   const pool = new Pool({
     connectionString,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 30_000,
     max: 5
   });
 
@@ -34,6 +37,10 @@ export function getDatabaseClient() {
   cachedDatabaseClient ??= createDatabaseClient();
 
   return cachedDatabaseClient;
+}
+
+export async function probeDatabaseConnection() {
+  await getDatabaseClient().execute(sql`select 1`);
 }
 
 export const db = new Proxy({} as DatabaseClient, {

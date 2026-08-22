@@ -152,8 +152,10 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   isLoading: false,
   isPreviewOpen: false,
   clearLogs: async () => {
+    const projectId = get().projectId;
+    if (!projectId) return;
     const response = await fetch("/api/runtime", {
-      body: JSON.stringify({ action: "clearLogs" }),
+      body: JSON.stringify({ action: "clearLogs", projectId }),
       headers: { "Content-Type": "application/json" },
       method: "POST"
     });
@@ -161,8 +163,10 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     set({ ...payload, error: null });
   },
   refreshRuntime: async () => {
+    const projectId = get().projectId;
+    if (!projectId) return;
     try {
-      const response = await fetch("/api/runtime");
+      const response = await fetch(`/api/runtime?projectId=${encodeURIComponent(projectId)}`);
       const payload = await readRuntimeResponse(response);
       set(payload);
     } catch (error) {
@@ -241,11 +245,13 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     }
   },
   stopPreview: async () => {
+    const projectId = get().projectId;
+    if (!projectId) return;
     set({ error: null, isLoading: true });
 
     try {
       const response = await fetch("/api/runtime", {
-        body: JSON.stringify({ action: "stop" }),
+        body: JSON.stringify({ action: "stop", projectId }),
         headers: { "Content-Type": "application/json" },
         method: "POST"
       });

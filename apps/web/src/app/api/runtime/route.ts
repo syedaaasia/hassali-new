@@ -7,6 +7,12 @@ import {
   stopRuntime,
   syncRunningRuntimeWorkspace
 } from "@/lib/server/runtime-manager";
+import { sanitizeRuntimeText } from "@/lib/server/runtime/runtime-event-buffer";
+import {
+  boundedJsonFailure,
+  productionRequestLimits,
+  readBoundedJson
+} from "@/lib/server/production-hardening/request-guard";
 
 export const runtime = "nodejs";
 
@@ -17,13 +23,13 @@ type RuntimeRouteFile = {
 
 function runtimeResponse(state: ReturnType<typeof getRuntimeStatus>) {
   return Response.json({
-    error: state.error,
-    logs: state.logs,
+    error: state.error ? sanitizeRuntimeText(state.error) : null,
+    logs: state.logs.map(sanitizeRuntimeText),
     port: state.port,
     previewUrl: state.previewUrl,
     projectId: state.projectId,
     status: state.status,
-    workspacePath: state.workspacePath
+    workspacePath: null
   });
 }
 
@@ -34,8 +40,20 @@ function databaseUnavailableResponse() {
   );
 }
 
-export async function GET() {
-  return runtimeResponse(getRuntimeStatus());
+export async function GET(request: Request) {
+  const { userId } = await auth();
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const projectId = new URL(request.url).searchParams.get("projectId")?.trim() ?? "";
+  if (!projectId) return Response.json({ error: "projectId is required." }, { status: 400 });
+  try {
+    const files = await listUserProjectFiles({ externalUserId: userId, projectId });
+    if (!files) return Response.json({ error: "Project not found." }, { status: 404 });
+  } catch {
+    return databaseUnavailableResponse();
+  }
+  const state = getRuntimeStatus();
+  if (state.projectId !== projectId) return Response.json({ error: "Runtime not found." }, { status: 404 });
+  return runtimeResponse(state);
 }
 
 export async function POST(request: Request) {
@@ -45,10 +63,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => null)) as {
+  const parsedBody = await readBoundedJson<{
     action?: unknown;
     projectId?: unknown;
-  } | null;
+  }>(request, productionRequestLimits.memoryJsonBytes);
+  if (!parsedBody.ok) return boundedJsonFailure(parsedBody);
+  const body = parsedBody.value;
   const action =
     body?.action === "clearLogs" ||
     body?.action === "restart" ||
@@ -56,14 +76,6 @@ export async function POST(request: Request) {
     body?.action === "sync"
       ? body.action
       : "start";
-
-  if (action === "clearLogs") {
-    return runtimeResponse(clearRuntimeLogs());
-  }
-
-  if (action === "stop") {
-    return runtimeResponse(await stopRuntime());
-  }
 
   if (typeof body?.projectId !== "string" || body.projectId.trim().length === 0) {
     return Response.json(
@@ -89,6 +101,19 @@ export async function POST(request: Request) {
 
   if (!files) {
     return Response.json({ error: "Project not found." }, { status: 404 });
+  }
+
+  const current = getRuntimeStatus();
+  if (current.projectId && current.projectId !== body.projectId) {
+    return Response.json({ error: "Another project runtime is active. Stop it from its owning project first." }, { status: 409 });
+  }
+
+  if (action === "clearLogs") {
+    return runtimeResponse(clearRuntimeLogs());
+  }
+
+  if (action === "stop") {
+    return runtimeResponse(await stopRuntime());
   }
 
   const runtimeFiles = files.map((file) => ({
