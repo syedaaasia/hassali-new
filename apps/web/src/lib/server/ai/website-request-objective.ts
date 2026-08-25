@@ -26,7 +26,9 @@ function clean(value: string) {
 
 function beforeInstruction(value: string) {
   const match = instructionStart.exec(value);
-  return clean(match?.index === undefined ? value : value.slice(0, match.index));
+  return clean(match?.index === undefined ? value : value.slice(0, match.index))
+    .replace(/\s+(?:(?:and|but)\s+)?(?:please|kindly)$/i, "")
+    .trim();
 }
 
 function plausibleProperName(value: string) {

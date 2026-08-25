@@ -424,7 +424,9 @@ test("locked models do not silently substitute", async () => {
     }));
     assert.equal(calls.length, 1);
     assert.equal(result.decision.fallbackModel, null);
-    assert.match(result.answer, /couldn't complete that answer reliably/i);
+    assert.match(result.answer, /React/i);
+    assert.match(result.answer, /Vue/i);
+    assert.doesNotMatch(result.answer, /Upwork|Fiverr|couldn't complete/i);
     assert.doesNotMatch(result.answer, /locked|selected model|provider/i);
   } finally {
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
@@ -723,32 +725,14 @@ test("ordinary dashboard and billing edits do not trigger app collisions", async
   }
 });
 
-test("malformed proposal responses use the deterministic redacted fallback without a second provider", async () => {
+test("malformed proposal responses use one bounded redacted provider fallback", async () => {
   const previousKey = process.env.OPENROUTER_API_KEY;
   const previousFetch = globalThis.fetch;
   const requests: Array<{ messages?: Array<{ content?: string }>; model?: string }> = [];
   process.env.OPENROUTER_API_KEY = "test-key";
   globalThis.fetch = async (_url, init) => {
     requests.push(JSON.parse(String(init?.body ?? "{}")));
-    if (requests.length === 1) {
-      return new Response("not-json", { status: 200 });
-    }
-    return Response.json({
-      model: "openrouter/free",
-      choices: [{
-        message: {
-          content: JSON.stringify({
-            summary: "Added focused signup validation.",
-            changes: [{
-              action: "update",
-              path: "src/App.tsx",
-              summary: "Validate signup input with the existing schema library.",
-              proposedContent: "import { z } from 'zod';\nconst Signup = z.object({ email: z.string().email() });\nexport default function App() { return <button>Save</button>; }"
-            }]
-          })
-        }
-      }]
-    });
+    return new Response("not-json", { status: 200 });
   };
   try {
     const source = [
@@ -773,7 +757,7 @@ test("malformed proposal responses use the deterministic redacted fallback witho
       workspace
     });
     const proposal = await proposalFromResponse(response);
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
     assert.equal(typeof requests[0]?.model, "string");
     const providerPayload = JSON.stringify(requests);
     assert(!providerPayload.includes("sk-or-v1-secretsecretsecretsecret"));

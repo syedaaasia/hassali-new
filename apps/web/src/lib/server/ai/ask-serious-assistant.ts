@@ -13,6 +13,7 @@ export type AskIntentName =
   | "client_message_or_email"
   | "coding_help_text_only"
   | "comparison_or_recommendation"
+  | "conversation_history_analysis"
   | "data_quality_check"
   | "data_work_guidance"
   | "date_time_question"
@@ -307,6 +308,11 @@ function isSummaryRequest(prompt: string) {
   return /\b(?:summarize|summarise|summary)\b/i.test(prompt);
 }
 
+function isConversationHistoryAnalysis(prompt: string) {
+  return /\b(?:summari[sz]e|summary|recap|handoff|what (?:have|did) we discuss|what decisions? (?:have we|did we) made?|what have we (?:done|covered))\b/i.test(prompt) &&
+    /\b(?:chat|conversation|discussion|messages?|everything|we(?:'ve| have) discussed|we discussed|so far|complete chat|entire chat)\b/i.test(prompt);
+}
+
 function isDataWorkGuidance(prompt: string) {
   return /\b(?:csv|spreadsheet|excel|records|dataset|data cleaning|dedupe|duplicates)\b/i.test(prompt);
 }
@@ -443,6 +449,7 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (/\b(?:logo|visual direction|brand identity|colors|palette)\b/i.test(prompt)) return classify(prompt, "logo_or_visual_direction", 0.82, "The user asks for visual or logo direction.");
   if (isWritingIntent(prompt)) return classify(prompt, "client_message_or_email", 0.94, "The user is asking for a drafted message or reply.");
   if (isPoliteRewrite(prompt)) return classify(prompt, "writing_or_rewriting", 0.92, "The user is asking to rewrite existing wording.");
+  if (isConversationHistoryAnalysis(prompt)) return classify(prompt, "conversation_history_analysis", 0.98, "The user asked Hassali to analyze the current conversation transcript.");
   if (isSummaryRequest(prompt)) return classify(prompt, "summarization", 0.9, "The user requested a summary of provided text.");
   if (/\b(?:bullet points|bullets|bullet format|as bullets)\b/i.test(prompt)) return classify(prompt, "bullet_format", 0.93, "The user requested bullet-point formatting.");
   if (/\b(?:legal advisor|contract|freelance contract|lawyer|legal)\b/i.test(prompt)) return classify(prompt, "legal_style_guidance", 0.86, "The user asks for legal-style guidance.");

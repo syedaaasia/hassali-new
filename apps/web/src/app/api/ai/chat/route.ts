@@ -3,6 +3,7 @@ import {
   getOwnedGithubProjectConnection,
   getOwnedProjectNotes,
   listUserProjectFiles,
+  loadChatHistory,
   loadOwnedChatHandoff,
   loadOwnedChatProposal,
   loadOwnedHandoffResponse,
@@ -36,6 +37,10 @@ import {
   runAskBrain,
   type AskModelSelectionPolicy
 } from "@/lib/server/ai/ask-brain-orchestrator";
+import {
+  classifyConversationHistoryIntent,
+  type ConversationTranscript
+} from "@/lib/server/ai/conversation-history-analysis";
 import {
   compactAskRequestUnderstanding,
   understandAskRequest
@@ -430,6 +435,28 @@ type ChatRequestMessage = {
   providerFailureCategory?: string | null;
   responseKind?: "deterministic_answer" | "identity_response" | "mode_boundary" | "provider_failure" | "safety_response" | "substantive_answer";
 };
+
+function persistedAttachmentLabels(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object") return [];
+  const attachments = (metadata as { attachments?: unknown }).attachments;
+  if (!Array.isArray(attachments)) return [];
+  return attachments.flatMap((attachment) => {
+    if (!attachment || typeof attachment !== "object") return [];
+    const record = attachment as { kind?: unknown; name?: unknown };
+    const name = typeof record.name === "string" ? record.name.trim().slice(0, 160) : "";
+    const kind = typeof record.kind === "string" ? record.kind.trim().slice(0, 40) : "";
+    return name ? [`${name}${kind ? ` (${kind})` : ""}`] : [];
+  }).slice(0, 8);
+}
+
+function requestConversationTranscript(messages: ChatRequestMessage[]): ConversationTranscript {
+  return {
+    authoritative: false,
+    messages: messages.map((message) => ({ content: message.content, role: message.role })),
+    source: "request_context",
+    truncated: false
+  };
+}
 
 type AiMode = "ASK" | "SUGGEST" | "EXECUTE";
 type ProductMode = "ASK" | "WEBSITE" | "CODE";
@@ -6181,6 +6208,7 @@ function createIntelligenceTextStream(
 
 export async function POST(request: Request) {
   const routeStartedAt = Date.now();
+  const completionRequestId = `ask-${crypto.randomUUID()}`;
   const taskSignal = request.signal;
   const parsedBody = await readBoundedJson<{
     approvalPolicy?: unknown;
@@ -6751,6 +6779,45 @@ export async function POST(request: Request) {
       { headers: { "Cache-Control": "no-store", [hassaliChatContractHeader]: hassaliChatContractVersion }, status: 503 }
     ));
   }
+  let askConversationTranscript = requestConversationTranscript(messages);
+  const conversationScope = persistence?.sessionId
+    ? `session-${persistence.sessionId.replace(/[^a-z0-9]/gi, "").slice(-10)}`
+    : "request-context";
+  if (productMode === "ASK" && classifyConversationHistoryIntent(askReasoningPrompt) && persistence) {
+    try {
+      const historyLimit = 1_001;
+      const history = await loadChatHistory({
+        limit: historyLimit,
+        projectId: persistence.projectId,
+        sessionId: persistence.sessionId,
+        userId: persistence.userId
+      });
+      const persistedMessages = history.messages.slice(0, historyLimit - 1).flatMap((message) =>
+        message.role === "user" || message.role === "assistant"
+          ? [{
+              attachmentLabels: persistedAttachmentLabels(message.metadata),
+              content: message.content,
+              role: message.role
+            }]
+          : []
+      );
+      const latestPersisted = persistedMessages.at(-1);
+      if (latestPersisted?.role !== "user" || latestPersisted.content.trim() !== latestUserPrompt.trim()) {
+        persistedMessages.push({ attachmentLabels: [], content: latestUserPrompt, role: "user" });
+      }
+      askConversationTranscript = {
+        authoritative: true,
+        messages: persistedMessages,
+        source: "owned_persistence",
+        truncated: history.messages.length >= historyLimit
+      };
+    } catch (error) {
+      console.warn("owned conversation transcript unavailable", {
+        projectId: persistence.projectId,
+        reason: error instanceof Error ? error.message.slice(0, 120) : "unknown"
+      });
+    }
+  }
   let inheritedRepairAuthority: WebsiteProposalRepairAuthority | null = null;
   if (structuredRepairContext && productMode === "WEBSITE" && requestedProjectId && persistence) {
     const rejectedProposal = await loadOwnedChatProposal({
@@ -6842,6 +6909,8 @@ export async function POST(request: Request) {
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
+      completionRequestId,
+      conversationScope,
       freshnessDecision: specialistFreshnessDecision,
       evidenceGraph: multimodalVerification.graph,
       evidenceVerificationState: multimodalVerification.state,
@@ -7794,6 +7863,9 @@ export async function POST(request: Request) {
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
+      completionRequestId,
+      conversationScope,
+      conversationTranscript: askConversationTranscript,
       evidenceGraph: multimodalVerification.graph,
       evidenceVerificationState: multimodalVerification.state,
       freshnessDecision: askFreshnessDecision,
@@ -7934,6 +8006,9 @@ export async function POST(request: Request) {
       abortSignal: taskSignal,
       askRuntimeContext,
       behavior,
+      completionRequestId,
+      conversationScope,
+      conversationTranscript: askConversationTranscript,
       evidenceGraph: multimodalVerification.graph,
       evidenceVerificationState: multimodalVerification.state,
       freshnessDecision: askFreshnessDecision,
