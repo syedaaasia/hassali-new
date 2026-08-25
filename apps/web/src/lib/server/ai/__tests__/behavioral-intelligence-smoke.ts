@@ -405,6 +405,18 @@ test("latest explicit objective wins over an older technical topic", () => {
   assert.doesNotMatch(result.resolvedRequest, /React|Vue/i);
 });
 
+test("complete why questions do not inherit an unrelated live objective", () => {
+  const result = decision("Why do humans dream?", "ASK", [
+    { content: "What happened in the world today that could affect AI companies the most?", role: "user" },
+    { content: "Current sources are unavailable.", role: "assistant" },
+    { content: "Answer my next question using only three words.", role: "user" },
+    { content: "Understood.", role: "assistant" }
+  ]);
+  assert.equal(result.referencedObjective, null);
+  assert.equal(result.resolvedRequest, "Why do humans dream?");
+  assert.equal(result.researchIntent, false);
+});
+
 test("active negative constraints survive list and choice follow-ups", () => {
   const result = decision("Which one is simplest?", "ASK", [
     { content: "Help me choose an auth system.", role: "user" },

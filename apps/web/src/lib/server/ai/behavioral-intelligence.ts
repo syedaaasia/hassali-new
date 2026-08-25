@@ -335,7 +335,10 @@ function selectReferencedObjective(
     if (ranked[0]?.score) return ranked[0].objective;
   }
 
-  if (/\b(?:previous question|answer (?:it|that)|think longer|why|which one|compare them)\b/i.test(prompt)) {
+  if (
+    /\b(?:previous question|answer (?:it|that)|think longer)\b/i.test(prompt) ||
+    /^(?:why|which one|compare them)[.!?]*$/i.test(prompt.trim())
+  ) {
     return answerableObjectives.at(-1) ?? priorUserObjectives.at(-1) ?? null;
   }
 
