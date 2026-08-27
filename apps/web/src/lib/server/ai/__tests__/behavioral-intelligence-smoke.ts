@@ -417,6 +417,63 @@ test("complete why questions do not inherit an unrelated live objective", () => 
   assert.equal(result.researchIntent, false);
 });
 
+const liveObjectiveHistory = [
+  { content: "What happened in AI news today?", role: "user" as const },
+  { content: "I could not verify the current answer from suitable live sources.", role: "assistant" as const }
+];
+
+for (const prompt of [
+  "Why do humans dream?",
+  "Why is the sky blue?",
+  "How does photosynthesis work?",
+  "How can I start freelancing?",
+  "Which one is the best database for Mango?",
+  "Think longer about why humans dream.",
+  "Before you answer it, explain photosynthesis.",
+  "Before you answer it explain photosynthesis.",
+  "What database does Mango use now?",
+  "What is quantum entanglement?",
+  "When did World War II end?",
+  "Where is Karachi?",
+  "Who created Linux?"
+]) {
+  test(`self-contained request does not inherit live context: ${prompt}`, () => {
+    const result = decision(prompt, "ASK", liveObjectiveHistory);
+    assert.equal(result.referencedObjective, null);
+    assert.equal(result.researchIntent, false);
+    assert.doesNotMatch(result.resolvedRequest, /AI news today/i);
+  });
+}
+
+const recursionHistory = [
+  { content: "Explain recursion simply.", role: "user" as const },
+  { content: "Recursion is when a process solves a problem by calling a smaller version of itself.", role: "assistant" as const }
+];
+
+for (const prompt of [
+  "Why?",
+  "Why though?",
+  "How?",
+  "How so?",
+  "What about that?",
+  "And then?",
+  "Explain why.",
+  "Tell me more.",
+  "What do you mean?",
+  "Can you explain?",
+  "Why is that?",
+  "How does that work?",
+  "What does that mean?",
+  "Explain this more."
+]) {
+  test(`elliptical request preserves relevant continuity: ${prompt}`, () => {
+    const result = decision(prompt, "ASK", recursionHistory);
+    assert.equal(result.referencedObjective, "Explain recursion simply.");
+    assert.match(result.resolvedRequest, /recursion/i);
+    assert.equal(result.researchIntent, false);
+  });
+}
+
 test("active negative constraints survive list and choice follow-ups", () => {
   const result = decision("Which one is simplest?", "ASK", [
     { content: "Help me choose an auth system.", role: "user" },

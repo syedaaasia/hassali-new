@@ -53,6 +53,7 @@ import {
 } from "./ask-response-constraints";
 import { createEpistemicDirectAnswer, isTimelessReasoningRequest } from "./ask-epistemic-foundation";
 import {
+  hasExplicitConversationSummaryTarget,
   prepareConversationSummary,
   type ConversationTranscript,
   type PreparedConversationSummary
@@ -436,10 +437,12 @@ function isWorkspaceProjectSummaryRequest(prompt: string) {
 
 function isReferenceSummaryRequest(input: AskBrainInput) {
   const workspace = getRelevantWorkspaceText(input);
+  if (hasExplicitConversationSummaryTarget(input.prompt)) return false;
 
   return Boolean(workspace.excerpt) &&
     !isWorkspaceProjectSummaryRequest(input.prompt) &&
-    /\b(?:summari[sz]e|explain|review|what is in|read)\b[\s\S]{0,80}\b(?:file|this)\b/i.test(input.prompt);
+    (/\b(?:summari[sz]e|explain|review|what is in|read)\b[\s\S]{0,80}\b(?:file|this)\b/i.test(input.prompt) ||
+      /\b(?:write|create|give me)\b[\s\S]{0,30}\b(?:summary|recap)\b/i.test(input.prompt));
 }
 
 function chooseDecisionPath(
@@ -650,7 +653,10 @@ function conversationSummaryFor(input: AskBrainInput): PreparedConversationSumma
     source: "request_context" as const,
     truncated: false
   };
-  return prepareConversationSummary({ prompt: input.prompt, transcript });
+  const workspace = getRelevantWorkspaceText(input);
+  const artifactTargetAvailable = Boolean(workspace.excerpt) ||
+    /\b(?:article|document|file|pdf|report|attachment|pasted (?:text|content|article|document|report))\b/i.test(input.prompt);
+  return prepareConversationSummary({ artifactTargetAvailable, prompt: input.prompt, transcript });
 }
 
 function buildModelPrompt(input: AskBrainInput, category: AskSemanticCategory) {
@@ -742,6 +748,17 @@ function buildModelReference(
         }
       : null
   }));
+}
+
+function sanitizeProviderMessages(messages: Parameters<AskProviderCall>[0]["messages"]) {
+  return messages.map((message) => ({
+    ...message,
+    content: redactSecrets(message.content)
+  }));
+}
+
+function callProviderWithSanitizedContext(providerCall: AskProviderCall, input: Parameters<AskProviderCall>[0]) {
+  return providerCall({ ...input, messages: sanitizeProviderMessages(input.messages) });
 }
 
 function providerConversation(
@@ -1308,7 +1325,7 @@ async function maybeReviseWithModel(
     };
   }
 
-  const revision = await (input.providerCall ?? fetchOpenRouterText)({
+  const revision = await callProviderWithSanitizedContext(input.providerCall ?? fetchOpenRouterText, {
     abortSignal: input.abortSignal,
     messages: [
       {
@@ -1608,7 +1625,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
         attemptedModels.push(executionProvider.executionModelId!);
         providerCallCount += 1;
         researchAttempted = researchAttempted || webSearchRequested;
-        const modelResult = normalizeAskProviderResult(await providerCall({
+        const modelResult = normalizeAskProviderResult(await callProviderWithSanitizedContext(providerCall, {
           abortSignal: input.abortSignal,
           messages: providerMessagesForCall,
           maxTokens: executionProvider.pricingClass === "free" ? 4_000 : 2_000,
@@ -1659,7 +1676,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
             fallbackModel = fallbackProvider.resolvedModelId ?? fallbackProvider.executionModelId;
             fallbackOccurred = true;
             fallbackReason = modelResult.category;
-            const fallbackResult = normalizeAskProviderResult(await providerCall({
+            const fallbackResult = normalizeAskProviderResult(await callProviderWithSanitizedContext(providerCall, {
               abortSignal: input.abortSignal,
               messages: providerMessagesForCall,
               maxTokens: 4_000,

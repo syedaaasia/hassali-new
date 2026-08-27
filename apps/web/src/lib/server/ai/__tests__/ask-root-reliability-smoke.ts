@@ -93,8 +93,13 @@ async function withConfiguredProvider(run: () => Promise<void>) {
 }
 
 for (const prompt of [
+  "write a summary",
   "summarize this chat",
   "write summary of the complete chat",
+  "summarize everything we discussed",
+  "give me a recap of this conversation",
+  "what have we discussed so far?",
+  "what did we talk about?",
   "give me a chronological recap of everything we've discussed"
 ]) {
   test(`production route completes conversation request: ${prompt}`, async () => {
@@ -161,7 +166,96 @@ test("unrelated topics are organized and attachment metadata remains visible", (
 test("conversation intent is semantic and does not capture pasted-text summaries", () => {
   assert(classifyConversationHistoryIntent("write summary of the complete chat"));
   assert(classifyConversationHistoryIntent("create a handoff from everything we discussed"));
+  assert(classifyConversationHistoryIntent("write a summary", { hasConversationContext: true }));
+  assert(classifyConversationHistoryIntent("what have we discussed so far?", { hasConversationContext: true }));
+  assert(classifyConversationHistoryIntent("Create a handoff report of this conversation"));
+  assert(classifyConversationHistoryIntent("Write a summary report of our discussion"));
+  assert(classifyConversationHistoryIntent("Summarize our conversation for a report"));
   assert.equal(classifyConversationHistoryIntent("summarize this pasted article: hello world"), null);
+  assert.equal(classifyConversationHistoryIntent("summarize this selected article"), null);
+  assert.equal(classifyConversationHistoryIntent("summarize this file"), null);
+  assert.equal(classifyConversationHistoryIntent("Pasted document: quarterly notes. Give me a summary"), null);
+  assert.equal(classifyConversationHistoryIntent("write a summary", {
+    artifactTargetAvailable: true,
+    hasConversationContext: true
+  }), null);
+  assert.equal(prepareConversationSummary({
+    artifactTargetAvailable: true,
+    prompt: "write a summary",
+    transcript: { authoritative: true, messages: baseConversation, source: "owned_persistence", truncated: false }
+  }), null);
+});
+
+test("every conversation-summary provider attempt receives canonical secret-sanitized context", async () => {
+  await withConfiguredProvider(async () => {
+    const secrets = [
+      "sk-test-super-secret-123456",
+      "hunter2-secret",
+      "mango-db-secret",
+      "token-secret-123456",
+      "private-key-secret-material",
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJoYXNzYWxpLXRlc3QifQ.signature-secret"
+    ];
+    const messages: ConversationHistoryMessage[] = [
+      { role: "user", content: "Mango uses Python, PostgreSQL, and React." },
+      { role: "assistant", content: "Mango is recorded." },
+      { role: "user", content: "Actually Mango now uses SQLite instead of PostgreSQL." },
+      { role: "user", content: "API key: sk-test-super-secret-123456" },
+      { role: "user", content: "password=hunter2-secret token=token-secret-123456" },
+      { role: "user", content: "postgres://mango:mango-db-secret@localhost/app" },
+      { role: "user", content: "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJoYXNzYWxpLXRlc3QifQ.signature-secret" },
+      { role: "user", content: "-----BEGIN PRIVATE KEY-----\nprivate-key-secret-material\n-----END PRIVATE KEY-----" },
+      { role: "user", content: "write summary of the complete chat" }
+    ];
+    const { calls, providerCall } = providerSequence([
+      { status: "failed", category: "provider_model_unavailable", reason: "primary unavailable" },
+      {
+        status: "ok",
+        content: "Conversation summary\n\nMain topics\n- Mango uses Python, React, and SQLite.\n\nCurrent state\n- SQLite supersedes PostgreSQL as the current database.",
+        servedModel: "fallback-model"
+      }
+    ]);
+    const result = await runAskBrain({
+      ...brainInput("write summary of the complete chat", {
+        conversationTranscript: { authoritative: true, messages, source: "owned_persistence", truncated: false },
+        messages,
+        modelSelectionPolicy: "automatic",
+        providerCall
+      })
+    });
+    assert.equal(calls.length, 2);
+    const outbound = JSON.stringify(calls);
+    for (const secret of secrets) assert(!outbound.includes(secret), `Outbound provider context leaked ${secret}`);
+    assert.match(outbound, /Mango/);
+    assert.match(outbound, /SQLite/);
+    assert.match(result.answer, /SQLite/);
+    assert.equal(result.decision.completionMethod, "alternate_model");
+  });
+});
+
+test("provider revision calls also receive sanitized context", async () => {
+  await withConfiguredProvider(async () => {
+    const messages: ConversationHistoryMessage[] = [
+      { role: "user", content: "API key: sk-test-revision-secret-123456" },
+      { role: "user", content: "Mango uses SQLite." },
+      { role: "user", content: "write summary of the complete chat" }
+    ];
+    const { calls, providerCall } = providerSequence([
+      { status: "ok", content: "Too short. API key: sk-test-revision-secret-123456", servedModel: "primary" },
+      {
+        status: "ok",
+        content: "Conversation summary\n\nMain topics\n- Mango uses SQLite.\n\nCurrent state\n- SQLite is the current database.",
+        servedModel: "primary"
+      }
+    ]);
+    await runAskBrain(brainInput("write summary of the complete chat", {
+      conversationTranscript: { authoritative: true, messages, source: "owned_persistence", truncated: false },
+      messages,
+      providerCall
+    }));
+    assert.equal(calls.length, 2);
+    assert.doesNotMatch(JSON.stringify(calls), /sk-test-revision-secret-123456/);
+  });
 });
 
 for (const [name, failure] of [

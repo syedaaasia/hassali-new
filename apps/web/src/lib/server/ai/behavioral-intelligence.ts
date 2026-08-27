@@ -252,16 +252,81 @@ function contextTokens(value: string) {
   );
 }
 
-function isEllipticalFollowup(value: string) {
+type ContinuityKind = "action_reference" | "elliptical_reference" | "explicit_prior_reference" | "prior_refinement" | "self_contained";
+
+function independentClause(value: string) {
   const text = value.trim();
-  return (
-    /^(?:answer|do|build|fix|try|make|continue|explain|compare)\s+(?:it|that|them|the previous (?:question|answer))(?:\s+correctly)?[.!?]*$/i.test(text) ||
-    /^(?:think longer(?: and answer)?|why|which one(?:\s+is\s+[^.!?]+)?|more|continue|go on|try again|make (?:it|that) (?:shorter|longer|simpler))[.!?]*$/i.test(text) ||
+  const explicitSecondObjective = text.match(
+    /^(?:before|after|while)\b.{1,120}?\b(?:it|that|this)\b\s*,?\s*((?:analy[sz]e|compare|describe|explain|review|summari[sz]e|tell me about)\b.+)$/i
+  )?.[1]?.trim();
+  if (explicitSecondObjective) return explicitSecondObjective;
+  const prefaced = text.match(/^(?:before|after|while)\b[^,]{1,140},\s*(.+)$/i)?.[1]?.trim();
+  return prefaced || text;
+}
+
+function hasUnresolvedDeicticReference(value: string) {
+  return /^(?:(?:why\s+(?:is|was|does|did)|what\s+(?:does|did|is|was))\s+(?:it|that|this)(?:\s+(?:mean|happen))?|how\s+(?:does|did|is|was|can|could|would)\s+(?:it|that|this)(?:\s+(?:work|happen))?|(?:describe|explain|review|summari[sz]e|tell me about)\s+(?:it|that|this|them|those)(?:\s+(?:more|further|again))?)[.!?]*$/i.test(value.trim());
+}
+
+function isStandaloneContextDependent(value: string) {
+  return hasUnresolvedDeicticReference(value) ||
+    /^(?:why(?: though)?|how(?: so)?|what about (?:that|it|them|those)|and then|explain why|tell me more|what do you mean|can you explain|which one(?:\s+is\s+[^.!?]+)?|more|continue|go on)[.!?]*$/i.test(value.trim());
+}
+
+function hasSelfContainedObjective(value: string) {
+  const text = independentClause(value).replace(/[.!?]+$/g, "").trim();
+  if (!text) return false;
+  if (/^which one\s+is\s+(?:the\s+)?best\s+\S+/i.test(text)) return true;
+  if (isStandaloneContextDependent(text)) return false;
+  if (/^what are (?:the )?(?:benefits?|downsides?|drawbacks?|pros?|cons?)$/i.test(text)) return false;
+
+  if (/^think longer about\s+(?!(?:it|that|this|them|those)\b).+/i.test(text)) return true;
+
+  const imperative = text.match(/^(?:analy[sz]e|compare|describe|explain|review|summari[sz]e|tell me about)\s+(.+)$/i)?.[1]?.trim();
+  if (imperative && !/^(?:it|that|this|them|those|why|more|the previous (?:one|question|answer))$/i.test(imperative)) {
+    return true;
+  }
+
+  if (/^(?:what|when|where|who|why|how)\s+(?:am|are|can|could|did|do|does|has|have|is|should|was|were|will|would)\s+\S+/i.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+function classifyContinuity(value: string): ContinuityKind {
+  const text = value.trim();
+  if (hasSelfContainedObjective(text)) return "self_contained";
+
+  if (/^(?:build|do|fix|implement|apply)\s+(?:it|that(?: plan)?)[.!?]*$/i.test(text)) {
+    return "action_reference";
+  }
+
+  if (
+    /\b(?:previous question|answer (?:it|that)|go back to|return to)\b/i.test(text) ||
+    /^(?:answer|do|build|fix|try|make|continue|explain|compare)\s+(?:it|that|them|the previous (?:question|answer))(?:\s+correctly)?[.!?]*$/i.test(text)
+  ) {
+    return "explicit_prior_reference";
+  }
+
+  if (/^(?:think longer(?: and answer)?|make (?:it|that) (?:shorter|longer|simpler)|try again)[.!?]*$/i.test(text)) {
+    return "prior_refinement";
+  }
+
+  if (
+    isStandaloneContextDependent(text) ||
     /^(?:give me\s+)?(?:the\s+)?top\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+(?:of them|from those|options?))?[.!?]*$/i.test(text) ||
     /^(?:give|name)(?:\s+me)?\s+(?:(?:an?|one)\s+example|(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:benefits?|drawbacks?|examples?|options?|reasons?|tools?|ways?))[.!?]*$/i.test(text) ||
-    /^(?:what are (?:the )?(?:benefits?|downsides?|drawbacks?|pros?|cons?)|would you personally [^.!?]*(?:it|here))[.!?]*$/i.test(text) ||
-    /\b(?:go back to|return to)\b/i.test(text)
-  );
+    /^(?:what are (?:the )?(?:benefits?|downsides?|drawbacks?|pros?|cons?)|would you personally [^.!?]*(?:it|here))[.!?]*$/i.test(text)
+  ) {
+    return "elliptical_reference";
+  }
+
+  return "self_contained";
+}
+
+function isEllipticalFollowup(value: string) {
+  return classifyContinuity(value) !== "self_contained";
 }
 
 function isAnswerableObjective(value: string) {
@@ -335,14 +400,24 @@ function selectReferencedObjective(
     if (ranked[0]?.score) return ranked[0].objective;
   }
 
-  if (
-    /\b(?:previous question|answer (?:it|that)|think longer)\b/i.test(prompt) ||
-    /^(?:why|which one|compare them)[.!?]*$/i.test(prompt.trim())
-  ) {
+  const continuity = classifyContinuity(prompt);
+  if (continuity === "self_contained") return null;
+
+  if (continuity === "action_reference") {
+    return actionableObjectives.at(-1) ?? answerableObjectives.at(-1) ?? priorUserObjectives.at(-1) ?? null;
+  }
+
+  if (continuity === "explicit_prior_reference") {
     return answerableObjectives.at(-1) ?? priorUserObjectives.at(-1) ?? null;
   }
 
-  if (isEllipticalFollowup(prompt) && !/^(?:build|do|fix|implement|apply)\b/i.test(prompt.trim())) {
+  if (continuity === "prior_refinement") {
+    return /^think longer|^try again/i.test(prompt.trim())
+      ? answerableObjectives.at(-1) ?? priorUserObjectives.at(-1) ?? null
+      : priorUserObjectives.at(-1) ?? answerableObjectives.at(-1) ?? null;
+  }
+
+  if (continuity === "elliptical_reference" && !/^(?:build|do|fix|implement|apply)\b/i.test(prompt.trim())) {
     return priorUserObjectives.at(-1) ?? answerableObjectives.at(-1) ?? null;
   }
 
@@ -350,7 +425,7 @@ function selectReferencedObjective(
     return actionableObjectives.at(-1) ?? answerableObjectives.at(-1) ?? priorUserObjectives.at(-1) ?? null;
   }
 
-  if (isEllipticalFollowup(prompt)) {
+  if (continuity === "elliptical_reference") {
     return priorUserObjectives.at(-1) ?? null;
   }
 

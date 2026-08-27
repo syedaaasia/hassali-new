@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hassaliChatContractVersion } from "@/lib/chat-contract";
+import { buildAskRuntimeContext } from "../ask-context";
+import { runAskBrain, type AskProviderCall } from "../ask-brain-orchestrator";
 
 type Turn = { content: string; role: "assistant" | "user" };
 
@@ -10,9 +12,11 @@ type AskResult = {
   freshness: string | null;
   providerFailure: string | null;
   responseKind: string | null;
+  sourceOutcome: string | null;
 };
 
-const genericFailure = /I couldn't complete that answer reliably right now|I could not verify the current answer from suitable live sources/i;
+const genericFailure = /I couldn't complete that answer reliably right now/i;
+const liveResearchLimitation = /I could not verify the current answer from suitable live sources/i;
 
 function wordCount(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;
@@ -48,11 +52,61 @@ async function send(messages: Turn[], prompt: string): Promise<AskResult> {
     completionMethod: response.headers.get("x-hassali-ask-completion-method"),
     freshness: response.headers.get("x-hassali-ask-freshness"),
     providerFailure: response.headers.get("x-hassali-ask-provider-failure"),
-    responseKind: response.headers.get("x-hassali-ask-response-kind")
+    responseKind: response.headers.get("x-hassali-ask-response-kind"),
+    sourceOutcome: response.headers.get("x-hassali-ask-source-outcome")
   };
 }
 
-test("founder dashboard sequence preserves correctness state routing and recovery", async () => {
+test("research-capable orchestration fixture requires useful verified evidence rather than treating routing as success", async () => {
+  const prompt = "What happened in AI news today?";
+  const providerInputs: Parameters<AskProviderCall>[0][] = [];
+  const fixtureSources = [
+    { id: "fixture-policy", title: "Fixture AI policy bulletin", url: "https://fixture.example/ai-policy" },
+    { id: "fixture-market", title: "Fixture AI market bulletin", url: "https://fixture.example/ai-market" }
+  ];
+  const providerCall: AskProviderCall = async (input) => {
+    providerInputs.push(input);
+    assert.equal(input.webSearch, true);
+    return {
+      content: "A fixture AI infrastructure policy announced today could affect AI companies. [Policy bulletin](https://fixture.example/ai-policy) [Market bulletin](https://fixture.example/ai-market)",
+      researchAttempted: true,
+      servedModel: "fixture/research-model",
+      sources: fixtureSources.map((source) => ({
+        ...source,
+        content: "Fixture discovery evidence.",
+        isOfficial: false,
+        retrievedAt: "2026-08-26T08:00:00.000Z",
+        sourceType: "secondary" as const
+      })),
+      status: "ok"
+    };
+  };
+  const result = await runAskBrain({
+    askRuntimeContext: buildAskRuntimeContext(new Date("2026-08-26T09:00:00.000Z")),
+    messages: [{ content: prompt, role: "user" }],
+    model: "fixture/research-model",
+    productMode: "ASK",
+    prompt,
+    providerCall,
+    providerCallOwnsRouting: true,
+    researchRetriever: async ({ discoveredSources }) => discoveredSources.map((source) => ({
+      ...source,
+      content: `${source.title} independently reports that fixture AI infrastructure policy changed today and materially affects AI companies.`,
+      publishedAt: "2026-08-26T07:00:00.000Z",
+      retrievedAt: "2026-08-26T09:00:00.000Z"
+    }))
+  });
+  assert.equal(providerInputs.length, 1);
+  assert.match(result.answer, /fixture AI infrastructure policy/i);
+  assert.match(result.answer, /fixture\.example\/ai-policy/i);
+  assert.doesNotMatch(result.answer, liveResearchLimitation);
+  assert.equal(result.decision.freshness.freshnessClass, "live_event");
+  assert.equal(result.decision.webSearchRequested, true);
+  assert(["VERIFIED", "PARTIALLY_VERIFIED"].includes(result.decision.sourceReliability.outcome));
+  assert.equal(result.decision.sourceReliability.sourceCount, 2);
+});
+
+test("no-provider cumulative dashboard replay distinguishes truthful live limitations from later stable recovery", async () => {
   const providerKeys = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"] as const;
   const previousKeys = Object.fromEntries(providerKeys.map((key) => [key, process.env[key]]));
   for (const key of providerKeys) delete process.env[key];
@@ -83,7 +137,7 @@ test("founder dashboard sequence preserves correctness state routing and recover
 
     const currentNews = await send(messages, "What happened in the world today that could affect AI companies the most?");
     assert.equal(currentNews.freshness, "live_event");
-    assert.doesNotMatch(currentNews.answer, /world news|AI companies.*today/i);
+    assert.match(currentNews.answer, liveResearchLimitation);
 
     const nextTurn = await send(messages, "Answer my next question using only three words.");
     assert.match(nextTurn.answer, /understood/i);
@@ -91,6 +145,26 @@ test("founder dashboard sequence preserves correctness state routing and recover
     assert.equal(wordCount(dreams.answer), 3, dreams.answer);
     assert.notEqual(dreams.freshness, "live_event");
     assert.doesNotMatch(dreams.answer, genericFailure);
+
+    const photosynthesis = await send(messages, "How does photosynthesis work?");
+    assert.notEqual(photosynthesis.freshness, "live_event");
+    assert.doesNotMatch(photosynthesis.answer, liveResearchLimitation);
+
+    const pakistanNews = await send(messages, "What happened in Pakistan today?");
+    assert.equal(pakistanNews.freshness, "live_event");
+    assert.match(pakistanNews.answer, liveResearchLimitation);
+
+    const recursion = await send(messages, "Explain recursion simply.");
+    assert.notEqual(recursion.freshness, "live_event");
+    assert.doesNotMatch(recursion.answer, liveResearchLimitation);
+
+    const recursionWhy = await send(messages, "Why?");
+    assert.notEqual(recursionWhy.freshness, "live_event");
+    assert.doesNotMatch(recursionWhy.answer, liveResearchLimitation);
+
+    const quantum = await send(messages, "Now explain quantum entanglement.");
+    assert.notEqual(quantum.freshness, "live_event");
+    assert.doesNotMatch(quantum.answer, liveResearchLimitation);
 
     const mangoSetup = await send(messages, "My imaginary project is called Mango. It uses Python, PostgreSQL and React. Remember that only for this conversation.");
     assert.doesNotMatch(mangoSetup.answer, genericFailure);
@@ -101,14 +175,20 @@ test("founder dashboard sequence preserves correctness state routing and recover
     assert.equal(mangoCurrent.answer.trim(), "SQLite");
     assert.notEqual(mangoCurrent.freshness, "live_event");
 
-    const summary = await send(messages, "write summary of the complete chat");
-    assert.match(summary.answer, /Conversation summary/i);
-    assert.match(summary.answer, /Mango/i);
-    assert.match(summary.answer, /SQLite/i);
-    assert.notEqual(summary.freshness, "live_event");
-    assert.equal(summary.completionMethod, "deterministic_conversation_summary");
-    assert.equal(summary.responseKind, "deterministic_answer");
-    assert.doesNotMatch(summary.answer, genericFailure);
+    for (const summaryPrompt of [
+      "write a summary",
+      "what have we discussed so far?",
+      "write summary of the complete chat"
+    ]) {
+      const summary = await send(messages, summaryPrompt);
+      assert.match(summary.answer, /Conversation summary/i);
+      assert.match(summary.answer, /Mango/i);
+      assert.match(summary.answer, /SQLite/i);
+      assert.notEqual(summary.freshness, "live_event");
+      assert.equal(summary.completionMethod, "deterministic_conversation_summary");
+      assert.equal(summary.responseKind, "deterministic_answer");
+      assert.doesNotMatch(summary.answer, genericFailure);
+    }
   } finally {
     for (const key of providerKeys) {
       const previous = previousKeys[key];

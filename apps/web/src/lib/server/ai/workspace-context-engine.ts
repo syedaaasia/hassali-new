@@ -76,6 +76,9 @@ export function redactWorkspaceSecrets(value: string) {
       /(["'](?:access[_-]?token|api[_-]?key|client[_-]?secret|password|private[_-]?key|refresh[_-]?token|secret(?:[_-]?access)?[_-]?key|token)["']\s*:\s*)["'][^"'\r\n]*(?:["']|$)/gi,
       '$1"[redacted-secret]"'
     )
+    .replace(/\b(Authorization\s*:\s*Bearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi, "$1[redacted-secret]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, "Bearer [redacted-secret]")
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted-secret]")
     .replace(/\b((?:[A-Z0-9_]*API[_-]?KEY|[A-Z0-9_]*SECRET|[A-Z0-9_]*TOKEN|PASSWORD)\s*[:=]\s*)["']?[^"'\s]{6,}/gi, "$1[redacted-secret]")
     .replace(/\b(?:sk|pk|rk|ghp|gho|ghu|ghs|AIza|xox[baprs]|sk-or-v1)-?[A-Za-z0-9_-]{12,}\b/g, "[redacted-secret]");
 
