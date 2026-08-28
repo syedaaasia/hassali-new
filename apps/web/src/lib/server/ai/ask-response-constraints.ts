@@ -41,8 +41,10 @@ function sentenceParts(value: string) {
       const url = trailingPunctuation ? match.slice(0, -trailingPunctuation.length) : match;
       return protect(url) + trailingPunctuation;
     })
-    .replace(/\b\d+(?:\.\d+)+\b/g, (match) => match.replaceAll(".", "\uE102"))
-    .replace(/\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc)\./gi, (match) => match.slice(0, -1) + "\uE103");
+    .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?/gi, protect)
+    .replace(/\bv?\d+(?:\.\d+)+\b/gi, (match) => match.replaceAll(".", "\uE102"))
+    .replace(/\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e)\./gi, (match) => match.replaceAll(".", "\uE103"))
+    .replace(/\b(?:[A-Z]\.){2,}/g, (match) => match.replaceAll(".", "\uE103"));
   return (protectedText.match(/[^.!?]+(?:[.!?]+|$)/g) ?? [])
     .map((part) => part
       .replaceAll("\uE102", ".")
@@ -80,15 +82,50 @@ function forbiddenWords(prompt: string) {
     .slice(0, 20);
 }
 
+type ScopedWordLimit = {
+  index: number;
+  length: number;
+  value: number;
+};
+
+function normalizedMaximum(value: string | undefined, operator: string | undefined) {
+  const parsed = positiveInteger(value);
+  if (!parsed) return null;
+  return /^(?:under|less than)$/i.test(operator ?? "") ? Math.max(1, parsed - 1) : parsed;
+}
+
+function perItemWordLimit(prompt: string): ScopedWordLimit | null {
+  const patterns = [
+    new RegExp("\\beach(?:\\s+(?:bullet|item|point))?\\s+(?:with\\s+)?(under|less than|no more than|at most|max(?:imum)?)\\s+" + countPattern + "\\s+words?\\b", "i"),
+    new RegExp("\\b(under|less than|no more than|at most|max(?:imum)?)\\s+" + countPattern + "\\s+words?\\s+(?:for\\s+)?each(?:\\s+(?:bullet|item|point))?\\b", "i"),
+    new RegExp("\\b(under|less than|no more than|at most|max(?:imum)?)\\s+" + countPattern + "\\s+words?\\s+each\\b", "i")
+  ];
+  for (const pattern of patterns) {
+    const match = prompt.match(pattern);
+    const value = normalizedMaximum(match?.[2], match?.[1]);
+    if (match?.index !== undefined && value) return { index: match.index, length: match[0].length, value };
+  }
+  return null;
+}
+
+function totalWordLimit(prompt: string, perItem: ScopedWordLimit | null) {
+  const totalScope = perItem
+    ? `${prompt.slice(0, perItem.index)} ${prompt.slice(perItem.index + perItem.length)}`
+    : prompt;
+  const match = totalScope.match(new RegExp("\\b(under|less than|max(?:imum)?|no more than|at most)\\s+" + countPattern + "\\s+words?(?:\\s+total)?\\b", "i"));
+  return normalizedMaximum(match?.[2], match?.[1]);
+}
+
 function currentConstraints(prompt: string): Omit<AskResponseConstraints, "source"> {
+  const perItem = perItemWordLimit(prompt);
   const exactWords = positiveInteger(prompt.match(new RegExp("\\bexactly\\s+" + countPattern + "\\s+words?\\b", "i"))?.[1])
     ?? positiveInteger(prompt.match(new RegExp("\\b(?:answer|respond)(?:\\s+(?:my\\s+)?next\\s+(?:question\\s+)?)?(?:in|using)\\s+(?:only\\s+)?" + countPattern + "\\s+words?\\b", "i"))?.[1])
     ?? positiveInteger(prompt.match(new RegExp("\\band\\s+(?:exactly\\s+)?" + countPattern + "\\s+words?\\b", "i"))?.[1]);
-  const maxWords = positiveInteger(prompt.match(/\b(?:under|less than|max(?:imum)?|no more than|at most)\s+(\d+)\s+words?\b/i)?.[1]);
+  const maxWords = totalWordLimit(prompt, perItem);
   const bulletCount = positiveInteger(prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+bullet(?:\\s+points?)?s?\\b", "i"))?.[1]);
-  const exactSentences = positiveInteger(prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+sentences?\\s+(?:only\\b)?", "i"))?.[1])
-    ?? positiveInteger(prompt.match(new RegExp("\\b(?:use|answer|respond)(?:\\s+in)?\\s+" + countPattern + "\\s+sentences?\\s+only\\b", "i"))?.[1]);
-  const bulletItemMaxWords = positiveInteger(prompt.match(new RegExp("\\beach(?:\\s+(?:bullet|item))?\\s+(?:with\\s+)?(?:no more than|at most|max(?:imum)?)\\s+" + countPattern + "\\s+words?\\b", "i"))?.[1]);
+  const exactSentences = positiveInteger(prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+sentences?(?:\\s+only)?\\b", "i"))?.[1])
+    ?? positiveInteger(prompt.match(new RegExp("\\b(?:use|answer|respond|write)(?:\\s+in)?\\s+(?:exactly\\s+)?" + countPattern + "\\s+sentences?(?:\\s+only)?\\b", "i"))?.[1]);
+  const bulletItemMaxWords = perItem?.value ?? null;
   const yesNoOnly = /\b(?:answer|respond|return)(?:\s+with)?\s+(?:only\s+)?yes\s+(?:or|\/)\s+no(?:\s+only)?\b/i.test(prompt) ||
     /\byes\s+(?:or|\/)\s+no\s+only\b/i.test(prompt);
   return {
@@ -108,7 +145,7 @@ export function extractAskResponseConstraints(prompt: string, history: AskConver
     return emptyConstraints("none");
   }
   const current = currentConstraints(prompt);
-  if (current.allowedResponses || current.exactWords || current.maxWords || current.bulletCount || current.exactSentences || current.forbiddenWords.length) {
+  if (current.allowedResponses || current.exactWords || current.maxWords || current.bulletCount || current.bulletItemMaxWords || current.exactSentences || current.forbiddenWords.length) {
     return { ...current, source: "current" };
   }
   const priorUsers = history.filter((message) => message.role === "user");
@@ -116,7 +153,7 @@ export function extractAskResponseConstraints(prompt: string, history: AskConver
   const immediatelyPrior = priorUsers.at(currentIsLast ? -2 : -1);
   if (immediatelyPrior && isNextTurnResponseConstraint(immediatelyPrior.content)) {
     const prior = currentConstraints(immediatelyPrior.content);
-    if (prior.allowedResponses || prior.exactWords || prior.maxWords || prior.bulletCount || prior.exactSentences || prior.forbiddenWords.length) {
+    if (prior.allowedResponses || prior.exactWords || prior.maxWords || prior.bulletCount || prior.bulletItemMaxWords || prior.exactSentences || prior.forbiddenWords.length) {
       return { ...prior, source: "prior-turn" };
     }
   }
@@ -171,6 +208,49 @@ export function repairAskResponseLength(answer: string, constraints: AskResponse
   return tokens.slice(0, ceiling).join(" ").replace(/[,;:]+$/, "").trim();
 }
 
+function distributeWordsAcrossParts(value: string, count: number) {
+  const tokens = words(value.replace(/^\s*(?:[-*•]|\d+[.)])\s+/gm, ""));
+  if (tokens.length < count) return [];
+  const parts: string[] = [];
+  let offset = 0;
+  for (let index = 0; index < count; index += 1) {
+    const remainingParts = count - index;
+    const take = Math.ceil((tokens.length - offset) / remainingParts);
+    parts.push(tokens.slice(offset, offset + take).join(" "));
+    offset += take;
+  }
+  return parts;
+}
+
+function exactBulletContents(value: string, count: number) {
+  const existing = value
+    .split(/\r?\n/)
+    .filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+/.test(line))
+    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim())
+    .filter(Boolean);
+  const candidates = existing.length
+    ? existing
+    : sentenceParts(value).map((part) => part.trim()).filter(Boolean);
+  if (candidates.length >= count) return candidates.slice(0, count);
+  return distributeWordsAcrossParts(candidates.join(" "), count);
+}
+
+function exactSentenceText(value: string, count: number, redistribute = false) {
+  const existing = sentenceParts(value);
+  const normalized = existing
+    .map((part) => part.replace(/[.!?]+$/g, "").trim())
+    .join(" ");
+  const parts = redistribute
+    ? distributeWordsAcrossParts(normalized || value, count)
+    : existing.length >= count
+      ? existing.slice(0, count)
+    : distributeWordsAcrossParts(existing.join(" ") || value, count);
+  if (!parts.length) return value.trim();
+  return parts
+    .map((part) => `${part.replace(/[.!?]+$/g, "").trim()}.`)
+    .join(" ");
+}
+
 export function finalizeAskResponseConstraints(answer: string, constraints: AskResponseConstraints) {
   let next = answer.trim();
   if (constraints.allowedResponses) {
@@ -182,12 +262,8 @@ export function finalizeAskResponseConstraints(answer: string, constraints: AskR
     next = next.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "").replace(/[ \t]{2,}/g, " ");
   }
   if (constraints.bulletCount) {
-    const existing = next.split(/\r?\n/).filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+/.test(line));
-    const candidates = existing.length
-      ? existing
-      : next.split(/(?<=[.!?])\s+/).map((line) => line.trim()).filter(Boolean).map((line) => `- ${line}`);
-    next = candidates.slice(0, constraints.bulletCount).map((line) => {
-      const content = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "");
+    const candidates = exactBulletContents(next, constraints.bulletCount);
+    next = candidates.map((content) => {
       const bounded = constraints.bulletItemMaxWords
         ? words(content).slice(0, constraints.bulletItemMaxWords).join(" ")
         : content;
@@ -195,7 +271,7 @@ export function finalizeAskResponseConstraints(answer: string, constraints: AskR
     }).join("\n");
   }
   if (constraints.exactSentences) {
-    next = sentenceParts(next).slice(0, constraints.exactSentences).join(" ").trim();
+    next = exactSentenceText(next, constraints.exactSentences);
   }
   next = repairAskResponseLength(next, constraints);
   if (constraints.exactWords) {
@@ -206,8 +282,12 @@ export function finalizeAskResponseConstraints(answer: string, constraints: AskR
     }
     next = tokens.slice(0, constraints.exactWords).join(" ").replace(/[,;:]+$/, "").trim();
   }
-  if (constraints.exactSentences === 1 && next) {
-    next = next.replace(/[.!?]+(?=\s+\S)/g, ",").replace(/[.!?]*$/, ".");
+  if (constraints.exactSentences && next) {
+    next = exactSentenceText(
+      next,
+      constraints.exactSentences,
+      Boolean(constraints.exactWords || constraints.maxWords)
+    );
   }
   return next;
 }

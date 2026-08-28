@@ -6,24 +6,48 @@ export type ConversationSummaryTargetContext = {
 export type AskSummaryTarget = "artifact" | "conversation" | null;
 
 export function hasExplicitConversationSummaryTarget(prompt: string) {
-  return /\b(?:chat|conversation|discussion|messages?|everything (?:we(?:'ve| have) discussed|we discussed)|what (?:have|did) we (?:discuss(?:ed)?|talk(?:ed)? about)|what did we talk about|so far|decisions? we|complete chat|entire chat|our discussion|from this chat)\b/i.test(prompt.trim());
+  const text = prompt.trim();
+  return /\b(?:our|this|the|current|complete|entire)\s+(?:chat|conversation|discussion|thread)\b/i.test(text) ||
+    /\b(?:chat|conversation|discussion|thread)\s+(?:history|transcript)\b/i.test(text) ||
+    /\b(?:last|latest|most recent)\s+\d{1,3}\s+(?:messages?|turns?)\b/i.test(text) ||
+    /\b(?:messages?|decisions?)\s+(?:in|from)\s+(?:our|this|the)\s+(?:chat|conversation|discussion|thread)\b/i.test(text) ||
+    /\b(?:everything (?:we(?:'ve| have) discussed|we discussed)|what (?:have|did) we (?:discuss(?:ed)?|talk(?:ed)? about)|what did we talk about|what decisions? (?:have we|did we) made?|what have we (?:done|covered)|so far|from this chat)\b/i.test(text);
 }
 
 export function hasExplicitArtifactSummaryTarget(prompt: string) {
-  return /\b(?:article|document|file|pdf|report|attachment|pasted (?:text|content|article|document|report))\b/i.test(prompt) ||
+  return /\b(?:article|document|file|pdf|attachment|upload|pasted (?:text|content|article|document|report))\b/i.test(prompt) ||
+    /\b(?:selected|attached|uploaded|named|this|the)\s+report\b/i.test(prompt) ||
+    /(?:^|[\s"'`(])(?:[\w.-]+\/)*[\w.-]+\.(?:csv|docx?|md|pdf|rtf|txt|xlsx?)(?=$|[\s"'`),.!?])/i.test(prompt) ||
     /\b(?:summari[sz]e|summary|recap)\b[\s\S]{0,40}:\s*(?:\r?\n)?[\s\S]{80,}/i.test(prompt);
 }
 
+export function isAskSummaryTransformationRequest(prompt: string) {
+  const text = prompt.trim();
+  return /\b(?:summari[sz]e|summary|recap|condense|compress|shorten)\b/i.test(text) ||
+    /\b(?:make|give me)\s+(?:(?:it|this|that)\s+)?(?:a\s+)?(?:shorter|concise|more concise|concise version)\b/i.test(text) ||
+    /\bmake\s+(?:our|this|the)\s+(?:chat|conversation|discussion|thread)\s+(?:shorter|more concise)\b/i.test(text) ||
+    /\b(?:trim|cut)\s+(?:it|this|that)\s+down\b/i.test(text) ||
+    /\breduce\s+(?:it|this|that)\s+to\s+(?:the\s+)?essentials\b/i.test(text);
+}
+
 export function isTargetlessSummaryRequest(prompt: string) {
-  return /^(?:please\s+)?(?:(?:write|create|give me)\s+(?:a\s+)?(?:summary|recap)|summari[sz]e|recap)(?:\s+(?:it|this|everything))?[.!?]*$/i.test(prompt.trim());
+  const text = prompt.trim();
+  if (!isAskSummaryTransformationRequest(text)) return false;
+  return /^(?:please\s+)?(?:(?:write|create|give me)\s+(?:a\s+)?(?:summary|recap)|summari[sz]e|recap)(?:\s+(?:it|this|everything))?[.!?]*$/i.test(text) ||
+    /^(?:please\s+)?(?:make\s+)?(?:it|this|that)(?:\s+(?:more))?\s+(?:shorter|concise)[.!?]*$/i.test(text) ||
+    /^(?:please\s+)?give me\s+(?:a\s+)?shorter\s+version[.!?]*$/i.test(text) ||
+    /^(?:please\s+)?(?:shorten|condense|compress)\s+(?:it|this|that)[.!?]*$/i.test(text) ||
+    /^(?:please\s+)?(?:trim|cut)\s+(?:it|this|that)\s+down[.!?]*$/i.test(text) ||
+    /^(?:please\s+)?reduce\s+(?:it|this|that)\s+to\s+(?:the\s+)?essentials[.!?]*$/i.test(text);
 }
 
 export function resolveAskSummaryTarget(
   prompt: string,
   context: ConversationSummaryTargetContext = {}
 ): AskSummaryTarget {
-  if (hasExplicitConversationSummaryTarget(prompt)) return "conversation";
+  if (!isAskSummaryTransformationRequest(prompt) && !hasExplicitConversationSummaryTarget(prompt)) return null;
   if (hasExplicitArtifactSummaryTarget(prompt)) return "artifact";
+  if (hasExplicitConversationSummaryTarget(prompt)) return "conversation";
   if (!isTargetlessSummaryRequest(prompt)) return null;
   if (context.artifactTargetAvailable) return "artifact";
   return context.hasConversationContext ? "conversation" : null;

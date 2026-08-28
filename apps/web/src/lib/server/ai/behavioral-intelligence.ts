@@ -255,6 +255,13 @@ function contextTokens(value: string) {
 
 type ContinuityKind = "action_reference" | "elliptical_reference" | "explicit_prior_reference" | "prior_refinement" | "self_contained";
 
+export type ContinuityDependencyAnalysis = {
+  explicitTarget: boolean;
+  kind: "dependent" | "independent";
+  missingObject: boolean;
+  unresolvedReference: boolean;
+};
+
 function independentClause(value: string) {
   const text = value.trim();
   const explicitSecondObjective = text.match(
@@ -269,27 +276,93 @@ function hasUnresolvedDeicticReference(value: string) {
   return /^(?:(?:why\s+(?:is|was|does|did)|what\s+(?:does|did|is|was))\s+(?:it|that|this)(?:\s+(?:mean|happen))?|how\s+(?:does|did|is|was|can|could|would)\s+(?:it|that|this)(?:\s+(?:work|happen))?|(?:describe|explain|review|summari[sz]e|tell me about)\s+(?:it|that|this|them|those)(?:\s+(?:more|further|again))?)[.!?]*$/i.test(value.trim());
 }
 
-function hasDependentRefinementStructure(value: string) {
+const anaphoricReferenceHeads = new Set([
+  "alternative", "answer", "approach", "argument", "assumption", "claim", "conclusion",
+  "decision", "example", "explanation", "idea", "method", "option", "opposite", "outcome",
+  "change", "fail", "follow", "happen", "matter", "point", "proposal", "reason", "result",
+  "scale", "statement", "suggestion", "theory", "work"
+]);
+
+function normalizedContinuityClause(value: string) {
   const text = value.trim().replace(/[.!?]+$/g, "");
-  const normalized = text
+  return text
     .replace(/^please\s+/i, "")
     .replace(/^(?:can|could|would|will)\s+you\s+/i, "")
     .trim();
-  const resolvedDemonstrativeNoun = /\b(?:this|that|those)\s+(?!(?:again|also|already|always|correct|deeper|ever|further|happen|happens|mean|means|more|never|often|really|simply|still|true|usually|work|worked|working|works|wrong)\b)[a-z][\w-]*\b/i.test(normalized);
-  if (resolvedDemonstrativeNoun) return false;
-  const resolvedDemonstrativeObject = /^(?:describe|explain|review|summari[sz]e|walk me through)\s+(?:this|that|those)\s+(?!(?:again|deeper|further|more|simply)\b)\S+/i.test(normalized);
-  if (resolvedDemonstrativeObject) return false;
-  const explicitTarget = /\b(?:about|of|on|through|using|with)\s+(?!(?:it|that|this|them|those)\b)\S+/i.test(normalized);
-  if (explicitTarget) return false;
-  return /^(?:elaborate|expand|go deeper|walk me through(?:\s+(?:it|that|this))?|give me (?:an?|another) example|another example)(?:\s+(?:more|further|deeper))?$/i.test(normalized) ||
-    /^(?:expand|elaborate)\s+on\s+(?:it|that|this)$/i.test(normalized) ||
-    /^(?:describe|explain|review|summari[sz]e)\s+(?:it|that|this)(?:\s+(?:again|further|more|more simply|simply))?$/i.test(normalized) ||
-    /^(?:does|did|is|was|can|could|would|will)\s+(?:it|that|this)\b/i.test(normalized) ||
-    /^(?:when|where)\b[\s\S]*\b(?:it|that|this)\b/i.test(normalized);
+}
+
+function hasExplicitContinuityTarget(value: string) {
+  const text = normalizedContinuityClause(value);
+  if (/\b(?:this|that)\s+[^:]{1,60}:\s*\S/i.test(text)) return true;
+  if (/\b(?:about|against|for|of|on|through|to|using|versus|vs\.?|with)\s+(?!(?:it|that|this|them|those|the\s+(?:alternative|opposite|previous\s+(?:answer|point)))\b)[A-Za-z0-9][\w.-]*/i.test(text)) return true;
+  if (/^put\s+(?!(?:it|that|this)\b).+?\s+(?:another|a different)\s+way$/i.test(text)) return true;
+  if (/^(?:describe|explain|justify|review|summari[sz]e|unpack|walk me through)\s+(?!(?:it|that|this|them|those|more|again|why)\b)\S+/i.test(text)) return true;
+  if (/\bif\s+(?!(?:it|that|this)\b)(?:an?|the\s+)?[A-Za-z0-9][\w.-]*(?:\s+[A-Za-z0-9][\w.-]*)?\s+(?:changed|disappeared|failed|held|were|was)\b/i.test(text)) return true;
+  if (/^(?:does|did|is|was|can|could|would|will)\s+(?!(?:it|that|this|the\s+(?:alternative|opposite))\b)[A-Za-z0-9][\w.-]*/i.test(text)) return true;
+  if (/^what\s+makes\s+(?!(?:it|that|this|you)\b)[A-Za-z0-9][\w.-]*(?:\s+[A-Za-z0-9][\w.-]*)?/i.test(text)) return true;
+  return /\b(?:this|that|those)\s+(?:[A-Z][\w.-]*\s+)?(?:component|function|implementation|module|query|service|table|type)\b/.test(text);
+}
+
+function hasUnresolvedContinuityReference(value: string) {
+  const text = normalizedContinuityClause(value);
+  const localReference = text.match(/^([\s\S]+?)\s+(?:and\s+then|and|then)\s+[\s\S]*\b(?:it|that|them)\b/i);
+  if (localReference?.[1] && hasExplicitContinuityTarget(localReference[1])) return false;
+  const relativeClause = text.match(/\b([A-Za-z][\w-]*)\s+that\s+(?:can|could|does|did|has|is|may|might|was|will|would)\b/i);
+  if (relativeClause?.[1] && !/^(?:argue|assume|believe|claim|conclude|say|suppose|think)$/i.test(relativeClause[1])) return false;
+  if (/\b(?:it|them)\b/i.test(text)) return true;
+  if (/^put\s+(?:it|this|that)\b/i.test(text)) return true;
+  if (/^make\s+(?:it|this|that)\b/i.test(text)) return true;
+  if (/\b(?:this|that)\s+(?:could|is|may|might|seems|was|were|would)\b/i.test(text)) return true;
+  if (/\bthe\s+(?:alternative|former|latter|opposite|previous\s+(?:answer|point|proposal))\b/i.test(text)) return true;
+  const demonstratives = [...text.matchAll(/\b(?:this|that|those)\b(?:\s+([A-Za-z][\w-]*))?/gi)];
+  return demonstratives.some((match) => {
+    const head = match[1]?.toLowerCase();
+    if (!head) return true;
+    return anaphoricReferenceHeads.has(head) || /^(?:again|always|false|more|true|wrong)$/.test(head);
+  });
+}
+
+function hasMissingRefinementObject(value: string) {
+  const text = normalizedContinuityClause(value);
+  return /^(?:clarify|defend|describe|elaborate|explain|expand|justify|rephrase|review|unpack)(?:\s+(?:again|deeper|further|more|why))?$/i.test(text) ||
+    /^go\s+(?:deeper|further)$/i.test(text) ||
+    /^tell\s+me\s+more$/i.test(text) ||
+    /^(?:give|show)(?:\s+me)?\s+(?:an?|another|the)\s+(?:counterexample|example|objection|reason)$/i.test(text) ||
+    /^another\s+(?:counterexample|example|objection|reason)$/i.test(text) ||
+    /^(?:any|what(?:\s+are|\s+is)?)\s+(?:the\s+)?(?:caveats?|drawbacks?|downsides?|objections?|risks?|tradeoffs?)$/i.test(text);
+}
+
+function hasEllipticalContinuityShape(value: string) {
+  const text = normalizedContinuityClause(value);
+  return /^(?:why|how)(?:\s+(?:though|so))?$/i.test(text) ||
+    /^(?:and\s+)?then(?:\s+(?:what|how|where|why))?$/i.test(text) ||
+    /^(?:continue|go on|more)$/i.test(text) ||
+    /^what\s+do\s+you\s+mean$/i.test(text) ||
+    /^which\s+one(?:\s+is\s+[^.!?]+)?$/i.test(text) ||
+    /^(?:compared|versus)\s+(?:with\s+)?(?:the\s+)?(?:alternative|opposite)$/i.test(text) ||
+    /^what\s+(?:comes|follows|happens)\s+(?:after|next)$/i.test(text) ||
+    /^what\s+is\s+(?:the\s+)?(?:strongest|main|best)\s+(?:objection|counterargument)$/i.test(text);
+}
+
+export function analyzeContinuityDependency(value: string): ContinuityDependencyAnalysis {
+  const explicitTarget = hasExplicitContinuityTarget(value);
+  const unresolvedReference = hasUnresolvedContinuityReference(value);
+  const missingObject = hasMissingRefinementObject(value);
+  const ellipticalShape = hasEllipticalContinuityShape(value);
+  return {
+    explicitTarget,
+    kind: explicitTarget && !unresolvedReference
+      ? "independent"
+      : unresolvedReference || missingObject || ellipticalShape
+        ? "dependent"
+        : "independent",
+    missingObject,
+    unresolvedReference
+  };
 }
 
 function isStandaloneContextDependent(value: string) {
-  return hasUnresolvedDeicticReference(value) || hasDependentRefinementStructure(value) ||
+  return hasUnresolvedDeicticReference(value) || analyzeContinuityDependency(value).kind === "dependent" ||
     /^(?:why(?: though)?|how(?: so)?|what about (?:that|it|them|those)|and then|explain why|tell me more|what do you mean|can you explain|which one(?:\s+is\s+[^.!?]+)?|more|continue|go on)[.!?]*$/i.test(value.trim());
 }
 
@@ -942,12 +1015,20 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   const objectiveState = buildConversationObjectiveState(messages, currentPrompt);
   const priorObjectives = objectiveState.recentObjectives;
   const requestedCountFromPrompt = extractRequestedCount(currentPrompt);
-  const referencedObjective = selectReferencedObjective(
-    currentPrompt,
-    priorObjectives,
-    priorObjectives.filter(isAnswerableObjective),
-    priorObjectives.filter(isActionableObjective)
-  );
+  const summaryTarget = resolveAskSummaryTarget(currentPrompt, {
+    artifactTargetAvailable: Boolean(
+      input.workspace?.activePath?.trim() && input.workspace?.activeFileContent?.trim()
+    ),
+    hasConversationContext: messages.some((message) => message.role === "user" && message.content.trim() !== currentPrompt)
+  });
+  const referencedObjective = summaryTarget === "artifact"
+    ? null
+    : selectReferencedObjective(
+        currentPrompt,
+        priorObjectives,
+        priorObjectives.filter(isAnswerableObjective),
+        priorObjectives.filter(isActionableObjective)
+      );
   const resolvedRequest = resolveFollowup(currentPrompt, referencedObjective, requestedCountFromPrompt);
   const intent = extractIntentConstraints({
     message: resolvedRequest,
@@ -975,7 +1056,7 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   const requiredOutputs = extractRequiredOutputs(resolvedRequest);
   const ambiguities = unique([
     ...intent.ambiguity,
-    isEllipticalFollowup(currentPrompt) && !referencedObjective
+    isEllipticalFollowup(currentPrompt) && !referencedObjective && summaryTarget !== "artifact"
       ? "The follow-up refers to earlier context, but no relevant conversation objective is available."
       : null
   ]);

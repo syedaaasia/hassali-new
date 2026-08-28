@@ -123,6 +123,76 @@ test("production request compaction and route preserve selected-artifact summary
   assert.doesNotMatch(selectedPdf.answer, /Mango|lunar-secret-value/i);
 });
 
+test("production target authority distinguishes artifact contents from conversation vocabulary", async () => {
+  const relayText = [
+    "Relay diagnostic report.",
+    "ERROR ZEBRA-741: the gateway rejected a stale relay token.",
+    "Benign stack: Python, React, PostgreSQL, and SQLite.",
+    "Private sentinel: API_KEY=round2-secret-sentinel-741"
+  ].join("\n");
+  const relayWorkspace: ChatRequestWorkspace = {
+    activeFileContent: relayText,
+    activePath: "relay.txt",
+    fileContents: { "relay.txt": relayText },
+    fileList: ["relay.txt"],
+    projectName: "Relay"
+  };
+  const sourdoughConversation = (): Turn[] => [
+    { content: "Explain sourdough fermentation. API_KEY=round2-secret-sentinel-741", role: "user" },
+    { content: "Sourdough uses wild yeast and bacteria.", role: "assistant" }
+  ];
+
+  for (const prompt of [
+    "Summarize the error messages in the selected file.",
+    "Summarize the chat comments in the selected file.",
+    "Summarize the conversation history recorded in relay.txt.",
+    "Summarize the thread notes in the selected report."
+  ]) {
+    const result = await send(sourdoughConversation(), prompt, relayWorkspace);
+    assert.match(result.answer, /ZEBRA-741/i, prompt);
+    assert.doesNotMatch(result.answer, /sourdough|round2-secret-sentinel-741/i, prompt);
+  }
+
+  for (const prompt of [
+    "make this shorter",
+    "shorten this",
+    "condense this",
+    "make this more concise",
+    "trim this down",
+    "give me a shorter version",
+    "compress this",
+    "reduce this to the essentials"
+  ]) {
+    const result = await send(sourdoughConversation(), prompt, relayWorkspace);
+    assert.match(result.answer, /ZEBRA-741/i, prompt);
+    assert.doesNotMatch(result.answer, /sourdough|round2-secret-sentinel-741|approval|proposal/i, prompt);
+  }
+
+  const conversation = await send(sourdoughConversation(), "Summarize our conversation about sourdough.", relayWorkspace);
+  assert.match(conversation.answer, /sourdough/i);
+  assert.doesNotMatch(conversation.answer, /ZEBRA-741|round2-secret-sentinel-741/i);
+
+  const noArtifact = await send(sourdoughConversation(), "make this conversation shorter");
+  assert.match(noArtifact.answer, /sourdough/i);
+  assert.doesNotMatch(noArtifact.answer, /ZEBRA-741|round2-secret-sentinel-741/i);
+
+  const pdfWorkspace = {
+    ...relayWorkspace,
+    activePath: "relay.pdf",
+    fileContents: { "relay.pdf": relayText },
+    fileList: ["relay.pdf"]
+  };
+  assert.match((await send(sourdoughConversation(), "make this concise", pdfWorkspace)).answer, /ZEBRA-741/i);
+
+  const pastedWorkspace = {
+    ...relayWorkspace,
+    activePath: "pasted-article.txt",
+    fileContents: { "pasted-article.txt": relayText },
+    fileList: ["pasted-article.txt"]
+  };
+  assert.match((await send(sourdoughConversation(), "reduce this to the essentials", pastedWorkspace)).answer, /ZEBRA-741/i);
+});
+
 test("research-capable orchestration fixture requires useful verified evidence rather than treating routing as success", async () => {
   const prompt = "What happened in AI news today?";
   const providerInputs: Parameters<AskProviderCall>[0][] = [];

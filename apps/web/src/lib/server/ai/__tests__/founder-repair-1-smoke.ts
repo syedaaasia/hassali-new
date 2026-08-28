@@ -128,6 +128,47 @@ test("closed-choice list sentence and composed contracts constrain the final del
         assert.equal(lines.length, 3);
         assert(lines.every((line) => line.replace(/^-\s*/, "").split(/\s+/).length <= 5));
       }
+    },
+    {
+      candidate: "First sentence. Second sentence. Third sentence.",
+      prompt: "Answer in exactly two sentences.",
+      verify(answer: string) {
+        assert.equal(answer, "First sentence. Second sentence.");
+      }
+    },
+    {
+      candidate: "First sentence. Second sentence. Third sentence.",
+      prompt: "Answer in 2 sentences.",
+      verify(answer: string) {
+        assert.equal(answer, "First sentence. Second sentence.");
+      }
+    },
+    {
+      candidate: "- Databases store structured information reliably for applications\n- Indexes speed selective queries for large tables\n- Transactions preserve consistency across related updates\n- Extra provider bullet",
+      prompt: "Three bullets, each under 8 words, about databases.",
+      verify(answer: string) {
+        const lines = answer.split(/\r?\n/);
+        assert.equal(lines.length, 3);
+        assert(lines.every((line) => line.replace(/^-\s*/, "").split(/\s+/).length <= 7));
+      }
+    },
+    {
+      candidate: "- Cache frequently requested data near consumers\n- Invalidate stale entries using explicit policies\n- Measure hit rates and memory pressure\n- Ignore this extra bullet",
+      prompt: "Exactly three bullets, maximum 10 words each, about caching.",
+      verify(answer: string) {
+        const lines = answer.split(/\r?\n/);
+        assert.equal(lines.length, 3);
+        assert(lines.every((line) => line.replace(/^-\s*/, "").split(/\s+/).length <= 10));
+      }
+    },
+    {
+      candidate: "One detailed caching recommendation with enough words to distribute across every requested list item safely.",
+      prompt: "Exactly four bullets, maximum 6 words each.",
+      verify(answer: string) {
+        const lines = answer.split(/\r?\n/);
+        assert.equal(lines.length, 4);
+        assert(lines.every((line) => line.replace(/^-\s*/, "").split(/\s+/).length <= 6));
+      }
     }
   ];
 
@@ -175,6 +216,30 @@ test("next-turn contracts apply once and composed word-sentence constraints vali
   );
   assert.equal(urlAnswer, "Read https://example.com/docs/v1.2 for details.");
   assert.deepEqual(validateAskResponseConstraints(urlAnswer, urlConstraints), []);
+
+  const scopedUnder = extractAskResponseConstraints("Three bullets, each under 8 words.");
+  assert.equal(scopedUnder.bulletCount, 3);
+  assert.equal(scopedUnder.bulletItemMaxWords, 7);
+  assert.equal(scopedUnder.maxWords, null);
+
+  const scopedMaximum = extractAskResponseConstraints("Exactly four bullets, maximum 6 words each.");
+  assert.equal(scopedMaximum.bulletCount, 4);
+  assert.equal(scopedMaximum.bulletItemMaxWords, 6);
+  assert.equal(scopedMaximum.maxWords, null);
+
+  const twoSentenceTotal = extractAskResponseConstraints("Two sentences and no more than 25 words total.");
+  const punctuationAnswer = finalizeAskResponseConstraints(
+    "Version v2.1 is documented at https://example.com/docs. Dr. Lin measured 3.14 seconds. A third sentence must disappear.",
+    twoSentenceTotal
+  );
+  assert.equal(punctuationAnswer, "Version v2.1 is documented at https://example.com/docs. Dr. Lin measured 3.14 seconds.");
+  assert.deepEqual(validateAskResponseConstraints(punctuationAnswer, twoSentenceTotal), []);
+
+  const abbreviationAnswer = finalizeAskResponseConstraints(
+    "Use e.g. cached reads for repeated work. Keep i.e. explanations concise. Remove this third sentence.",
+    extractAskResponseConstraints("Answer in exactly two sentences.")
+  );
+  assert.equal(abbreviationAnswer, "Use e.g. cached reads for repeated work. Keep i.e. explanations concise.");
 });
 
 test("forbidden-word and bullet constraints fail deterministically when violated", () => {

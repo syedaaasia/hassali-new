@@ -1,7 +1,9 @@
 import {
+  isAskSummaryTransformationRequest,
   resolveAskSummaryTarget,
   type ConversationSummaryTargetContext
 } from "../../ask-summary-target";
+import { redactWorkspaceSecrets } from "./workspace-context-engine";
 
 export type ConversationHistoryMessage = {
   attachmentLabels?: string[];
@@ -17,6 +19,7 @@ export type ConversationHistoryIntent = {
 export {
   hasExplicitArtifactSummaryTarget,
   hasExplicitConversationSummaryTarget,
+  isAskSummaryTransformationRequest,
   isTargetlessSummaryRequest,
   resolveAskSummaryTarget,
   type AskSummaryTarget,
@@ -62,7 +65,8 @@ export function classifyConversationHistoryIntent(
   context: ConversationSummaryTargetContext = {}
 ): ConversationHistoryIntent | null {
   const text = prompt.trim();
-  const asksForSummary = /\b(?:summari[sz]e|summary|recap|handoff|main points|what (?:have|did) we (?:discuss(?:ed)?|talk(?:ed)? about)|what did we talk about|what decisions? (?:have we|did we) made?|what have we (?:done|covered)|everything (?:we(?:'ve| have) discussed|so far))\b/i.test(text);
+  const asksForSummary = isAskSummaryTransformationRequest(text) ||
+    /\b(?:handoff|main points|what (?:have|did) we (?:discuss(?:ed)?|talk(?:ed)? about)|what did we talk about|what decisions? (?:have we|did we) made?|what have we (?:done|covered)|everything (?:we(?:'ve| have) discussed|so far))\b/i.test(text);
   if (!asksForSummary || resolveAskSummaryTarget(text, context) !== "conversation") return null;
 
   const requested = text.match(/\b(?:last|latest|most recent)\s+(\d{1,3})\s+(?:messages?|turns?)\b/i)?.[1];
@@ -205,7 +209,10 @@ export function prepareConversationSummary(input: {
     hasConversationContext: input.transcript.messages.some((message) => message.role !== "system" && message.content.trim() !== input.prompt.trim())
   });
   if (!intent) return null;
-  const messages = visibleConversationMessages({ ...input, intent });
+  const messages = visibleConversationMessages({ ...input, intent }).map((message) => ({
+    ...message,
+    content: redactWorkspaceSecrets(message.content).redacted
+  }));
   const chunks = chunkMessages(messages);
   const deterministic = deterministicSummary({ intent, messages, transcript: input.transcript });
   const modelContext = messages.length === 0

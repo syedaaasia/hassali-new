@@ -1554,12 +1554,14 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     answer = summarizeReferenceFile(input);
     providerFailureCategory = null;
     providerStatus = "not_needed";
+  } else if (isReferenceSummaryRequest(input)) {
+    answer = summarizeReferenceFile(input);
+    providerFailureCategory = null;
+    providerStatus = "not_needed";
   } else if (localConversationalAnswer) {
     answer = localConversationalAnswer;
     providerFailureCategory = null;
     providerStatus = "not_needed";
-  } else if (isReferenceSummaryRequest(input)) {
-    answer = summarizeReferenceFile(input);
   } else if (
     selected.path === "boundary_only" ||
     selected.path === "unsafe_refusal" ||

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  analyzeContinuityDependency,
   normalizeFinalActionDecision,
   resolveBehavioralDecision,
   selectRelevantBehavioralContext,
@@ -263,9 +264,32 @@ test("semantic follow-up dependency preserves prior objectives without stealing 
     "Another example?",
     "What are the downsides?",
     "When would I use that?",
-    "Is that always true?"
+    "Is that always true?",
+    "Can you unpack that?",
+    "Put that another way.",
+    "What makes you say that?",
+    "What would break if that assumption changed?",
+    "Suppose that is false; what follows?",
+    "Compared with the alternative?",
+    "Any caveats?",
+    "Then what?",
+    "Show me a counterexample.",
+    "Could you justify it?",
+    "What evidence supports that?",
+    "Why would that matter in practice?",
+    "How would I know if that's happening?",
+    "What changes if it doesn't?",
+    "Does that scale?",
+    "What would the opposite look like?",
+    "Where does that assumption fail?",
+    "What comes after that?",
+    "Can you defend that conclusion?",
+    "Is there a simpler way to see it?",
+    "What is the strongest objection?",
+    "How does the alternative compare?"
   ];
   for (const prompt of dependent) {
+    assert.equal(analyzeContinuityDependency(prompt).kind, "dependent", prompt);
     assert.match(decision(prompt, "ASK", prior).referencedObjective ?? "", /recursion/i, prompt);
   }
 
@@ -278,11 +302,68 @@ test("semantic follow-up dependency preserves prior objectives without stealing 
     "Give me an example of dependency injection.",
     "What are the downsides of PostgreSQL?",
     "When would I use Redis instead of Memcached?",
-    "Is gravity always attractive?"
+    "Is gravity always attractive?",
+    "Can you unpack B-trees?",
+    "Put eventual consistency another way.",
+    "What makes PostgreSQL MVCC useful?",
+    "What would break if serializable isolation disappeared?",
+    "Show me a counterexample to dependency injection.",
+    "What are the caveats of WebSockets?",
+    "Compared with REST, how does GraphQL behave?",
+    "Could you justify using Redis here?",
+    "Does SQLite scale for high-concurrency writes?",
+    "What is the strongest objection to microservices?",
+    "Explain this architecture: event sourcing with CQRS.",
+    "How does this PostgreSQL query work?",
+    "What is wrong with that React component?"
   ];
   for (const prompt of selfContained) {
+    assert.equal(analyzeContinuityDependency(prompt).kind, "independent", prompt);
     assert.equal(decision(prompt, "ASK", prior).referencedObjective, null, prompt);
   }
+});
+
+test("semantic continuity follows the newest explicit topic through a cumulative chain", () => {
+  const messages: Array<{ content: string; role: "assistant" | "user" }> = [];
+  const addTopic = (prompt: string, answer: string) => {
+    const result = decision(prompt, "ASK", messages);
+    assert.equal(result.referencedObjective, null, prompt);
+    messages.push({ content: prompt, role: "user" }, { content: answer, role: "assistant" });
+  };
+  const addFollowup = (prompt: string, expected: RegExp) => {
+    const result = decision(prompt, "ASK", messages);
+    assert.match(result.referencedObjective ?? "", expected, prompt);
+    messages.push({ content: prompt, role: "user" }, { content: `Answer for ${prompt}`, role: "assistant" });
+  };
+
+  addTopic("Explain why database indexes speed up selective queries.", "Indexes reduce scanned rows.");
+  addFollowup("Can you unpack that?", /database indexes/i);
+  addFollowup("What evidence supports that?", /database indexes/i);
+  addTopic("Now explain photosynthesis.", "Photosynthesis converts light into chemical energy.");
+  addFollowup("What would the opposite look like?", /photosynthesis/i);
+  addTopic("Actually, explain event sourcing with CQRS instead.", "Event sourcing records state changes as events.");
+  addFollowup("Where does that assumption fail?", /event sourcing/i);
+  addTopic("Describe PostgreSQL MVCC.", "MVCC maintains concurrent row versions.");
+  addFollowup("Could you justify it?", /PostgreSQL MVCC/i);
+});
+
+test("selected-artifact transformations stay answer-only in ASK", () => {
+  const prompt = "make this shorter";
+  const result = resolveBehavioralDecision({
+    messages: [{ content: prompt, role: "user" }],
+    prompt,
+    selectedMode: "ASK",
+    workspace: {
+      activeFileContent: "A selected report that needs a shorter version.",
+      activePath: "report.txt",
+      fileList: ["report.txt"]
+    }
+  });
+  assert.equal(result.action, "ANSWER");
+  assert.equal(result.mutationIntent, false);
+  assert.equal(result.approvalRequired, false);
+  assert.equal(result.clarificationRequired, false);
+  assert(result.relevantContextScope.includes("selected_project"));
 });
 
 test("contradictory final action metadata fails closed with structured warnings", () => {
