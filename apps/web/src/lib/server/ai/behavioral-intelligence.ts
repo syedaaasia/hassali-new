@@ -2,6 +2,7 @@ import {
   extractIntentConstraints,
   type IntentConstraintResult
 } from "./intent-constraint-brain";
+import { resolveAskSummaryTarget } from "./conversation-history-analysis";
 import type {
   WorkspaceContextInput,
   WorkspaceProductMode
@@ -268,8 +269,27 @@ function hasUnresolvedDeicticReference(value: string) {
   return /^(?:(?:why\s+(?:is|was|does|did)|what\s+(?:does|did|is|was))\s+(?:it|that|this)(?:\s+(?:mean|happen))?|how\s+(?:does|did|is|was|can|could|would)\s+(?:it|that|this)(?:\s+(?:work|happen))?|(?:describe|explain|review|summari[sz]e|tell me about)\s+(?:it|that|this|them|those)(?:\s+(?:more|further|again))?)[.!?]*$/i.test(value.trim());
 }
 
+function hasDependentRefinementStructure(value: string) {
+  const text = value.trim().replace(/[.!?]+$/g, "");
+  const normalized = text
+    .replace(/^please\s+/i, "")
+    .replace(/^(?:can|could|would|will)\s+you\s+/i, "")
+    .trim();
+  const resolvedDemonstrativeNoun = /\b(?:this|that|those)\s+(?!(?:again|also|already|always|correct|deeper|ever|further|happen|happens|mean|means|more|never|often|really|simply|still|true|usually|work|worked|working|works|wrong)\b)[a-z][\w-]*\b/i.test(normalized);
+  if (resolvedDemonstrativeNoun) return false;
+  const resolvedDemonstrativeObject = /^(?:describe|explain|review|summari[sz]e|walk me through)\s+(?:this|that|those)\s+(?!(?:again|deeper|further|more|simply)\b)\S+/i.test(normalized);
+  if (resolvedDemonstrativeObject) return false;
+  const explicitTarget = /\b(?:about|of|on|through|using|with)\s+(?!(?:it|that|this|them|those)\b)\S+/i.test(normalized);
+  if (explicitTarget) return false;
+  return /^(?:elaborate|expand|go deeper|walk me through(?:\s+(?:it|that|this))?|give me (?:an?|another) example|another example)(?:\s+(?:more|further|deeper))?$/i.test(normalized) ||
+    /^(?:expand|elaborate)\s+on\s+(?:it|that|this)$/i.test(normalized) ||
+    /^(?:describe|explain|review|summari[sz]e)\s+(?:it|that|this)(?:\s+(?:again|further|more|more simply|simply))?$/i.test(normalized) ||
+    /^(?:does|did|is|was|can|could|would|will)\s+(?:it|that|this)\b/i.test(normalized) ||
+    /^(?:when|where)\b[\s\S]*\b(?:it|that|this)\b/i.test(normalized);
+}
+
 function isStandaloneContextDependent(value: string) {
-  return hasUnresolvedDeicticReference(value) ||
+  return hasUnresolvedDeicticReference(value) || hasDependentRefinementStructure(value) ||
     /^(?:why(?: though)?|how(?: so)?|what about (?:that|it|them|those)|and then|explain why|tell me more|what do you mean|can you explain|which one(?:\s+is\s+[^.!?]+)?|more|continue|go on)[.!?]*$/i.test(value.trim());
 }
 
@@ -792,6 +812,13 @@ export function selectRelevantBehavioralContext(input: {
   }
 
   const selectedPrior = prior.filter((_, index) => selectedIndexes.has(index)).slice(-8);
+  const artifactTargetAvailable = Boolean(
+    input.workspace?.activePath?.trim() && input.workspace?.activeFileContent?.trim()
+  );
+  const summaryTarget = resolveAskSummaryTarget(input.prompt, {
+    artifactTargetAvailable,
+    hasConversationContext: prior.some((message) => message.role === "user")
+  });
   const referencedPath = (input.workspace?.fileList ?? []).some((path) => {
     const normalizedPath = path.replace(/\\/g, "/").toLowerCase();
     const basename = normalizedPath.split("/").at(-1) ?? normalizedPath;
@@ -799,6 +826,7 @@ export function selectRelevantBehavioralContext(input: {
     return prompt.includes(normalizedPath) || prompt.includes(basename);
   });
   const localContextRequested =
+    summaryTarget === "artifact" ||
     /\b(?:active file|current (?:app|codebase|file|project|repo(?:sitory)?|site|website|workspace)|existing (?:app|project|site|website)|my (?:app|code|files?|project|repo(?:sitory)?|site|website)|selected file|this (?:app|code|file|function|project|site|website))\b/i.test(input.prompt) ||
     /\b(?:inside|within|in) (?:my|the|this) (?:codebase|project|repo(?:sitory)?|workspace)\b/i.test(input.prompt) ||
     /^(?:explain|review|summari[sz]e|walk me through)\s+this\b/i.test(input.prompt);

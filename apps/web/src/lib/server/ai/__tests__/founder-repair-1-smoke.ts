@@ -5,7 +5,11 @@ import { buildAskRuntimeContext } from "../ask-context";
 import { runAskBrain, type AskProviderCall } from "../ask-brain-orchestrator";
 import { understandAskRequest } from "../ask-request-understanding";
 import { decideAskFreshness } from "../ask-source-reliability";
-import { extractAskResponseConstraints, validateAskResponseConstraints } from "../ask-response-constraints";
+import {
+  extractAskResponseConstraints,
+  finalizeAskResponseConstraints,
+  validateAskResponseConstraints
+} from "../ask-response-constraints";
 import { applyProjectNoteAction, buildDeterministicAskSummary, parseProjectNoteAction } from "@/lib/project-notes-intelligence";
 import { createHassaliSelfKnowledgeAnswer } from "@/lib/server/self-knowledge/hassali-self-knowledge";
 import { formatGitHubCodeContext, listGitHubRepositories, listGitHubRepositoryPaths } from "@/lib/server/github/github-integration";
@@ -91,6 +95,86 @@ test("current and prior-turn response constraints are reusable and validated", a
   const providerCall: AskProviderCall = async () => ({ content: "Brains process experiences.", servedModel: "fixture/reasoning", status: "ok" });
   const result = await runAskBrain(askInput(messages[2].content, messages, providerCall));
   assert.equal(result.answer.split(/\s+/).length, 3);
+});
+
+test("closed-choice list sentence and composed contracts constrain the final delivered answer", async () => {
+  const cases = [
+    {
+      candidate: "Yes, because water causes other surfaces to become wet.",
+      prompt: "Is water wet? Return only YES or NO.",
+      verify(answer: string) {
+        assert.equal(answer, "YES");
+      }
+    },
+    {
+      candidate: "- First point\n- Second point\n- Third point\n- Fourth point\n- Fifth point",
+      prompt: "Give exactly three bullet points about reliable software.",
+      verify(answer: string) {
+        assert.equal(answer.split(/\r?\n/).length, 3);
+      }
+    },
+    {
+      candidate: "First sentence. Second sentence. Third sentence.",
+      prompt: "Explain testing. Use one sentence only.",
+      verify(answer: string) {
+        assert.equal(answer, "First sentence.");
+      }
+    },
+    {
+      candidate: "- This first bullet contains far too many unnecessary words\n- This second bullet also contains far too many words\n- Third concise point\n- Fourth extra point",
+      prompt: "Give exactly three bullet points, each no more than five words.",
+      verify(answer: string) {
+        const lines = answer.split(/\r?\n/);
+        assert.equal(lines.length, 3);
+        assert(lines.every((line) => line.replace(/^-\s*/, "").split(/\s+/).length <= 5));
+      }
+    }
+  ];
+
+  for (const entry of cases) {
+    let calls = 0;
+    const providerCall: AskProviderCall = async () => {
+      calls += 1;
+      return { content: entry.candidate, servedModel: "fixture/adversarial", status: "ok" };
+    };
+    const result = await runAskBrain(askInput(entry.prompt, [{ content: entry.prompt, role: "user" }], providerCall));
+    entry.verify(result.answer);
+    assert.deepEqual(validateAskResponseConstraints(result.answer, extractAskResponseConstraints(entry.prompt)), [], entry.prompt);
+    assert.equal(result.decision.failureStage, "none", entry.prompt);
+    assert.equal(calls, 1, entry.prompt);
+  }
+});
+
+test("next-turn contracts apply once and composed word-sentence constraints validate after final transforms", () => {
+  const history = [
+    { content: "Answer my next question using one sentence only.", role: "user" as const },
+    { content: "Understood.", role: "assistant" as const },
+    { content: "Why do humans dream?", role: "user" as const }
+  ];
+  assert.equal(extractAskResponseConstraints(history.at(-1)!.content, history).exactSentences, 1);
+  const laterHistory = [
+    ...history,
+    { content: "Dreams may help memory and emotion processing.", role: "assistant" as const },
+    { content: "What is sleep?", role: "user" as const }
+  ];
+  assert.equal(extractAskResponseConstraints(laterHistory.at(-1)!.content, laterHistory).source, "none");
+
+  const prompt = "Explain recursion in exactly one sentence and 15 words.";
+  const constraints = extractAskResponseConstraints(prompt);
+  const finalized = finalizeAskResponseConstraints(
+    "Recursion repeatedly solves smaller versions of a problem. It stops when a base case is reached.",
+    constraints
+  );
+  assert.deepEqual(validateAskResponseConstraints(finalized, constraints), []);
+  assert.equal(finalized.split(/\s+/).length, 15);
+
+  const urlConstraints = extractAskResponseConstraints("Use one sentence only.");
+  const urlAnswer = finalizeAskResponseConstraints(
+    "Read https://example.com/docs/v1.2 for details. This second sentence should be removed.",
+    urlConstraints
+  );
+  assert.equal(urlAnswer, "Read https://example.com/docs/v1.2 for details.");
+  assert.deepEqual(validateAskResponseConstraints(urlAnswer, urlConstraints), []);
 });
 
 test("forbidden-word and bullet constraints fail deterministically when violated", () => {

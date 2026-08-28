@@ -1,3 +1,8 @@
+import {
+  resolveAskSummaryTarget,
+  type ConversationSummaryTargetContext
+} from "../../ask-summary-target";
+
 export type ConversationHistoryMessage = {
   attachmentLabels?: string[];
   content: string;
@@ -9,10 +14,14 @@ export type ConversationHistoryIntent = {
   requestedMessageCount: number | null;
 };
 
-export type ConversationSummaryTargetContext = {
-  artifactTargetAvailable?: boolean;
-  hasConversationContext?: boolean;
-};
+export {
+  hasExplicitArtifactSummaryTarget,
+  hasExplicitConversationSummaryTarget,
+  isTargetlessSummaryRequest,
+  resolveAskSummaryTarget,
+  type AskSummaryTarget,
+  type ConversationSummaryTargetContext
+} from "../../ask-summary-target";
 
 export type ConversationTranscript = {
   authoritative: boolean;
@@ -48,29 +57,13 @@ function isGenericFailure(value: string) {
   return /^(?:I couldn't complete that answer reliably right now|Answer capacity is busy right now|I couldn't reach an answer service right now)/i.test(value.trim());
 }
 
-export function hasExplicitConversationSummaryTarget(prompt: string) {
-  return /\b(?:chat|conversation|discussion|messages?|everything (?:we(?:'ve| have) discussed|we discussed)|what (?:have|did) we (?:discuss(?:ed)?|talk(?:ed)? about)|what did we talk about|so far|decisions? we|complete chat|entire chat|our discussion|from this chat)\b/i.test(prompt.trim());
-}
-
-function hasExplicitArtifactSummaryTarget(prompt: string) {
-  return /\b(?:article|document|file|pdf|report|attachment|pasted (?:text|content|article|document|report))\b/i.test(prompt) ||
-    /\b(?:summari[sz]e|summary|recap)\b[\s\S]{0,40}:\s*(?:\r?\n)?[\s\S]{80,}/i.test(prompt);
-}
-
 export function classifyConversationHistoryIntent(
   prompt: string,
   context: ConversationSummaryTargetContext = {}
 ): ConversationHistoryIntent | null {
   const text = prompt.trim();
   const asksForSummary = /\b(?:summari[sz]e|summary|recap|handoff|main points|what (?:have|did) we (?:discuss(?:ed)?|talk(?:ed)? about)|what did we talk about|what decisions? (?:have we|did we) made?|what have we (?:done|covered)|everything (?:we(?:'ve| have) discussed|so far))\b/i.test(text);
-  const explicitConversationTarget = hasExplicitConversationSummaryTarget(text);
-  if (!asksForSummary || (!explicitConversationTarget && hasExplicitArtifactSummaryTarget(text))) return null;
-
-  const targetlessSummary = /^(?:please\s+)?(?:(?:write|create|give me)\s+(?:a\s+)?(?:summary|recap)|summari[sz]e|recap)(?:\s+(?:it|this|everything))?[.!?]*$/i.test(text);
-  if (
-    !explicitConversationTarget &&
-    !(targetlessSummary && context.hasConversationContext && !context.artifactTargetAvailable)
-  ) return null;
+  if (!asksForSummary || resolveAskSummaryTarget(text, context) !== "conversation") return null;
 
   const requested = text.match(/\b(?:last|latest|most recent)\s+(\d{1,3})\s+(?:messages?|turns?)\b/i)?.[1];
   const requestedMessageCount = requested ? Math.max(1, Math.min(200, Number(requested))) : null;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hassaliChatContractVersion } from "@/lib/chat-contract";
+import { compactWorkspaceForChatRequest, type ChatRequestWorkspace } from "@/lib/chat-request-context";
 import { buildAskRuntimeContext } from "../ask-context";
 import { runAskBrain, type AskProviderCall } from "../ask-brain-orchestrator";
 
@@ -22,8 +23,17 @@ function wordCount(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;
 }
 
-async function send(messages: Turn[], prompt: string): Promise<AskResult> {
+async function send(messages: Turn[], prompt: string, selectedWorkspace?: ChatRequestWorkspace): Promise<AskResult> {
   messages.push({ content: prompt, role: "user" });
+  const workspace = selectedWorkspace
+    ? compactWorkspaceForChatRequest({ messages, mode: "ASK", prompt, workspace: selectedWorkspace })
+    : {
+        activeFileContent: "",
+        activePath: "",
+        fileContents: {},
+        fileList: [],
+        projectName: null
+      };
   const { POST } = await import("@/app/api/ai/chat/route");
   const response = await POST(new Request("http://localhost/api/ai/chat", {
     body: JSON.stringify({
@@ -33,13 +43,7 @@ async function send(messages: Turn[], prompt: string): Promise<AskResult> {
       model: "tencent/hy3:free",
       modelSelectionPolicy: "automatic",
       productMode: "ASK",
-      workspace: {
-        activeFileContent: "",
-        activePath: "",
-        fileContents: {},
-        fileList: [],
-        projectName: null
-      }
+      workspace
     }),
     headers: { "content-type": "application/json" },
     method: "POST"
@@ -56,6 +60,68 @@ async function send(messages: Turn[], prompt: string): Promise<AskResult> {
     sourceOutcome: response.headers.get("x-hassali-ask-source-outcome")
   };
 }
+
+function mangoConversation(): Turn[] {
+  return [
+    { content: "My imaginary project Mango uses Python and SQLite.", role: "user" },
+    { content: "Understood. Mango uses Python and SQLite.", role: "assistant" }
+  ];
+}
+
+const lunarReportText = [
+  "Lunar geology report: Mare Imbrium contains basalt plains formed by ancient volcanic activity.",
+  "Tycho is a young impact crater with bright rays.",
+  "Research credential: API_KEY=lunar-secret-value"
+].join("\n");
+
+const lunarWorkspace: ChatRequestWorkspace = {
+  activeFileContent: lunarReportText,
+  activePath: "reports/lunar-geology.txt",
+  fileContents: { "reports/lunar-geology.txt": lunarReportText },
+  fileList: ["reports/lunar-geology.txt"],
+  projectName: "Lunar Research"
+};
+
+test("production request compaction and route preserve selected-artifact summary authority", async () => {
+  const implicitArtifact = await send(mangoConversation(), "write a summary", lunarWorkspace);
+  assert.match(implicitArtifact.answer, /Mare Imbrium|Tycho/i);
+  assert.doesNotMatch(implicitArtifact.answer, /Mango/i);
+  assert.doesNotMatch(implicitArtifact.answer, /lunar-secret-value/i);
+
+  const explicitConversation = await send(mangoConversation(), "summarize our conversation", lunarWorkspace);
+  assert.match(explicitConversation.answer, /Conversation summary/i);
+  assert.match(explicitConversation.answer, /Mango/i);
+  assert.doesNotMatch(explicitConversation.answer, /Mare Imbrium|lunar-secret-value/i);
+
+  const explicitArtifact = await send(mangoConversation(), "summarize the selected report", lunarWorkspace);
+  assert.match(explicitArtifact.answer, /Mare Imbrium|Tycho/i);
+  assert.doesNotMatch(explicitArtifact.answer, /Mango|lunar-secret-value/i);
+
+  const explicitConversationAgain = await send(mangoConversation(), "what have we discussed so far?", lunarWorkspace);
+  assert.match(explicitConversationAgain.answer, /Conversation summary/i);
+  assert.match(explicitConversationAgain.answer, /Mango/i);
+  assert.doesNotMatch(explicitConversationAgain.answer, /Mare Imbrium|lunar-secret-value/i);
+
+  const pastedArticleWorkspace = {
+    ...lunarWorkspace,
+    activePath: "pasted-article.txt",
+    fileContents: { "pasted-article.txt": lunarReportText },
+    fileList: ["pasted-article.txt"]
+  };
+  const pastedArticle = await send(mangoConversation(), "give me a summary", pastedArticleWorkspace);
+  assert.match(pastedArticle.answer, /Mare Imbrium|Tycho/i);
+  assert.doesNotMatch(pastedArticle.answer, /Mango|lunar-secret-value/i);
+
+  const selectedPdfWorkspace = {
+    ...lunarWorkspace,
+    activePath: "reports/lunar-geology.pdf",
+    fileContents: { "reports/lunar-geology.pdf": lunarReportText },
+    fileList: ["reports/lunar-geology.pdf"]
+  };
+  const selectedPdf = await send(mangoConversation(), "summarize this", selectedPdfWorkspace);
+  assert.match(selectedPdf.answer, /Mare Imbrium|Tycho/i);
+  assert.doesNotMatch(selectedPdf.answer, /Mango|lunar-secret-value/i);
+});
 
 test("research-capable orchestration fixture requires useful verified evidence rather than treating routing as success", async () => {
   const prompt = "What happened in AI news today?";
@@ -146,9 +212,17 @@ test("no-provider cumulative dashboard replay distinguishes truthful live limita
     assert.notEqual(dreams.freshness, "live_event");
     assert.doesNotMatch(dreams.answer, genericFailure);
 
+    const dreamsFollowup = await send(messages, "Could you elaborate?");
+    assert.notEqual(dreamsFollowup.freshness, "live_event");
+    assert.doesNotMatch(dreamsFollowup.answer, genericFailure);
+
     const photosynthesis = await send(messages, "How does photosynthesis work?");
     assert.notEqual(photosynthesis.freshness, "live_event");
     assert.doesNotMatch(photosynthesis.answer, liveResearchLimitation);
+
+    const photosynthesisFollowup = await send(messages, "Can you expand on that?");
+    assert.notEqual(photosynthesisFollowup.freshness, "live_event");
+    assert.doesNotMatch(photosynthesisFollowup.answer, genericFailure);
 
     const pakistanNews = await send(messages, "What happened in Pakistan today?");
     assert.equal(pakistanNews.freshness, "live_event");
@@ -162,9 +236,19 @@ test("no-provider cumulative dashboard replay distinguishes truthful live limita
     assert.notEqual(recursionWhy.freshness, "live_event");
     assert.doesNotMatch(recursionWhy.answer, liveResearchLimitation);
 
+    for (const prompt of ["Walk me through that.", "Does that always work?"]) {
+      const followup = await send(messages, prompt);
+      assert.notEqual(followup.freshness, "live_event", prompt);
+      assert.doesNotMatch(followup.answer, genericFailure, prompt);
+    }
+
     const quantum = await send(messages, "Now explain quantum entanglement.");
     assert.notEqual(quantum.freshness, "live_event");
     assert.doesNotMatch(quantum.answer, liveResearchLimitation);
+
+    const quantumFollowup = await send(messages, "Please elaborate.");
+    assert.notEqual(quantumFollowup.freshness, "live_event");
+    assert.doesNotMatch(quantumFollowup.answer, genericFailure);
 
     const mangoSetup = await send(messages, "My imaginary project is called Mango. It uses Python, PostgreSQL and React. Remember that only for this conversation.");
     assert.doesNotMatch(mangoSetup.answer, genericFailure);

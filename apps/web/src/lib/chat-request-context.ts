@@ -1,3 +1,5 @@
+import { resolveAskSummaryTarget } from "./ask-summary-target";
+
 export type ChatRequestProductMode = "ASK" | "CODE" | "WEBSITE";
 
 export type ChatRequestWorkspace = {
@@ -86,6 +88,10 @@ export function requestNeedsWorkspaceContext(
 ) {
   if (mode !== "ASK") return true;
 
+  if (resolveAskSummaryTarget(prompt, {
+    artifactTargetAvailable: Boolean(context?.activePath),
+    hasConversationContext: (context?.messages?.length ?? 0) > 1
+  }) === "artifact") return true;
   if (hasLocalContextSignal(prompt)) return true;
   if (context?.activePath && referencesActiveContext(prompt)) return true;
 

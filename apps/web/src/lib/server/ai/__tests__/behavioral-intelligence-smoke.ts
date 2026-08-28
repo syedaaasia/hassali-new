@@ -234,6 +234,57 @@ test("context relevance excludes stale tasks and retains explicit continuity", (
   assert(continuity.relevantContextScope.includes("related_conversation"));
 });
 
+test("semantic follow-up dependency preserves prior objectives without stealing self-contained topics", () => {
+  const prior = [
+    { content: "Explain recursion simply.", role: "user" as const },
+    { content: "Recursion solves a problem by calling the same process on a smaller input until it reaches a base case.", role: "assistant" as const }
+  ];
+  const dependent = [
+    "Why?",
+    "Why though?",
+    "Why is that?",
+    "How?",
+    "How so?",
+    "How does that work?",
+    "What about that?",
+    "And then?",
+    "Explain why.",
+    "Tell me more.",
+    "What do you mean?",
+    "Can you explain?",
+    "Could you elaborate?",
+    "Can you expand on that?",
+    "Please elaborate.",
+    "Walk me through that.",
+    "Does that always work?",
+    "Could you go deeper?",
+    "Explain that more simply.",
+    "Give me an example.",
+    "Another example?",
+    "What are the downsides?",
+    "When would I use that?",
+    "Is that always true?"
+  ];
+  for (const prompt of dependent) {
+    assert.match(decision(prompt, "ASK", prior).referencedObjective ?? "", /recursion/i, prompt);
+  }
+
+  const selfContained = [
+    "Could you elaborate on quantum entanglement?",
+    "Can you expand on the history of Linux?",
+    "Please elaborate on photosynthesis.",
+    "Walk me through React Server Components.",
+    "Does SQLite always work well for high-concurrency writes?",
+    "Give me an example of dependency injection.",
+    "What are the downsides of PostgreSQL?",
+    "When would I use Redis instead of Memcached?",
+    "Is gravity always attractive?"
+  ];
+  for (const prompt of selfContained) {
+    assert.equal(decision(prompt, "ASK", prior).referencedObjective, null, prompt);
+  }
+});
+
 test("contradictory final action metadata fails closed with structured warnings", () => {
   const normalized = normalizeFinalActionDecision({
     answerOnly: true,

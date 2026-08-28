@@ -39,6 +39,7 @@ import {
 } from "@/lib/server/ai/ask-brain-orchestrator";
 import {
   classifyConversationHistoryIntent,
+  resolveAskSummaryTarget,
   type ConversationTranscript
 } from "@/lib/server/ai/conversation-history-analysis";
 import {
@@ -6531,6 +6532,14 @@ export async function POST(request: Request) {
     fileList: [],
     projectName: null
   };
+  const selectedArtifactAvailable = Boolean(
+    requestedWorkspace.activePath.trim() && requestedWorkspace.activeFileContent.trim()
+  );
+  const summaryTarget = resolveAskSummaryTarget(effectiveUserPrompt, {
+    artifactTargetAvailable: selectedArtifactAvailable,
+    hasConversationContext: relevantMessages.some((message) => message.role === "user" && message.content.trim() !== effectiveUserPrompt.trim())
+  });
+  const selectedArtifactIsAuthoritative = summaryTarget === "artifact";
   const nonMutatingFinalAction = behavior.answerOnly &&
     ["answer", "clarify", "plan"].includes(behavior.finalDisposition);
   const askRuntimeContext = buildAskRuntimeContext();
@@ -6562,7 +6571,7 @@ export async function POST(request: Request) {
     : askFreshnessDecision.researchRequired
       ? "live_current_info"
       : "general";
-  const preflightWorkspace = nonMutatingFinalAction && !behavior.relevantWorkspaceContext
+  const preflightWorkspace = nonMutatingFinalAction && !behavior.relevantWorkspaceContext && !selectedArtifactIsAuthoritative
     ? emptyWorkspace
     : requestedWorkspace;
   const intelligencePreflight = await runIntelligencePreflight({
@@ -6574,9 +6583,9 @@ export async function POST(request: Request) {
     prompt: effectiveUserPrompt,
     workspace: preflightWorkspace
   });
-  const workspace = nonMutatingFinalAction && !behavior.relevantWorkspaceContext
+  const workspace = nonMutatingFinalAction && !behavior.relevantWorkspaceContext && !selectedArtifactIsAuthoritative
     ? emptyWorkspace
-    : productMode === "ASK" && !intelligencePreflight.complexity.projectContextSelected
+    : productMode === "ASK" && !intelligencePreflight.complexity.projectContextSelected && !selectedArtifactIsAuthoritative
       ? emptyWorkspace
       : requestedWorkspace;
   const semanticTelemetry = {

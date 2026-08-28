@@ -48,13 +48,12 @@ import {
   askResponseConstraintInstruction,
   extractAskResponseConstraints,
   finalizeAskResponseConstraints,
-  repairAskResponseLength,
   validateAskResponseConstraints
 } from "./ask-response-constraints";
 import { createEpistemicDirectAnswer, isTimelessReasoningRequest } from "./ask-epistemic-foundation";
 import {
-  hasExplicitConversationSummaryTarget,
   prepareConversationSummary,
+  resolveAskSummaryTarget,
   type ConversationTranscript,
   type PreparedConversationSummary
 } from "./conversation-history-analysis";
@@ -414,9 +413,8 @@ function getRelevantWorkspaceText(input: AskBrainInput) {
 }
 
 function isHardLengthOrFormatRequest(prompt: string) {
-  return /\b(?:under|less than|max(?:imum)?|exactly)\s+\d+\s+words?\b/i.test(prompt) ||
-    /\b(?:exactly\s+\d+\s+bullets?|bullet points only|bullets only|no explanation|direct answer only)\b/i.test(prompt) ||
-    /\b(?:do not|don't|without)\s+(?:use|using)\s+(?:the\s+)?words?\b/i.test(prompt);
+  return extractAskResponseConstraints(prompt).source !== "none" ||
+    /\b(?:bullet points only|bullets only|no explanation|direct answer only)\b/i.test(prompt);
 }
 
 function isAdviceOnlyBuildQuestion(prompt: string) {
@@ -437,12 +435,12 @@ function isWorkspaceProjectSummaryRequest(prompt: string) {
 
 function isReferenceSummaryRequest(input: AskBrainInput) {
   const workspace = getRelevantWorkspaceText(input);
-  if (hasExplicitConversationSummaryTarget(input.prompt)) return false;
-
   return Boolean(workspace.excerpt) &&
     !isWorkspaceProjectSummaryRequest(input.prompt) &&
-    (/\b(?:summari[sz]e|explain|review|what is in|read)\b[\s\S]{0,80}\b(?:file|this)\b/i.test(input.prompt) ||
-      /\b(?:write|create|give me)\b[\s\S]{0,30}\b(?:summary|recap)\b/i.test(input.prompt));
+    resolveAskSummaryTarget(input.prompt, {
+      artifactTargetAvailable: true,
+      hasConversationContext: Boolean(input.conversationTranscript?.messages.length || input.messages.length > 1)
+    }) === "artifact";
 }
 
 function chooseDecisionPath(
@@ -571,8 +569,10 @@ function reviewAnswer(answer: string, classification: AskIntentClassification, i
     input.behavior?.objective ?? input.prompt
   ));
   const conversationSummary = conversationSummaryFor(input);
+  const referenceSummary = isReferenceSummaryRequest(input);
   const deterministicSemantics = Boolean(createEpistemicDirectAnswer(input.prompt, input.messages)) ||
     Boolean(conversationSummary) ||
+    referenceSummary ||
     isTimelessReasoningRequest(input.prompt);
   const contractValidation = input.behavior?.answerIntent && !localConversation && !deterministicSemantics
     ? validateAnswerAgainstContract(answer, input.behavior.answerContract)
@@ -621,6 +621,7 @@ function semanticCategory(input: AskBrainInput, classification: AskIntentClassif
   if (classification.safetySensitivity === "high") return "urgent_safety";
   if (classification.intent === "conversation_history_analysis") return "conversation_history_analysis";
   if (classification.wantsExecution) return "mutation_request";
+  if (isReferenceSummaryRequest(input)) return "workspace_analysis";
   if (isHassaliRuntimeStatusQuestion(prompt)) return "model_question";
   if (/\b(?:what project|workspace|current files|this project|active file|repository|repo)\b/i.test(prompt)) return "workspace_analysis";
   if (standaloneGreeting) return "casual_conversation";
@@ -1746,7 +1747,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   }
   answer = sanitizePublicPersonClaims(answer, input, category, webSearchRequested);
   let sanitized = sanitizeAskOutput(answer);
-  sanitized = { ...sanitized, value: repairAskResponseLength(sanitized.value, extractAskResponseConstraints(input.prompt, input.messages)) };
+  const responseConstraints = extractAskResponseConstraints(input.prompt, input.messages);
+  sanitized = { ...sanitized, value: finalizeAskResponseConstraints(sanitized.value, responseConstraints) };
   let review = reviewAnswer(sanitized.value, classification, input);
 
   if (
@@ -1791,7 +1793,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     revisionFailureCategory = revision.failureCategory;
     revisionReason = revision.revisionReason;
     sanitized = sanitizeAskOutput(revision.content);
-    sanitized = { ...sanitized, value: repairAskResponseLength(sanitized.value, extractAskResponseConstraints(input.prompt, input.messages)) };
+    sanitized = { ...sanitized, value: finalizeAskResponseConstraints(sanitized.value, responseConstraints) };
     review = reviewAnswer(sanitized.value, classification, input);
     if (revisionCallRan && revision.servedModel) {
       actualServedModel = revision.servedModel;
@@ -1864,7 +1866,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     fallbackOccurred = true;
     fallbackReason = "multimodal_evidence_conflict";
   }
-  const finalConstraints = extractAskResponseConstraints(input.prompt, input.messages);
+  const finalConstraints = responseConstraints;
   sanitized = {
     ...sanitized,
     value: finalizeAskResponseConstraints(sanitized.value, finalConstraints)
