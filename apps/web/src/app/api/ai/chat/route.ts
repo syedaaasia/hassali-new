@@ -39,7 +39,7 @@ import {
 } from "@/lib/server/ai/ask-brain-orchestrator";
 import {
   classifyConversationHistoryIntent,
-  resolveAskSummaryTarget,
+  resolveAskContentTarget,
   type ConversationTranscript
 } from "@/lib/server/ai/conversation-history-analysis";
 import {
@@ -6535,11 +6535,11 @@ export async function POST(request: Request) {
   const selectedArtifactAvailable = Boolean(
     requestedWorkspace.activePath.trim() && requestedWorkspace.activeFileContent.trim()
   );
-  const summaryTarget = resolveAskSummaryTarget(effectiveUserPrompt, {
+  const contentTarget = resolveAskContentTarget(effectiveUserPrompt, {
     artifactTargetAvailable: selectedArtifactAvailable,
     hasConversationContext: relevantMessages.some((message) => message.role === "user" && message.content.trim() !== effectiveUserPrompt.trim())
   });
-  const selectedArtifactIsAuthoritative = summaryTarget === "artifact";
+  const selectedArtifactIsAuthoritative = contentTarget === "selected_artifact" || contentTarget === "named_artifact";
   const nonMutatingFinalAction = behavior.answerOnly &&
     ["answer", "clarify", "plan"].includes(behavior.finalDisposition);
   const askRuntimeContext = buildAskRuntimeContext();

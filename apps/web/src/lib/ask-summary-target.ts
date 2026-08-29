@@ -1,3 +1,9 @@
+import {
+  analyzeAskTurnSemantics,
+  isAskContentTransformationOperation,
+  resolveAskContentTarget
+} from "./ask-turn-semantics";
+
 export type ConversationSummaryTargetContext = {
   artifactTargetAvailable?: boolean;
   hasConversationContext?: boolean;
@@ -22,12 +28,8 @@ export function hasExplicitArtifactSummaryTarget(prompt: string) {
 }
 
 export function isAskSummaryTransformationRequest(prompt: string) {
-  const text = prompt.trim();
-  return /\b(?:summari[sz]e|summary|recap|condense|compress|shorten)\b/i.test(text) ||
-    /\b(?:make|give me)\s+(?:(?:it|this|that)\s+)?(?:a\s+)?(?:shorter|concise|more concise|concise version)\b/i.test(text) ||
-    /\bmake\s+(?:our|this|the)\s+(?:chat|conversation|discussion|thread)\s+(?:shorter|more concise)\b/i.test(text) ||
-    /\b(?:trim|cut)\s+(?:it|this|that)\s+down\b/i.test(text) ||
-    /\breduce\s+(?:it|this|that)\s+to\s+(?:the\s+)?essentials\b/i.test(text);
+  const operation = analyzeAskTurnSemantics(prompt).operation;
+  return operation === "summarize" || operation === "shorten";
 }
 
 export function isTargetlessSummaryRequest(prompt: string) {
@@ -51,4 +53,10 @@ export function resolveAskSummaryTarget(
   if (!isTargetlessSummaryRequest(prompt)) return null;
   if (context.artifactTargetAvailable) return "artifact";
   return context.hasConversationContext ? "conversation" : null;
+}
+
+export { resolveAskContentTarget };
+
+export function isAskContentTransformationRequest(prompt: string) {
+  return isAskContentTransformationOperation(analyzeAskTurnSemantics(prompt).operation);
 }

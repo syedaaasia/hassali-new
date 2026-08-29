@@ -2,7 +2,7 @@ import {
   extractIntentConstraints,
   type IntentConstraintResult
 } from "./intent-constraint-brain";
-import { resolveAskSummaryTarget } from "./conversation-history-analysis";
+import { analyzeAskTurnSemantics, isAskContentTransformationOperation } from "../../ask-turn-semantics";
 import type {
   WorkspaceContextInput,
   WorkspaceProductMode
@@ -322,40 +322,14 @@ function hasUnresolvedContinuityReference(value: string) {
   });
 }
 
-function hasMissingRefinementObject(value: string) {
-  const text = normalizedContinuityClause(value);
-  return /^(?:clarify|defend|describe|elaborate|explain|expand|justify|rephrase|review|unpack)(?:\s+(?:again|deeper|further|more|why))?$/i.test(text) ||
-    /^go\s+(?:deeper|further)$/i.test(text) ||
-    /^tell\s+me\s+more$/i.test(text) ||
-    /^(?:give|show)(?:\s+me)?\s+(?:an?|another|the)\s+(?:counterexample|example|objection|reason)$/i.test(text) ||
-    /^another\s+(?:counterexample|example|objection|reason)$/i.test(text) ||
-    /^(?:any|what(?:\s+are|\s+is)?)\s+(?:the\s+)?(?:caveats?|drawbacks?|downsides?|objections?|risks?|tradeoffs?)$/i.test(text);
-}
-
-function hasEllipticalContinuityShape(value: string) {
-  const text = normalizedContinuityClause(value);
-  return /^(?:why|how)(?:\s+(?:though|so))?$/i.test(text) ||
-    /^(?:and\s+)?then(?:\s+(?:what|how|where|why))?$/i.test(text) ||
-    /^(?:continue|go on|more)$/i.test(text) ||
-    /^what\s+do\s+you\s+mean$/i.test(text) ||
-    /^which\s+one(?:\s+is\s+[^.!?]+)?$/i.test(text) ||
-    /^(?:compared|versus)\s+(?:with\s+)?(?:the\s+)?(?:alternative|opposite)$/i.test(text) ||
-    /^what\s+(?:comes|follows|happens)\s+(?:after|next)$/i.test(text) ||
-    /^what\s+is\s+(?:the\s+)?(?:strongest|main|best)\s+(?:objection|counterargument)$/i.test(text);
-}
-
 export function analyzeContinuityDependency(value: string): ContinuityDependencyAnalysis {
-  const explicitTarget = hasExplicitContinuityTarget(value);
-  const unresolvedReference = hasUnresolvedContinuityReference(value);
-  const missingObject = hasMissingRefinementObject(value);
-  const ellipticalShape = hasEllipticalContinuityShape(value);
+  const semantics = analyzeAskTurnSemantics(value);
+  const explicitTarget = semantics.explicitTarget || hasExplicitContinuityTarget(value);
+  const unresolvedReference = semantics.dependency === "prior_context" && hasUnresolvedContinuityReference(value);
+  const missingObject = semantics.dependency === "prior_context" && !unresolvedReference;
   return {
     explicitTarget,
-    kind: explicitTarget && !unresolvedReference
-      ? "independent"
-      : unresolvedReference || missingObject || ellipticalShape
-        ? "dependent"
-        : "independent",
+    kind: semantics.dependency === "prior_context" ? "dependent" : "independent",
     missingObject,
     unresolvedReference
   };
@@ -888,10 +862,10 @@ export function selectRelevantBehavioralContext(input: {
   const artifactTargetAvailable = Boolean(
     input.workspace?.activePath?.trim() && input.workspace?.activeFileContent?.trim()
   );
-  const summaryTarget = resolveAskSummaryTarget(input.prompt, {
+  const contentTarget = analyzeAskTurnSemantics(input.prompt, {
     artifactTargetAvailable,
     hasConversationContext: prior.some((message) => message.role === "user")
-  });
+  }).target;
   const referencedPath = (input.workspace?.fileList ?? []).some((path) => {
     const normalizedPath = path.replace(/\\/g, "/").toLowerCase();
     const basename = normalizedPath.split("/").at(-1) ?? normalizedPath;
@@ -899,7 +873,7 @@ export function selectRelevantBehavioralContext(input: {
     return prompt.includes(normalizedPath) || prompt.includes(basename);
   });
   const localContextRequested =
-    summaryTarget === "artifact" ||
+    contentTarget === "selected_artifact" || contentTarget === "named_artifact" ||
     /\b(?:active file|current (?:app|codebase|file|project|repo(?:sitory)?|site|website|workspace)|existing (?:app|project|site|website)|my (?:app|code|files?|project|repo(?:sitory)?|site|website)|selected file|this (?:app|code|file|function|project|site|website))\b/i.test(input.prompt) ||
     /\b(?:inside|within|in) (?:my|the|this) (?:codebase|project|repo(?:sitory)?|workspace)\b/i.test(input.prompt) ||
     /^(?:explain|review|summari[sz]e|walk me through)\s+this\b/i.test(input.prompt);
@@ -1015,13 +989,15 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   const objectiveState = buildConversationObjectiveState(messages, currentPrompt);
   const priorObjectives = objectiveState.recentObjectives;
   const requestedCountFromPrompt = extractRequestedCount(currentPrompt);
-  const summaryTarget = resolveAskSummaryTarget(currentPrompt, {
+  const turnSemantics = analyzeAskTurnSemantics(currentPrompt, {
     artifactTargetAvailable: Boolean(
       input.workspace?.activePath?.trim() && input.workspace?.activeFileContent?.trim()
     ),
     hasConversationContext: messages.some((message) => message.role === "user" && message.content.trim() !== currentPrompt)
   });
-  const referencedObjective = summaryTarget === "artifact"
+  const artifactTransformation = isAskContentTransformationOperation(turnSemantics.operation) &&
+    (turnSemantics.target === "selected_artifact" || turnSemantics.target === "named_artifact" || turnSemantics.target === "pasted_content");
+  const referencedObjective = turnSemantics.target !== null
     ? null
     : selectReferencedObjective(
         currentPrompt,
@@ -1038,12 +1014,17 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   });
   const inferredAction = inferAction(currentPrompt, resolvedRequest);
   const mixedAction = inferMixedMutationAction(currentPrompt);
-  const action = input.selectedMode === "WEBSITE" && (
+  const answerOnlyTransformation = input.selectedMode === "ASK" &&
+    isAskContentTransformationOperation(turnSemantics.operation) &&
+    !turnSemantics.explicitMutation;
+  const action = answerOnlyTransformation
+    ? turnSemantics.operation === "explain" || turnSemantics.operation === "simplify" ? "EXPLAIN" : "ANSWER"
+    : input.selectedMode === "WEBSITE" && (
     isExplicitWebsiteFactUpdate(currentPrompt) || isExplicitWebsiteDesignUpdate(currentPrompt)
   )
     ? "EDIT"
     : mixedAction ?? inferredAction;
-  const mixedIntent = Boolean(mixedAction);
+  const mixedIntent = Boolean(mixedAction) && !answerOnlyTransformation;
   const mutationIntent = isMutationAction(action);
   const answerIntent = mixedIntent || isAnswerAction(action);
   const requestedCount = requestedCountFromPrompt ?? extractRequestedCount(resolvedRequest);
@@ -1056,7 +1037,7 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   const requiredOutputs = extractRequiredOutputs(resolvedRequest);
   const ambiguities = unique([
     ...intent.ambiguity,
-    isEllipticalFollowup(currentPrompt) && !referencedObjective && summaryTarget !== "artifact"
+    isEllipticalFollowup(currentPrompt) && !referencedObjective && !artifactTransformation
       ? "The follow-up refers to earlier context, but no relevant conversation objective is available."
       : null
   ]);

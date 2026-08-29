@@ -21,6 +21,7 @@ export {
   hasExplicitConversationSummaryTarget,
   isAskSummaryTransformationRequest,
   isTargetlessSummaryRequest,
+  resolveAskContentTarget,
   resolveAskSummaryTarget,
   type AskSummaryTarget,
   type ConversationSummaryTargetContext

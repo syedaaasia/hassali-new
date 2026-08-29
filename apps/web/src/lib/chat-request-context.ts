@@ -1,4 +1,4 @@
-import { resolveAskSummaryTarget } from "./ask-summary-target";
+import { resolveAskContentTarget } from "./ask-summary-target";
 
 export type ChatRequestProductMode = "ASK" | "CODE" | "WEBSITE";
 
@@ -88,10 +88,11 @@ export function requestNeedsWorkspaceContext(
 ) {
   if (mode !== "ASK") return true;
 
-  if (resolveAskSummaryTarget(prompt, {
+  const contentTarget = resolveAskContentTarget(prompt, {
     artifactTargetAvailable: Boolean(context?.activePath),
     hasConversationContext: (context?.messages?.length ?? 0) > 1
-  }) === "artifact") return true;
+  });
+  if (contentTarget === "selected_artifact" || contentTarget === "named_artifact") return true;
   if (hasLocalContextSignal(prompt)) return true;
   if (context?.activePath && referencesActiveContext(prompt)) return true;
 

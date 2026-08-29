@@ -1891,6 +1891,19 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     fallbackReason = `final_review_failed:${review.issues.join(",")}`;
     failureStage = failureStage === "none" ? "quality" : failureStage;
   }
+  const finalConstraintIssues = validateAskResponseConstraints(sanitized.value, finalConstraints);
+  if (finalConstraintIssues.length > 0) {
+    // Bounded revision and deterministic repair have already run; do not label
+    // a known-invalid contract result as a successful model completion.
+    providerFailureCategory = "provider_response_invalid";
+    providerStatus = "failed";
+    modelCallSucceeded = false;
+    fallbackOccurred = true;
+    fallbackReason = `final_constraint_failed:${finalConstraintIssues.join(",")}`;
+    failureStage = "constraint";
+    sanitized = sanitizeAskOutput(providerFailureAnswer(input, providerFailureCategory));
+    review = reviewAnswer(sanitized.value, classification, input);
+  }
   const multimodalState: VerificationState = evidenceConflicts.length
     ? "CONFLICTING"
     : input.evidenceVerificationState ?? (combinedEvidenceGraph.nodes.length ? "FULLY_VERIFIED" : "UNVERIFIED");
