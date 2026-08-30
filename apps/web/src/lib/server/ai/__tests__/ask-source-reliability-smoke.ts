@@ -189,7 +189,7 @@ test("retrieval failure cannot become a latest-memory answer", async () => {
     status: "failed"
   })));
   assert.equal(result.decision.sourceReliability.outcome, "RETRIEVAL_FAILED");
-  assert.match(result.answer, /could not verify the current answer/i);
+  assert.match(result.answer, /live evidence was unavailable/i);
   assert.doesNotMatch(result.answer, /latest stable version is/i);
 });
 
@@ -208,6 +208,23 @@ test("conflicting current sources fail closed", () => {
   assert.equal(report.outcome, "SOURCE_CONFLICT");
   assert.equal(report.sourceConflict, true);
   assert.match(report.answer, /sources conflict/i);
+});
+
+test("different release channels are not treated as conflicting versions", () => {
+  const prompt = "What is the latest stable version of Node.js?";
+  const freshness = decision(prompt);
+  const report = verifyAskSourceReliability({
+    answer: "Node.js 26.8.1 is the current release.",
+    decision: freshness,
+    researchAttempted: true,
+    sources: [
+      source({ claimScope: "version:current", claimValue: "26.8.1", content: "Node.js current release is 26.8.1.", id: "current", isOfficial: true, updatedAt: "2026-08-29" }),
+      source({ claimScope: "version:lts", claimValue: "24.20.0", content: "Node.js LTS release is 24.20.0.", id: "lts", isOfficial: true, updatedAt: "2026-08-29", url: "https://example.com/lts" })
+    ],
+    time: normalizeAskTimeContext(prompt, runtime)
+  });
+  assert.notEqual(report.outcome, "SOURCE_CONFLICT");
+  assert.equal(report.sourceConflict, false);
 });
 
 test("stale sources cannot prove latest", () => {
@@ -234,6 +251,10 @@ test("stale sources cannot prove latest", () => {
     time: normalizeAskTimeContext(prompt, runtime)
   });
   assert.equal(mixedReport.outcome, "PARTIALLY_VERIFIED");
+  assert.match(mixedReport.answer, /16\.1\.0 is the latest stable version/i);
+  assert.match(mixedReport.answer, /supported by 1 accessible source/i);
+  assert.match(mixedReport.answer, /news\.example\/next/i);
+  assert.doesNotMatch(mixedReport.answer, /live evidence was unavailable/i);
 });
 
 test("relative dates use the injected clock and timezone", () => {
@@ -347,6 +368,26 @@ test("answer-only current guidance cannot produce mutation authority", async () 
   assert.doesNotMatch(result.answer, /files? (?:were|have been) changed/i);
 });
 
+test("partially verified current answers remain useful substantive results", async () => {
+  const prompt = "What is the latest stable version of Next.js?";
+  const provider = successfulProvider(
+    "Next.js 16.1.0 is the latest stable version according to the current release report.",
+    [source({
+      content: "The current release report says Next.js 16.1.0 is the latest stable version.",
+      isOfficial: false,
+      sourceType: "secondary",
+      title: "Current release report",
+      url: "https://news.example/next"
+    })]
+  );
+  const result = await runAskBrain(askInput(prompt, provider.providerCall));
+  assert.equal(result.decision.sourceReliability.outcome, "PARTIALLY_VERIFIED");
+  assert.equal(result.decision.responseKind, "substantive_answer");
+  assert.match(result.answer, /Next\.js 16\.1\.0/i);
+  assert.match(result.answer, /not available to fully verify/i);
+  assert.doesNotMatch(result.answer, /selected (?:answer service|model)|bounded recovery/i);
+});
+
 test("OpenRouter URL annotations become validated sources", async () => {
   const previousFetch = globalThis.fetch;
   let payload = "";
@@ -378,7 +419,9 @@ test("OpenRouter URL annotations become validated sources", async () => {
       productMode: "ASK",
       prompt: "What is the latest stable version of Next.js?"
     });
-    assert.match(payload, /"plugins":\[\{"id":"web"/);
+    assert.match(payload, /"type":"openrouter:web_search"/);
+    assert.match(payload, /"max_tool_calls":2/);
+    assert.doesNotMatch(payload, /"plugins":\[\{"id":"web"/);
     assert.equal(result.decision.sourceReliability.outcome, "VERIFIED");
     assert.equal(result.decision.sourceReliability.officialSourceCount, 1);
     assert.match(result.answer, /nextjs\.org/);

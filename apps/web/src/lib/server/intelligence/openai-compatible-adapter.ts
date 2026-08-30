@@ -46,6 +46,14 @@ type OpenAICompatiblePayload = {
   };
 };
 
+type OpenAICompatibleErrorPayload = {
+  error?: {
+    code?: number | string;
+    message?: string;
+    type?: string;
+  };
+};
+
 export type OpenAICompatibleAdapterConfig = {
   allowInsecureLoopback?: boolean;
   baseUrl: string;
@@ -124,7 +132,7 @@ function boundedResponseBytes(value = 2 * 1024 * 1024) {
   return Math.max(64 * 1024, Math.min(value, 4 * 1024 * 1024));
 }
 
-async function readBoundedJsonResponse(response: Response, maximumBytes: number) {
+async function readBoundedJsonResponse<T = OpenAICompatiblePayload>(response: Response, maximumBytes: number) {
   const declared = Number.parseInt(response.headers.get("content-length") ?? "", 10);
   if (Number.isFinite(declared) && declared > maximumBytes) {
     await response.body?.cancel().catch(() => undefined);
@@ -150,7 +158,7 @@ async function readBoundedJsonResponse(response: Response, maximumBytes: number)
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return JSON.parse(new TextDecoder().decode(bytes)) as OpenAICompatiblePayload;
+  return JSON.parse(new TextDecoder().decode(bytes)) as T;
 }
 
 function retryAfterMs(response: Response) {
@@ -384,11 +392,38 @@ async function fetchWithTimeout(input: {
   }
 }
 
-function responseFailure(config: OpenAICompatibleAdapterConfig, response: Response, model: string | null) {
-  const category = failureCategory(response.status);
+function responseFailureCategory(status: number, payload: OpenAICompatibleErrorPayload | null) {
+  const signal = [payload?.error?.code, payload?.error?.type, payload?.error?.message]
+    .filter((value) => typeof value === "string" || typeof value === "number")
+    .join(" ")
+    .toLowerCase()
+    .slice(0, 1_000);
+  if (/\b(?:safety|moderation|content policy|policy violation)\b/.test(signal)) return "content-safety" as const;
+  if (/\b(?:no endpoints?|model (?:is )?(?:not found|unavailable)|unknown model|invalid model|model id)\b/.test(signal)) {
+    return "model-unavailable" as const;
+  }
+  if (/\b(?:unsupported|does not support|not supported)\b/.test(signal) && /\b(?:tool|response[_ -]?format|structured|vision|image)\b/.test(signal)) {
+    return "unsupported-capability" as const;
+  }
+  return failureCategory(status);
+}
+
+function responseFailure(
+  config: OpenAICompatibleAdapterConfig,
+  response: Response,
+  model: string | null,
+  payload: OpenAICompatibleErrorPayload | null
+) {
+  const category = responseFailureCategory(response.status, payload);
   return providerFailure({
     category,
-    code: `PROVIDER_HTTP_${response.status}`,
+    code: category === "model-unavailable"
+      ? "PROVIDER_MODEL_UNAVAILABLE"
+      : category === "unsupported-capability"
+        ? "PROVIDER_CAPABILITY_UNSUPPORTED"
+        : category === "content-safety"
+          ? "PROVIDER_CONTENT_REJECTED"
+          : `PROVIDER_HTTP_${response.status}`,
     httpStatus: response.status,
     model,
     providerId: config.providerId,
@@ -401,8 +436,13 @@ async function releaseFailedResponse(
   response: Response,
   model: string | null
 ) {
-  const failure = responseFailure(config, response, model);
-  await response.body?.cancel().catch(() => undefined);
+  let payload: OpenAICompatibleErrorPayload | null = null;
+  try {
+    payload = await readBoundedJsonResponse<OpenAICompatibleErrorPayload>(response, 64 * 1024);
+  } catch {
+    await response.body?.cancel().catch(() => undefined);
+  }
+  const failure = responseFailure(config, response, model, payload);
   return failure;
 }
 

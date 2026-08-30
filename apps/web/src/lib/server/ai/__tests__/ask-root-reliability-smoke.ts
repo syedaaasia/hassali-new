@@ -344,3 +344,60 @@ test("provider failure is not Hassali failure when local evidence is sufficient"
   assert.match(result.answer, /Conversation summary/i);
   assert(result.decision.fallbackMethodsAttempted.includes("deterministic_conversation_summary"));
 });
+
+test("dependent follow-up uses relevant visible conversation evidence after all providers fail", async () => {
+  const messages = [
+    { role: "user" as const, content: "Explain database indexes." },
+    { role: "assistant" as const, content: "A database index locates matching rows without scanning the entire table, which speeds up read queries. Maintaining the index adds work to inserts and updates." },
+    { role: "user" as const, content: "Give me a customer email lookup example." },
+    { role: "assistant" as const, content: "A CRM can search customer records by email address to retrieve the matching account and order history." },
+    { role: "user" as const, content: "How would the database index we just discussed help that customer email lookup? Use two sentences." }
+  ];
+  const result = await runAskBrain(brainInput(messages.at(-1)!.content, {
+    conversationTranscript: { authoritative: true, messages, source: "owned_persistence", truncated: false },
+    messages,
+    modelSelectionPolicy: "automatic",
+    providerCall: async () => ({ status: "timeout", category: "provider_timeout", reason: "offline" }),
+    providerCallOwnsRouting: true,
+    requestUnderstanding: {
+      conversationContext: "recent_required",
+      evidenceAuthority: "irrelevant",
+      freshnessRequirement: "timeless",
+      memoryRequirement: "irrelevant",
+      method: "conversation_reasoning",
+      taskType: "follow_up",
+      uncertainty: "ordinary"
+    }
+  }));
+
+  assert.doesNotMatch(result.answer, /couldn't|provider|selected model/i);
+  assert.match(result.answer, /database index/i);
+  assert.match(result.answer, /customer|email/i);
+  assert.equal(result.answer.match(/[.!?](?:\s|$)/g)?.length, 2);
+});
+
+test("conversation-grounded recovery does not answer a self-contained new topic from stale history", async () => {
+  const messages = [
+    { role: "user" as const, content: "Explain database indexes." },
+    { role: "assistant" as const, content: "A database index speeds up row lookup while adding write maintenance." },
+    { role: "user" as const, content: "Now explain photosynthesis." }
+  ];
+  const result = await runAskBrain(brainInput("Now explain photosynthesis.", {
+    conversationTranscript: { authoritative: true, messages, source: "owned_persistence", truncated: false },
+    messages,
+    providerCall: async () => ({ status: "timeout", category: "provider_timeout", reason: "offline" }),
+    providerCallOwnsRouting: true,
+    requestUnderstanding: {
+      conversationContext: "current_turn_only",
+      evidenceAuthority: "irrelevant",
+      freshnessRequirement: "timeless",
+      memoryRequirement: "irrelevant",
+      method: "model_reasoning",
+      taskType: "general_knowledge",
+      uncertainty: "ordinary"
+    }
+  }));
+
+  assert.doesNotMatch(result.answer, /database index|row lookup|write maintenance/i);
+  assert.match(result.answer, /couldn't finish|trustworthy result|available capabilities/i);
+});

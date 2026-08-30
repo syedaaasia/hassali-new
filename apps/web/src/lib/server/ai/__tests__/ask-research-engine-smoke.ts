@@ -183,6 +183,15 @@ test("RESEARCH-14 reliable source disagreement is represented", () => {
   assert.deepEqual(evidence.conflictingSourceIds, ["a", "b"]);
 });
 
+test("RESEARCH-14B distinct version channels are not a source conflict", () => {
+  const evidence = buildResearchEvidenceState("release", [
+    source({ claimScope: "version:current", claimValue: "26.8.1", id: "current" }),
+    source({ claimScope: "version:lts", claimValue: "24.20.0", id: "lts", url: "https://standards.example.org/lts" })
+  ]);
+  assert.equal(evidence.state, "supported");
+  assert.deepEqual(evidence.conflictingSourceIds, []);
+});
+
 test("RESEARCH-15 citations map to retrieved source pages", () => {
   const sources = [source()];
   const citations = createResearchCitations(sources);
@@ -207,6 +216,31 @@ test("RESEARCH-17 unavailable pages produce truthful unverified research with no
   });
   assert.equal(result.status, "unverified");
   assert.equal(result.citations.length, 0);
+});
+
+test("RESEARCH-17B provider discovery excerpts survive page retrieval failure", async () => {
+  clearResearchPageCache();
+  const provider: ResearchProvider = {
+    id: "mock",
+    search: async () => [{
+      publishedAt: "2026-08-09T08:00:00.000Z",
+      snippet: "The release bulletin confirms version 9.4 shipped today with a security fix and migration notes.",
+      title: "Current release bulletin",
+      url: "https://docs.example.com/release"
+    }]
+  };
+  const result = await runBoundedWebResearch({
+    decision: decision("Search the web for this current release."),
+    fetchImpl: async () => new Response("missing", { status: 404 }),
+    prompt: "current release",
+    provider,
+    resolver: publicResolver
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.sources.length, 1);
+  assert.match(result.sources[0]?.content ?? "", /version 9\.4/i);
+  assert.equal(result.sources[0]?.trustBoundary, "untrusted_public_web");
+  assert.equal(result.citations.length, 1);
 });
 
 test("RESEARCH-18 supplied-content summary does not invoke research", () => {

@@ -561,7 +561,17 @@ export async function retrieveAskResearchSources(input: {
         version: source.version ?? page.version
       });
     } catch {
-      // A failed page is omitted; the source reliability gate fails closed if evidence is required.
+      // Provider search annotations can contain a useful excerpt even when the
+      // destination rejects automated retrieval. Preserve that bounded evidence
+      // as untrusted discovery material; freshness and claim support are still
+      // decided by the source reliability gate.
+      if (source.content.trim().length >= 40) {
+        retrieved.push({
+          ...source,
+          content: source.content.trim().slice(0, 12_000),
+          trustBoundary: "untrusted_public_web"
+        });
+      }
     }
   }
   return rankAndDeduplicateResearchSources(retrieved, input.prompt);
@@ -607,12 +617,24 @@ export function validateResearchStatements(statements: ResearchStatement[], cita
 
 export function buildResearchEvidenceState(claim: string, sources: AskResearchSource[]): ResearchEvidenceState {
   const relevant = sources.filter((source) => source.content.toLowerCase().includes(claim.toLowerCase()) || source.claimValue);
-  const values = new Set(relevant.map((source) => source.claimValue?.trim()).filter(Boolean));
+  const scopedValues = new Map<string, Set<string>>();
+  for (const source of relevant) {
+    const value = source.claimValue?.trim();
+    if (!value) continue;
+    const scope = source.claimScope?.trim() || "unscoped";
+    const values = scopedValues.get(scope) ?? new Set<string>();
+    values.add(value);
+    scopedValues.set(scope, values);
+  }
+  const hasConflict = [...scopedValues.values()].some((values) => values.size > 1);
   return {
     claim,
-    conflictingSourceIds: values.size > 1 ? relevant.map((source) => source.id) : [],
-    state: values.size > 1 ? "conflicting" : relevant.length ? "supported" : "unverified",
-    supportingSourceIds: values.size > 1 ? [] : relevant.map((source) => source.id)
+    conflictingSourceIds: hasConflict ? relevant.filter((source) => {
+      const scope = source.claimScope?.trim() || "unscoped";
+      return (scopedValues.get(scope)?.size ?? 0) > 1;
+    }).map((source) => source.id) : [],
+    state: hasConflict ? "conflicting" : relevant.length ? "supported" : "unverified",
+    supportingSourceIds: hasConflict ? [] : relevant.map((source) => source.id)
   };
 }
 

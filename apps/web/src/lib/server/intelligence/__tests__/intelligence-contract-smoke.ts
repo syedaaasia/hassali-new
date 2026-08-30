@@ -223,6 +223,28 @@ test("provider HTTP failures normalize to stable categories without response-str
   }
 });
 
+test("standard provider error envelopes distinguish model availability capability and safety failures", async () => {
+  const fixtures = [
+    ["No endpoints found for this model", "model-unavailable"],
+    ["This model does not support response_format", "unsupported-capability"],
+    ["Request rejected by content safety policy", "content-safety"]
+  ] as const;
+  for (const [message, category] of fixtures) {
+    const adapter = compatibleAdapter({
+      fetchImpl: async () => new Response(JSON.stringify({ error: { message } }), {
+        headers: { "content-type": "application/json" },
+        status: 400
+      })
+    });
+    const result = await adapter.invoke(request());
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.failure.category, category);
+      assert(!result.failure.safeUserMessage.includes(message));
+    }
+  }
+});
+
 test("network and malformed responses normalize safely", async () => {
   const network = compatibleAdapter({
     baseUrl: "https://provider.example/v1",

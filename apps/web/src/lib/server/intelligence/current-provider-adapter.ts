@@ -115,7 +115,17 @@ export function createCurrentOpenRouterAdapter(options?: {
       .filter((model) => model.executionProviderId === "openrouter" && !model.isTestOnly)
       .map(normalizeRegisteredModel),
     extraRequestBody: (request) => request.features?.webResearch
-      ? { plugins: [{ id: "web", max_results: Math.min(Math.max(request.features.webResearch.maxResults ?? 3, 1), 5) }] }
+      ? {
+          max_tool_calls: 2,
+          tools: [{
+            parameters: {
+              max_results: Math.min(Math.max(request.features.webResearch.maxResults ?? 3, 1), 5),
+              max_total_results: 6,
+              max_uses: 2
+            },
+            type: "openrouter:web_search"
+          }]
+        }
       : {},
     fetchImpl: options?.fetchImpl,
     getApiKey: options?.getApiKey ?? (() => process.env.OPENROUTER_API_KEY ?? null),

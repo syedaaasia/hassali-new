@@ -128,7 +128,8 @@ const retryableFallbackCategories = new Set([
   "network",
   "provider-unavailable",
   "rate-limit",
-  "timeout"
+  "timeout",
+  "unsupported-capability"
 ]);
 
 const providerLevelCapabilities = new Set<IntelligenceCapability>([

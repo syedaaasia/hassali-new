@@ -63,6 +63,7 @@ export type AskNormalizedTimeContext = {
 export type AskResearchSource = {
   author?: string | null;
   canonicalUrl?: string | null;
+  claimScope?: string | null;
   claimValue?: string | null;
   content: string;
   effectiveDate?: string | null;
@@ -528,6 +529,137 @@ function sourceList(answer: string, sources: AskResearchSource[]) {
   return `${answer.trim()}\n\nSources:\n${missing.map((source) => `- [${source.title}](${source.url})`).join("\n")}`;
 }
 
+function conflictingClaimGroups(sources: AskResearchSource[]) {
+  const scoped = new Map<string, Set<string>>();
+  const unscoped = new Set<string>();
+
+  for (const source of sources) {
+    const value = source.claimValue?.trim();
+    if (!value) continue;
+    const scope = source.claimScope?.trim();
+    if (!scope) {
+      unscoped.add(value);
+      continue;
+    }
+    const values = scoped.get(scope) ?? new Set<string>();
+    values.add(value);
+    scoped.set(scope, values);
+  }
+
+  return {
+    hasConflict: unscoped.size > 1 || [...scoped.values()].some((values) => values.size > 1),
+    scopes: new Set([...scoped.entries()].filter(([, values]) => values.size > 1).map(([scope]) => scope)),
+    unscopedConflict: unscoped.size > 1
+  };
+}
+
+function evidenceLimitation(
+  decision: AskFreshnessDecision,
+  outcome: AskResearchOutcomeStatus,
+  time: AskNormalizedTimeContext,
+  sourceCount: number
+) {
+  if (outcome === "SOURCE_CONFLICT") {
+    return `Sources conflict on a material current claim as of ${time.runtimeDate}; the different values are shown instead of being silently merged.`;
+  }
+  if (outcome === "INSUFFICIENT_FRESHNESS") {
+    return `The available evidence is older than the requested freshness window, so it is background rather than a verified current answer as of ${time.runtimeDate}.`;
+  }
+  if (outcome === "PARTIALLY_VERIFIED") {
+    if (decision.sourceRequirement === "official_source_required") {
+      return `The answer is supported by ${sourceCount} accessible source${sourceCount === 1 ? "" : "s"}, but an authoritative official source was not available to fully verify it as of ${time.runtimeDate}.`;
+    }
+    if (decision.sourceRequirement === "multi_source_verification_required") {
+      return `The answer has useful current evidence, but fewer than two independent fresh sources were available as of ${time.runtimeDate}.`;
+    }
+    return `Some claims are supported by accessible evidence as of ${time.runtimeDate}; unsupported details were omitted.`;
+  }
+  return `Live evidence was not available to complete this current request as of ${time.runtimeDate}.`;
+}
+
+function conflictingEvidenceAnswer(
+  sources: AskResearchSource[],
+  decision: AskFreshnessDecision,
+  time: AskNormalizedTimeContext
+) {
+  const conflictGroups = conflictingClaimGroups(sources);
+  const conflicts = sources
+    .filter((source) => source.claimValue?.trim() && (
+      (conflictGroups.unscopedConflict && !source.claimScope?.trim()) ||
+      Boolean(source.claimScope && conflictGroups.scopes.has(source.claimScope))
+    ))
+    .slice(0, 4)
+    .map((source) => `- ${source.title}: ${source.claimValue}`);
+  const body = conflicts.length
+    ? conflicts.join("\n")
+    : "The retained sources disagree, but they do not expose comparable machine-readable values.";
+  return sourceList([
+    evidenceLimitation(decision, "SOURCE_CONFLICT", time, sources.length),
+    "",
+    body
+  ].join("\n"), sources);
+}
+
+function qualifiedEvidenceAnswer(input: {
+  decision: AskFreshnessDecision;
+  groundedClaims: GroundedClaim[];
+  outcome: AskResearchOutcomeStatus;
+  safeAnswer: string;
+  sources: AskResearchSource[];
+  time: AskNormalizedTimeContext;
+}) {
+  if (input.outcome === "SOURCE_CONFLICT") {
+    return conflictingEvidenceAnswer(input.sources, input.decision, input.time);
+  }
+
+  const supportedClaims = input.groundedClaims
+    .filter((claim) =>
+      claim.supportingSourceIds.length > 0 &&
+      claim.freshnessSatisfied &&
+      directQuotes(claim.claim).every((quote) =>
+        input.sources.some((source) => quoteText(source.content).includes(quoteText(quote)))
+      )
+    )
+    .map((claim) => removeUnknownCitations(claim.claim, unsupportedCitationMarkers(claim.claim)))
+    .filter((claim, index, claims) => claims.indexOf(claim) === index)
+    .slice(0, 8);
+  const supportIds = new Set(input.groundedClaims
+    .filter((claim) => claim.supportingSourceIds.length > 0 && claim.freshnessSatisfied)
+    .flatMap((claim) => claim.supportingSourceIds));
+  const supportingSources = input.sources.filter((source) =>
+    supportIds.has(source.id) && sourceRecencySatisfied(source, input.decision, input.time)
+  );
+
+  if (supportedClaims.length > 0) {
+    return sourceList([
+      evidenceLimitation(input.decision, input.outcome, input.time, supportingSources.length),
+      "",
+      ...supportedClaims.map((claim) => `- ${claim}`)
+    ].join("\n"), supportingSources);
+  }
+
+  if (input.outcome === "INSUFFICIENT_FRESHNESS" && input.safeAnswer.trim()) {
+    const olderEvidence = input.sources.slice(0, 4).map((source) => {
+      const date = source.effectiveDate ?? source.eventDate ?? source.updatedAt ?? source.publishedAt;
+      const details = [date ? `dated ${date}` : null, source.version ? `version ${source.version}` : null]
+        .filter(Boolean)
+        .join(", ");
+      return `- ${source.title}${details ? ` (${details})` : ""}`;
+    });
+    return sourceList([
+      evidenceLimitation(input.decision, input.outcome, input.time, input.sources.length),
+      "",
+      ...olderEvidence
+    ].join("\n"), input.sources);
+  }
+
+  return createAskResearchFailureAnswer({
+    decision: input.decision,
+    outcome: input.outcome,
+    time: input.time
+  });
+}
+
 export function createAskResearchFailureAnswer(input: {
   decision: AskFreshnessDecision;
   outcome: AskResearchOutcomeStatus;
@@ -548,7 +680,7 @@ export function createAskResearchFailureAnswer(input: {
   if (input.outcome === "INSUFFICIENT_FRESHNESS") {
     return `I found source material, but it is not fresh enough to verify the current answer as of ${input.time.runtimeDate}. I will not label a remembered or stale result as latest.`;
   }
-  return `I could not verify the current answer from suitable live sources as of ${input.time.runtimeDate}. I would rather leave it unverified than substitute model memory and call it current.`;
+  return `Live evidence was unavailable for this request as of ${input.time.runtimeDate}, so I will not guess at current facts. I can still explain stable background, or you can retry the live check.`;
 }
 
 export function verifyAskSourceReliability(input: {
@@ -562,8 +694,7 @@ export function verifyAskSourceReliability(input: {
   const officialSourceCount = sources.filter((source) => source.isOfficial).length;
   const freshSources = sources.filter((source) => sourceRecencySatisfied(source, input.decision, input.time));
   const freshOfficialSourceCount = freshSources.filter((source) => source.isOfficial).length;
-  const claimValues = new Set(sources.map((source) => source.claimValue?.trim()).filter(Boolean));
-  const sourceConflict = claimValues.size > 1;
+  const sourceConflict = conflictingClaimGroups(sources).hasConflict;
   const knownUrls = new Set(sources.map((source) => normalizedUrl(source.url)).filter(Boolean));
   const unknownMarkdown = markdownCitations(input.answer)
     .filter((citation) => !knownUrls.has(normalizedUrl(citation.url)))
@@ -634,7 +765,14 @@ export function verifyAskSourceReliability(input: {
     : sources;
   const verifiedAnswer = outcome === "VERIFIED"
     ? sourceList(safeAnswer, citationSources)
-    : createAskResearchFailureAnswer({ decision: input.decision, outcome, time: input.time });
+    : qualifiedEvidenceAnswer({
+        decision: input.decision,
+        groundedClaims,
+        outcome,
+        safeAnswer,
+        sources,
+        time: input.time
+      });
   const finalGroundedClaims = groundedClaims.map((claim) => ({
     ...claim,
     verificationStatus: outcome

@@ -17,7 +17,7 @@ type AskResult = {
 };
 
 const genericFailure = /I couldn't complete that answer reliably right now/i;
-const liveResearchLimitation = /I could not verify the current answer from suitable live sources/i;
+const liveResearchLimitation = /Live evidence was unavailable for this request/i;
 
 function wordCount(value: string) {
   return value.trim().split(/\s+/).filter(Boolean).length;

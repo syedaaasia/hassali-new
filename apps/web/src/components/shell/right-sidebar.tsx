@@ -1522,10 +1522,10 @@ export function RightSidebar({ isEditorOpen, onToggleEditor }: RightSidebarProps
                   <button
                     className="rounded-lg border border-white/15 px-2.5 py-1 text-muted-foreground hover:text-foreground"
                     disabled={isStreaming}
-                    onClick={() => prepareProviderRetry("locked")}
+                    onClick={() => prepareProviderRetry(modelSelectionPolicy)}
                     type="button"
                   >
-                    Retry selected model
+                    {modelSelectionPolicy === "locked" ? "Retry selected model" : "Try again"}
                   </button>
                   {modelSelectionPolicy === "locked" ? (
                     <button

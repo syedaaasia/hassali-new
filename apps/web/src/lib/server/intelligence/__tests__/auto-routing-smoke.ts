@@ -297,6 +297,15 @@ test("AUTO-13 invalid requests never trigger fallback", async () => {
   assert.equal(alternate.invokeCount(), 0);
 });
 
+test("AUTO-13B runtime capability mismatch uses one capable fallback", async () => {
+  const primary = fixtureAdapter({ defaultModelId: "primary/model", id: "primary", invoke: async (req) => failure("unsupported-capability", "primary", req.requestedModel ?? "primary/model"), models: [model({ id: "primary/model" })] });
+  const alternate = fixtureAdapter({ id: "alternate", models: [model({ id: "alternate/model" })] });
+  const result = await router(primary.adapter, alternate.adapter).invoke(request({ requestedModel: "primary/model" }), preferences({ preferredModelId: "primary/model" }));
+  assert.equal(result.attempts, 2);
+  assert.equal(result.fallbackUsed, true);
+  assert.equal(alternate.invokeCount(), 1);
+});
+
 test("AUTO-14 authentication failure temporarily excludes BYOK without a retry storm", async () => {
   const byok = fixtureAdapter({
     computeSource: "byok-cloud",

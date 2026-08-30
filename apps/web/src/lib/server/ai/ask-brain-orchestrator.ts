@@ -36,6 +36,7 @@ import {
   normalizeAskTimeContext,
   verifyAskSourceReliability,
   type AskFreshnessDecision,
+  type AskResearchOutcomeStatus,
   type AskResearchSource
 } from "./ask-source-reliability";
 import {
@@ -820,6 +821,32 @@ function sourceDateFromText(value: string) {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : null;
 }
 
+function sourceVersionClaim(prompt: string, title: string, content: string) {
+  if (!/\b(?:version|release|sdk|framework|library)\b/i.test(prompt)) {
+    return { scope: null, value: null };
+  }
+  const combined = `${title}\n${content}`;
+  const matches = [...combined.matchAll(/\bv?(\d+\.\d+(?:\.\d+)?(?:-[a-z0-9.-]+)?)\b/gi)];
+  if (matches.length === 0) return { scope: null, value: null };
+
+  const ranked = matches.map((match) => {
+    const index = match.index ?? 0;
+    const nearby = combined.slice(Math.max(0, index - 100), index + match[0].length + 100);
+    let score = match[1].split(".").length >= 3 ? 4 : 0;
+    if (/\b(?:latest|current|stable|release|version)\b/i.test(nearby)) score += 3;
+    if (index < title.length) score += 2;
+    if (/\bnode(?:\.js|js)?\b/i.test(prompt) && /\bnode(?:\.js|js)?\b/i.test(nearby)) score += 2;
+    return { index, nearby, score, value: match[1] };
+  }).sort((left, right) => right.score - left.score || left.index - right.index);
+  const selected = ranked[0];
+  const lts = /\blts\b/i.test(selected.nearby);
+  const current = /\b(?:current|latest)\b/i.test(selected.nearby) || /\/latest\/?/i.test(title);
+  return {
+    scope: lts ? "version:lts" : current ? "version:current" : "version:unspecified",
+    value: selected.value
+  };
+}
+
 function sourceClaimValue(prompt: string, content: string, version: string | null) {
   if (/\b(?:version|release|sdk|framework|library)\b/i.test(prompt) && version) return version;
   if (/\b(?:price|rate|value)\b/i.test(prompt)) {
@@ -856,8 +883,10 @@ function normalizeIntelligenceSources(input: {
     const content = citation?.content?.trim() ?? "";
     const isOfficial = isLikelyOfficialSource(url, input.prompt);
     const version = `${title} ${content}`.match(/\bv?(\d+\.\d+(?:\.\d+)?(?:-[a-z0-9.-]+)?)\b/i)?.[1] ?? null;
+    const versionClaim = sourceVersionClaim(input.prompt, title, content);
     return [{
-      claimValue: sourceClaimValue(input.prompt, `${title}\n${content}`, version),
+      claimScope: versionClaim.scope,
+      claimValue: versionClaim.value ?? sourceClaimValue(input.prompt, `${title}\n${content}`, version),
       content,
       id: `retrieved-source-${index + 1}`,
       isOfficial,
@@ -1086,9 +1115,93 @@ function summarizeReferenceFile(input: AskBrainInput) {
 
 const noLocalCompletionAnswer = "I do not have enough verified local context to complete this request, and no configured answer method returned a usable result.";
 
+const groundedFallbackStopWords = new Set([
+  "about", "after", "again", "also", "and", "answer", "could", "discussed", "does", "from", "give",
+  "have", "help", "here", "how", "into", "just", "more", "please", "sentence", "sentences", "that",
+  "the", "their", "them", "then", "this", "those", "two", "use", "using", "what", "when", "where",
+  "which", "with", "would", "you", "your"
+]);
+
+function groundedFallbackTokens(value: string) {
+  return new Set(
+    (value.toLowerCase().match(/[a-z0-9][a-z0-9_-]{2,}/g) ?? [])
+      .filter((token) => !groundedFallbackStopWords.has(token))
+  );
+}
+
+function conversationGroundedFallback(input: AskBrainInput, classification: AskIntentClassification) {
+  const category = semanticCategory(input, classification);
+  if (!categoryUsesHistory(category, input)) return null;
+
+  const queryTokens = groundedFallbackTokens([
+    input.prompt,
+    input.behavior?.objective ?? "",
+    input.behavior?.referencedObjective ?? "",
+    input.behavior?.resolvedRequest ?? ""
+  ].join(" "));
+  if (queryTokens.size < 2) return null;
+
+  const sentences = input.messages
+    .filter((message) => message.role === "assistant" && message.responseKind !== "provider_failure")
+    .slice(-8)
+    .flatMap((message, messageIndex) => redactSecrets(message.content)
+      .split(/(?<=[.!?])\s+|\r?\n+/)
+      .map((sentence) => ({ messageIndex, sentence: sentence
+        .replace(/^\s*(?:[-*]|\d+[.)])\s+/, "")
+        .replace(/\*\*/g, "")
+        .replace(/\s+/g, " ")
+        .trim() })))
+    .filter(({ sentence }) =>
+      sentence.length >= 24 &&
+      sentence.length <= 480 &&
+      !/\b(?:couldn't complete|couldn't finish|can't complete|available recovery attempts|provider|selected model)\b/i.test(sentence)
+    );
+  if (!sentences.length) return null;
+
+  const frequencies = new Map<string, number>();
+  const candidates = sentences.map(({ messageIndex, sentence }) => {
+    const tokens = groundedFallbackTokens(sentence);
+    for (const token of tokens) {
+      if (queryTokens.has(token)) frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+    }
+    return { messageIndex, sentence, tokens };
+  });
+
+  const selected: typeof candidates = [];
+  const covered = new Set<string>();
+  while (selected.length < 3) {
+    const next = candidates
+      .filter((candidate) => !selected.includes(candidate))
+      .map((candidate) => {
+        const matches = [...candidate.tokens].filter((token) => queryTokens.has(token));
+        const uncovered = matches.filter((token) => !covered.has(token));
+        const rarity = uncovered.reduce((score, token) => score + 1 / (frequencies.get(token) ?? 1), 0);
+        return {
+          candidate,
+          score: rarity * 4 + uncovered.length * 2 + matches.length + candidate.messageIndex / 100
+        };
+      })
+      .filter(({ candidate }) => [...candidate.tokens].filter((token) => queryTokens.has(token)).length >= 2)
+      .sort((left, right) => right.score - left.score)[0]?.candidate;
+    if (!next) break;
+    selected.push(next);
+    for (const token of next.tokens) if (queryTokens.has(token)) covered.add(token);
+  }
+
+  if (selected.length < 2 || covered.size < Math.min(3, queryTokens.size)) return null;
+  const grounded = selected
+    .map(({ sentence }) => `${sentence.replace(/[.!?]+$/g, "").trim()}.`)
+    .join(" ");
+  const constraints = extractAskResponseConstraints(input.prompt, input.messages);
+  const finalized = finalizeAskResponseConstraints(grounded, constraints);
+  return validateAskResponseConstraints(finalized, constraints).length === 0 ? finalized : null;
+}
+
 function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntentClassification) {
   const conversationSummary = conversationSummaryFor(input);
   if (conversationSummary) return conversationSummary.deterministicSummary;
+  const groundedConversationAnswer = conversationGroundedFallback(input, classification);
+  if (groundedConversationAnswer) return groundedConversationAnswer;
   const prompt = input.prompt.toLowerCase();
   const previousAssistant = [...input.messages].reverse().find((message) => message.role === "assistant")?.content ?? "";
   const workspace = getRelevantWorkspaceText(input);
@@ -1286,28 +1399,35 @@ function providerFailureAnswer(input: AskBrainInput, category: string | null) {
   const priorFailure = [...input.messages].reverse().find((message) => message.role === "assistant" && message.responseKind === "provider_failure");
   const unresolvedQuestion = [...input.messages].reverse().find((message) => message.role === "user" && message.content.trim() !== input.prompt.trim());
   const visibleMessage = category === "provider_rate_limited"
-    ? "Answer capacity is busy right now. Please try again shortly."
+    ? "I couldn't finish this request right now. Please try again shortly."
     : category === "provider_timeout"
-      ? "I couldn't complete that answer in time. Please try again."
+      ? "I couldn't finish this request within the available time. Please try again."
       : category === "provider_insufficient_credits"
-        ? "I couldn't complete that answer with the currently available capacity."
+        ? "I couldn't finish this request with the currently available capacity."
         : category === "provider_not_configured"
-          ? "No configured answer provider is available for this request, and Hassali does not have a safe local method for it."
+          ? "This request needs a capability that is not available right now, and there is no safe local method for it."
           : category === "provider_network_error"
-            ? "I couldn't reach an answer service right now. Please try again."
+            ? "I couldn't finish this request because the required online capability was unreachable. Please try again."
             : category === "provider_response_invalid"
-              ? "The selected answer service returned an unusable response, and bounded recovery did not produce a valid answer."
+              ? "I couldn't produce a trustworthy answer for this request after the available recovery attempts."
               : category === "provider_request_rejected"
-                ? "The selected answer service rejected this request. Hassali did not retry it through another provider to bypass that refusal."
+                ? "I can't complete this request as written. Rephrase it if a safer or more specific version would help."
                 : category === "provider_model_unavailable"
-                  ? "The selected model is unavailable, and no compatible bounded fallback completed the request."
-                  : "No available answer method completed this request. Hassali stopped after bounded recovery.";
+                  ? "I couldn't finish this request with the currently available capabilities."
+                  : "I couldn't complete this request with a trustworthy result.";
 
   if (priorFailure && /\b(?:what do you mean|answer my original question|try again)\b/i.test(input.prompt)) {
     return `My previous message was not an answer to "${truncate(unresolvedQuestion?.content ?? "your question", 180)}". ${visibleMessage} You do not need to restate it.`;
   }
 
   return visibleMessage;
+}
+
+function sourceOutcomeHasUsefulAnswer(outcome: AskResearchOutcomeStatus, sourceCount: number) {
+  return outcome === "VERIFIED" || (
+    sourceCount > 0 &&
+    ["INSUFFICIENT_FRESHNESS", "PARTIALLY_VERIFIED", "SOURCE_CONFLICT"].includes(outcome)
+  );
 }
 
 function sanitizePublicPersonClaims(answer: string, input: AskBrainInput, category: AskSemanticCategory, liveSourcesUsed: boolean) {
@@ -1991,7 +2111,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     credentialSource: provider.credentialSource,
     responseKind: completionMethod === "deterministic_conversation_summary"
       ? "deterministic_answer"
-      : sourceReliability.outcome !== "VERIFIED"
+      : !sourceOutcomeHasUsefulAnswer(sourceReliability.outcome, sourceReliability.sourceCount)
       ? "provider_failure"
       : providerFailureCategory && selected.path === "model_reasoning_preferred"
       ? "provider_failure"
