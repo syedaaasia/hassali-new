@@ -5,7 +5,7 @@ import type {
 } from "./intelligence-contract";
 
 export type IntelligenceResultQuality = {
-  code: "EMPTY_RESPONSE" | "MALFORMED_STRUCTURED_RESPONSE" | "PROVIDER_SENTINEL" | "TRUNCATED_RESPONSE" | "USABLE";
+  code: "EMPTY_RESPONSE" | "MALFORMED_STRUCTURED_RESPONSE" | "MISSING_REQUIRED_RESEARCH_EVIDENCE" | "PROVIDER_SENTINEL" | "TRUNCATED_RESPONSE" | "USABLE";
   usable: boolean;
 };
 
@@ -24,6 +24,12 @@ export function inspectIntelligenceResultQuality(
   if (/^(?:null|undefined|\[object Object\])$/i.test(text) ||
     /^(?:the selected model returned no usable answer|no compatible fallback completed|provider error|model unavailable)\b/i.test(text)) {
     return { code: "PROVIDER_SENTINEL", usable: false };
+  }
+  if (
+    (request.requiredCapabilities.includes("webResearch") || Boolean(request.features?.webResearch)) &&
+    result.response.citations.length === 0
+  ) {
+    return { code: "MISSING_REQUIRED_RESEARCH_EVIDENCE", usable: false };
   }
   if (request.responseFormat === "json_object") {
     try {

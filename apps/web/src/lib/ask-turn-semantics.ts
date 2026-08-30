@@ -212,7 +212,10 @@ function dependencyFor(prompt: string): AskTurnDependency {
   const text = normalized(prompt);
   if (!text) return "independent";
   if (hasSameTurnAntecedent(text)) return "local_reference";
-  if (/\b(?:it|same|that|equivalent|likewise|similarly)\b/i.test(text) && (
+  const relativeClauseThat = /\b(?!(?:apply|argue|assume|believe|claim|conclude|do|repeat|say|suppose|think|use)\b)[a-z][\w-]*\s+that\s+(?!(?:for|on|to|with)\b)[a-z][\w-]*\b/i.test(text);
+  const transferableReference = /\b(?:it|same|equivalent|likewise|similarly)\b/i.test(text) ||
+    (/\bthat\b/i.test(text) && !relativeClauseThat);
+  if (transferableReference && (
       /\b(?:for|to|with|on)\s+(?!(?:it|this|that|these|those|them)\b)\S+/i.test(text) ||
       /^(?:likewise|similarly)\s*,?\s+\S+\s+(?!(?:it|this|that|these|those|them)\b)\S+/i.test(text)
     )) {

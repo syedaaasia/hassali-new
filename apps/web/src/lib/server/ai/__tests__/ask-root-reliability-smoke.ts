@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { hassaliDefaultModelId } from "@/lib/model-registry";
 import { buildAskRuntimeContext } from "../ask-context";
 import {
   runAskBrain,
@@ -54,7 +55,7 @@ async function routeChat(prompt: string, history = baseConversation) {
         clientContractVersion: hassaliChatContractVersion,
         messages,
         mode: "ASK",
-        model: "tencent/hy3:free",
+        model: hassaliDefaultModelId,
         productMode: "ASK",
         projectId: null,
         workspace: { activeFileContent: "", activePath: "", fileContents: {}, fileList: [], projectName: null },

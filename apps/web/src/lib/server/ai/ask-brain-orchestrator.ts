@@ -52,6 +52,7 @@ import {
   validateAskResponseConstraints
 } from "./ask-response-constraints";
 import { createEpistemicDirectAnswer, isTimelessReasoningRequest } from "./ask-epistemic-foundation";
+import { resolveOfficialReleaseQuery } from "./official-release-intelligence";
 import {
   prepareConversationSummary,
   resolveAskSummaryTarget,
@@ -826,7 +827,7 @@ function sourceVersionClaim(prompt: string, title: string, content: string) {
     return { scope: null, value: null };
   }
   const combined = `${title}\n${content}`;
-  const matches = [...combined.matchAll(/\bv?(\d+\.\d+(?:\.\d+)?(?:-[a-z0-9.-]+)?)\b/gi)];
+  const matches = [...combined.matchAll(/\bv?(\d+\.\d+(?:\.\d+)?)\b/gi)];
   if (matches.length === 0) return { scope: null, value: null };
 
   const ranked = matches.map((match) => {
@@ -839,8 +840,18 @@ function sourceVersionClaim(prompt: string, title: string, content: string) {
     return { index, nearby, score, value: match[1] };
   }).sort((left, right) => right.score - left.score || left.index - right.index);
   const selected = ranked[0];
-  const lts = /\blts\b/i.test(selected.nearby);
-  const current = /\b(?:current|latest)\b/i.test(selected.nearby) || /\/latest\/?/i.test(title);
+  const claimCenter = selected.index + selected.value.length / 2;
+  const nearestMarker = (pattern: RegExp) => {
+    let distance = Number.POSITIVE_INFINITY;
+    for (const match of combined.matchAll(pattern)) {
+      distance = Math.min(distance, Math.abs((match.index ?? 0) - claimCenter));
+    }
+    return distance;
+  };
+  const ltsDistance = nearestMarker(/\blts\b/gi);
+  const currentDistance = nearestMarker(/\b(?:current|latest)\b/gi);
+  const lts = ltsDistance <= 80 && ltsDistance < currentDistance;
+  const current = currentDistance <= 80 || /\/latest\/?/i.test(title);
   return {
     scope: lts ? "version:lts" : current ? "version:current" : "version:unspecified",
     value: selected.value
@@ -1643,6 +1654,17 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   }
 
   const deterministicAnswer = await createAskDirectAnswer(input.prompt, input.askRuntimeContext, input.messages);
+  const officialRelease = freshness.researchRequired && !freshness.researchProhibited
+    ? await resolveOfficialReleaseQuery({
+        prompt: input.prompt,
+        retrievedAt: input.askRuntimeContext.currentIsoDatetime,
+        signal: input.abortSignal
+      })
+    : null;
+  if (officialRelease) {
+    researchAttempted = true;
+    researchSources.push(...officialRelease.sources);
+  }
   const epistemicAnswer = createEpistemicDirectAnswer(input.prompt, input.messages);
   const localConversationalAnswer = createLocalConversationalAnswer(
     input.behavior?.objective ?? input.prompt
@@ -1688,6 +1710,10 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     providerStatus = "not_needed";
   } else if (deterministicLiveSourceAvailable && deterministicAnswer) {
     answer = deterministicAnswer;
+    providerFailureCategory = null;
+    providerStatus = "not_needed";
+  } else if (officialRelease) {
+    answer = officialRelease.answer;
     providerFailureCategory = null;
     providerStatus = "not_needed";
   } else if (freshness.sourceRequirement === "private_file_required" && workspace.excerpt) {
@@ -2111,6 +2137,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     credentialSource: provider.credentialSource,
     responseKind: completionMethod === "deterministic_conversation_summary"
       ? "deterministic_answer"
+      : sourceReliability.sourceCount > 0 && sourceOutcomeHasUsefulAnswer(sourceReliability.outcome, sourceReliability.sourceCount)
+        ? "substantive_answer"
       : !sourceOutcomeHasUsefulAnswer(sourceReliability.outcome, sourceReliability.sourceCount)
       ? "provider_failure"
       : providerFailureCategory && selected.path === "model_reasoning_preferred"

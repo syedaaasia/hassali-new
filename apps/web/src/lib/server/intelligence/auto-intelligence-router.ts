@@ -523,6 +523,16 @@ export class AutoIntelligenceRouter {
     const fallbackCandidates = candidates.slice(1).filter((candidate) =>
       candidate.adapterId !== primary.adapterId || candidate.modelId !== primary.modelId
     );
+    if (
+      !explicit &&
+      preferences.allowFallback !== false &&
+      fallbackCandidates.length === 0 &&
+      primary.model.rawProviderMetadata?.automaticFallback
+    ) {
+      // A provider-managed meta-router can legitimately select a different
+      // upstream model on the one bounded fallback attempt.
+      fallbackCandidates.push(primary);
+    }
     fallbackCandidates.sort((left, right) =>
       Number(Boolean(right.model.rawProviderMetadata?.automaticFallback)) -
         Number(Boolean(left.model.rawProviderMetadata?.automaticFallback)) ||

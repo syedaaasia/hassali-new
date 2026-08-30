@@ -120,7 +120,8 @@ function fixtureAdapter(input: {
       structuredOutput: "supported",
       text: "supported",
       tools: "supported",
-      vision: "supported"
+      vision: "supported",
+      webResearch: "supported"
     }),
     computeSource,
     defaultModelId: input.defaultModelId ?? null,
@@ -304,6 +305,42 @@ test("AUTO-13B runtime capability mismatch uses one capable fallback", async () 
   assert.equal(result.attempts, 2);
   assert.equal(result.fallbackUsed, true);
   assert.equal(alternate.invokeCount(), 1);
+});
+
+test("AUTO-13C required research evidence gets one bounded meta-router retry", async () => {
+  let attempt = 0;
+  const automatic = fixtureAdapter({
+    defaultModelId: "openrouter/free",
+    id: "openrouter",
+    invoke: async () => {
+      attempt += 1;
+      const servedModel = attempt === 1 ? "free/first" : "free/second";
+      return {
+        ok: true,
+        response: {
+          citations: attempt === 1 ? [] : [{ title: "Official evidence", url: "https://example.com/current" }],
+          computeSource: "free-cloud",
+          content: [{ text: "Current answer", type: "text" }],
+          finishReason: "stop",
+          model: servedModel,
+          providerId: "openrouter",
+          toolCalls: [],
+          usage: unknownIntelligenceUsage({ latencyMs: 1, model: servedModel, providerId: "openrouter" })
+        }
+      };
+    },
+    models: [model({ automaticFallback: true, id: "openrouter/free" })]
+  });
+  const result = await router(automatic.adapter).invoke(request({
+    features: { webResearch: { maxResults: 3 } },
+    requestedModel: "openrouter/free",
+    requiredCapabilities: ["text", "webResearch"]
+  }), preferences({ preferredModelId: "openrouter/free" }));
+  assert.equal(result.attempts, 2);
+  assert.equal(result.fallbackUsed, true);
+  assert.equal(automatic.invokeCount(), 2);
+  assert(result.result.ok);
+  if (result.result.ok) assert.equal(result.result.response.citations.length, 1);
 });
 
 test("AUTO-14 authentication failure temporarily excludes BYOK without a retry storm", async () => {

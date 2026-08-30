@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { POST } from "@/app/api/ai/chat/route";
 import { hassaliChatContractVersion } from "@/lib/chat-contract";
+import { hassaliDefaultModelId } from "@/lib/model-registry";
 
 type Proposal = {
   changes: Array<{ path?: string; proposedContent?: string }>;
@@ -17,7 +18,7 @@ async function generate(prompt: string) {
       clientContractVersion: hassaliChatContractVersion,
       messages: [{ content: prompt, role: "user" }],
       mode: "EXECUTE",
-      model: "tencent/hy3:free",
+      model: hassaliDefaultModelId,
       modelSelectionPolicy: "locked",
       productMode: "WEBSITE",
       workspace: {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { buildAskRuntimeContext } from "../ask-context";
+import { resolveOfficialReleaseQuery } from "../official-release-intelligence";
 import {
   runAskBrain,
   type AskProviderCall
@@ -102,6 +103,27 @@ test("latest technical versions require current official evidence", async () => 
   assert.equal(provider.calls[0]?.webSearch, true);
   assert.equal(result.decision.sourceReliability.outcome, "VERIFIED");
   assert.match(result.answer, /nextjs\.org/);
+});
+
+test("official Node release resolution survives model-search unavailability", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify([
+    { date: "2026-08-26", lts: false, version: "v26.8.1" },
+    { date: "2026-08-25", lts: "Krypton", version: "v24.20.0" }
+  ]), { headers: { "content-type": "application/json" }, status: 200 });
+  try {
+    const result = await resolveOfficialReleaseQuery({
+      prompt: "What is the latest stable version of Node.js?",
+      retrievedAt: runtime.currentIsoDatetime
+    });
+    assert(result);
+    assert.match(result.answer, /26\.8\.1/);
+    assert.match(result.answer, /24\.20\.0/);
+    assert.deepEqual(result.sources.map((item) => item.claimScope), ["version:current", "version:lts"]);
+    assert(result.sources.every((item) => item.isOfficial));
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test("current officeholder discovery does not assume an identity", () => {
@@ -384,7 +406,7 @@ test("partially verified current answers remain useful substantive results", asy
   assert.equal(result.decision.sourceReliability.outcome, "PARTIALLY_VERIFIED");
   assert.equal(result.decision.responseKind, "substantive_answer");
   assert.match(result.answer, /Next\.js 16\.1\.0/i);
-  assert.match(result.answer, /not available to fully verify/i);
+  assert.match(result.answer, /partially corroborated/i);
   assert.doesNotMatch(result.answer, /selected (?:answer service|model)|bounded recovery/i);
 });
 
@@ -421,10 +443,44 @@ test("OpenRouter URL annotations become validated sources", async () => {
     });
     assert.match(payload, /"type":"openrouter:web_search"/);
     assert.match(payload, /"max_tool_calls":2/);
+    assert.match(payload, /"tool_choice":"required"/);
     assert.doesNotMatch(payload, /"plugins":\[\{"id":"web"/);
     assert.equal(result.decision.sourceReliability.outcome, "VERIFIED");
     assert.equal(result.decision.sourceReliability.officialSourceCount, 1);
     assert.match(result.answer, /nextjs\.org/);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("OpenRouter Node release channels and noisy partial versions do not become a false conflict", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{
+      message: {
+        annotations: [
+          { type: "url_citation", url_citation: { content: "Get Node.js v24.20.0 LTS for production use.", title: "Node.js Download", url: "https://nodejs.org/en/download" } },
+          { type: "url_citation", url_citation: { content: "A navigation label mentions Node.js 26.5 Current.", title: "Node.js Download Current", url: "https://nodejs.org/en/download/current" } },
+          { type: "url_citation", url_citation: { content: "The latest current release contains node-v26.8.1-aix-ppc64.tar.gz.", title: "Index of /download/release/latest/", url: "https://nodejs.org/download/release/latest/" } }
+        ],
+        content: "Node.js 24.20.0 is the current LTS line, while 26.8.1 is the latest Current release."
+      }
+    }],
+    model: "openrouter/free"
+  }), { headers: { "content-type": "application/json" }, status: 200 });
+  try {
+    const prompt = "What is the latest stable version of Node.js?";
+    const result = await runAskBrain({
+      askRuntimeContext: runtime,
+      messages: [{ content: prompt, role: "user" }],
+      model: "openrouter/free",
+      modelSelectionPolicy: "locked",
+      productMode: "ASK",
+      prompt
+    });
+    assert.notEqual(result.decision.sourceReliability.outcome, "SOURCE_CONFLICT");
+    assert.doesNotMatch(result.answer, /sources conflict/i);
+    assert.match(result.answer, /24\.20\.0|26\.8\.1/);
   } finally {
     globalThis.fetch = previousFetch;
   }

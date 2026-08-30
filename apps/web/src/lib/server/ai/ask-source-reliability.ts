@@ -546,9 +546,18 @@ function conflictingClaimGroups(sources: AskResearchSource[]) {
     scoped.set(scope, values);
   }
 
+  const comparableValues = (scope: string, values: Set<string>) => {
+    if (!scope.startsWith("version:")) return values;
+    const fullVersions = [...values].filter((value) => /^v?\d+\.\d+\.\d+(?:\b|[-+])/i.test(value));
+    return fullVersions.length > 0 ? new Set(fullVersions) : values;
+  };
+  const conflictingScopes = new Set([...scoped.entries()]
+    .filter(([scope, values]) => comparableValues(scope, values).size > 1)
+    .map(([scope]) => scope));
+
   return {
-    hasConflict: unscoped.size > 1 || [...scoped.values()].some((values) => values.size > 1),
-    scopes: new Set([...scoped.entries()].filter(([, values]) => values.size > 1).map(([scope]) => scope)),
+    hasConflict: unscoped.size > 1 || conflictingScopes.size > 0,
+    scopes: conflictingScopes,
     unscopedConflict: unscoped.size > 1
   };
 }
@@ -567,7 +576,7 @@ function evidenceLimitation(
   }
   if (outcome === "PARTIALLY_VERIFIED") {
     if (decision.sourceRequirement === "official_source_required") {
-      return `The answer is supported by ${sourceCount} accessible source${sourceCount === 1 ? "" : "s"}, but an authoritative official source was not available to fully verify it as of ${time.runtimeDate}.`;
+      return `The answer is supported by ${sourceCount} accessible source${sourceCount === 1 ? "" : "s"}, but some details were only partially corroborated as of ${time.runtimeDate}.`;
     }
     if (decision.sourceRequirement === "multi_source_verification_required") {
       return `The answer has useful current evidence, but fewer than two independent fresh sources were available as of ${time.runtimeDate}.`;
@@ -580,7 +589,8 @@ function evidenceLimitation(
 function conflictingEvidenceAnswer(
   sources: AskResearchSource[],
   decision: AskFreshnessDecision,
-  time: AskNormalizedTimeContext
+  time: AskNormalizedTimeContext,
+  safeAnswer = ""
 ) {
   const conflictGroups = conflictingClaimGroups(sources);
   const conflicts = sources
@@ -593,6 +603,19 @@ function conflictingEvidenceAnswer(
   const body = conflicts.length
     ? conflicts.join("\n")
     : "The retained sources disagree, but they do not expose comparable machine-readable values.";
+  const versionOnly = sources
+    .filter((source) => source.claimValue?.trim())
+    .every((source) => source.claimScope?.startsWith("version:"));
+  if (versionOnly && safeAnswer.trim()) {
+    return sourceList([
+      "Current release sources expose different version values. They may represent separate release channels or publication lag, so both the qualified synthesis and compared values are shown.",
+      "",
+      safeAnswer.trim(),
+      "",
+      "Compared source values:",
+      body
+    ].join("\n"), sources);
+  }
   return sourceList([
     evidenceLimitation(decision, "SOURCE_CONFLICT", time, sources.length),
     "",
@@ -609,7 +632,7 @@ function qualifiedEvidenceAnswer(input: {
   time: AskNormalizedTimeContext;
 }) {
   if (input.outcome === "SOURCE_CONFLICT") {
-    return conflictingEvidenceAnswer(input.sources, input.decision, input.time);
+    return conflictingEvidenceAnswer(input.sources, input.decision, input.time, input.safeAnswer);
   }
 
   const supportedClaims = input.groundedClaims

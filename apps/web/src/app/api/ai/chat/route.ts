@@ -6252,18 +6252,28 @@ export async function POST(request: Request) {
     return Response.json({ error: "A user message is required." }, { status: 400 });
   }
 
-  const clientRequestedModel =
+  const modelSelectionPolicy: AskModelSelectionPolicy =
+    body?.modelSelectionPolicy === "locked" ? "locked" : "automatic";
+  const rawClientRequestedModel =
     typeof body?.model === "string" && body.model.trim().length > 0
       ? body.model.trim()
       : null;
-  const model = clientRequestedModel ?? process.env.HASSALI_DEFAULT_MODEL ?? fallbackModel;
-  const clientModelMetadata = clientRequestedModel
-    ? findHassaliModel(clientRequestedModel)
+  const clientModelMetadata = rawClientRequestedModel
+    ? findHassaliModel(rawClientRequestedModel)
     : null;
-  const clientModelPermitted = !clientRequestedModel || Boolean(
+  const retiredAutomaticSelection = Boolean(
+    rawClientRequestedModel &&
+    modelSelectionPolicy === "automatic" &&
     clientModelMetadata &&
     !clientModelMetadata.isTestOnly &&
-    userSelectableProposalModelIds.has(clientRequestedModel.toLowerCase())
+    !userSelectableProposalModelIds.has(rawClientRequestedModel.toLowerCase())
+  );
+  const clientRequestedModel = retiredAutomaticSelection ? null : rawClientRequestedModel;
+  const model = clientRequestedModel ?? process.env.HASSALI_DEFAULT_MODEL ?? fallbackModel;
+  const clientModelPermitted = !rawClientRequestedModel || retiredAutomaticSelection || Boolean(
+    clientModelMetadata &&
+    !clientModelMetadata.isTestOnly &&
+    userSelectableProposalModelIds.has(rawClientRequestedModel.toLowerCase())
   );
   if (!clientModelPermitted) {
     return Response.json(
@@ -6271,8 +6281,6 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  const modelSelectionPolicy: AskModelSelectionPolicy =
-    body?.modelSelectionPolicy === "locked" ? "locked" : "automatic";
   const researchPolicy = isAskResearchPolicy(body?.researchPolicy) ? body.researchPolicy : "auto";
   const mode: AiMode =
     body?.mode === "SUGGEST" || body?.mode === "EXECUTE" || body?.mode === "ASK"

@@ -1,4 +1,5 @@
 import {
+  hassaliDefaultModelId,
   hassaliModelRegistry,
   type HassaliModelMetadata
 } from "@/lib/model-registry";
@@ -110,13 +111,14 @@ export function createCurrentOpenRouterAdapter(options?: {
     },
     computeSource: "free-cloud",
     executionLocality: executionLocalityForComputeSource("free-cloud"),
-    defaultModelId: process.env.HASSALI_DEFAULT_MODEL ?? "openai/gpt-4o-mini",
+    defaultModelId: process.env.HASSALI_DEFAULT_MODEL ?? hassaliDefaultModelId,
     configuredModels: async () => hassaliModelRegistry
       .filter((model) => model.executionProviderId === "openrouter" && !model.isTestOnly)
       .map(normalizeRegisteredModel),
     extraRequestBody: (request) => request.features?.webResearch
       ? {
           max_tool_calls: 2,
+          tool_choice: "required",
           tools: [{
             parameters: {
               max_results: Math.min(Math.max(request.features.webResearch.maxResults ?? 3, 1), 5),

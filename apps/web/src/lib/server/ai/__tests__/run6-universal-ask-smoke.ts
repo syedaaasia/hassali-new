@@ -270,7 +270,7 @@ test("RUN6-11 all provider failures stop after two and return neutral Hassali co
   ]);
   const result = await runAskBrain(askInput("Explain retrieval augmented generation.", { providerCall }));
   assert.equal(calls.length, 2);
-  assert.match(result.answer, /couldn't complete that answer/i);
+  assert.match(result.answer, /couldn't finish this request/i);
   assert.doesNotMatch(result.answer, /selected model|compatible fallback|alpha|beta|provider/i);
 });
 

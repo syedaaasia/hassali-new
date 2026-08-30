@@ -80,6 +80,14 @@ test("generated continuity matrix separates missing targets from explicit subjec
   ]) {
     assert.equal(analyzeAskTurnSemantics(prompt).dependency, "local_reference", prompt);
   }
+
+  for (const prompt of [
+    "Create a website for software that helps small service businesses follow up with leads.",
+    "Build a tracker that works with local CSV files.",
+    "Explain a cache that refreshes with new records."
+  ]) {
+    assert.equal(analyzeAskTurnSemantics(prompt).dependency, "independent", prompt);
+  }
 });
 
 test("cumulative topic chains bind dependent turns to the newest explicit objective", () => {
