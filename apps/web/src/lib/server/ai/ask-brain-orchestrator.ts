@@ -563,18 +563,20 @@ function isEvaluatorStyleOutput(answer: string) {
   );
 }
 
-function reviewAnswer(answer: string, classification: AskIntentClassification, input: AskBrainInput) {
+function reviewAnswer(
+  answer: string,
+  classification: AskIntentClassification,
+  input: AskBrainInput,
+  completionMethod: AskBrainDecision["completionMethod"]
+) {
   const issues: string[] = [];
   const localConversation = Boolean(createLocalConversationalAnswer(
     input.behavior?.objective ?? input.prompt
   ));
   const conversationSummary = conversationSummaryFor(input);
-  const referenceSummary = isReferenceSummaryRequest(input);
-  const deterministicSemantics = Boolean(createEpistemicDirectAnswer(input.prompt, input.messages)) ||
-    Boolean(conversationSummary) ||
-    referenceSummary ||
-    isTimelessReasoningRequest(input.prompt);
-  const contractValidation = input.behavior?.answerIntent && !localConversation && !deterministicSemantics
+  const deterministicMethod = completionMethod === "deterministic" ||
+    completionMethod === "deterministic_conversation_summary";
+  const contractValidation = input.behavior?.answerIntent && !localConversation && !deterministicMethod
     ? validateAnswerAgainstContract(answer, input.behavior.answerContract)
     : null;
 
@@ -1260,7 +1262,25 @@ function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntent
 
 function providerFailureAnswer(input: AskBrainInput, category: string | null) {
   const deterministicFallback = fallbackOpenEndedAnswer(input, classifyAskIntent(input.prompt));
-  if (deterministicFallback !== noLocalCompletionAnswer) {
+  const conversationSummary = conversationSummaryFor(input);
+  const authoritativeLocalFallback = deterministicFallback === conversationSummary?.deterministicSummary ||
+    isReferenceSummaryRequest(input) ||
+    isWorkspaceProjectSummaryRequest(input.prompt);
+  const fallbackContract = input.behavior?.answerContract;
+  const fallbackContractValid = authoritativeLocalFallback || !fallbackContract || validateAnswerAgainstContract(
+    deterministicFallback,
+    fallbackContract
+  ).complete;
+  const fallbackConstraints = extractAskResponseConstraints(input.prompt, input.messages);
+  const fallbackConstraintsValid = validateAskResponseConstraints(
+    finalizeAskResponseConstraints(deterministicFallback, fallbackConstraints),
+    fallbackConstraints
+  ).length === 0;
+  if (
+    deterministicFallback !== noLocalCompletionAnswer &&
+    fallbackContractValid &&
+    fallbackConstraintsValid
+  ) {
     return deterministicFallback;
   }
   const priorFailure = [...input.messages].reverse().find((message) => message.role === "assistant" && message.responseKind === "provider_failure");
@@ -1746,12 +1766,15 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   if (conversationSummary && answer === conversationSummary.deterministicSummary) {
     completionMethod = "deterministic_conversation_summary";
     fallbackMethodsAttempted.push("deterministic_conversation_summary");
+  } else if (isReferenceSummaryRequest(input) && answer !== noLocalCompletionAnswer) {
+    completionMethod = "deterministic";
+    fallbackMethodsAttempted.push("deterministic_workspace_summary");
   }
   answer = sanitizePublicPersonClaims(answer, input, category, webSearchRequested);
   let sanitized = sanitizeAskOutput(answer);
   const responseConstraints = extractAskResponseConstraints(input.prompt, input.messages);
   sanitized = { ...sanitized, value: finalizeAskResponseConstraints(sanitized.value, responseConstraints) };
-  let review = reviewAnswer(sanitized.value, classification, input);
+  let review = reviewAnswer(sanitized.value, classification, input, completionMethod);
 
   if (
     !review.passed &&
@@ -1796,7 +1819,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     revisionReason = revision.revisionReason;
     sanitized = sanitizeAskOutput(revision.content);
     sanitized = { ...sanitized, value: finalizeAskResponseConstraints(sanitized.value, responseConstraints) };
-    review = reviewAnswer(sanitized.value, classification, input);
+    review = reviewAnswer(sanitized.value, classification, input, completionMethod);
     if (revisionCallRan && revision.servedModel) {
       actualServedModel = revision.servedModel;
     }
@@ -1873,14 +1896,14 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     ...sanitized,
     value: finalizeAskResponseConstraints(sanitized.value, finalConstraints)
   };
-  review = reviewAnswer(sanitized.value, classification, input);
+  review = reviewAnswer(sanitized.value, classification, input, completionMethod);
   if (!review.passed && conversationSummary && !input.abortSignal?.aborted) {
     sanitized = sanitizeAskOutput(finalizeAskResponseConstraints(
       conversationSummary.deterministicSummary,
       finalConstraints
     ));
-    review = reviewAnswer(sanitized.value, classification, input);
     completionMethod = "deterministic_conversation_summary";
+    review = reviewAnswer(sanitized.value, classification, input, completionMethod);
     failureStage = review.passed ? "none" : "constraint";
     if (!fallbackMethodsAttempted.includes("deterministic_conversation_summary")) {
       fallbackMethodsAttempted.push("deterministic_conversation_summary");
@@ -1902,7 +1925,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     fallbackReason = `final_constraint_failed:${finalConstraintIssues.join(",")}`;
     failureStage = "constraint";
     sanitized = sanitizeAskOutput(providerFailureAnswer(input, providerFailureCategory));
-    review = reviewAnswer(sanitized.value, classification, input);
+    review = reviewAnswer(sanitized.value, classification, input, completionMethod);
   }
   const multimodalState: VerificationState = evidenceConflicts.length
     ? "CONFLICTING"

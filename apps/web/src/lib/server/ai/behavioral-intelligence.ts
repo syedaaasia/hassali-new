@@ -253,7 +253,7 @@ function contextTokens(value: string) {
   );
 }
 
-type ContinuityKind = "action_reference" | "elliptical_reference" | "explicit_prior_reference" | "prior_refinement" | "self_contained";
+type ContinuityKind = "action_reference" | "elliptical_reference" | "explicit_prior_reference" | "operation_transfer" | "prior_refinement" | "self_contained";
 
 export type ContinuityDependencyAnalysis = {
   explicitTarget: boolean;
@@ -363,6 +363,7 @@ function hasSelfContainedObjective(value: string) {
 
 function classifyContinuity(value: string): ContinuityKind {
   const text = value.trim();
+  if (analyzeAskTurnSemantics(text).dependency === "operation_transfer") return "operation_transfer";
   if (hasSelfContainedObjective(text)) return "self_contained";
 
   if (/^(?:build|do|fix|implement|apply)\s+(?:it|that(?: plan)?)[.!?]*$/i.test(text)) {
@@ -484,6 +485,10 @@ function selectReferencedObjective(
       : priorUserObjectives.at(-1) ?? answerableObjectives.at(-1) ?? null;
   }
 
+  if (continuity === "operation_transfer") {
+    return answerableObjectives.at(-1) ?? priorUserObjectives.at(-1) ?? null;
+  }
+
   if (continuity === "elliptical_reference" && !/^(?:build|do|fix|implement|apply)\b/i.test(prompt.trim())) {
     return priorUserObjectives.at(-1) ?? answerableObjectives.at(-1) ?? null;
   }
@@ -601,6 +606,9 @@ function extractRequiredOutputs(value: string) {
 function resolveFollowup(prompt: string, referencedObjective: string | null, requestedCount: number | null) {
   if (!referencedObjective) return prompt.trim();
   const trimmed = prompt.trim();
+  if (classifyContinuity(trimmed) === "operation_transfer") {
+    return `Apply the operation from the referenced objective to the current subject.\nCurrent request: ${trimmed}\nReferenced objective: ${referencedObjective}`;
+  }
   if (/\b(?:go back|return)\s+to\b/i.test(trimmed)) {
     return `${trimmed}\nReferenced objective: ${referencedObjective}`;
   }
@@ -995,8 +1003,9 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
     ),
     hasConversationContext: messages.some((message) => message.role === "user" && message.content.trim() !== currentPrompt)
   });
-  const artifactTransformation = isAskContentTransformationOperation(turnSemantics.operation) &&
-    (turnSemantics.target === "selected_artifact" || turnSemantics.target === "named_artifact" || turnSemantics.target === "pasted_content");
+  const artifactTransformation = turnSemantics.target === "selected_artifact" ||
+    turnSemantics.target === "named_artifact" ||
+    turnSemantics.target === "pasted_content";
   const referencedObjective = turnSemantics.target !== null
     ? null
     : selectReferencedObjective(
@@ -1015,15 +1024,20 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   const inferredAction = inferAction(currentPrompt, resolvedRequest);
   const mixedAction = inferMixedMutationAction(currentPrompt);
   const answerOnlyTransformation = input.selectedMode === "ASK" &&
-    isAskContentTransformationOperation(turnSemantics.operation) &&
-    !turnSemantics.explicitMutation;
+    (isAskContentTransformationOperation(turnSemantics.operation) || artifactTransformation) &&
+    turnSemantics.authority === "answer_only";
+  const persistentArtifactMutation = input.selectedMode === "ASK" &&
+    artifactTransformation &&
+    turnSemantics.authority === "persistent_mutation";
   const action = answerOnlyTransformation
     ? turnSemantics.operation === "explain" || turnSemantics.operation === "simplify" ? "EXPLAIN" : "ANSWER"
-    : input.selectedMode === "WEBSITE" && (
-    isExplicitWebsiteFactUpdate(currentPrompt) || isExplicitWebsiteDesignUpdate(currentPrompt)
-  )
-    ? "EDIT"
-    : mixedAction ?? inferredAction;
+    : persistentArtifactMutation
+      ? "EDIT"
+      : input.selectedMode === "WEBSITE" && (
+          isExplicitWebsiteFactUpdate(currentPrompt) || isExplicitWebsiteDesignUpdate(currentPrompt)
+        )
+        ? "EDIT"
+        : mixedAction ?? inferredAction;
   const mixedIntent = Boolean(mixedAction) && !answerOnlyTransformation;
   const mutationIntent = isMutationAction(action);
   const answerIntent = mixedIntent || isAnswerAction(action);
@@ -1048,7 +1062,7 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
   const confidence = ambiguities.length
     ? Math.min(intent.confidence, referencedObjective ? 0.72 : 0.45)
     : Math.max(intent.confidence, 0.88);
-  const objective = referencedObjective && isEllipticalFollowup(currentPrompt)
+  const objective = referencedObjective && isEllipticalFollowup(currentPrompt) && turnSemantics.dependency !== "operation_transfer"
     ? referencedObjective
     : currentPrompt.trim();
   const persistentConstraints = (

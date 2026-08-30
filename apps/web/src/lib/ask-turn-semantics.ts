@@ -18,9 +18,12 @@ export type AskContentTarget =
   | "selected_artifact"
   | null;
 
-export type AskTurnDependency = "independent" | "local_reference" | "prior_context";
+export type AskTurnDependency = "independent" | "local_reference" | "operation_transfer" | "prior_context";
+
+export type AskTurnAuthority = "answer_only" | "persistent_mutation";
 
 export type AskTurnSemantics = {
+  authority: AskTurnAuthority;
   dependency: AskTurnDependency;
   explicitMutation: boolean;
   explicitTarget: boolean;
@@ -86,7 +89,8 @@ export function isAskContentTransformationOperation(operation: AskContentOperati
 function hasPersistentMutationAuthority(prompt: string) {
   return /\b(?:apply|commit|modify|overwrite|save|update|write)\b[\s\S]{0,80}\b(?:changes?|file|project|repository|repo|workspace|disk)\b/i.test(prompt) ||
     /\b(?:apply|save|write)\s+(?:it|this|that|the result|the changes?)\b/i.test(prompt) ||
-    /\b(?:edit|modify|update|replace)\s+(?:the\s+)?(?:active|current|selected|named)?\s*(?:file|project|repository|workspace|[\w./-]+\.(?:jsx?|tsx?|html?|css|md|txt))\b/i.test(prompt);
+    /\b(?:edit|modify|update|replace)\s+(?:the\s+)?(?:active|current|selected|named)?\s*(?:file|project|repository|workspace|[\w./-]+\.(?:jsx?|tsx?|html?|css|md|txt))\b/i.test(prompt) ||
+    /\b(?:in[- ]place|on disk|in (?:the )?(?:file|project|repository|repo|workspace))\b/i.test(prompt);
 }
 
 function hasPastedBody(prompt: string) {
@@ -120,11 +124,35 @@ function targetFor(
   if (ARTIFACT_TARGET.test(prompt)) return context.artifactTargetAvailable ? "selected_artifact" : "named_artifact";
   if (CONVERSATION_TARGET.test(prompt)) return "conversation";
   if (hasPastedBody(prompt)) return "pasted_content";
+  if (context.artifactTargetAvailable && hasArtifactBoundReference(prompt)) return "selected_artifact";
   if (!isAskContentTransformationOperation(operation)) return null;
   if (explicitTransformSubject(prompt, operation)) return "explicit_subject";
   if (context.artifactTargetAvailable) return "selected_artifact";
   if (operation === "summarize" && context.hasConversationContext) return "conversation";
   return null;
+}
+
+function hasArtifactBoundReference(prompt: string) {
+  const text = normalized(prompt);
+  if (!text) return false;
+
+  // A deictic object has no source inside the turn; the selected artifact is the
+  // only authoritative local antecedent. This is independent of the operation
+  // verb, so new rewrite styles do not need routing patches.
+  if (/\b(?:it|this|these|those|them)\b/i.test(text) &&
+      !/\b(?:this|these)\s+(?:chat|conversation|discussion|thread)\b/i.test(text)) {
+    return true;
+  }
+
+  // Projection requests name the desired output fields but omit the source.
+  // They are artifact-bound only when no explicit source/subject follows.
+  if (/^(?:give|list|show)(?:\s+me)?\s+(?:just\s+|only\s+)?(?:the\s+)?[^:?!]{2,100}$/i.test(text) &&
+      !/\b(?:about|for|from|in|of|on|regarding)\s+(?:an?|the\s+)?[A-Za-z0-9][\w.+#/-]*/i.test(text) &&
+      !/\b[A-Z][A-Za-z0-9.+#/-]{2,}\b/.test(text.split(/\s+/).slice(1).join(" "))) {
+    return true;
+  }
+
+  return false;
 }
 
 function hasSameTurnAntecedent(prompt: string) {
@@ -184,6 +212,12 @@ function dependencyFor(prompt: string): AskTurnDependency {
   const text = normalized(prompt);
   if (!text) return "independent";
   if (hasSameTurnAntecedent(text)) return "local_reference";
+  if (/\b(?:it|same|that|equivalent|likewise|similarly)\b/i.test(text) && (
+      /\b(?:for|to|with|on)\s+(?!(?:it|this|that|these|those|them)\b)\S+/i.test(text) ||
+      /^(?:likewise|similarly)\s*,?\s+\S+\s+(?!(?:it|this|that|these|those|them)\b)\S+/i.test(text)
+    )) {
+    return "operation_transfer";
+  }
   if (/\b(?:go back|previous (?:answer|point|question)|return to)\b/i.test(text)) return "prior_context";
   if (/\bthe\s+(?:alternative|former|latter|opposite|previous\s+(?:answer|point)|reverse case)\b/i.test(text) && !/:\s*\S/.test(text)) {
     return "prior_context";
@@ -225,9 +259,13 @@ export function analyzeAskTurnSemantics(
   const operation = operationFor(prompt);
   const target = targetFor(prompt, operation, context);
   const dependency = dependencyFor(prompt);
+  const authority: AskTurnAuthority = hasPersistentMutationAuthority(prompt)
+    ? "persistent_mutation"
+    : "answer_only";
   return {
+    authority,
     dependency,
-    explicitMutation: hasPersistentMutationAuthority(prompt),
+    explicitMutation: authority === "persistent_mutation",
     explicitTarget: target === "conversation" || target === "explicit_subject" || target === "named_artifact" || target === "pasted_content",
     operation,
     target

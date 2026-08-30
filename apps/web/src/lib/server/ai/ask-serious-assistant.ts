@@ -440,7 +440,10 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   if (detectDangerousCodingRequest(prompt)) return classify(prompt, "auth_or_security_guidance", 0.96, "The user asked for harmful code; ASK should refuse and redirect to defensive security.");
   if (isDirectDateTimeQuestion(prompt)) return classify(prompt, "date_time_question", 0.9, "The user is directly asking for date or time.");
   if (isWebsiteCodeTextRequest(prompt)) return classify(prompt, "website_code_text_only", 0.92, "The user asks for website code in chat only.");
-  if (/\b(?:compare|which is better|recommend|best option|versus|vs)\b/i.test(prompt)) return classify(prompt, "comparison_or_recommendation", 0.9, "The user asks for comparison or recommendation.");
+  if (
+    /\b(?:compare|which is better|recommend(?:ation)?|versus|vs)\b/i.test(prompt) ||
+    /^(?:what|which|who|where)\b[\s\S]{0,100}\bbest\b/i.test(prompt)
+  ) return classify(prompt, "comparison_or_recommendation", 0.9, "The user asks for comparison or recommendation.");
   if (isConceptualTechnicalExplanation(prompt)) return classify(prompt, "explanation_or_teaching", 0.9, "The user asks for a conceptual technical explanation rather than implementation code.");
   if (detectCodingCategory(prompt) || isCodingTextRequest(prompt)) return classify(prompt, /\b(?:xampp|cmd|localhost|install|run|commands?|setup)\b/i.test(prompt) ? "local_setup_guidance" : "coding_help_text_only", 0.9, "The user asks for code or setup guidance as text.");
   if (/\b(?:write it|write this|say politely|say this|make it|rewrite)\b/i.test(prompt) && (explicitMaxWordsFor(prompt) || /\b(?:human|sarcastic(?:ally)?|firm|simple|general)\b/i.test(prompt))) return classify(prompt, "writing_or_rewriting", 0.88, "The user asks for wording refinement with quality constraints.");

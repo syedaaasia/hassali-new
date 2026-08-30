@@ -8,6 +8,7 @@ export type AskResponseConstraints = {
   exactWords: number | null;
   forbiddenWords: string[];
   maxWords: number | null;
+  listStyle: "bulleted" | "numbered" | null;
   rules: AskOutputConstraintRule[];
   source: "current" | "prior-turn" | "none";
 };
@@ -19,9 +20,10 @@ export type AskOutputConstraintRule = {
   value: number | string[];
 };
 
-const countPattern = "(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)";
+const countPattern = "(\\d+|a|an|single|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)";
 
 const numberWords: Record<string, number> = {
+  a: 1, an: 1, single: 1,
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
   eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
   eighteen: 18, nineteen: 19, twenty: 20
@@ -70,6 +72,7 @@ function emptyConstraints(source: AskResponseConstraints["source"]): AskResponse
     exactSentences: null,
     exactWords: null,
     forbiddenWords: [],
+    listStyle: null,
     maxWords: null,
     rules: [],
     source
@@ -106,11 +109,11 @@ function normalizedMaximum(value: string | undefined, operator: string | undefin
 function perItemWordLimit(prompt: string): ScopedWordLimit | null {
   const operator = "(under|less than|fewer than|no more than|at most|max(?:imum)?|no longer than|may not exceed|cannot exceed|exceed)";
   const patterns = [
-    new RegExp("\\b(?:each|every)(?:\\s+(?:bullet|item|point))?\\s+(?:with\\s+)?" + operator + "\\s+" + countPattern + "\\s+words?\\b", "i"),
-    new RegExp("\\b" + operator + "\\s+" + countPattern + "\\s+words?\\s+(?:for\\s+)?(?:each|every)(?:\\s+(?:bullet|item|point))?\\b", "i"),
-    new RegExp("\\b" + operator + "\\s+" + countPattern + "\\s+words?\\s+(?:each|per\\s+(?:bullet|item|point))\\b", "i"),
-    new RegExp("\\b(?:no\\s+)?(?:bullet|item|point)\\s+(?:may\\s+|can\\s+)?(?:be\\s+)?" + operator + "\\s+" + countPattern + "\\s+words?\\b", "i"),
-    new RegExp("\\b(?:no\\s+)?(?:bullet|item|point)\\s+(?:may\\s+|can\\s+)?(?:be\\s+)?(longer than|over)\\s+" + countPattern + "\\s+words?\\b", "i")
+    new RegExp("\\b(?:each|every)(?:\\s+(?:bullet|item|line|point|step))?\\s+(?:with\\s+)?" + operator + "\\s+" + countPattern + "\\s+words?\\b", "i"),
+    new RegExp("\\b" + operator + "\\s+" + countPattern + "\\s+words?\\s+(?:for\\s+)?(?:each|every)(?:\\s+(?:bullet|item|line|point|step))?\\b", "i"),
+    new RegExp("\\b" + operator + "\\s+" + countPattern + "\\s+words?\\s+(?:each|per\\s+(?:bullet|item|line|point|step))\\b", "i"),
+    new RegExp("\\b(?:no\\s+)?(?:bullet|item|line|point|step)\\s+(?:may\\s+|can\\s+)?(?:be\\s+)?" + operator + "\\s+" + countPattern + "\\s+words?\\b", "i"),
+    new RegExp("\\b(?:no\\s+)?(?:bullet|item|line|point|step)\\s+(?:may\\s+|can\\s+)?(?:be\\s+)?(longer than|over)\\s+" + countPattern + "\\s+words?\\b", "i")
   ];
   for (const pattern of patterns) {
     const match = prompt.match(pattern);
@@ -129,10 +132,12 @@ function totalWordLimit(prompt: string, perItem: ScopedWordLimit | null) {
 }
 
 function allowedResponses(prompt: string) {
+  const tokenSet = prompt.match(/\b(?:exactly\s+)?(?:one|single|1)\s+(?:token|choice|label|value)\s*:\s*([^.!?\r\n]{3,160})/i)?.[1];
   const command = prompt.match(/\b(?:answer|choose|pick|reply(?:\s+with)?|respond(?:\s+with)?|return)\b([\s\S]{0,180})/i)?.[1] ?? "";
-  const constrained = /\b(?:exactly\s+one|one\s+of|only)\b/i.test(command);
-  const candidateText = command
+  const constrained = Boolean(tokenSet) || /\b(?:exactly\s+one|one\s+of|only)\b/i.test(command);
+  const candidateText = (tokenSet ?? command)
     .replace(/^\s*(?:only\s+)?(?:exactly\s+)?(?:one\b\s*)?(?:of\b\s*)?:?\s*/i, "")
+    .replace(/^\s*(?:token|choice|label|value)\s*:\s*/i, "")
     .replace(/\s+only\s*[.!?]*$/i, "")
     .replace(/[.!?]+$/g, "")
     .trim();
@@ -153,9 +158,16 @@ function currentConstraints(prompt: string): Omit<AskResponseConstraints, "sourc
     ?? positiveInteger(prompt.match(new RegExp("\\b(?:answer|respond)(?:\\s+(?:my\\s+)?next\\s+(?:question\\s+)?)?(?:in|using)\\s+(?:only\\s+)?" + countPattern + "\\s+words?\\b", "i"))?.[1])
     ?? positiveInteger(prompt.match(new RegExp("\\band\\s+(?:exactly\\s+)?" + countPattern + "\\s+words?\\b", "i"))?.[1]);
   const maxWords = totalWordLimit(prompt, perItem);
-  const bulletCount = positiveInteger(prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+bullet(?:\\s+points?)?s?\\b", "i"))?.[1]);
+  const listMatch = prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+(?:(numbered|ordered|bulleted)\\s+)?(bullet(?:\\s+points?)?s?|items?|lines?|points?|steps?)\\b", "i"));
+  const bulletCount = positiveInteger(listMatch?.[1]);
+  const listStyle = /^(?:numbered|ordered)$/i.test(listMatch?.[2] ?? "") || /^(?:steps?|numbered items?)$/i.test(listMatch?.[3] ?? "")
+    ? "numbered" as const
+    : bulletCount
+      ? "bulleted" as const
+      : null;
   const exactSentences = positiveInteger(prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+sentences?(?:\\s+only)?\\b", "i"))?.[1])
-    ?? positiveInteger(prompt.match(new RegExp("\\b(?:use|answer|respond|write)(?:\\s+in)?\\s+(?:exactly\\s+)?" + countPattern + "\\s+sentences?(?:\\s+only)?\\b", "i"))?.[1]);
+    ?? positiveInteger(prompt.match(new RegExp("\\b(?:use|answer|respond|write)(?:\\s+in)?\\s+(?:exactly\\s+)?" + countPattern + "\\s+sentences?(?:\\s+only)?\\b", "i"))?.[1])
+    ?? (/\b(?:use|answer|respond|write)(?:\s+in)?\s+(?:a\s+)?single\s+sentence(?:\s+only)?\b/i.test(prompt) ? 1 : null);
   const bulletItemMaxWords = perItem?.value ?? null;
   const allowed = allowedResponses(prompt);
   const rules: AskOutputConstraintRule[] = [];
@@ -172,6 +184,7 @@ function currentConstraints(prompt: string): Omit<AskResponseConstraints, "sourc
     exactSentences,
     exactWords,
     forbiddenWords: forbiddenWords(prompt),
+    listStyle,
     maxWords,
     rules
   };
@@ -203,7 +216,7 @@ export function askResponseConstraintInstruction(constraints: AskResponseConstra
     constraints.allowedResponses ? "Return only one of: " + constraints.allowedResponses.join(" or ") + "." : "",
     constraints.exactWords ? "Return exactly " + constraints.exactWords + " words." : "",
     constraints.maxWords ? "Return no more than " + constraints.maxWords + " words." : "",
-    constraints.bulletCount ? "Return exactly " + constraints.bulletCount + " bullet items." : "",
+    constraints.bulletCount ? "Return exactly " + constraints.bulletCount + " " + (constraints.listStyle === "numbered" ? "numbered items." : "bullet items.") : "",
     constraints.bulletItemMaxWords ? "Keep every bullet item to no more than " + constraints.bulletItemMaxWords + " words." : "",
     constraints.exactSentences ? "Return exactly " + constraints.exactSentences + " sentence" + (constraints.exactSentences === 1 ? "." : "s.") : "",
     constraints.forbiddenWords.length ? "Do not use these forbidden words (including ordinary case variants): " + constraints.forbiddenWords.join(", ") + "." : ""
@@ -223,6 +236,9 @@ export function validateAskResponseConstraints(answer: string, constraints: AskR
     const bulletLines = answer.split(/\r?\n/).filter((line) => /^\s*(?:[-*•]|\d+[.)])\s+/.test(line));
     const bullets = bulletLines.length;
     if (bullets !== constraints.bulletCount) issues.push("constraint_bullets:" + constraints.bulletCount + ":" + bullets);
+    if (constraints.listStyle === "numbered" && bulletLines.some((line) => !/^\s*\d+[.)]\s+/.test(line))) {
+      issues.push("constraint_numbered_structure");
+    }
     if (constraints.bulletItemMaxWords) {
       const overlong = bulletLines.filter((line) => words(line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "")).length > constraints.bulletItemMaxWords!).length;
       if (overlong) issues.push("constraint_bullet_max_words:" + constraints.bulletItemMaxWords + ":" + overlong);
@@ -310,11 +326,11 @@ export function finalizeAskResponseConstraints(answer: string, constraints: AskR
   }
   if (constraints.bulletCount) {
     const candidates = exactBulletContents(next, constraints.bulletCount);
-    next = candidates.map((content) => {
+    next = candidates.map((content, index) => {
       const bounded = constraints.bulletItemMaxWords
         ? words(content).slice(0, constraints.bulletItemMaxWords).join(" ")
         : content;
-      return `- ${bounded}`;
+      return constraints.listStyle === "numbered" ? `${index + 1}. ${bounded}` : `- ${bounded}`;
     }).join("\n");
   }
   if (constraints.exactSentences) {
