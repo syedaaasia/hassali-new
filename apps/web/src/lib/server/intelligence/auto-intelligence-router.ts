@@ -287,6 +287,25 @@ function rememberFailure(scopeId: string, candidate: IntelligenceRouteCandidate,
   }
 }
 
+function sameRoute(
+  left: IntelligenceRouteCandidate,
+  right: IntelligenceRouteCandidate | null
+) {
+  return Boolean(
+    right &&
+    left.adapterId === right.adapterId &&
+    left.modelId === right.modelId
+  );
+}
+
+function shouldRememberMetaRouterFailure(failure: IntelligenceFailure) {
+  return ![
+    "malformed-provider-response",
+    "model-unavailable",
+    "timeout"
+  ].includes(failure.category);
+}
+
 function fallbackReason(category: IntelligenceFailure["category"]): IntelligenceRoutingReasonCode {
   if (category === "rate-limit") return "FALLBACK_AFTER_RATE_LIMIT";
   if (category === "timeout") return "FALLBACK_AFTER_TIMEOUT";
@@ -526,11 +545,11 @@ export class AutoIntelligenceRouter {
     if (
       !explicit &&
       preferences.allowFallback !== false &&
-      fallbackCandidates.length === 0 &&
       primary.model.rawProviderMetadata?.automaticFallback
     ) {
       // A provider-managed meta-router can legitimately select a different
-      // upstream model on the one bounded fallback attempt.
+      // upstream model on the one bounded fallback attempt. Keep that retry
+      // ahead of registry alternatives that may be stale or unavailable.
       fallbackCandidates.push(primary);
     }
     fallbackCandidates.sort((left, right) =>
@@ -577,17 +596,25 @@ export class AutoIntelligenceRouter {
       request,
       await invokeCandidate(resolution.decision.primary)
     );
+    const providerManagedRetry = sameRoute(resolution.decision.primary, resolution.decision.fallback);
     if (primaryResult.ok || !retryableFallbackCategories.has(primaryResult.failure.category) || !resolution.decision.fallback) {
       if (!primaryResult.ok) rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
       return { attempts: 1, decision: resolution.decision, fallbackUsed: false, primaryFailureCategory: null, result: primaryResult };
     }
-    rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
+    if (!providerManagedRetry || shouldRememberMetaRouterFailure(primaryResult.failure)) {
+      rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
+    }
     const fallback = {
       ...resolution.decision.fallback,
       reasonCodes: [...resolution.decision.fallback.reasonCodes, fallbackReason(primaryResult.failure.category)]
     };
     const fallbackResult = normalizeIntelligenceResultQuality(request, await invokeCandidate(fallback));
-    if (!fallbackResult.ok) rememberFailure(scopeId, fallback, fallbackResult.failure);
+    if (
+      !fallbackResult.ok &&
+      (!providerManagedRetry || shouldRememberMetaRouterFailure(fallbackResult.failure))
+    ) {
+      rememberFailure(scopeId, fallback, fallbackResult.failure);
+    }
     return {
       attempts: 2,
       decision: { ...resolution.decision, fallback },
@@ -625,17 +652,25 @@ export class AutoIntelligenceRouter {
       });
     };
     const primaryResult = await streamCandidate(resolution.decision.primary);
+    const providerManagedRetry = sameRoute(resolution.decision.primary, resolution.decision.fallback);
     if (primaryResult.ok || !retryableFallbackCategories.has(primaryResult.failure.category) || !resolution.decision.fallback) {
       if (!primaryResult.ok) rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
       return { attempts: 1, decision: resolution.decision, fallbackUsed: false, primaryFailureCategory: null, result: primaryResult };
     }
-    rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
+    if (!providerManagedRetry || shouldRememberMetaRouterFailure(primaryResult.failure)) {
+      rememberFailure(scopeId, resolution.decision.primary, primaryResult.failure);
+    }
     const fallback = {
       ...resolution.decision.fallback,
       reasonCodes: [...resolution.decision.fallback.reasonCodes, fallbackReason(primaryResult.failure.category)]
     };
     const fallbackResult = await streamCandidate(fallback);
-    if (!fallbackResult.ok) rememberFailure(scopeId, fallback, fallbackResult.failure);
+    if (
+      !fallbackResult.ok &&
+      (!providerManagedRetry || shouldRememberMetaRouterFailure(fallbackResult.failure))
+    ) {
+      rememberFailure(scopeId, fallback, fallbackResult.failure);
+    }
     return {
       attempts: 2,
       decision: { ...resolution.decision, fallback },

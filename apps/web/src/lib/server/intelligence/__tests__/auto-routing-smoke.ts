@@ -343,6 +343,88 @@ test("AUTO-13C required research evidence gets one bounded meta-router retry", a
   if (result.result.ok) assert.equal(result.result.response.citations.length, 1);
 });
 
+test("AUTO-13D a provider-managed meta-router can recover on the next request after upstream model misses", async () => {
+  let attempt = 0;
+  const automatic = fixtureAdapter({
+    defaultModelId: "openrouter/free",
+    id: "openrouter",
+    invoke: async (req) => {
+      attempt += 1;
+      if (attempt <= 2) {
+        return failure("model-unavailable", "openrouter", req.requestedModel ?? "openrouter/free");
+      }
+      return {
+        ok: true,
+        response: {
+          citations: [],
+          computeSource: "free-cloud",
+          content: [{ text: "Recovered answer", type: "text" }],
+          finishReason: "stop",
+          model: "free/recovered",
+          providerId: "openrouter",
+          toolCalls: [],
+          usage: unknownIntelligenceUsage({ latencyMs: 1, model: "free/recovered", providerId: "openrouter" })
+        }
+      };
+    },
+    models: [model({ automaticFallback: true, id: "openrouter/free" })]
+  });
+  const auto = router(automatic.adapter);
+  const prefs = preferences({ preferredModelId: "openrouter/free", scopeId: "meta-router-recovery" });
+
+  const first = await auto.invoke(request({ requestedModel: "openrouter/free" }), prefs);
+  const second = await auto.invoke(request({ requestedModel: "openrouter/free" }), prefs);
+
+  assert.equal(first.result.ok, false);
+  assert.equal(first.attempts, 2);
+  assert.equal(second.result.ok, true);
+  assert.equal(second.attempts, 1);
+  assert.equal(automatic.invokeCount(), 3);
+});
+
+test("AUTO-13E a provider-managed meta-router retry outranks a stale registry alternate", async () => {
+  let attempt = 0;
+  const automatic = fixtureAdapter({
+    defaultModelId: "openrouter/free",
+    id: "openrouter",
+    invoke: async (req) => {
+      if (req.requestedModel === "anthropic/claude-next") {
+        return failure("model-unavailable", "openrouter", req.requestedModel);
+      }
+      attempt += 1;
+      if (attempt === 1) {
+        return failure("malformed-provider-response", "openrouter", req.requestedModel ?? "openrouter/free");
+      }
+      return {
+        ok: true,
+        response: {
+          citations: [],
+          computeSource: "free-cloud",
+          content: [{ text: "Recovered through the free router", type: "text" }],
+          finishReason: "stop",
+          model: "free/recovered",
+          providerId: "openrouter",
+          toolCalls: [],
+          usage: unknownIntelligenceUsage({ latencyMs: 1, model: "free/recovered", providerId: "openrouter" })
+        }
+      };
+    },
+    models: [
+      model({ automaticFallback: true, id: "openrouter/free" }),
+      model({ id: "anthropic/claude-next" })
+    ]
+  });
+  const result = await router(automatic.adapter).invoke(
+    request({ requestedModel: "openrouter/free" }),
+    preferences({ preferredModelId: "openrouter/free", scopeId: "meta-router-priority" })
+  );
+
+  assert.equal(result.result.ok, true);
+  assert.equal(result.attempts, 2);
+  assert.equal(result.decision?.fallback?.modelId, "openrouter/free");
+  assert.equal(automatic.invokeCount(), 2);
+});
+
 test("AUTO-14 authentication failure temporarily excludes BYOK without a retry storm", async () => {
   const byok = fixtureAdapter({
     computeSource: "byok-cloud",

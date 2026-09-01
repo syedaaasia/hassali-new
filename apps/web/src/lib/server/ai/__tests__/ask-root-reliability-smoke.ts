@@ -12,6 +12,7 @@ import {
   prepareConversationSummary,
   type ConversationHistoryMessage
 } from "../conversation-history-analysis";
+import { resolveBehavioralDecision } from "../behavioral-intelligence";
 
 const observedFailure = "I couldn't complete that answer reliably right now. Please try again.";
 const baseConversation: ConversationHistoryMessage[] = [
@@ -81,6 +82,42 @@ function providerSequence(results: ModelCallResult[]) {
   };
   return { calls, providerCall };
 }
+
+test("production route completes bounded everyday arithmetic without a provider", async () => {
+  const { answer, response } = await routeChat("If I have 17 apples and give away 6, how many remain?", []);
+  assert.match(answer, /11 apples remain/i);
+  assert.equal(response.headers.get("x-hassali-ask-response-kind"), "deterministic_answer");
+  assert.equal(response.headers.get("x-hassali-ask-provider-call-count"), "0");
+});
+
+test("conversational address does not make a concise correct answer fail its contract", async () => {
+  await withConfiguredProvider(async () => {
+    const prompt = "Mate, what's RAM for?";
+    const messages = [{ role: "user" as const, content: prompt }];
+    const behavior = resolveBehavioralDecision({
+      messages,
+      prompt,
+      selectedMode: "ASK",
+      workspace: { fileList: [] }
+    });
+    const { calls, providerCall } = providerSequence([{
+      status: "ok",
+      content: "RAM temporarily stores data and instructions your computer is actively using so the CPU can access them quickly.",
+      servedModel: "test-model"
+    }]);
+    const result = await runAskBrain(brainInput(prompt, {
+      behavior,
+      conversationTranscript: { authoritative: true, messages, source: "owned_persistence", truncated: false },
+      messages,
+      providerCall
+    }));
+
+    assert.equal(calls.length, 1);
+    assert.match(result.answer, /^RAM temporarily stores/i);
+    assert.equal(result.decision.modelCallSucceeded, true);
+    assert.equal(result.decision.failureStage, "none");
+  });
+});
 
 async function withConfiguredProvider(run: () => Promise<void>) {
   const previousKey = process.env.OPENROUTER_API_KEY;

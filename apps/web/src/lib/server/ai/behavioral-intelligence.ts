@@ -545,6 +545,10 @@ function extractNamedEntities(value: string) {
     )
     .filter((item) =>
       !/^(?:(?:Answer|Build|Compare|Continue|Create|Explain|Give|Make|Reconsider|Return|The|Think)|(?:Can|Could|Would|Will|Should|What|Which|Who|Where|When|Why|How)(?:\s+(?:I|we|you|it|this|that))?|I)$/i.test(item)
+    )
+    .filter((item) => contentTokens(item).length > 0)
+    .filter((item) =>
+      !/^(?:bro|buddy|dear|dude|friend|hello|hey|hi|mate|ma'am|sir)$/i.test(item)
     );
   return unique(matches);
 }

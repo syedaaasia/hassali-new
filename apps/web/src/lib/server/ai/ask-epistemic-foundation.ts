@@ -56,6 +56,46 @@ function boundedArithmeticAnswer(prompt: string) {
       return elapsed === 60 ? "One hour. The first is taken immediately, then the remaining two at thirty-minute intervals." : `${elapsed} minutes.`;
     }
   }
+
+  const formatResult = (value: number) => Number.isInteger(value)
+    ? String(value)
+    : String(Number(value.toFixed(6)));
+  const safeResult = (left: number, right: number, operation: "+" | "-" | "*" | "/") => {
+    if (![left, right].every((value) => Number.isFinite(value) && Math.abs(value) <= 1_000_000_000)) return null;
+    if (operation === "/" && right === 0) return null;
+    const result = operation === "+"
+      ? left + right
+      : operation === "-"
+        ? left - right
+        : operation === "*"
+          ? left * right
+          : left / right;
+    return Number.isFinite(result) && Math.abs(result) <= 1_000_000_000_000 ? result : null;
+  };
+
+  const direct = prompt.match(/\b(?:what(?:'s| is)|calculate|compute|solve)?\s*(-?\d+(?:\.\d+)?)\s*(\+|-|\*|×|\/|÷|plus|minus|times|multiplied by|divided by)\s*(-?\d+(?:\.\d+)?)\b/i);
+  if (direct) {
+    const operationText = direct[2]!.toLowerCase();
+    const operation: "+" | "-" | "*" | "/" = /^(?:\+|plus)$/.test(operationText)
+      ? "+"
+      : /^(?:-|minus)$/.test(operationText)
+        ? "-"
+        : /^(?:\*|×|times|multiplied by)$/.test(operationText)
+          ? "*"
+          : "/";
+    const result = safeResult(Number(direct[1]), Number(direct[3]), operation);
+    if (result !== null) return `${formatResult(result)}.`;
+  }
+
+  const takeAway = prompt.match(
+    /\b(?:have|had|start(?:ed)? with|got)\s+(-?\d+(?:\.\d+)?)\s+([a-z][a-z -]{0,30}?)\s+(?:and\s+)?(?:give|gave)\s+away\s+(-?\d+(?:\.\d+)?)\b/i
+  );
+  if (takeAway && /\b(?:how many|remain|left)\b/i.test(prompt)) {
+    const result = safeResult(Number(takeAway[1]), Number(takeAway[3]), "-");
+    const noun = takeAway[2]!.trim().replace(/\s+(?:and|then)$/i, "");
+    if (result !== null) return `${formatResult(result)} ${noun} remain.`;
+  }
+
   return null;
 }
 

@@ -1037,6 +1037,18 @@ export function createAutoAskProviderCall(input: {
     });
 
     if (!outcome.result.ok) {
+      console.warn("auto intelligence route failed", {
+        attempts: outcome.attempts,
+        fallbackAdapterId: outcome.decision?.fallback?.adapterId ?? null,
+        fallbackModelId: outcome.decision?.fallback?.modelId ?? null,
+        fallbackUsed: outcome.fallbackUsed,
+        failureCategory: outcome.result.failure.category,
+        failureCode: outcome.result.failure.internal?.code ?? null,
+        mode: input.productMode,
+        primaryAdapterId: outcome.decision?.primary.adapterId ?? null,
+        primaryFailureCategory: outcome.primaryFailureCategory,
+        primaryModelId: outcome.decision?.primary.modelId ?? null
+      });
       const category = legacyProviderFailureCategory(outcome.result.failure);
       return {
         status: outcome.result.failure.category === "cancelled"
