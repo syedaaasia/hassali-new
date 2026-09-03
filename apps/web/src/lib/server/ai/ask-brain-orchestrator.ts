@@ -538,6 +538,16 @@ function sanitizeAskOutput(answer: string) {
   let next = answer.trim();
   const original = next;
 
+  next = next.replace(/^(?:\s*[-_*~=]{3,}\s*)+/, "").trim();
+  const directAnswerPreamble = next.match(/^([^:\r\n]{1,140}):\s*([\s\S]+)$/);
+  if (
+    directAnswerPreamble &&
+    /^(?:i(?:'|’)ll|i will|here(?:'|’)s|here is|rewritten|revised|polished)\b/i.test(directAnswerPreamble[1]) &&
+    /\b(?:answer|respond|response|rewrite|rewritten|version|sentence|message|text)\b/i.test(directAnswerPreamble[1])
+  ) {
+    next = directAnswerPreamble[2].trim();
+  }
+
   next = next.replace(/HASSALI_DIFF_PROPOSAL[\s\S]*/gi, "").trim();
   next = next.replace(/\bAs an AI language model,?\s*/gi, "").trim();
   next = next.replace(/\b(?:I selected|Decision path|model_reasoning_preferred|deterministic_required|After reviewing my answer)[^\n]*\n?/gi, "").trim();

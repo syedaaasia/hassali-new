@@ -346,6 +346,25 @@ test("hostile provider output is repaired or marked failed at final delivery", a
   const sentence = await run(sentencePrompt, "First sentence. Second sentence. Third sentence.");
   assert.deepEqual(validateAskResponseConstraints(sentence.answer, extractAskResponseConstraints(sentencePrompt)), []);
 
+  const warmRewritePrompt = "Rewrite this warmly in one sentence: Please remember to lock the back door tonight.";
+  const warmRewrite = await run(
+    warmRewritePrompt,
+    "--------I’ll answer in one sentence: Please remember to lock the back door tonight, and thank you for keeping our home safe."
+  );
+  assert.equal(warmRewrite.answer, "Please remember to lock the back door tonight, and thank you for keeping our home safe.");
+
+  const conciseRewrite = await run(
+    "Rewrite this concisely: The revised schedule is ready for the client.",
+    "*** Here’s a concise rewrite: The revised schedule is ready for the client."
+  );
+  assert.equal(conciseRewrite.answer, "The revised schedule is ready for the client.");
+
+  const ordinaryColonAnswer = await run(
+    "What does a password manager do?",
+    "A password manager does this: it stores unique passwords securely and fills them when needed."
+  );
+  assert.equal(ordinaryColonAnswer.answer, "A password manager does this: it stores unique passwords securely and fills them when needed.");
+
   const tokenPrompt = "Return exactly one token: SAFE or UNSAFE.";
   const token = await run(tokenPrompt, "SAFE because the request is local-only.");
   assert.equal(token.answer, "SAFE");
