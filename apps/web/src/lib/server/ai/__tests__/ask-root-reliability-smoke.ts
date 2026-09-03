@@ -139,6 +139,28 @@ test("ordinary narrative subtraction survives total provider failure", async () 
   }
 });
 
+test("ordinary equal groups with number words complete without a provider", async () => {
+  for (const [prompt, expected] of [
+    ["Nine cartons hold six bottles each. How many bottles are there altogether?", "54 bottles altogether."],
+    ["Eight baskets contain four apples each. How many apples in all?", "32 apples altogether."],
+    ["Twelve trays with five cups in each tray. How many cups total?", "60 cups altogether."]
+  ] as const) {
+    let providerCalls = 0;
+    const messages = [{ content: prompt, role: "user" as const }];
+    const result = await runAskBrain(brainInput(prompt, {
+      conversationTranscript: { authoritative: true, messages, source: "owned_persistence", truncated: false },
+      messages,
+      providerCall: async () => {
+        providerCalls += 1;
+        return { status: "failed", category: "provider_response_invalid", reason: "fixture invalid" };
+      },
+      providerCallOwnsRouting: true
+    }));
+    assert.equal(providerCalls, 0, prompt);
+    assert.equal(result.answer, expected, prompt);
+  }
+});
+
 test("conversational address does not make a concise correct answer fail its contract", async () => {
   await withConfiguredProvider(async () => {
     const prompt = "Mate, what's RAM for?";

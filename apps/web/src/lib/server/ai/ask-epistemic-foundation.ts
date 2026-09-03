@@ -28,7 +28,16 @@ function conversationFactAnswer(prompt: string, history: AskConversationMessage[
 }
 
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
-const smallNumbers: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
+const smallNumbers: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+  eighteen: 18, nineteen: 19, twenty: 20
+};
+const smallNumberPattern = "(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)";
+
+function parseSmallNumber(value: string) {
+  return /^\d+$/.test(value) ? Number(value) : smallNumbers[value.toLowerCase()] ?? Number.NaN;
+}
 
 function dayOffsetAnswer(prompt: string) {
   const match = prompt.match(/\bif\s+yesterday\s+was\s+(\d+|one|two|three|four|five|six|seven)\s+days?\s+before\s+(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\b/i);
@@ -105,11 +114,12 @@ function boundedArithmeticAnswer(prompt: string) {
     return Number.isFinite(result) && Math.abs(result) <= 1_000_000_000_000 ? result : null;
   };
 
-  const equalGroups = prompt.match(
-    /\b(\d+)\s+([a-z][\w-]*)\s+(?:with|containing|holding)\s+(\d+)\s+([a-z][\w-]*)\s+(?:in\s+)?each(?:\s+[a-z][\w-]*)?\b/i
-  );
+  const equalGroups = prompt.match(new RegExp(
+    `\\b(${smallNumberPattern})\\s+([a-z][\\w-]*)\\s+(?:with|contain(?:s|ing)?|hold(?:s|ing)?)\\s+(${smallNumberPattern})\\s+([a-z][\\w-]*)\\s+(?:in\\s+)?each(?:\\s+[a-z][\\w-]*)?\\b`,
+    "i"
+  ));
   if (equalGroups && /\b(?:altogether|how many|in all|total)\b/i.test(prompt)) {
-    const result = safeResult(Number(equalGroups[1]), Number(equalGroups[3]), "*");
+    const result = safeResult(parseSmallNumber(equalGroups[1]!), parseSmallNumber(equalGroups[3]!), "*");
     if (result !== null) return `${formatResult(result)} ${equalGroups[4]!.toLowerCase()} altogether.`;
   }
 
