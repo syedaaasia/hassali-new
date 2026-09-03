@@ -52,6 +52,7 @@ import {
   finalizeAskResponseConstraints,
   validateAskResponseConstraints
 } from "./ask-response-constraints";
+import { createExclusiveSetFallback, exclusiveSetInstruction } from "./answer-scope-constraints";
 import { createEpistemicDirectAnswer, isTimelessReasoningRequest } from "./ask-epistemic-foundation";
 import { resolveOfficialReleaseQuery } from "./official-release-intelligence";
 import {
@@ -735,6 +736,7 @@ function buildModelPrompt(input: AskBrainInput, category: AskSemanticCategory) {
       ? `Resolved action: ${input.behavior.action}. Satisfy every material field in the bounded answer contract supplied as reference data.`
       : "",
     askResponseConstraintInstruction(extractAskResponseConstraints(input.prompt, input.messages)),
+    exclusiveSetInstruction(input.behavior?.answerContract.exclusiveSetConstraints ?? []),
     "",
     "Answer directly and practically in plain text."
   ].join("\n");
@@ -1437,18 +1439,21 @@ function providerFailureAnswer(
     deterministicRequiredIntents.has(classification.intent) ||
     isSupportiveMicrocopyRequest(input.prompt)
   );
+  const exclusiveFallback = createExclusiveSetFallback(input.behavior?.answerContract.exclusiveSetConstraints ?? [], input.prompt);
   const deterministicFallback = trustedDeterministicCandidate
     ? deterministicCandidate!
-    : fallbackOpenEndedAnswer(input, classification);
+    : exclusiveFallback ?? fallbackOpenEndedAnswer(input, classification);
   const conversationSummary = conversationSummaryFor(input);
   const authoritativeLocalFallback = deterministicFallback === conversationSummary?.deterministicSummary ||
     isReferenceSummaryRequest(input) ||
     isWorkspaceProjectSummaryRequest(input.prompt);
   const fallbackContract = input.behavior?.answerContract;
-  const fallbackContractValid = authoritativeLocalFallback || !fallbackContract || validateAnswerAgainstContract(
+  const fallbackValidation = fallbackContract ? validateAnswerAgainstContract(
     deterministicFallback,
     fallbackContract
-  ).complete;
+  ) : null;
+  const fallbackContractValid = (!fallbackValidation || authoritativeLocalFallback || fallbackValidation.complete) &&
+    !fallbackValidation?.violatedConstraints.length;
   const fallbackConstraints = extractAskResponseConstraints(input.prompt, input.messages);
   const fallbackConstraintsValid = validateAskResponseConstraints(
     finalizeAskResponseConstraints(deterministicFallback, fallbackConstraints),
@@ -1521,7 +1526,7 @@ async function maybeReviseWithModel(
   contractValidation: AnswerContractValidation | null,
   revisionModel = input.model
 ) {
-  if (!process.env.OPENROUTER_API_KEY) {
+  if (!input.providerCall && !process.env.OPENROUTER_API_KEY) {
     return {
       content: answer,
       failureCategory: "provider_not_configured",
@@ -2133,7 +2138,10 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     fallbackReason = `final_review_failed:${review.issues.join(",")}`;
     failureStage = failureStage === "none" ? "quality" : failureStage;
   }
-  const finalConstraintIssues = validateAskResponseConstraints(sanitized.value, finalConstraints);
+  const finalConstraintIssues = [
+    ...validateAskResponseConstraints(sanitized.value, finalConstraints),
+    ...(review.contractValidation?.violatedConstraints ?? [])
+  ];
   if (finalConstraintIssues.length > 0) {
     // Bounded revision and deterministic repair have already run; do not label
     // a known-invalid contract result as a successful model completion.

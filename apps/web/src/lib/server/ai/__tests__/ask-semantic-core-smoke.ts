@@ -410,6 +410,69 @@ test("recovery never promotes a locally incomplete fallback over the answer cont
   }
 });
 
+test("exclusive-set repair uses an authorized provider adapter without an OpenRouter key", async () => {
+  const previousKey = process.env.OPENROUTER_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  try {
+    const prompt = "I have rice, eggs, and soy sauce. Suggest one meal using only those ingredients.";
+    const messages = [{ content: prompt, role: "user" as const }];
+    let calls = 0;
+    const result = await runAskBrain({
+      askRuntimeContext: buildAskRuntimeContext(new Date("2026-09-03T09:00:00.000Z")),
+      behavior: resolveBehavioralDecision({ messages, prompt, selectedMode: "ASK" }),
+      messages,
+      model: "fixture/model",
+      modelSelectionPolicy: "locked",
+      productMode: "ASK",
+      prompt,
+      providerCall: async () => {
+        calls += 1;
+        return {
+          content: calls === 1
+            ? "Cook the rice and eggs in oil, then finish with soy sauce."
+            : "Cook the rice in a pan, fold in the eggs, and finish with soy sauce.",
+          servedModel: "fixture/model",
+          status: "ok"
+        };
+      },
+      providerCallOwnsRouting: true,
+      requestUnderstanding: understandAskRequest({ freshnessRequired: false, hasSuppliedEvidence: false, messages, prompt }),
+      workspace: { activePath: "", fileList: [] }
+    });
+
+    assert.equal(calls, 2, JSON.stringify({ answer: result.answer, decision: result.decision }));
+    assert.doesNotMatch(result.answer, /\boil\b/i);
+    assert.match(result.answer, /rice|eggs|soy sauce/i);
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previousKey;
+  }
+});
+
+test("exclusive palette has a validated local fallback after bounded provider failure", async () => {
+  const prompt = "Suggest a simple palette using only red and white colors.";
+  const messages = [{ content: prompt, role: "user" as const }];
+  let calls = 0;
+  const result = await runAskBrain({
+    askRuntimeContext: buildAskRuntimeContext(new Date("2026-09-03T09:00:00.000Z")),
+    behavior: resolveBehavioralDecision({ messages, prompt, selectedMode: "ASK" }),
+    messages, model: "fixture/model", modelSelectionPolicy: "locked", productMode: "ASK", prompt,
+    providerCall: async () => {
+      calls += 1;
+      return calls === 1
+        ? { content: "Use red, white, and blue for your palette.", servedModel: "fixture/model", status: "ok" }
+        : { status: "timeout", category: "provider_timeout", reason: "Fixture timeout" };
+    },
+    providerCallOwnsRouting: true,
+    requestUnderstanding: understandAskRequest({ freshnessRequired: false, hasSuppliedEvidence: false, messages, prompt }),
+    workspace: { activePath: "", fileList: [] }
+  });
+  assert.equal(calls, 2);
+  assert.match(result.answer, /red/i);
+  assert.match(result.answer, /white/i);
+  assert.doesNotMatch(result.answer, /blue|couldn't|unavailable/i);
+});
+
 test("hyphenated sentence counts remain final-output contracts", () => {
   const constraints = extractAskResponseConstraints("Write a friendly two-sentence reminder.");
   assert.equal(constraints.exactSentences, 2);

@@ -961,6 +961,97 @@ test("representative product matrix preserves requested product type", () => {
   }
 });
 
+test("exclusive allowed sets are scoped across answer domains", () => {
+  const cases = [
+    {
+      prompt: "I have rice, eggs, and soy sauce. Suggest a meal using only those ingredients.",
+      valid: "Cook the rice in a pan, fold in the eggs, and finish with soy sauce.",
+      invalid: "Cook the rice and eggs in oil, then add soy sauce."
+    },
+    {
+      prompt: "Build this using only HTML and CSS.",
+      valid: "Use an HTML file for structure and CSS for the responsive layout; no JavaScript is needed.",
+      invalid: "Use HTML and CSS, then add JavaScript for interaction."
+    },
+    {
+      prompt: "Change only header.tsx and footer.tsx.",
+      valid: "Update header.tsx and footer.tsx; leave app.tsx unchanged.",
+      invalid: "Update header.tsx, footer.tsx, and app.tsx."
+    },
+    {
+      prompt: "For the design, use only red and white colors.",
+      valid: "Use red for accents and white for the background.",
+      invalid: "Use red and white with a blue highlight."
+    }
+  ];
+
+  for (const entry of cases) {
+    const contract = decision(entry.prompt, "ASK").answerContract;
+    assert.equal(contract.exclusiveSetConstraints.length, 1, entry.prompt);
+    assert.equal(validateAnswerAgainstContract(entry.valid, contract).violatedConstraints.length, 0, entry.prompt);
+    assert(validateAnswerAgainstContract(entry.invalid, contract).violatedConstraints.some((value) => /exclusive set/.test(value)), entry.prompt);
+  }
+});
+
+test("negative exclusions and positive lists remain distinct from exclusive sets", () => {
+  const excluded = decision("Write a reply without technical jargon.", "ASK").answerContract;
+  assert(excluded.explicitConstraints.some((value) => /without technical jargon/i.test(value)));
+  for (const prompt of ["Suggest a meal without onions.", "Suggest a meal; exclude onions.", "Suggest a meal; avoid onions."]) {
+    const contract = decision(prompt, "ASK").answerContract;
+    assert(validateAnswerAgainstContract("Add onions to the meal.", contract).violatedConstraints.length > 0, prompt);
+  }
+  const replacement = decision("Use olive oil instead of butter.", "ASK").answerContract;
+  assert.equal(replacement.exclusiveSetConstraints.length, 0);
+  assert(validateAnswerAgainstContract("Cook with butter.", replacement).violatedConstraints.length > 0);
+  const phrase = decision('Write a reminder without using the phrase "I hope you are well".', "ASK").answerContract;
+  assert(validateAnswerAgainstContract("I hope you are well. Send the invoice reference.", phrase).violatedConstraints.length > 0);
+  const noOil = decision("Suggest a meal without oil.", "ASK").answerContract;
+  assert.equal(validateAnswerAgainstContract("Use no oil.", noOil).violatedConstraints.length, 0);
+  assert(validateAnswerAgainstContract("Use no oil initially, but add oil at the end.", noOil).violatedConstraints.length > 0);
+
+  const positive = decision("Use rice, eggs, and soy sauce.", "ASK").answerContract;
+  assert.equal(positive.exclusiveSetConstraints.length, 0);
+  assert.equal(validateAnswerAgainstContract("Use rice, eggs, soy sauce, and a little oil.", positive).violatedConstraints.length, 0);
+
+  const conversational = decision("I only wanted to say hello.", "ASK").answerContract;
+  assert.equal(conversational.exclusiveSetConstraints.length, 0);
+});
+
+test("exclusive lists resolve scoped references without limiting ordinary context words", () => {
+  const cases = [
+    ["The colors are teal and gold. Use only these two.", "teal", "gold"],
+    ["Suggest a meal. Use rice and eggs. Do not add anything else.", "rice", "eggs"],
+    ["Build using nothing except HTML and CSS.", "html", "css"],
+    ["Build using just HTML and CSS.", "html", "css"]
+  ];
+  for (const [prompt, ...allowed] of cases) {
+    assert.deepEqual(decision(prompt, "ASK").answerContract.exclusiveSetConstraints[0]?.allowed, allowed, prompt);
+  }
+  const sections = decision("Summarize only sections 2 and 4.", "ASK").answerContract;
+  assert.deepEqual(sections.exclusiveSetConstraints[0]?.allowed, ["2", "4"]);
+  assert(validateAnswerAgainstContract("Section 1: old material. Section 2: current material.", sections).violatedConstraints.length > 0);
+  const fields = decision("Return only name, email, and company fields.", "ASK").answerContract;
+  assert.equal(validateAnswerAgainstContract('{"name":"Mira","email":"mira@example.com","company":"Sample"}', fields).violatedConstraints.length, 0);
+  assert(validateAnswerAgainstContract('{"name":"Mira","email":"mira@example.com","company":"Sample","timezone":"UTC"}', fields).violatedConstraints.length > 0);
+});
+
+test("exclusive scope belongs to the current utterance rather than appended context", () => {
+  const prompt = 'Write a warm client reminder without using the phrase "I hope you are well". Ask them to send the invoice reference.';
+  const result = resolveBehavioralDecision({
+    messages: [
+      { role: "user", content: "Suggest a simple palette using only red and white colors." },
+      { role: "assistant", content: "Use red for emphasis and white for the background." },
+      { role: "user", content: prompt }
+    ],
+    prompt,
+    selectedMode: "ASK"
+  });
+  assert.deepEqual(result.answerContract.exclusiveSetConstraints, []);
+  const technology = decision("Use only HTML and CSS.", "ASK").answerContract;
+  assert.deepEqual(technology.exclusiveSetConstraints[0]?.allowed, ["html", "css"]);
+  assert.equal(validateAnswerAgainstContract("The browser renders an HTML page with a CSS layout. Do not use JavaScript.", technology).violatedConstraints.length, 0);
+});
+
 let passed = 0;
 for (const entry of tests) {
   entry.run();

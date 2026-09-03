@@ -3,6 +3,12 @@ import {
   type IntentConstraintResult
 } from "./intent-constraint-brain";
 import { analyzeAskTurnSemantics, isAskContentTransformationOperation } from "../../ask-turn-semantics";
+import {
+  extractExclusiveSetConstraints,
+  materiallyIncluded,
+  validateExclusiveSetConstraints,
+  type ExclusiveSetConstraint
+} from "./answer-scope-constraints";
 import type {
   WorkspaceContextInput,
   WorkspaceProductMode
@@ -78,6 +84,7 @@ export type ConversationObjectiveState = {
 export type AnswerContract = {
   countRequirements: AnswerCountRequirement[];
   explicitConstraints: string[];
+  exclusiveSetConstraints: ExclusiveSetConstraint[];
   formatRequirements: string[];
   freshnessRequirement: "current_if_available" | "none";
   minimumCompleteness: "all_material_parts";
@@ -441,8 +448,10 @@ function isExplicitWebsiteDesignUpdate(value: string) {
 
 function extractExplicitNegatives(value: string) {
   return unique(
-    Array.from(value.matchAll(/\b(?:do not|don't|dont|never|no|without)\s+([^.!?\n]{2,120})/gi))
-      .map((match) => match[0].trim())
+    [
+      ...Array.from(value.matchAll(/\b(?:do not|don't|dont|never|no|without|exclude|avoid)\s+([^.!?\n]{2,120})/gi), (match) => match[0].trim()),
+      ...Array.from(value.matchAll(/\binstead of\s+([^.!?\n]{2,120})/gi), (match) => `without ${match[1].trim()}`)
+    ]
   );
 }
 
@@ -961,6 +970,7 @@ export function buildConversationObjectiveState(
 function buildAnswerContract(
   action: BehavioralAction,
   resolvedRequest: string,
+  currentPrompt: string,
   intent: IntentConstraintResult,
   requestedCount: number | null,
   requestedEntities: string[],
@@ -982,6 +992,7 @@ function buildAnswerContract(
       ...persistentConstraints,
       ...extractExplicitNegatives(resolvedRequest)
     ]),
+    exclusiveSetConstraints: extractExclusiveSetConstraints(currentPrompt),
     formatRequirements: extractFormatRequirements(resolvedRequest),
     freshnessRequirement: /\b(?:current|currently|latest|today|right now|up[- ]to[- ]date)\b/i.test(resolvedRequest) &&
       !/\b(?:if|suppose|imagine|puzzle|riddle|prove|which is heavier|how many|all but)\b/i.test(resolvedRequest)
@@ -1138,6 +1149,7 @@ export function resolveBehavioralDecision(input: BehavioralDecisionInput): Behav
     answerContract: buildAnswerContract(
       finalAction,
       resolvedRequest,
+      currentPrompt,
       intent,
       requestedCount,
       requestedEntities,
@@ -1312,11 +1324,13 @@ function missingAnswerFormats(answer: string, requirements: string[]) {
 }
 
 function negativeConstraintViolated(answer: string, constraint: string) {
-  if (!/^(?:do not|don't|dont|never|no|not|without)\s+/i.test(constraint)) return false;
-  const target = constraint
-    .replace(/^(?:do not|don't|dont|never|no|not|without)\s+/i, "")
-    .replace(/^(?:include|mention|recommend|use|add|discuss|suggest)\s+/i, "")
+  if (!/^(?:do not|don't|dont|never|no|not|without|exclude|avoid)\s+/i.test(constraint)) return false;
+  const rawTarget = constraint
+    .replace(/^(?:do not|don't|dont|never|no|not|without|exclude|avoid)\s+/i, "")
+    .replace(/^(?:include|mention|recommend|use|using|add|discuss|suggest|modify|touch|change)\s+/i, "")
+    .replace(/^(?:the\s+)?(?:phrase|word|term)\s+/i, "")
     .trim();
+  const target = rawTarget.match(/^["`'](.+?)["`']/)?.[1] ?? rawTarget;
   if (/\b(?:cheesy|cliches?|cliched)\b/i.test(target)) {
     return /\b(?:believe in yourself|everything happens for a reason|keep (?:going|moving forward)|one (?:small )?step at a time|the sky(?:'s| is) the limit|you(?:'ve| have) got this)\b/i.test(answer);
   }
@@ -1324,12 +1338,7 @@ function negativeConstraintViolated(answer: string, constraint: string) {
     return /\b(?:believe in yourself|everything happens for a reason|keep (?:going|moving forward)|one (?:small )?step at a time|the sky(?:'s| is) the limit|you(?:'ve| have) got this)\b/i.test(answer);
   }
   if (!target || target.length < 2 || !entityPresent(answer, target)) return false;
-  const relevantSentences = answer
-    .split(/(?<=[.!?])\s+/)
-    .filter((sentence) => entityPresent(sentence, target));
-  return relevantSentences.some((sentence) =>
-    !/\b(?:avoid|do not|don't|exclude|never|no need|not recommend|skip|without)\b/i.test(sentence)
-  );
+  return materiallyIncluded(answer, target);
 }
 
 function isActionableAdviceRequest(value: string) {
@@ -1431,6 +1440,8 @@ export function validateAnswerAgainstContract(
   const violatedConstraints = contract.explicitConstraints.filter((constraint) =>
     negativeConstraintViolated(answer, constraint)
   );
+  violatedConstraints.push(...validateExclusiveSetConstraints(answer, contract.exclusiveSetConstraints)
+    .map((violation) => `exclusive set ${violation}`));
 
   if (!answer.trim()) issues.push("Answer is empty.");
   if (/\b(?:kernel classified|analysis request|kept code from generating|relevant objective for ask mode)\b/i.test(answer)) {
