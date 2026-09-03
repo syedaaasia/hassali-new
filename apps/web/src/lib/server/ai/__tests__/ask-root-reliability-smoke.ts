@@ -90,6 +90,31 @@ test("production route completes bounded everyday arithmetic without a provider"
   assert.equal(response.headers.get("x-hassali-ask-provider-call-count"), "0");
 });
 
+test("stable household explanations survive total provider failure through the epistemic foundation", async () => {
+  for (const prompt of [
+    "Briefly explain why detergent helps lift oil from dishes.",
+    "Why does soap help wash grease from a pan?",
+    "How can dishwashing liquid carry cooking oil away in water?"
+  ]) {
+    let providerCalls = 0;
+    const messages = [{ content: prompt, role: "user" as const }];
+    const result = await runAskBrain(brainInput(prompt, {
+      conversationTranscript: { authoritative: true, messages, source: "owned_persistence", truncated: false },
+      messages,
+      providerCall: async () => {
+        providerCalls += 1;
+        return { status: "timeout", category: "provider_timeout", reason: "fixture timeout" };
+      },
+      providerCallOwnsRouting: true
+    }));
+
+    assert.equal(providerCalls, 0, prompt);
+    assert.match(result.answer, /detergent molecules|grips oil|carry away/i, prompt);
+    assert.doesNotMatch(result.answer, /couldn't|provider|recovery attempts/i, prompt);
+    assert.equal(result.decision.completionMethod, "deterministic", prompt);
+  }
+});
+
 test("conversational address does not make a concise correct answer fail its contract", async () => {
   await withConfiguredProvider(async () => {
     const prompt = "Mate, what's RAM for?";

@@ -139,6 +139,42 @@ function boundedArithmeticAnswer(prompt: string) {
   return null;
 }
 
+function stablePhysicalExplanation(prompt: string) {
+  const asksForExplanation = /\b(?:briefly\s+)?(?:explain|how|why|what makes|what causes)\b/i.test(prompt);
+  if (!asksForExplanation) return null;
+
+  if (
+    /\b(?:detergent|dish\s*soap|dishwashing liquid|soap)\b/i.test(prompt) &&
+    /\b(?:oil|grease|fat|oily|greasy)\b/i.test(prompt)
+  ) {
+    return "Detergent molecules have one end that bonds with water and another that grips oil, so they surround the grease in tiny droplets that water can carry away.";
+  }
+
+  if (
+    /\b(?:fog|foggy|condensation|water droplets?|moisture)\b/i.test(prompt) &&
+    /\b(?:cold|cool|glass|mirror|window|surface|outside)\b/i.test(prompt)
+  ) {
+    return "Warm, humid air cools when it touches the colder surface, causing water vapor to condense into tiny visible droplets.";
+  }
+
+  if (
+    /\b(?:dry|dries|drying|evaporat(?:e|es|ion))\b/i.test(prompt) &&
+    /\b(?:air|breeze|wind|moving|fan)\b/i.test(prompt)
+  ) {
+    return "Moving air carries away the humid air beside the wet surface, allowing more water to evaporate and making it dry faster.";
+  }
+
+  if (
+    /\b(?:feel|feels|touch)\b/i.test(prompt) &&
+    /\b(?:metal|wood|wooden|ceramic|plastic)\b/i.test(prompt) &&
+    /\b(?:cold|colder|warm|warmer|temperature|same room)\b/i.test(prompt)
+  ) {
+    return "The materials can be at the same temperature but feel different because good conductors such as metal move heat away from your skin faster than insulating materials such as wood or ceramic.";
+  }
+
+  return null;
+}
+
 export function isTimelessReasoningRequest(prompt: string) {
   const hypothetical = /\b(?:if|suppose|imagine|puzzle|riddle|prove|why does|which is heavier|how many|measure exactly|all but)\b/i.test(prompt);
   const formal = /\b(?:0\.9{3}|infinity|largest number|handshakes?|litres?|liters?|citations?|deduction|paradox)\b/i.test(prompt);
@@ -158,6 +194,8 @@ export function createEpistemicDirectAnswer(prompt: string, history: AskConversa
   if (dayOffset) return dayOffset;
   const arithmetic = boundedArithmeticAnswer(prompt);
   if (arithmetic) return arithmetic;
+  const physicalExplanation = stablePhysicalExplanation(prompt);
+  if (physicalExplanation) return physicalExplanation;
   const conversationFact = conversationFactAnswer(prompt, history);
   if (conversationFact) return conversationFact;
   if (/\bremember\s+that\s+only\s+for\s+this\s+conversation\b/i.test(prompt)) {
