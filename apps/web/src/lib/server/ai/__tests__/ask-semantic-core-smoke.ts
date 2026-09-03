@@ -7,6 +7,7 @@ import {
 } from "@/lib/chat-request-context";
 import { buildAskRuntimeContext } from "../ask-context";
 import { runAskBrain, type AskProviderCall } from "../ask-brain-orchestrator";
+import { createEpistemicDirectAnswer } from "../ask-epistemic-foundation";
 import { understandAskRequest } from "../ask-request-understanding";
 import {
   extractAskResponseConstraints,
@@ -388,4 +389,148 @@ test("recovery never promotes a locally incomplete fallback over the answer cont
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = previousKey;
   }
+});
+
+test("hyphenated sentence counts remain final-output contracts", () => {
+  const constraints = extractAskResponseConstraints("Write a friendly two-sentence reminder.");
+  assert.equal(constraints.exactSentences, 2);
+  assert.deepEqual(validateAskResponseConstraints("First sentence. Second sentence.", constraints), []);
+});
+
+test("bounded clock duration arithmetic stays local and exact", () => {
+  assert.equal(
+    createEpistemicDirectAnswer("A bus departs at 2:45 PM and rides for 1 hour 35 minutes. What time does it arrive?"),
+    "4:20 PM."
+  );
+  assert.equal(
+    createEpistemicDirectAnswer("A train leaves at 23:40 and travels for 35 minutes. When does it arrive?"),
+    "00:15."
+  );
+});
+
+test("existential there does not inherit a stale objective", () => {
+  const prompt = "A shop has 6 boxes with 8 pencils in each box. How many pencils are there altogether?";
+  assert.equal(analyzeAskTurnSemantics(prompt).dependency, "independent");
+  assert.equal(createEpistemicDirectAnswer(prompt), "48 pencils altogether.");
+  assert.equal(analyzeAskTurnSemantics("Are you there?").dependency, "prior_context");
+
+  const messages = [
+    { role: "user" as const, content: "What is 47 minus 19?" },
+    { role: "assistant" as const, content: "28." },
+    { role: "user" as const, content: prompt }
+  ];
+  const decision = resolveBehavioralDecision({ messages, prompt, selectedMode: "ASK", workspace: { fileList: [] } });
+  assert.equal(decision.referencedObjective, null);
+  assert.equal(decision.objective, prompt);
+});
+
+test("local conversation handles the current utterance instead of an inherited objective", async () => {
+  const prompt = "Are you there?";
+  const messages = [
+    { role: "user" as const, content: "Explain data backups." },
+    { role: "assistant" as const, content: "A backup is a separate copy of important data." },
+    { role: "user" as const, content: prompt }
+  ];
+  const behavior = resolveBehavioralDecision({ messages, prompt, selectedMode: "ASK", workspace: { fileList: [] } });
+  assert.notEqual(behavior.objective, prompt);
+
+  const result = await runAskBrain({
+    askRuntimeContext: buildAskRuntimeContext(new Date("2026-08-30T09:00:00.000Z")),
+    behavior,
+    messages,
+    model: "fixture/unused",
+    modelSelectionPolicy: "automatic",
+    productMode: "ASK",
+    prompt: behavior.resolvedRequest,
+    workspace: { activePath: "", fileList: [] }
+  });
+  assert.equal(result.answer, "I am here and ready. What would you like to work through?");
+  assert.equal(result.decision.modelCallRan, false);
+});
+
+test("a bounded conversational question request completes locally", async () => {
+  const prompt = "I've had a quiet day. Ask me one interesting but easy question.";
+  const messages = [{ role: "user" as const, content: prompt }];
+  const result = await runAskBrain({
+    askRuntimeContext: buildAskRuntimeContext(new Date("2026-08-30T09:00:00.000Z")),
+    behavior: resolveBehavioralDecision({ messages, prompt, selectedMode: "ASK" }),
+    messages,
+    model: "fixture/unused",
+    modelSelectionPolicy: "automatic",
+    productMode: "ASK",
+    prompt,
+    workspace: { activePath: "", fileList: [] }
+  });
+
+  assert.match(result.answer, /\?$/);
+  assert.equal(result.decision.modelCallRan, false);
+  assert.equal(result.decision.responseKind, "deterministic_answer");
+});
+
+test("provider failure preserves a valid deterministic supportive answer", async () => {
+  const prompt = "Give me a brief, grounded line before I clean the kitchen; avoid motivational slogans.";
+  const messages = [{ role: "user" as const, content: prompt }];
+  const result = await runAskBrain({
+    askRuntimeContext: buildAskRuntimeContext(new Date("2026-08-30T09:00:00.000Z")),
+    behavior: resolveBehavioralDecision({ messages, prompt, selectedMode: "ASK" }),
+    messages,
+    model: "fixture/rate-limited",
+    modelSelectionPolicy: "locked",
+    productMode: "ASK",
+    prompt,
+    providerCall: async () => ({
+      category: "provider_rate_limited",
+      reason: "fixture limit",
+      status: "failed"
+    }),
+    providerCallOwnsRouting: true,
+    requestUnderstanding: understandAskRequest({
+      freshnessRequired: false,
+      hasSuppliedEvidence: false,
+      messages,
+      prompt
+    }),
+    workspace: { activePath: "", fileList: [] }
+  });
+
+  assert.match(result.answer, /smallest concrete part/i);
+  assert.equal(result.decision.completionMethod, "deterministic");
+  assert.equal(result.decision.responseKind, "deterministic_answer");
+  assert.equal(result.decision.providerFailureCategory, "provider_rate_limited");
+  assert(result.decision.fallbackMethodsAttempted.includes("deterministic_local_fallback"));
+});
+
+test("misframed supportive provider output is rejected and recovered locally", async () => {
+  const prompt = "Reassure me about opening a difficult email, without sounding dramatic.";
+  const messages = [{ role: "user" as const, content: prompt }];
+  let calls = 0;
+  const result = await runAskBrain({
+    askRuntimeContext: buildAskRuntimeContext(new Date("2026-08-30T09:00:00.000Z")),
+    behavior: resolveBehavioralDecision({ messages, prompt, selectedMode: "ASK" }),
+    messages,
+    model: "fixture/provider",
+    modelSelectionPolicy: "locked",
+    productMode: "ASK",
+    prompt,
+    providerCall: async () => {
+      calls += 1;
+      return calls === 1
+        ? { content: "Subject: About that email\n\nHi, most difficult emails are fine. You've got this.", servedModel: "fixture/provider", status: "ok" }
+        : { category: "provider_rate_limited", reason: "fixture limit", status: "failed" };
+    },
+    providerCallOwnsRouting: true,
+    requestUnderstanding: understandAskRequest({
+      freshnessRequired: false,
+      hasSuppliedEvidence: false,
+      messages,
+      prompt
+    }),
+    workspace: { activePath: "", fileList: [] }
+  });
+
+  assert(calls >= 1 && calls <= 2);
+  assert.match(result.answer, /do not need to solve all of it at once/i);
+  assert.doesNotMatch(result.answer, /^\s*subject\s*:/i);
+  assert.equal(result.decision.completionMethod, "deterministic");
+  assert.equal(result.decision.responseKind, "deterministic_answer");
 });

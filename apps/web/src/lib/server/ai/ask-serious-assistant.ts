@@ -325,8 +325,8 @@ function isDirectDateTimeQuestion(prompt: string) {
 }
 
 function wantsProjectExecution(prompt: string) {
-  return /\b(?:in (?:this|my|the) project|apply (?:all )?(?:files|changes|this|it)|create[\s\S]{0,60}files|write files|save (?:it|this)|modify files|edit files|replace (?:all )?(?:project )?files|rewrite (?:my|this|the) [\w.-]+ app|right now|i approve|approved in advance|install|start runtime)\b/i.test(prompt) ||
-    /\b(?:run|start)\b(?!\s+(?:it|this|the script|the app|locally|on windows|in xampp|from cmd|with cmd))/i.test(prompt);
+  return /\b(?:in (?:this|my|the) project|apply (?:all )?(?:files|changes|this|it)|create[\s\S]{0,60}files|write files|save (?:it|this)|modify files|edit files|replace (?:all )?(?:project )?files|rewrite (?:my|this|the) [\w.-]+ app|i approve|approved in advance|install|start runtime)\b/i.test(prompt) ||
+    /\b(?:run|start)\s+(?:(?:the|this|my)\s+)?(?:tests?|test suite|dev server|server|runtime|app|application|script|build|preview|npm|pnpm|yarn|python|node|docker|command)\b/i.test(prompt);
 }
 
 function isWebsiteCodeTextRequest(prompt: string) {
@@ -368,7 +368,10 @@ function detectCodingCategory(prompt: string): AskCodingCategory | null {
   if (wantsProjectExecution(prompt)) return "project_execution_boundary";
   if (/\bwordpress|shortcode|functions\.php|plugin|child theme\b/i.test(prompt)) return "wordpress_help";
   if (/\bshopify|liquid|theme section|product page|theme editor\b/i.test(prompt)) return "shopify_help";
-  if (/\bgit\b|\bgithub\b|\bcommit\b|\bbranch\b|\bclone\b|\bpull\b|\bpush\b|\brestore\b|\breset\b/i.test(prompt)) return "git_github_help";
+  if (
+    /\b(?:git|github|commit|clone)\b/i.test(prompt) ||
+    /\b(?:branch|pull|push|restore|reset)\b[\s\S]{0,70}\b(?:code|commit|file|git|github|project|repo(?:sitory)?|working tree)\b|\b(?:code|commit|file|git|github|project|repo(?:sitory)?|working tree)\b[\s\S]{0,70}\b(?:branch|pull|push|restore|reset)\b/i.test(prompt)
+  ) return "git_github_help";
   if (/\bdocker\b|\bdocker compose\b|\bdocker-compose\b|\bcompose\.ya?ml\b/i.test(prompt)) return "docker_or_docker_compose";
   if (/\bsql\b|\bcreate table\b|\bschema\b|\bselect\b|\binsert\b|\bpostgres\b|\bmysql\b/i.test(prompt)) return "sql_database_schema_or_queries";
   if (/\bfastify\b/i.test(prompt)) return "fastify_api";
@@ -446,6 +449,7 @@ export function classifyAskIntent(prompt: string): AskIntentClassification {
   ) return classify(prompt, "comparison_or_recommendation", 0.9, "The user asks for comparison or recommendation.");
   if (isConceptualTechnicalExplanation(prompt)) return classify(prompt, "explanation_or_teaching", 0.9, "The user asks for a conceptual technical explanation rather than implementation code.");
   if (detectCodingCategory(prompt) || isCodingTextRequest(prompt)) return classify(prompt, /\b(?:xampp|cmd|localhost|install|run|commands?|setup)\b/i.test(prompt) ? "local_setup_guidance" : "coding_help_text_only", 0.9, "The user asks for code or setup guidance as text.");
+  if (isSupportiveMicrocopyRequest(prompt)) return classify(prompt, "emotional_support_or_therapy_style", 0.9, "The user asks for a short supportive response with tone constraints.");
   if (/\b(?:write it|write this|say politely|say this|make it|rewrite)\b/i.test(prompt) && (explicitMaxWordsFor(prompt) || /\b(?:human|sarcastic(?:ally)?|firm|simple|general)\b/i.test(prompt))) return classify(prompt, "writing_or_rewriting", 0.88, "The user asks for wording refinement with quality constraints.");
   if (/\b(?:debug|error|bug|fix this|not working|stack trace)\b/i.test(prompt)) return classify(prompt, "debugging_help", 0.86, "The user asks for debugging help.");
   if (/\b(?:brand name|name for|powerful word|suggest.*names?|naming)\b/i.test(prompt) || /\bcombine\b[\s\S]{0,100}\b(?:words?|names?|theme)\b/i.test(prompt)) return classify(prompt, "brand_naming", 0.9, "The user asks for naming ideas.");
@@ -568,6 +572,17 @@ function createRewriteAnswer(prompt: string) {
   return source
     ? `Here is a cleaner version:\n\n${source}`
     : "Paste the text you want rewritten, and I will make it clearer while keeping your meaning.";
+}
+
+export function isSupportiveMicrocopyRequest(prompt: string) {
+  return /\b(?:encourage|motivate|reassure)\s+me\b|\bpep talk\b|\bsay something\b[\s\S]{0,60}\b(?:encouraging|hopeful|supportive)\b|\bgive me\b[\s\S]{0,80}\b(?:grounded|motivational|supportive)\b[\s\S]{0,40}\b(?:line|sentence|words?)\b/i.test(prompt);
+}
+
+function createSupportiveMicrocopyAnswer(prompt: string) {
+  if (/\breassure\s+me\b/i.test(prompt)) {
+    return "You do not need to solve all of it at once; handle the next clear piece, then reassess with less weight on your mind.";
+  }
+  return "Pick the smallest concrete part, give it ten honest minutes, and let that amount of progress be enough for now.";
 }
 
 function extractNameInputs(prompt: string) {
@@ -1725,7 +1740,9 @@ export function createAskSeriousAnswer(
       answer = "For logo/visual direction, start with the audience, the feeling you want, where the logo appears small, and one memorable shape or mark. Keep the small icon simpler than the full brand mark.";
       break;
     case "emotional_support_or_therapy_style":
-      answer = "I am here with you. Tell me what happened in one or two sentences, and I can help you sort the feeling, choose the next small step, and write what you need to say.";
+      answer = isSupportiveMicrocopyRequest(prompt)
+        ? createSupportiveMicrocopyAnswer(prompt)
+        : "I am here with you. Tell me what happened in one or two sentences, and I can help you sort the feeling, choose the next small step, and write what you need to say.";
       break;
     case "debugging_help":
       answer = createDebuggingAnswer(prompt);

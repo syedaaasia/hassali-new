@@ -132,7 +132,11 @@ function boundedResponseBytes(value = 2 * 1024 * 1024) {
   return Math.max(64 * 1024, Math.min(value, 4 * 1024 * 1024));
 }
 
-async function readBoundedJsonResponse<T = OpenAICompatiblePayload>(response: Response, maximumBytes: number) {
+async function readBoundedJsonResponse<T = OpenAICompatiblePayload>(
+  response: Response,
+  maximumBytes: number,
+  timeoutMs?: number
+) {
   const declared = Number.parseInt(response.headers.get("content-length") ?? "", 10);
   if (Number.isFinite(declared) && declared > maximumBytes) {
     await response.body?.cancel().catch(() => undefined);
@@ -142,15 +146,35 @@ async function readBoundedJsonResponse<T = OpenAICompatiblePayload>(response: Re
   if (!reader) throw new IntelligenceContractError("PROVIDER_RESPONSE_MISSING", "The provider returned no readable response body.");
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maximumBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new IntelligenceContractError("PROVIDER_RESPONSE_TOO_LARGE", "The provider response exceeded Hassali's safe response limit.");
+  try {
+    while (true) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const read = reader.read();
+        const result = timeoutMs === undefined
+          ? await read
+          : await Promise.race([
+              read,
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new IntelligenceContractError("PROVIDER_RESPONSE_TIMEOUT", "The provider response did not finish in time.")), timeoutMs);
+              })
+            ]);
+        if (result.done) break;
+        total += result.value.byteLength;
+        if (total > maximumBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw new IntelligenceContractError("PROVIDER_RESPONSE_TOO_LARGE", "The provider response exceeded Hassali's safe response limit.");
+        }
+        chunks.push(result.value);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     }
-    chunks.push(value);
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
   }
   const bytes = new Uint8Array(total);
   let offset = 0;
@@ -438,7 +462,7 @@ async function releaseFailedResponse(
 ) {
   let payload: OpenAICompatibleErrorPayload | null = null;
   try {
-    payload = await readBoundedJsonResponse<OpenAICompatibleErrorPayload>(response, 64 * 1024);
+    payload = await readBoundedJsonResponse<OpenAICompatibleErrorPayload>(response, 64 * 1024, 250);
   } catch {
     await response.body?.cancel().catch(() => undefined);
   }

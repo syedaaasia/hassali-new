@@ -746,7 +746,7 @@ export function verifyAskSourceReliability(input: {
   else if (!recencySatisfied) outcome = "INSUFFICIENT_FRESHNESS";
   else if (officialRequired && freshOfficialSourceCount === 0) outcome = "PARTIALLY_VERIFIED";
   else if (multipleRequired && freshSources.length < 2) outcome = "PARTIALLY_VERIFIED";
-  else if (!directQuoteIntegrity) outcome = "PARTIALLY_VERIFIED";
+  else if (evidenceRequired && !directQuoteIntegrity) outcome = "PARTIALLY_VERIFIED";
 
   const groundedClaims = currentClaims(input.answer, input.decision).map((claim): GroundedClaim => {
     const supports = sources

@@ -674,6 +674,38 @@ test("answer contract enforces requested list count", () => {
   assert.equal(complete.complete, true);
 });
 
+test("personal advice with one step does not invent entity or list requirements", () => {
+  const result = decision(
+    "I feel distracted today. Suggest one small step that could help me focus for fifteen minutes.",
+    "ASK"
+  );
+  assert.deepEqual(result.requestedEntities, []);
+  assert.equal(result.answerContract.requiredOutputs.includes("steps"), false);
+
+  const validation = validateAnswerAgainstContract(
+    "Put your phone out of reach, set a fifteen-minute timer, and work only on the next small task until it rings.",
+    result.answerContract
+  );
+  assert.equal(validation.complete, true);
+
+  const concise = decision("I need to focus now. Suggest one practical action.", "ASK");
+  const conciseValidation = validateAnswerAgainstContract(
+    "Set a ten-minute timer and work only on the next small task until it rings.",
+    concise.answerContract
+  );
+  assert.equal(conciseValidation.complete, true);
+
+  for (const [prompt, answer] of [
+    ["Suggest one quick way to begin writing when I feel stuck.", "Write one deliberately rough sentence, then improve it after the page is no longer blank."],
+    ["Recommend one action to reduce distractions during a short study session.", "Put your phone in another room before you start the study timer."]
+  ] as const) {
+    const advice = decision(prompt, "ASK");
+    const adviceValidation = validateAnswerAgainstContract(answer, advice.answerContract);
+    assert.deepEqual(advice.requestedEntities, []);
+    assert.equal(adviceValidation.complete, true);
+  }
+});
+
 test("answer contract rejects unrelated evaluator output", () => {
   const result = decision("What is the best tool for vibe coding?", "ASK");
   const validation = validateAnswerAgainstContract(
@@ -747,6 +779,75 @@ test("one example for each compared technology requires both examples", () => {
     result.answerContract
   );
   assert.equal(complete.complete, true);
+});
+
+test("writing imperatives are not mistaken for required named entities", () => {
+  const result = decision("Write a friendly two-sentence reminder to return a borrowed book this weekend.", "ASK");
+  assert.deepEqual(result.requestedEntities, []);
+  assert(result.answerContract.formatRequirements.some((requirement) => /^two sentences?$/.test(requirement)));
+});
+
+test("positive and negative tone instructions survive into the answer contract", () => {
+  const result = decision("Say something friendly but not cheesy.", "ASK");
+  assert(result.answerContract.explicitConstraints.includes("friendly"));
+  assert(result.answerContract.explicitConstraints.includes("not cheesy"));
+
+  const neighbor = decision("Write a warm reply without robotic language.", "ASK");
+  assert(neighbor.answerContract.explicitConstraints.includes("warm"));
+  assert(neighbor.answerContract.explicitConstraints.includes("without robotic"));
+});
+
+test("bounded writing is validated by delivery rather than prompt-word parroting", () => {
+  const result = decision("Give me a calm pep talk for starting a boring chore, without sounding dramatic.", "ASK");
+  assert.equal(validateAnswerAgainstContract(
+    "Set a five-minute timer and begin with the easiest visible part; stopping after that is allowed.",
+    result.answerContract
+  ).complete, true);
+  assert.equal(validateAnswerAgainstContract(
+    "I couldn't produce a trustworthy answer after provider validation failed.",
+    result.answerContract
+  ).complete, false);
+});
+
+test("dramatic tone exclusions reject stock motivational slogans", () => {
+  const result = decision("Reassure me about opening a difficult email, without sounding dramatic.", "ASK");
+  assert.equal(result.answerContract.explicitConstraints.some((value) => /dramatic/i.test(value)), true);
+  assert.equal(
+    validateAnswerAgainstContract("Most difficult emails are fine. You've got this.", result.answerContract).complete,
+    false
+  );
+  assert.equal(
+    validateAnswerAgainstContract("Open it only to learn what it says; you can decide what to do after reading it.", result.answerContract).complete,
+    true
+  );
+});
+
+test("supportive imperatives are not entities and accept substantive delivery", () => {
+  const result = decision("Encourage me in a practical, non-cliched way.", "ASK");
+  assert.deepEqual(result.requestedEntities, []);
+  assert(result.answerContract.explicitConstraints.includes("non-cliched"));
+  assert.equal(validateAnswerAgainstContract(
+    "Pick one useful task that fits the energy you actually have, and let that be enough for this afternoon.",
+    result.answerContract
+  ).complete, true);
+
+  const paraphrase = decision("Say something supportive for someone restarting work after lunch, without cliches.", "ASK");
+  assert.deepEqual(paraphrase.requestedEntities, []);
+  assert(paraphrase.answerContract.explicitConstraints.includes("without cliches"));
+  assert.equal(validateAnswerAgainstContract(
+    "Choose one clear task for the next twenty minutes; the rest can wait until you have your rhythm back.",
+    paraphrase.answerContract
+  ).complete, true);
+  assert.equal(validateAnswerAgainstContract(
+    "The afternoon is manageable. You've got this.",
+    paraphrase.answerContract
+  ).complete, false);
+});
+
+test("sentence-level conversational imperatives are not named entities", () => {
+  const result = decision("I've had a quiet day. Ask me one interesting but easy question.", "ASK");
+  assert.deepEqual(result.requestedEntities, []);
+  assert.deepEqual(result.answerContract.requestedEntities, []);
 });
 
 test("multi-location deterministic time answers every requested city", () => {

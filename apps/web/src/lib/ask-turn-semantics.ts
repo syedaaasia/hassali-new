@@ -168,7 +168,11 @@ function hasSameTurnAntecedent(prompt: string) {
 }
 
 function hasDeicticReference(prompt: string) {
-  if (/\b(?:it|this|these|those|them|there)\b/i.test(prompt)) return true;
+  if (/\b(?:it|this|these|those|them)\b/i.test(prompt)) return true;
+  const existentialThere =
+    /\b(?:is|are|was|were|will|would|can|could|should|may|might|must)\s+(?:not\s+)?there\b/i.test(prompt) ||
+    /\bthere\s+(?:is|are|was|were|will|would|can|could|should|may|might|must)\b/i.test(prompt);
+  if (/\bthere\b/i.test(prompt) && !existentialThere) return true;
   if (!/\bthat\b/i.test(prompt)) return false;
   return /^(?:that\b|(?:are|can|could|did|do|does|has|have|is|should|was|were|will|would)\s+that\b|(?:how|what|when|where|why)\s+(?:are|can|could|did|do|does|has|have|is|should|was|were|will|would)\s+that\b)/i.test(prompt) ||
     /\b(?:about|against|because|if|mean|means|meant|of|on|say|said|says|suppose|use|uses|with)\s+that\b/i.test(prompt) ||

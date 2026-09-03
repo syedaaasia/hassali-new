@@ -25,7 +25,7 @@ async function post(input: {
       clientContractVersion: hassaliChatContractVersion,
       messages: input.messages,
       mode: input.productMode === "ASK" ? "ASK" : "EXECUTE",
-      model: "tencent/hy3:free",
+      model: "openrouter/free",
       modelSelectionPolicy: input.modelSelectionPolicy ?? "locked",
       productMode: input.productMode,
       workspace: {
@@ -71,7 +71,7 @@ try {
   ];
   globalThis.fetch = async () => new Response(JSON.stringify({
     choices: [{ message: { content: answers.shift() ?? "No answer fixture." } }],
-    model: "tencent/hy3:free"
+    model: "openrouter/free"
   }), {
     headers: { "content-type": "application/json" },
     status: 200
@@ -157,7 +157,7 @@ try {
       : "React has a broad ecosystem. Vue is approachable and progressive. Svelte moves more work into compilation.";
     return new Response(JSON.stringify({
       choices: [{ message: { content } }],
-      model: "tencent/hy3:free"
+      model: "openrouter/free"
     }), {
       headers: { "content-type": "application/json" },
       status: 200
@@ -170,7 +170,10 @@ try {
   });
   const repairedComparison = await incompleteProvider.text();
   assert.equal(incompleteProviderCalls, 2);
-  assert.deepEqual(incompleteProviderModels, ["tencent/hy3:free", "openrouter/free"]);
+  assert.deepEqual(incompleteProviderModels, [
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free"
+  ]);
   assert.equal(incompleteProvider.headers.get("x-hassali-behavior-answer-valid"), "true");
   assert.match(repairedComparison, /React[\s\S]*Vue[\s\S]*Svelte/i);
 
@@ -186,7 +189,7 @@ try {
       : "OAuth delegates authentication through an authorization provider, while session authentication keeps a server-recognized session after sign-in. For example, OAuth can authorize access through Google; a session cookie can then identify the signed-in user on later requests.";
     return new Response(JSON.stringify({
       choices: [{ message: { content } }],
-      model: "tencent/hy3:free"
+      model: "openrouter/free"
     }), {
       headers: { "content-type": "application/json" },
       status: 200
@@ -199,7 +202,10 @@ try {
   });
   const repairedAcknowledgement = await acknowledgementProvider.text();
   assert.equal(acknowledgementProviderCalls, 2);
-  assert.deepEqual(acknowledgementProviderModels, ["tencent/hy3:free", "openrouter/free"]);
+  assert.deepEqual(acknowledgementProviderModels, [
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free"
+  ]);
   assert.doesNotMatch(repairedAcknowledgement, /ready to help/i);
   assert.match(repairedAcknowledgement, /OAuth[\s\S]*session/i);
 
@@ -215,7 +221,7 @@ try {
       : "React has a broad ecosystem. Vue is approachable and progressive. Svelte moves more work into compilation.";
     return new Response(JSON.stringify({
       choices: [{ message: { content } }],
-      model: "tencent/hy3:free"
+      model: "openrouter/free"
     }), {
       headers: { "content-type": "application/json" },
       status: 200
@@ -228,7 +234,7 @@ try {
   });
   const lockedRepairText = await lockedRepair.text();
   assert.equal(lockedProviderCalls, 2);
-  assert.deepEqual(lockedProviderModels, ["tencent/hy3:free", "tencent/hy3:free"]);
+  assert.deepEqual(lockedProviderModels, ["openrouter/free", "openrouter/free"]);
   assert.equal(lockedRepair.headers.get("x-hassali-ask-fallback-model"), "");
   assert.match(lockedRepairText, /React[\s\S]*Vue[\s\S]*Svelte/i);
 
@@ -243,7 +249,7 @@ try {
       : "React has a broad ecosystem. Vue is approachable and progressive. Svelte moves more work into compilation.";
     return new Response(JSON.stringify({
       choices: [{ message: { content } }],
-      model: "tencent/hy3:free"
+      model: "openrouter/free"
     }), {
       headers: { "content-type": "application/json" },
       status: 200
@@ -267,7 +273,7 @@ try {
     if (failedRepairCalls === 1) {
       return new Response(JSON.stringify({
         choices: [{ message: { content: "React has a broad ecosystem." } }],
-        model: "tencent/hy3:free"
+        model: "openrouter/free"
       }), {
         headers: { "content-type": "application/json" },
         status: 200
@@ -340,7 +346,8 @@ try {
     /placeholder|unfinished|internal taxonomy|visitor copy/i
   );
   assert.doesNotMatch(lawHtml, /general-information boundary|no outcome guarantees|secure-intake reminder|accurate and\./i);
-  assert.match(lawHtml, /Clear legal information|Honest expectations|Careful initial inquiry/i);
+  assert.match(lawHtml, /Legal Resources|LegalService|law firm/i);
+  assert.match(lawHtml, /direct inquiry|clear next step|current pricing/i);
   assert.match(lawContract, /brandNameProvenance: SAFE_INFERENCE/);
   assert.match(lawContract, /brandNameConfirmed: false/);
   assert.doesNotMatch(lawContract, /GENERATED_PLACEHOLDER/);

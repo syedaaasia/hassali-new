@@ -362,6 +362,13 @@ export class AutoIntelligenceRouter {
         models: await adapterModels(adapter, scopeId, health, now)
       };
     }));
+    const automaticAskPreference = request.mode === "ASK" &&
+      !explicit &&
+      Boolean(preferences.preferredModelId) &&
+      sources.some((source) => source.models.some((model) =>
+        model.modelId.toLowerCase() === preferences.preferredModelId!.toLowerCase() &&
+        Boolean(model.rawProviderMetadata?.automaticFallback)
+      ));
     const rejectedCapabilities = new Set<IntelligenceCapability>();
     let rejectedByBudget = false;
     const candidates: InternalCandidate[] = [];
@@ -370,6 +377,7 @@ export class AutoIntelligenceRouter {
       if (!["ready", "degraded"].includes(source.health.status)) continue;
       for (const model of source.models) {
         if (model.availability === "unavailable") continue;
+        if (automaticAskPreference && model.rawProviderMetadata?.pricingClass !== "free") continue;
         if (explicit && model.modelId.toLowerCase() !== explicit.modelId.toLowerCase()) continue;
         const failedCapability = request.requiredCapabilities.find(
           (capability) => capabilitySupport(source.adapter, model, capability) !== "supported"
@@ -398,7 +406,10 @@ export class AutoIntelligenceRouter {
         if (cooldownUntil) failureCooldowns.delete(candidateKey(scopeId, routeBase));
 
         const reasons: IntelligenceRoutingReasonCode[] = [];
+        const isVariableAskMetaRoute = automaticAskPreference &&
+          Boolean(model.rawProviderMetadata?.automaticFallback);
         let score = source.health.status === "ready" ? 60 : 20;
+        if (isVariableAskMetaRoute) score += 5;
         score += request.requiredCapabilities.length * 12;
         score += preferred.filter(
           (capability) => capabilitySupport(source.adapter, model, capability) === "supported"
@@ -411,7 +422,7 @@ export class AutoIntelligenceRouter {
         if (source.health.status === "ready") reasons.push("HEALTHY_SOURCE");
         if (request.requiredCapabilities.includes("vision")) reasons.push("VISION_REQUIRED");
         if (source.adapter.computeSource === "byok-cloud") reasons.push("BYOK_AVAILABLE");
-        if (source.adapter.id === "openrouter") {
+        if (source.adapter.id === "openrouter" && !automaticAskPreference) {
           score += 10;
           reasons.push("DEFAULT_RELIABLE");
         }
@@ -430,11 +441,15 @@ export class AutoIntelligenceRouter {
           reasons.push("USER_OVERRIDE");
         } else if (
           source.health.status === "ready" &&
-          preferences.preferredModelId?.toLowerCase() === model.modelId.toLowerCase()
+          preferences.preferredModelId?.toLowerCase() === model.modelId.toLowerCase() &&
+          !isVariableAskMetaRoute
         ) {
           score += 80;
         }
-        if (source.adapter.defaultModelId?.toLowerCase() === model.modelId.toLowerCase()) score += 20;
+        if (
+          source.adapter.defaultModelId?.toLowerCase() === model.modelId.toLowerCase() &&
+          !isVariableAskMetaRoute
+        ) score += 20;
         const cost = knownCost(model);
         const scope = intelligenceCostScope(source.adapter.computeSource);
         const estimatedRequestCostMicros = estimateRequestCostMicros(request, model);
@@ -552,9 +567,12 @@ export class AutoIntelligenceRouter {
       // ahead of registry alternatives that may be stale or unavailable.
       fallbackCandidates.push(primary);
     }
+    const primaryUsesMetaRoute = Boolean(primary.model.rawProviderMetadata?.automaticFallback);
+    const preferConcreteFallback = automaticAskPreference && !primaryUsesMetaRoute;
     fallbackCandidates.sort((left, right) =>
-      Number(Boolean(right.model.rawProviderMetadata?.automaticFallback)) -
-        Number(Boolean(left.model.rawProviderMetadata?.automaticFallback)) ||
+      (preferConcreteFallback
+        ? Number(Boolean(left.model.rawProviderMetadata?.automaticFallback)) - Number(Boolean(right.model.rawProviderMetadata?.automaticFallback))
+        : Number(Boolean(right.model.rawProviderMetadata?.automaticFallback)) - Number(Boolean(left.model.rawProviderMetadata?.automaticFallback))) ||
       right.score - left.score ||
       left.adapterId.localeCompare(right.adapterId) ||
       left.modelId.localeCompare(right.modelId)

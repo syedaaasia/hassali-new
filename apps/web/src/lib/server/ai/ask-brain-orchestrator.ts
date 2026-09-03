@@ -4,6 +4,7 @@ import {
 } from "./ask-context";
 import {
   classifyAskIntent,
+  isSupportiveMicrocopyRequest,
   type AskConversationMessage,
   type AskIntentClassification,
   type AskIntentName
@@ -348,8 +349,18 @@ function createLocalConversationalAnswer(prompt: string) {
   if (/^(?:what can you do|what do you do|how can you help(?: me)?)$/.test(normalized)) {
     return "I can answer questions, teach, plan, compare options, help with writing, inspect relevant project context, and give code guidance as text. For file changes, I can prepare an explicit handoff to CODE or WEBSITE, where approval is still required.";
   }
+  if (
+    /\bask me\s+(?:one|a single|an)\b[\s\S]{0,50}\bquestion\b/i.test(prompt) &&
+    !/\b(?:about|on)\s+[A-Za-z0-9]/i.test(prompt)
+  ) {
+    return "What is one small thing you noticed today that you would normally overlook?";
+  }
 
   return null;
+}
+
+function currentVisibleUserPrompt(prompt: string, messages: AskConversationMessage[]) {
+  return [...messages].reverse().find((message) => message.role === "user")?.content.trim() || prompt;
 }
 
 function availabilityCategory(category: string | null): AskProviderAvailabilityCategory | null {
@@ -573,7 +584,7 @@ function reviewAnswer(
 ) {
   const issues: string[] = [];
   const localConversation = Boolean(createLocalConversationalAnswer(
-    input.behavior?.objective ?? input.prompt
+    currentVisibleUserPrompt(input.prompt, input.messages)
   ));
   const conversationSummary = conversationSummaryFor(input);
   const deterministicMethod = completionMethod === "deterministic" ||
@@ -590,6 +601,12 @@ function reviewAnswer(
   if (/\b(?:created|modified|saved|applied) (?:the )?(?:files|project files|changes)\b/i.test(answer)) issues.push("fake_file_mutation_claim");
   if (/\b(?:ran npm install|installed packages|started the server|started runtime)\b/i.test(answer)) issues.push("fake_runtime_claim");
   if (/\b(?:decision path|model_reasoning_preferred|self-review|reviewing my answer)\b/i.test(answer)) issues.push("internal_meta_leak");
+  if (
+    classification.intent === "emotional_support_or_therapy_style" &&
+    /^\s*["']?(?:subject\s*:|dear\b|hi\s*[,!])/i.test(answer)
+  ) {
+    issues.push("supportive_response_misframed_as_message");
+  }
   if (
     classification.wantsExecution &&
     (input.behavior?.mutationIntent ?? true) &&
@@ -665,6 +682,7 @@ function conversationSummaryFor(input: AskBrainInput): PreparedConversationSumma
 }
 
 function buildModelPrompt(input: AskBrainInput, category: AskSemanticCategory) {
+  const classification = classifyAskIntent(input.prompt);
   const publicPersonContext = category === "public_person" || input.messages.some((message) => message.role === "user" && /^who (?:is|was|are)\b/i.test(message.content.trim()));
   const freshness = input.freshnessDecision;
   const expertise = input.productMode === "CODE"
@@ -688,6 +706,9 @@ function buildModelPrompt(input: AskBrainInput, category: AskSemanticCategory) {
     "Prefer Windows CMD commands when local setup is involved. For legal, medical, accounting, or security topics, give useful general guidance with natural safety boundaries.",
     "For public-person questions, identify the most likely person carefully, distinguish similar religious/cultural roles, and state ambiguity instead of inventing biography details.",
     "For a standalone casual greeting, answer naturally in one short sentence. Do not introduce Hassali, product modes, projects, files, or workspace state unless asked.",
+    classification.intent === "emotional_support_or_therapy_style"
+      ? "When the user asks for reassurance, encouragement, or a pep talk, speak directly to the user. Do not turn the subject they mention into an email, letter, or message draft unless they explicitly ask you to write one. Honor requested tone limits and avoid stock motivational slogans."
+      : "",
     publicPersonContext
       ? "Public-person factuality: use only high-confidence general facts. Never claim you checked sources, news, official biographies, or live search unless a tool actually ran. Do not infer clerical status, education, affiliations, travel, family, dates, or media appearances from a person's religious or cultural work."
       : "",
@@ -1396,8 +1417,19 @@ function fallbackOpenEndedAnswer(input: AskBrainInput, classification: AskIntent
   return noLocalCompletionAnswer;
 }
 
-function providerFailureAnswer(input: AskBrainInput, category: string | null) {
-  const deterministicFallback = fallbackOpenEndedAnswer(input, classifyAskIntent(input.prompt));
+function providerFailureAnswer(
+  input: AskBrainInput,
+  category: string | null,
+  deterministicCandidate: string | null = null
+) {
+  const classification = classifyAskIntent(input.prompt);
+  const trustedDeterministicCandidate = Boolean(deterministicCandidate) && (
+    deterministicRequiredIntents.has(classification.intent) ||
+    isSupportiveMicrocopyRequest(input.prompt)
+  );
+  const deterministicFallback = trustedDeterministicCandidate
+    ? deterministicCandidate!
+    : fallbackOpenEndedAnswer(input, classification);
   const conversationSummary = conversationSummaryFor(input);
   const authoritativeLocalFallback = deterministicFallback === conversationSummary?.deterministicSummary ||
     isReferenceSummaryRequest(input) ||
@@ -1679,7 +1711,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   }
   const epistemicAnswer = createEpistemicDirectAnswer(input.prompt, input.messages);
   const localConversationalAnswer = createLocalConversationalAnswer(
-    input.behavior?.objective ?? input.prompt
+    currentVisibleUserPrompt(input.prompt, input.messages)
   );
   const deterministicLiveSourceAvailable = Boolean(
     deterministicAnswer?.includes("Source: Open-Meteo live forecast API.")
@@ -1752,6 +1784,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     fallbackOccurred = !deterministicAnswer;
     fallbackReason = deterministicAnswer ? null : "deterministic_handler_empty";
   } else if (selected.path === "model_reasoning_preferred") {
+    completionMethod = "selected_model";
     if (
       provider.configured &&
       (input.providerCallOwnsRouting || provider.executionProvider === "openrouter") &&
@@ -1775,7 +1808,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
         fallbackOccurred = true;
         fallbackReason = `provider_cooldown:${selectedProviderCooldown.failureCategory ?? "recent_failure"}`;
         providerFailureCategory = selectedProviderCooldown.failureCategory ?? "provider_unavailable";
-        answer = providerFailureAnswer(input, providerFailureCategory);
+        answer = providerFailureAnswer(input, providerFailureCategory, deterministicAnswer);
       } else {
         modelCallRan = true;
         webSearchRequested = freshness.researchRequired &&
@@ -1896,7 +1929,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
               providerStatus = fallbackResult.status === "not_configured" ? "not_configured" : "failed";
               providerFailureCategory = fallbackResult.category;
               retryAfter = fallbackResult.retryAfter ?? modelResult.retryAfter ?? null;
-              answer = providerFailureAnswer(input, providerFailureCategory);
+              answer = providerFailureAnswer(input, providerFailureCategory, deterministicAnswer);
             }
           } else {
             providerStatus = modelResult.status === "not_configured" ? "not_configured" : "failed";
@@ -1904,7 +1937,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
             fallbackReason = modelResult.category;
             providerFailureCategory = modelResult.category;
             retryAfter = modelResult.retryAfter ?? null;
-            answer = providerFailureAnswer(input, providerFailureCategory);
+            answer = providerFailureAnswer(input, providerFailureCategory, deterministicAnswer);
           }
         }
       }
@@ -1913,7 +1946,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
       fallbackOccurred = true;
       fallbackReason = provider.failureCategory ?? "provider_not_configured";
       providerFailureCategory = fallbackReason;
-      answer = providerFailureAnswer(input, providerFailureCategory);
+      answer = providerFailureAnswer(input, providerFailureCategory, deterministicAnswer);
     }
   } else {
     answer = deterministicAnswer ?? fallbackOpenEndedAnswer(input, classification);
@@ -1927,6 +1960,14 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
   } else if (isReferenceSummaryRequest(input) && answer !== noLocalCompletionAnswer) {
     completionMethod = "deterministic";
     fallbackMethodsAttempted.push("deterministic_workspace_summary");
+  }
+  if (providerFailureCategory && deterministicAnswer && answer === deterministicAnswer) {
+    completionMethod = "deterministic";
+    fallbackOccurred = true;
+    fallbackReason = `${providerFailureCategory}:deterministic_local_fallback`;
+    if (!fallbackMethodsAttempted.includes("deterministic_local_fallback")) {
+      fallbackMethodsAttempted.push("deterministic_local_fallback");
+    }
   }
   answer = sanitizePublicPersonClaims(answer, input, category, webSearchRequested);
   let sanitized = sanitizeAskOutput(answer);
@@ -1990,7 +2031,7 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
       providerFailureCategory = revisionFailureCategory ?? "provider_response_invalid";
       providerStatus = "failed";
       modelCallSucceeded = false;
-      sanitized = sanitizeAskOutput(providerFailureAnswer(input, providerFailureCategory));
+      sanitized = sanitizeAskOutput(providerFailureAnswer(input, providerFailureCategory, deterministicAnswer));
     } else {
       sanitized = sanitizeAskOutput(fallbackOpenEndedAnswer(input, classification));
     }
@@ -1999,6 +2040,16 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     completionMethod = "deterministic_conversation_summary";
     if (!fallbackMethodsAttempted.includes("deterministic_conversation_summary")) {
       fallbackMethodsAttempted.push("deterministic_conversation_summary");
+    }
+  }
+  if (
+    providerFailureCategory &&
+    deterministicAnswer &&
+    sanitized.value === sanitizeAskOutput(deterministicAnswer).value
+  ) {
+    completionMethod = "deterministic";
+    if (!fallbackMethodsAttempted.includes("deterministic_local_fallback")) {
+      fallbackMethodsAttempted.push("deterministic_local_fallback");
     }
   }
 
@@ -2149,6 +2200,8 @@ export async function runAskBrain(input: AskBrainInput): Promise<AskBrainResult>
     credentialSource: provider.credentialSource,
     responseKind: completionMethod === "deterministic_conversation_summary"
       ? "deterministic_answer"
+      : completionMethod === "deterministic"
+        ? "deterministic_answer"
       : sourceReliability.sourceCount > 0 && sourceOutcomeHasUsefulAnswer(sourceReliability.outcome, sourceReliability.sourceCount)
         ? "substantive_answer"
       : !sourceOutcomeHasUsefulAnswer(sourceReliability.outcome, sourceReliability.sourceCount)

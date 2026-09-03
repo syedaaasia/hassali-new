@@ -165,7 +165,7 @@ function currentConstraints(prompt: string): Omit<AskResponseConstraints, "sourc
     : bulletCount
       ? "bulleted" as const
       : null;
-  const exactSentences = positiveInteger(prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+sentences?(?:\\s+only)?\\b", "i"))?.[1])
+  const exactSentences = positiveInteger(prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "(?:\\s+|-)sentences?(?:\\s+only)?\\b", "i"))?.[1])
     ?? positiveInteger(prompt.match(new RegExp("\\b(?:use|answer|respond|write)(?:\\s+in)?\\s+(?:exactly\\s+)?" + countPattern + "\\s+sentences?(?:\\s+only)?\\b", "i"))?.[1])
     ?? (/\b(?:use|answer|respond|write)(?:\s+in)?\s+(?:a\s+)?single\s+sentence(?:\s+only)?\b/i.test(prompt) ? 1 : null);
   const bulletItemMaxWords = perItem?.value ?? null;

@@ -42,6 +42,38 @@ function dayOffsetAnswer(prompt: string) {
 }
 
 function boundedArithmeticAnswer(prompt: string) {
+  const clockStart = prompt.match(
+    /\b(?:at|departs?|leaves?|starts?)\s+(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)?\b/i
+  );
+  const clockDuration = prompt.match(
+    /\bfor\s+(?:(\d+)\s+hours?(?:\s*(?:and\s+)?(\d+)\s+minutes?)?|(\d+)\s+minutes?)\b/i
+  );
+  if (clockStart && clockDuration && /\b(?:arriv(?:e|es|al)|end(?:s|ing)?|finish(?:es|ing)?|what time|when)\b/i.test(prompt)) {
+    const startHour = Number(clockStart[1]);
+    const startMinute = Number(clockStart[2]);
+    const hours = Number(clockDuration[1] ?? 0);
+    const minutes = Number(clockDuration[2] ?? clockDuration[3] ?? 0);
+    const meridiem = clockStart[3]?.replaceAll(".", "").toUpperCase() ?? null;
+    if (
+      startMinute >= 0 && startMinute < 60 &&
+      hours >= 0 && hours <= 168 && minutes >= 0 && minutes < 1_440 &&
+      ((meridiem && startHour >= 1 && startHour <= 12) || (!meridiem && startHour >= 0 && startHour <= 23))
+    ) {
+      const baseHour = meridiem
+        ? (startHour % 12) + (meridiem === "PM" ? 12 : 0)
+        : startHour;
+      const totalMinutes = (baseHour * 60 + startMinute + hours * 60 + minutes) % (24 * 60);
+      const resultHour = Math.floor(totalMinutes / 60);
+      const resultMinute = totalMinutes % 60;
+      if (meridiem) {
+        const resultMeridiem = resultHour >= 12 ? "PM" : "AM";
+        const displayHour = resultHour % 12 || 12;
+        return `${displayHour}:${String(resultMinute).padStart(2, "0")} ${resultMeridiem}.`;
+      }
+      return `${String(resultHour).padStart(2, "0")}:${String(resultMinute).padStart(2, "0")}.`;
+    }
+  }
+
   const handshake = prompt.match(/\b(?:among|with)\s+(\d+)\s+people\b/i);
   if (handshake && /\bhandshakes?\b/i.test(prompt)) {
     const people = Number(handshake[1]);
@@ -72,6 +104,14 @@ function boundedArithmeticAnswer(prompt: string) {
           : left / right;
     return Number.isFinite(result) && Math.abs(result) <= 1_000_000_000_000 ? result : null;
   };
+
+  const equalGroups = prompt.match(
+    /\b(\d+)\s+([a-z][\w-]*)\s+(?:with|containing|holding)\s+(\d+)\s+([a-z][\w-]*)\s+(?:in\s+)?each(?:\s+[a-z][\w-]*)?\b/i
+  );
+  if (equalGroups && /\b(?:altogether|how many|in all|total)\b/i.test(prompt)) {
+    const result = safeResult(Number(equalGroups[1]), Number(equalGroups[3]), "*");
+    if (result !== null) return `${formatResult(result)} ${equalGroups[4]!.toLowerCase()} altogether.`;
+  }
 
   const direct = prompt.match(/\b(?:what(?:'s| is)|calculate|compute|solve)?\s*(-?\d+(?:\.\d+)?)\s*(\+|-|\*|×|\/|÷|plus|minus|times|multiplied by|divided by)\s*(-?\d+(?:\.\d+)?)\b/i);
   if (direct) {

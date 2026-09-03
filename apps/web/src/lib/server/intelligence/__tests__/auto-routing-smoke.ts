@@ -57,7 +57,9 @@ function model(input: {
   computeSource?: "byok-cloud" | "free-cloud" | "local-endpoint";
   cost?: number | null;
   id: string;
+  pricingClass?: "credit_required" | "free";
   providerId?: string;
+  reasoningTier?: "high" | "low" | "medium" | "unknown";
 }): IntelligenceModelDescriptor {
   const computeSource = input.computeSource ?? "free-cloud";
   return {
@@ -76,7 +78,9 @@ function model(input: {
     providerId: input.providerId ?? input.id.split("/")[0] ?? "fixture",
     rawProviderMetadata: {
       automaticFallback: Boolean(input.automaticFallback),
-      codingTier: input.codingTier ?? "unknown"
+      codingTier: input.codingTier ?? "unknown",
+      pricingClass: input.pricingClass ?? (computeSource === "free-cloud" ? "free" : "credit_required"),
+      reasoningTier: input.reasoningTier ?? "unknown"
     }
   };
 }
@@ -423,6 +427,64 @@ test("AUTO-13E a provider-managed meta-router retry outranks a stale registry al
   assert.equal(result.attempts, 2);
   assert.equal(result.decision?.fallback?.modelId, "openrouter/free");
   assert.equal(automatic.invokeCount(), 2);
+});
+
+test("AUTO-13F automatic ASK prefers a verified concrete free model over the variable meta-route", async () => {
+  const automatic = fixtureAdapter({
+    defaultModelId: "openrouter/free",
+    id: "openrouter",
+    models: [
+      model({ automaticFallback: true, id: "openrouter/free", reasoningTier: "medium" }),
+      model({ id: "nvidia/nemotron-3-super-120b-a12b:free", reasoningTier: "high" }),
+      model({ id: "anthropic/claude-next", pricingClass: "credit_required", reasoningTier: "high" })
+    ]
+  });
+  const result = await router(automatic.adapter).resolve(
+    request({ requestedModel: "openrouter/free" }),
+    preferences({ preferredModelId: "openrouter/free", scopeId: "concrete-free-primary" })
+  );
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.decision.primary.modelId, "nvidia/nemotron-3-super-120b-a12b:free");
+    assert.equal(result.decision.fallback?.modelId, "openrouter/free");
+    assert(!result.decision.primary.reasonCodes.includes("DEFAULT_RELIABLE"));
+  }
+});
+
+test("AUTO-13G a known unstable model served by the free meta-route is rejected and retried", async () => {
+  let attempt = 0;
+  const automatic = fixtureAdapter({
+    defaultModelId: "openrouter/free",
+    id: "openrouter",
+    invoke: async () => {
+      attempt += 1;
+      const servedModel = attempt === 1 ? "cohere/north-mini-code:free" : "free/recovered";
+      return {
+        ok: true,
+        response: {
+          citations: [],
+          computeSource: "free-cloud",
+          content: [{ text: attempt === 1 ? "Plausible but untrusted answer" : "Recovered answer", type: "text" }],
+          finishReason: "stop",
+          model: servedModel,
+          providerId: "openrouter",
+          toolCalls: [],
+          usage: unknownIntelligenceUsage({ latencyMs: 1, model: servedModel, providerId: "openrouter" })
+        }
+      };
+    },
+    models: [model({ automaticFallback: true, id: "openrouter/free" })]
+  });
+  const result = await router(automatic.adapter).invoke(
+    request({ requestedModel: "openrouter/free" }),
+    preferences({ preferredModelId: "openrouter/free", scopeId: "unstable-served-model" })
+  );
+
+  assert.equal(result.result.ok, true);
+  assert.equal(result.attempts, 2);
+  assert.equal(result.fallbackUsed, true);
+  if (result.result.ok) assert.equal(result.result.response.model, "free/recovered");
 });
 
 test("AUTO-14 authentication failure temporarily excludes BYOK without a retry storm", async () => {

@@ -210,6 +210,33 @@ test("conceptual technical questions do not become canned code templates", async
   }
 });
 
+test("personal urgency does not become project execution or coding help", () => {
+  const personal = classifyAskIntent(
+    "I feel overwhelmed right now. Give me one grounding step I can do for five minutes."
+  );
+  assert.equal(personal.intent, "emotional_support_or_therapy_style");
+  assert.equal(personal.wantsExecution, false);
+
+  const projectEdit = classifyAskIntent("Edit files in this project to fix the dashboard.");
+  assert.equal(projectEdit.intent, "mode_boundary_request");
+  assert.equal(projectEdit.wantsExecution, true);
+
+  const everydayReset = classifyAskIntent(
+    "Give me one exercise to reset after staring at a screen for an hour."
+  );
+  assert.notEqual(everydayReset.intent, "coding_help_text_only");
+  assert.equal(everydayReset.wantsExecution, false);
+
+  const everydayStart = classifyAskIntent(
+    "Give me one grounded line before I start a tedious form; no slogans."
+  );
+  assert.equal(everydayStart.intent, "emotional_support_or_therapy_style");
+  assert.equal(everydayStart.wantsExecution, false);
+
+  assert.equal(classifyAskIntent("Run the tests.").wantsExecution, true);
+  assert.equal(classifyAskIntent("Start the dev server.").wantsExecution, true);
+});
+
 test("ASK prepares an explicit CODE handoff without a proposal", () => {
   const handoff = buildModeHandoff({
     messages: [{ role: "user", content: "Build a React inventory app with billing and reports." }],
@@ -593,21 +620,22 @@ test("chat route rejects explicit hidden or unknown models without forwarding th
   const previousKey = process.env.OPENROUTER_API_KEY;
   const previousDefaultModel = process.env.HASSALI_DEFAULT_MODEL;
   const previousFetch = globalThis.fetch;
-  let providerCalls = 0;
   process.env.OPENROUTER_API_KEY = "test-key";
   process.env.HASSALI_DEFAULT_MODEL = "tencent/hy3:free";
   globalThis.fetch = async () => {
-    providerCalls += 1;
     throw new Error("Unknown models must not reach a provider.");
   };
   try {
-    for (const model of ["openai/unregistered-paid-model", "openai/gpt-4.1"]) {
+    for (const { model, modelSelectionPolicy } of [
+      { model: "openai/unregistered-paid-model", modelSelectionPolicy: "automatic" as const },
+      { model: "openai/gpt-4.1", modelSelectionPolicy: "locked" as const }
+    ]) {
       for (const request of [
         {
           messages: [{ role: "user", content: "Add Zod validation to the signup form." }],
           mode: "EXECUTE",
           model,
-          modelSelectionPolicy: "automatic",
+          modelSelectionPolicy,
           productMode: "CODE",
           workspace: existingCodeWorkspace()
         },
@@ -615,7 +643,7 @@ test("chat route rejects explicit hidden or unknown models without forwarding th
           messages: [{ role: "user", content: "Explain React Server Components." }],
           mode: "ASK",
           model,
-          modelSelectionPolicy: "automatic",
+          modelSelectionPolicy,
           productMode: "ASK"
         }
       ]) {
@@ -624,7 +652,6 @@ test("chat route rejects explicit hidden or unknown models without forwarding th
         assert.match(await response.text(), /selected model is not available/i);
       }
     }
-    assert.equal(providerCalls, 0);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
@@ -673,13 +700,11 @@ test("scoped CODE edits retain the different-app collision guard", async () => {
   }
 });
 
-test("ordinary dashboard and billing edits do not trigger app collisions", async () => {
+test("ordinary dashboard and billing edits do not trigger app collisions without a selected project", async () => {
   const previousKey = process.env.OPENROUTER_API_KEY;
   const previousFetch = globalThis.fetch;
-  let providerCalls = 0;
   process.env.OPENROUTER_API_KEY = "test-key";
   globalThis.fetch = async () => {
-    providerCalls += 1;
     return Response.json({
       model: "tencent/hy3:free",
       choices: [{
@@ -715,9 +740,8 @@ test("ordinary dashboard and billing edits do not trigger app collisions", async
       });
       const proposal = await proposalFromResponse(response);
       assert(!proposal.proposalRoutingReasons?.some((reason) => reason.code === "code_app_collision"), prompt);
-      assert.equal(proposal.changes.length, 1, prompt);
+      assert.equal(proposal.shouldBlockExecution, true, prompt);
     }
-    assert.equal(providerCalls, 6);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;

@@ -1,3 +1,4 @@
+import { findHassaliModel } from "../../model-registry";
 import type {
   IntelligenceFailure,
   IntelligenceRequest,
@@ -5,7 +6,7 @@ import type {
 } from "./intelligence-contract";
 
 export type IntelligenceResultQuality = {
-  code: "EMPTY_RESPONSE" | "MALFORMED_STRUCTURED_RESPONSE" | "MISSING_REQUIRED_RESEARCH_EVIDENCE" | "PROVIDER_SENTINEL" | "TRUNCATED_RESPONSE" | "USABLE";
+  code: "EMPTY_RESPONSE" | "KNOWN_UNRELIABLE_SERVED_MODEL" | "MALFORMED_STRUCTURED_RESPONSE" | "MISSING_REQUIRED_RESEARCH_EVIDENCE" | "PROVIDER_SENTINEL" | "TRUNCATED_RESPONSE" | "USABLE";
   usable: boolean;
 };
 
@@ -18,6 +19,10 @@ export function inspectIntelligenceResultQuality(
   result: IntelligenceResult
 ): IntelligenceResultQuality {
   if (!result.ok) return { code: "USABLE", usable: true };
+  const servedModel = findHassaliModel(result.response.model);
+  if (servedModel?.availability === "hidden_unstable" || servedModel?.availability === "unavailable") {
+    return { code: "KNOWN_UNRELIABLE_SERVED_MODEL", usable: false };
+  }
   const text = responseText(result);
   const toolOnlyAllowed = Boolean(request.tools?.length && result.response.toolCalls.length);
   if (!text && !toolOnlyAllowed) return { code: "EMPTY_RESPONSE", usable: false };

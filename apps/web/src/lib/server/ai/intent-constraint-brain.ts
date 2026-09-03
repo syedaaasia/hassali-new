@@ -112,6 +112,20 @@ const STYLE_TERMS = [
   "warm"
 ];
 
+const STYLE_AVOIDANCE_TERMS = [
+  "cheesy",
+  "cliched",
+  "cliche",
+  "corporate",
+  "dramatic",
+  "formal",
+  "generic",
+  "robotic",
+  "salesy",
+  "stiff",
+  "wordy"
+];
+
 function unique(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
@@ -197,6 +211,12 @@ function extractFeatures(message: string, domain: string | null, countConstraint
 
 function extractStyleConstraints(message: string) {
   const styles = STYLE_TERMS.filter((term) => new RegExp(`\\b${term.replace(/\s+/g, "\\s+")}\\b`, "i").test(message));
+  for (const term of STYLE_AVOIDANCE_TERMS) {
+    const termPattern = term === "cliche" ? "cliches?" : term;
+    const pattern = new RegExp(`\\b(?:(?:not|avoid|without|no)\\s+(?:(?:too|overly)\\s+)?${termPattern}|non[- ]${termPattern})\\b`, "i");
+    const match = message.match(pattern);
+    if (match) styles.push(match[0].trim());
+  }
   const colorChange = message.match(/\b(?:change|make|update|switch)\b[\s\S]{0,50}\b(?:color|colour|palette|theme)\b(?:\s+to\s+([a-z -]{2,24}))?/i);
   if (colorChange) styles.push(colorChange[0].trim());
   return unique(styles);

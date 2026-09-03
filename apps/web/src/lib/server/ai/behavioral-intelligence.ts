@@ -193,7 +193,9 @@ const STOP_WORDS = new Set([
   "more",
   "most",
   "please",
+  "recommend",
   "should",
+  "suggest",
   "that",
   "the",
   "them",
@@ -506,7 +508,7 @@ function selectReferencedObjective(
 
 function topicFromObjective(objective: string) {
   const cleaned = objective
-    .replace(/^(?:please\s+)?(?:analy[sz]e|answer|build|can you|compare|create|design|explain|give me|help me|how (?:can|do|should) i|implement|list|make|recommend|review|should i|tell me|what (?:are|does|is)|which|why is)\s+/i, "")
+    .replace(/^(?:please\s+)?(?:analy[sz]e|answer|build|can you|compare|create|design|draft|explain|extract|format|give me|help me|how (?:can|do|should) i|implement|list|make|provide|recommend|rewrite|review|should i|suggest|summari[sz]e|tell me|translate|what (?:are|does|is)|which|why is|write)\s+/i, "")
     .replace(/[.!?]+$/g, "")
     .trim();
   return cleaned || objective.trim();
@@ -538,14 +540,20 @@ function extractLocationEntities(value: string) {
 }
 
 function extractNamedEntities(value: string) {
+  const leadingImperatives = new Set(
+    Array.from(value.matchAll(
+      /(?:^|[.!?]\s+)([A-Z][A-Za-z-]*)\s+(?:a|an|anything|me|my|one|our|something|that|the|this|us|your)\b/g
+    )).map((match) => match[1].toLowerCase())
+  );
   const matches = Array.from(value.matchAll(/\b[A-Z][A-Za-z0-9.+#-]*(?:\s+[A-Z][A-Za-z0-9.+#-]*){0,3}\b/g))
     .map((match) => match[0])
     .map((item) =>
-      item.replace(/^(?:Answer|Build|Can|Compare|Continue|Could|Create|Describe|Explain|Give|How|List|Make|Recommend|Reconsider|Return|Review|Should|Tell|Think|What|Which|Who|Why|Will|Would)\s+/i, "").trim()
+      item.replace(/^(?:Answer|Build|Can|Compare|Continue|Could|Create|Describe|Draft|Encourage|Explain|Extract|Format|Give|How|List|Make|Motivate|Provide|Recommend|Reconsider|Reassure|Return|Rewrite|Review|Should|Suggest|Summarize|Tell|Think|Translate|What|Which|Who|Why|Will|Would|Write)\s+/i, "").trim()
     )
     .filter((item) =>
-      !/^(?:(?:Answer|Build|Compare|Continue|Create|Explain|Give|Make|Reconsider|Return|The|Think)|(?:Can|Could|Would|Will|Should|What|Which|Who|Where|When|Why|How)(?:\s+(?:I|we|you|it|this|that))?|I)$/i.test(item)
+      !/^(?:(?:Answer|Build|Compare|Continue|Create|Draft|Encourage|Explain|Extract|Format|Give|Make|Motivate|Provide|Recommend|Reconsider|Reassure|Return|Rewrite|Suggest|Summarize|The|Think|Translate|Write)|(?:Can|Could|Would|Will|Should|What|Which|Who|Where|When|Why|How)(?:\s+(?:I|we|you|it|this|that))?|I)$/i.test(item)
     )
+    .filter((item) => !leadingImperatives.has(item.toLowerCase()))
     .filter((item) => contentTokens(item).length > 0)
     .filter((item) =>
       !/^(?:bro|buddy|dear|dude|friend|hello|hey|hi|mate|ma'am|sir)$/i.test(item)
@@ -587,8 +595,8 @@ function extractFormatRequirements(value: string) {
     /\bconcise(?:ly)?\b|\bbrief(?:ly)?\b/i.test(value) ? "concise" : null,
     /\btable\b/i.test(value) ? "table" : null,
     /\b(?:bullet|bulleted)\b/i.test(value) ? "bullets" : null,
-    /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b/i.test(value)
-      ? value.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+sentences?\b/i)?.[0]
+    /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+|-)sentences?\b/i.test(value)
+      ? value.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+|-)sentences?\b/i)?.[0].replace("-", " ")
       : null,
     /\b(?:approximately|about|around)?\s*\d+\s+words?\b/i.test(value)
       ? value.match(/\b(?:approximately|about|around)?\s*\d+\s+words?\b/i)?.[0]
@@ -602,7 +610,7 @@ function extractRequiredOutputs(value: string) {
     /\b(?:example|sample)\b/i.test(value) ? "example" : null,
     /\b(?:explain|explanation)\b/i.test(value) ? "explanation" : null,
     /\b(?:recommend|recommendation|which (?:one|option))\b/i.test(value) ? "recommendation" : null,
-    /\b(?:steps?|how to)\b/i.test(value) ? "steps" : null,
+    /\b(?:steps|step[- ]by[- ]step|how to)\b/i.test(value) ? "steps" : null,
     /\b(?:code|snippet)\b/i.test(value) ? "code" : null
   ]);
 }
@@ -970,6 +978,7 @@ function buildAnswerContract(
     countRequirements,
     explicitConstraints: unique([
       ...intent.contentConstraints,
+      ...intent.styleConstraints,
       ...persistentConstraints,
       ...extractExplicitNegatives(resolvedRequest)
     ]),
@@ -991,7 +1000,7 @@ function buildAnswerContract(
         .filter(Boolean)
     ),
     requiredOutputs,
-    topic: topicFromObjective(resolvedRequest)
+    topic: resolvedRequest.trim()
   };
 }
 
@@ -1303,11 +1312,17 @@ function missingAnswerFormats(answer: string, requirements: string[]) {
 }
 
 function negativeConstraintViolated(answer: string, constraint: string) {
-  if (!/^(?:do not|don't|dont|never|no|without)\s+/i.test(constraint)) return false;
+  if (!/^(?:do not|don't|dont|never|no|not|without)\s+/i.test(constraint)) return false;
   const target = constraint
-    .replace(/^(?:do not|don't|dont|never|no|without)\s+/i, "")
+    .replace(/^(?:do not|don't|dont|never|no|not|without)\s+/i, "")
     .replace(/^(?:include|mention|recommend|use|add|discuss|suggest)\s+/i, "")
     .trim();
+  if (/\b(?:cheesy|cliches?|cliched)\b/i.test(target)) {
+    return /\b(?:believe in yourself|everything happens for a reason|keep (?:going|moving forward)|one (?:small )?step at a time|the sky(?:'s| is) the limit|you(?:'ve| have) got this)\b/i.test(answer);
+  }
+  if (/\b(?:dramatic|overly positive|motivational slogans?)\b/i.test(target)) {
+    return /\b(?:believe in yourself|everything happens for a reason|keep (?:going|moving forward)|one (?:small )?step at a time|the sky(?:'s| is) the limit|you(?:'ve| have) got this)\b/i.test(answer);
+  }
   if (!target || target.length < 2 || !entityPresent(answer, target)) return false;
   const relevantSentences = answer
     .split(/(?<=[.!?])\s+/)
@@ -1317,10 +1332,35 @@ function negativeConstraintViolated(answer: string, constraint: string) {
   );
 }
 
+function isActionableAdviceRequest(value: string) {
+  return /\b(?:give me|recommend|suggest)\b[\s\S]{0,80}\b(?:action|exercise|step|technique|tip|way)\b/i.test(value);
+}
+
+function isActionableAnswer(value: string) {
+  return /\b(?:avoid|begin|block|breathe|choose|close|disable|focus|move|open|organize|pause|pick|place|put|remove|set|silence|spend|start|switch|take|try|turn|write)\b/i.test(value) &&
+    value.trim().length >= 24;
+}
+
+function isBoundedWritingRequest(value: string) {
+  return /\b(?:compose|draft|give me|say|write)\b[\s\S]{0,100}\b(?:apology|caption|email|encouragement|line|message|note|pep talk|reminder|reply|response|sentence|text|wording)\b/i.test(value);
+}
+
+function isUsableComposedAnswer(value: string) {
+  return value.trim().length >= 12 &&
+    !/\b(?:couldn't produce|couldn't complete|provider|routing|validation failed)\b/i.test(value);
+}
+
+function isSupportiveResponseRequest(value: string) {
+  return /\b(?:encourage|motivate|reassure)\s+me\b|\bpep talk\b|\bsay something\b[\s\S]{0,50}\b(?:encouraging|hopeful|supportive)\b/i.test(value);
+}
+
 function topicAligned(answer: string, topic: string, requiredEntities: string[]) {
   if (requiredEntities.length) {
     return requiredEntities.some((entity) => entityPresent(answer, entity));
   }
+  if (isActionableAdviceRequest(topic) && isActionableAnswer(answer)) return true;
+  if (isBoundedWritingRequest(topic) && isUsableComposedAnswer(answer)) return true;
+  if (isSupportiveResponseRequest(topic) && isUsableComposedAnswer(answer)) return true;
   const tokens = contentTokens(topic);
   if (!tokens.length) return true;
   const answerTokens = new Set(contentTokens(answer));
@@ -1345,7 +1385,10 @@ export function validateAnswerAgainstContract(
     if (output === "pros_and_cons") return !(/\bpros?\b/i.test(answer) && /\bcons?\b/i.test(answer));
     if (output === "example") return !/\b(?:example|for instance|e\.g\.)\b/i.test(answer);
     if (output === "explanation") return answer.trim().length < 80;
-    if (output === "recommendation") return !/\b(?:recommend|best fit|choose|choice|prefer|would use|simpler|better)\b/i.test(answer);
+    if (output === "recommendation") {
+      if (isActionableAdviceRequest(contract.topic) && isActionableAnswer(answer)) return false;
+      return !/\b(?:recommend|best fit|choose|choice|prefer|would use|simpler|better)\b/i.test(answer);
+    }
     if (output === "steps") return observedCompleteListItemCount(answer) === null;
     if (output === "code") return !/```|(?:const|function|class|def|import|<\w+)/i.test(answer);
     return false;

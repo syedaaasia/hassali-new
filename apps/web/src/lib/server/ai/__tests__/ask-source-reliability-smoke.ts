@@ -89,6 +89,44 @@ test("industry labels do not turn design advice into high-stakes research", () =
   assert.equal(freshness.directAnswerAllowed, true);
 });
 
+test("personal time context remains timeless while current external facts still require research", () => {
+  const personal = decision(
+    "I feel distracted today. Suggest one small step that could help me focus for fifteen minutes."
+  );
+  assert.equal(personal.freshnessClass, "timeless");
+  assert.equal(personal.researchRequired, false);
+  assert.equal(personal.directAnswerAllowed, true);
+
+  const news = decision("What happened in the news today?");
+  assert.equal(news.freshnessClass, "live_event");
+  assert.equal(news.researchRequired, true);
+});
+
+test("timeless quoted wording is not rejected as an unsupported source quote", () => {
+  const prompt = "Suggest one small step that could help me focus.";
+  const freshness = decision(prompt);
+  const report = verifyAskSourceReliability({
+    answer: "Set a timer labelled \"focus\" for fifteen minutes, then work on one task until it rings.",
+    decision: freshness,
+    researchAttempted: false,
+    sources: [],
+    time: normalizeAskTimeContext(prompt, runtime)
+  });
+  assert.equal(report.outcome, "VERIFIED");
+  assert.equal(report.sourceCount, 0);
+});
+
+test("personal focus advice survives the full ASK quality and source pipeline", async () => {
+  const prompt = "I feel distracted today. Suggest one small step that could help me focus for fifteen minutes.";
+  const provider = successfulProvider(
+    "Put your phone out of reach, set a fifteen-minute timer, and work only on the next small task until it rings."
+  );
+  const result = await runAskBrain(askInput(prompt, provider.providerCall));
+  assert.equal(result.decision.sourceReliability.outcome, "VERIFIED");
+  assert.match(result.answer, /fifteen-minute timer/i);
+  assert.doesNotMatch(result.answer, /Live evidence was unavailable|trustworthy answer|available recovery/i);
+});
+
 test("latest technical versions require current official evidence", async () => {
   const prompt = "What is the latest stable version of Next.js?";
   const freshness = decision(prompt);
