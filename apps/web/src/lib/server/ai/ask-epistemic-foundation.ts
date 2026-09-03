@@ -136,6 +136,15 @@ function boundedArithmeticAnswer(prompt: string) {
     if (result !== null) return `${formatResult(result)} ${noun} remain.`;
   }
 
+  const removedFromTotal = prompt.match(
+    /\b(?:had|has|held|contained|started with)\s+(-?\d+(?:\.\d+)?)\s+([a-z][a-z -]{0,30}?)\s*(?:and\s+|,\s*(?:and\s+)?)(-?\d+(?:\.\d+)?)\s+(?:of\s+them\s+)?(?:were|was)?\s*(?:borrowed|removed|used|sold|taken|given away)\b/i
+  );
+  if (removedFromTotal && /\b(?:how many|remain|remaining|left|still there)\b/i.test(prompt)) {
+    const result = safeResult(Number(removedFromTotal[1]), Number(removedFromTotal[3]), "-");
+    const noun = removedFromTotal[2]!.trim();
+    if (result !== null) return `${formatResult(result)} ${noun} remain.`;
+  }
+
   return null;
 }
 

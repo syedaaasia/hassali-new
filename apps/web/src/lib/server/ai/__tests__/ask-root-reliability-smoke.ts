@@ -115,6 +115,30 @@ test("stable household explanations survive total provider failure through the e
   }
 });
 
+test("ordinary narrative subtraction survives total provider failure", async () => {
+  for (const [prompt, expected] of [
+    ["A shelf had 96 books and 34 were borrowed. How many are still there?", "62 books remain."],
+    ["A pantry contained 45 cans, and 12 were used. How many are left?", "33 cans remain."],
+    ["The stall started with 70 tickets and 19 were sold. How many remain?", "51 tickets remain."]
+  ] as const) {
+    let providerCalls = 0;
+    const messages = [{ content: prompt, role: "user" as const }];
+    const result = await runAskBrain(brainInput(prompt, {
+      conversationTranscript: { authoritative: true, messages, source: "owned_persistence", truncated: false },
+      messages,
+      providerCall: async () => {
+        providerCalls += 1;
+        return { status: "timeout", category: "provider_timeout", reason: "fixture timeout" };
+      },
+      providerCallOwnsRouting: true
+    }));
+
+    assert.equal(providerCalls, 0, prompt);
+    assert.equal(result.answer, expected, prompt);
+    assert.equal(result.decision.completionMethod, "deterministic", prompt);
+  }
+});
+
 test("conversational address does not make a concise correct answer fail its contract", async () => {
   await withConfiguredProvider(async () => {
     const prompt = "Mate, what's RAM for?";
