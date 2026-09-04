@@ -20,4 +20,17 @@ await test("state is bound JSON data not interpolated SQL", async () => { const 
 await test("optimistic save binds read timestamp with JS precision", async () => { const timestamp = "2026-09-04T00:00:00.123Z"; const f = fixture([[{ owned: true }], [{ state: {} }]]); await upsertOwnedGrowthProjectState({ ...input, state: {}, expectedUpdatedAt: timestamp }, f.db); assert.ok(f.queries[1].params.includes(timestamp)); assert.match(f.queries[1].sql, /date_trunc\('milliseconds'/); });
 await test("conflicting write is reported without recomputing state", async () => { const f = fixture([[{ owned: true }], []]); assert.equal(await upsertOwnedGrowthProjectState({ ...input, state: {}, expectedUpdatedAt: null }, f.db), null); assert.equal(f.queries.length, 2); });
 await test("database failure propagates rather than returning success", async () => { const db = { execute: async () => { throw new Error("storage unavailable"); } } as unknown as DatabaseClient; await assert.rejects(() => upsertOwnedGrowthProjectState({ ...input, state: {} }, db), /storage unavailable/); });
+await test("failed update preserves the previous readable state", async () => {
+  const saved = { state: { discovery: { version: 1, business: { name: "Saved business" } } }, updatedAt: new Date("2026-09-04T00:00:00Z") };
+  let writes = 0;
+  const db = { execute: async (query: SQL) => {
+    const statement = new PgDialect().sqlToQuery(query).sql;
+    if (statement.includes("select exists")) return { rows: [{ owned: true }] };
+    if (statement.includes("insert into growth_project_states")) { writes++; throw Object.assign(new Error("write rejected"), { code: "40001" }); }
+    return { rows: [structuredClone(saved)] };
+  } } as unknown as DatabaseClient;
+  await assert.rejects(() => upsertOwnedGrowthProjectState({ ...input, state: { replacement: true }, expectedUpdatedAt: saved.updatedAt.toISOString() }, db), { code: "40001" });
+  assert.equal(writes, 1);
+  assert.deepEqual(await getOwnedGrowthProjectState(input, db), saved);
+});
 console.log(`Growth persistence contracts: ${count}/${count} PASS (mock database; no live persistence claim)`);

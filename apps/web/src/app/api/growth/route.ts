@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { getOwnedGrowthProjectState, ownsGrowthProject, upsertOwnedGrowthProjectState } from "@hassali/database";
-import { getOwnedWebsiteGrowthHandoff } from "@/lib/server/ai/website-growth-handoff-store";
-import { growthBusinessTruthFromWebsite } from "@/lib/server/growth-intelligence/growth-intelligence";
+import { WebsiteGrowthHandoffError } from "@/lib/server/ai/website-growth-handoff";
+import { loadGrowthBusinessContext } from "@/lib/server/growth-intelligence/growth-business-context";
 import { prepareGrowthState } from "@/lib/server/growth-intelligence/growth-route-state";
 import { persistedGrowthTruth } from "@/lib/server/growth-intelligence/growth-state-validation";
 import { record } from "@/lib/server/growth-intelligence/growth-state-validation";
@@ -49,8 +49,8 @@ export async function POST(request: Request) {
     const existing = await getOwnedGrowthProjectState({ externalUserId: userId, projectId });
     const existingTruth = persistedGrowthTruth(existing?.state);
     if (record(record(existing?.state).project).businessTruth && !existingTruth) console.info("growth_state_recovered", { code: "GROWTH_STALE_BUSINESS_TRUTH" });
-    const handoff = existingTruth ? null : await getOwnedWebsiteGrowthHandoff({ externalUserId: userId, projectId });
-    const enrichedTruth = existingTruth ?? (handoff ? growthBusinessTruthFromWebsite(handoff) : null);
+    stage = "business-context";
+    const enrichedTruth = await loadGrowthBusinessContext({ externalUserId: userId, projectId, state: existing?.state });
     stage = "prepare";
     const previousDiscovery = readDiscoveryState(record(existing?.state).discovery);
     if (action !== "strategy" && body.revision !== previousDiscovery.revision) return Response.json({ error: "This Growth project changed in another session. Reload it before continuing.", code: "GROWTH_CONFLICT" }, { status: 409 });
@@ -71,6 +71,14 @@ export async function POST(request: Request) {
     return Response.json({ state });
   } catch (error) {
     const storage = growthStorageFailure(error);
+    if (stage === "business-context" && error instanceof WebsiteGrowthHandoffError) {
+      console.error("growth_request_failed", { stage, code: error.code });
+      return Response.json({ error: "Growth could not load the authorized project context.", code: `GROWTH_CONTEXT_${error.code}` }, { status: error.code === "OWNERSHIP_REQUIRED" ? 404 : 409 });
+    }
+    if (stage === "business-context" && storage.code === "GROWTH_STORAGE_FAILED") {
+      console.error("growth_request_failed", { stage, code: "GROWTH_CONTEXT_INVALID" });
+      return Response.json({ error: "Growth could not interpret the saved project context. Your saved data has not been replaced.", code: "GROWTH_CONTEXT_INVALID" }, { status: 422 });
+    }
     console.error("growth_request_failed", { stage, code: error instanceof GrowthDiscoveryError ? error.code : stage === "prepare" ? "GROWTH_PREPARATION_FAILED" : storage.code });
     if (error instanceof GrowthDiscoveryError) return Response.json({ error: error.message, code: error.code }, { status: 422 });
     if (stage !== "prepare") return Response.json(storage, { status: 503 });
