@@ -87,12 +87,13 @@ export async function ownsGrowthProject(input: { externalUserId: string; project
   return ownsProject(input.externalUserId, input.projectId, db);
 }
 
-export async function upsertOwnedGrowthProjectState(input: { externalUserId: string; projectId: string; state: unknown }, db: Db = getDatabaseClient()) {
+export async function upsertOwnedGrowthProjectState(input: { externalUserId: string; projectId: string; state: unknown; expectedUpdatedAt?: string | null }, db: Db = getDatabaseClient()) {
   if (!await ownsProject(input.externalUserId, input.projectId, db)) return null;
   const result = await db.execute<{ state: unknown; updatedAt: Date }>(sql`
     insert into growth_project_states (project_id, user_id, state)
     select ${input.projectId}, users.id, ${JSON.stringify(input.state)}::jsonb from users where users.external_id = ${input.externalUserId}
     on conflict (project_id) do update set state = excluded.state, updated_at = now()
+    where ${input.expectedUpdatedAt === undefined} or date_trunc('milliseconds', growth_project_states.updated_at) = ${input.expectedUpdatedAt ?? null}::timestamptz
     returning state, updated_at as "updatedAt"
   `);
   return result.rows[0] ?? null;
