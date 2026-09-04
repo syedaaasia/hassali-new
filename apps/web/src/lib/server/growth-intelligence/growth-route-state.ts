@@ -7,6 +7,7 @@ import {
   validateGrowthCampaign
 } from "./growth-intelligence";
 import type { GrowthBusinessTruth } from "./growth-types";
+import { validGrowthBusinessTruth } from "./growth-state-validation";
 
 export function prepareGrowthState(input: {
   businessTruth: GrowthBusinessTruth | null;
@@ -15,7 +16,7 @@ export function prepareGrowthState(input: {
   prompt: string;
 }) {
   const project = createGrowthProject({
-    businessTruth: growthBusinessTruthFromPrompt(input.prompt, input.businessTruth),
+    businessTruth: growthBusinessTruthFromPrompt(input.prompt, validGrowthBusinessTruth(input.businessTruth)),
     ownerId: input.ownerId,
     projectId: input.projectId
   });

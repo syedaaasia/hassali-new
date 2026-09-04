@@ -1,9 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
-import { getOwnedGrowthProjectState, upsertOwnedGrowthProjectState } from "@hassali/database";
+import { getOwnedGrowthProjectState, ownsGrowthProject, upsertOwnedGrowthProjectState } from "@hassali/database";
 import { getOwnedWebsiteGrowthHandoff } from "@/lib/server/ai/website-growth-handoff-store";
 import { growthBusinessTruthFromWebsite } from "@/lib/server/growth-intelligence/growth-intelligence";
 import { prepareGrowthState } from "@/lib/server/growth-intelligence/growth-route-state";
-import type { GrowthBusinessTruth } from "@/lib/server/growth-intelligence/growth-types";
+import { persistedGrowthTruth } from "@/lib/server/growth-intelligence/growth-state-validation";
 import { boundedJsonFailure, productionRequestLimits, readBoundedJson } from "@/lib/server/production-hardening/request-guard";
 
 export async function GET(request: Request) {
@@ -11,6 +11,7 @@ export async function GET(request: Request) {
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const projectId = new URL(request.url).searchParams.get("projectId")?.trim();
   if (!projectId) return Response.json({ error: "projectId is required" }, { status: 400 });
+  if (!await ownsGrowthProject({ externalUserId: userId, projectId })) return Response.json({ error: "Project not found" }, { status: 404 });
   const state = await getOwnedGrowthProjectState({ externalUserId: userId, projectId });
   return Response.json({ state: state?.state ?? null, updatedAt: state?.updatedAt ?? null });
 }
@@ -24,15 +25,21 @@ export async function POST(request: Request) {
   const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim().slice(0, 4_000) : "";
   if (!projectId || !prompt) return Response.json({ error: "projectId and prompt are required" }, { status: 400 });
+  let stage = "load";
   try {
+    if (!await ownsGrowthProject({ externalUserId: userId, projectId })) return Response.json({ error: "Project not found" }, { status: 404 });
     const existing = await getOwnedGrowthProjectState({ externalUserId: userId, projectId });
-    const existingTruth = ((existing?.state as { project?: { businessTruth?: GrowthBusinessTruth } } | null)?.project?.businessTruth) ?? null;
-    const handoff = await getOwnedWebsiteGrowthHandoff({ externalUserId: userId, projectId }).catch(() => null);
+    const existingTruth = persistedGrowthTruth(existing?.state);
+    const handoff = existingTruth ? null : await getOwnedWebsiteGrowthHandoff({ externalUserId: userId, projectId });
     const enrichedTruth = existingTruth ?? (handoff ? growthBusinessTruthFromWebsite(handoff) : null);
+    stage = "prepare";
     const state = prepareGrowthState({ businessTruth: enrichedTruth, ownerId: userId, projectId, prompt });
-    await upsertOwnedGrowthProjectState({ externalUserId: userId, projectId, state });
+    stage = "persist";
+    const saved = await upsertOwnedGrowthProjectState({ externalUserId: userId, projectId, state });
+    if (!saved) return Response.json({ error: "Project not found" }, { status: 404 });
     return Response.json({ state });
   } catch {
-    return Response.json({ error: "Growth could not prepare this strategy from the current business context." }, { status: 409 });
+    console.error("growth_request_failed", { stage });
+    return Response.json({ error: stage === "prepare" ? "Growth could not interpret this business context." : "Growth project storage is unavailable. Your saved business context has not been replaced.", code: stage === "prepare" ? "GROWTH_PREPARATION_FAILED" : "GROWTH_STORAGE_FAILED" }, { status: stage === "prepare" ? 422 : 503 });
   }
 }

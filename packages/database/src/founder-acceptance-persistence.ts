@@ -74,12 +74,17 @@ export async function upsertOwnedGithubProjectConnection(input: { externalUserId
 }
 
 export async function getOwnedGrowthProjectState(input: { externalUserId: string; projectId: string }, db: Db = getDatabaseClient()) {
+  if (!await ownsProject(input.externalUserId, input.projectId, db)) return null;
   const result = await db.execute<{ state: unknown; updatedAt: Date }>(sql`
     select state, states.updated_at as "updatedAt" from growth_project_states states
     inner join users on users.id = states.user_id
     where states.project_id = ${input.projectId} and users.external_id = ${input.externalUserId} limit 1
   `);
   return result.rows[0] ?? null;
+}
+
+export async function ownsGrowthProject(input: { externalUserId: string; projectId: string }, db: Db = getDatabaseClient()) {
+  return ownsProject(input.externalUserId, input.projectId, db);
 }
 
 export async function upsertOwnedGrowthProjectState(input: { externalUserId: string; projectId: string; state: unknown }, db: Db = getDatabaseClient()) {
