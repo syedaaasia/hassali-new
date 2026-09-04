@@ -23,6 +23,16 @@ test("raw/fenced/prose-wrapped JSON share one parser", () => {
 test("array output and oversized output rejected", () => { assert.throws(() => parseGrowthObject("[]")); assert.throws(() => parseGrowthObject('[{"plan":{}}]')); assert.throws(() => parseGrowthObject(" ".repeat(96001))); });
 test("wrong typed criteria cannot silently drop geography", () => { assert.equal(validSearchPlanShape({ titles: ["Manager"], geographies: "Canada" }), false); assert.equal(validSearchPlanShape(valid.plan), true); });
 test("provider safety finish is not retried", async () => { let calls = 0; await assert.rejects(() => inferGrowthObject({ instruction: "plan", data: {}, validate, infer: async () => { calls++; return response('{}', 'content_filter'); } }), { code: "GROWTH_SAFETY_REJECTION" }); assert.equal(calls, 1); });
+test("Growth receives repairable structured text before its schema gate", async () => {
+  const requests: IntelligenceRequest[] = [];
+  const result = await inferGrowthObject({ instruction: "plan", data: {}, validate, infer: async request => {
+    requests.push(request);
+    return response(`\`\`\`json\n${JSON.stringify(valid)}\n\`\`\``);
+  } });
+  assert.deepEqual(result.data, valid);
+  assert.equal(requests[0]?.responseFormat, "text");
+  assert.deepEqual(requests[0]?.requiredCapabilities, ["text", "structuredOutput"]);
+});
 for (const [name, first] of [["syntax", response("{bad")], ["schema", response('{"unrelated":true}')], ["truncation", response(JSON.stringify(valid), "length")]] as const) {
   test(`${name} gets exactly one bounded structured repair`, async () => {
     const requests: IntelligenceRequest[] = [];
@@ -30,7 +40,7 @@ for (const [name, first] of [["syntax", response("{bad")], ["schema", response('
       infer: async request => { requests.push(request); return requests.length === 1 ? first : response(JSON.stringify(valid)); } });
     assert.deepEqual(result.data, valid); assert.equal(requests.length, 2);
     assert.match(JSON.stringify(requests[1].messages), /Canadian clinics/);
-    assert.equal(requests[1].responseFormat, "json_object");
+    assert.equal(requests[1].responseFormat, "text");
   });
 }
 test("unrepairable schema stops after two calls", async () => { let calls = 0; await assert.rejects(() => inferGrowthObject({ instruction: "plan", data: {}, validate, infer: async () => { calls++; return response('{}'); } }), /bounded repair/); assert.equal(calls, 2); });

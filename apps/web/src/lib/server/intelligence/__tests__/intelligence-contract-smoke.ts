@@ -274,6 +274,24 @@ test("network and malformed responses normalize safely", async () => {
   if (!malformedResult.ok) assert.equal(malformedResult.failure.category, "malformed-provider-response");
 });
 
+test("response-body deadline is a timeout, not invalid JSON", async () => {
+  const adapter = compatibleAdapter({
+    fetchImpl: async (_url, init) => new Response(new ReadableStream({
+      start(controller) {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+      }
+    }), { headers: { "content-type": "application/json" }, status: 200 }),
+    timeoutMs: 1_000
+  });
+  const result = await adapter.invoke(request({ timeoutMs: 1_000 }));
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.failure.category, "timeout");
+    assert.equal(result.failure.internal?.code, "PROVIDER_TIMEOUT");
+  }
+});
+
 test("OpenAI-compatible requests preserve multimodal parts, tools, and normalized usage", async () => {
   let capturedBody: Record<string, unknown> | null = null;
   const adapter = compatibleAdapter({

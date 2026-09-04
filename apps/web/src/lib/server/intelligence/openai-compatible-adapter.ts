@@ -677,9 +677,12 @@ export function createOpenAICompatibleAdapter(config: OpenAICompatibleAdapterCon
         payload = await readBoundedJsonResponse(result.response, maxResponseBytes);
       } catch (error) {
         result.cleanup();
+        const cancelled = Boolean(request.abortSignal?.aborted);
+        const timedOut = !cancelled && error instanceof Error && error.name === "AbortError";
+        const network = !cancelled && !timedOut && error instanceof TypeError;
         return { ok: false, failure: providerFailure({
-          category: "malformed-provider-response",
-          code: error instanceof IntelligenceContractError ? error.code : "PROVIDER_JSON_INVALID",
+          category: cancelled ? "cancelled" : timedOut ? "timeout" : network ? "network" : "malformed-provider-response",
+          code: cancelled ? "REQUEST_CANCELLED" : timedOut ? "PROVIDER_TIMEOUT" : network ? "PROVIDER_NETWORK_ERROR" : error instanceof IntelligenceContractError ? error.code : "PROVIDER_JSON_INVALID",
           model: request.requestedModel,
           providerId: config.providerId
         }) };
