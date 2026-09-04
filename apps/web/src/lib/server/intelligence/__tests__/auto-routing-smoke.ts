@@ -311,6 +311,44 @@ test("AUTO-13B runtime capability mismatch uses one capable fallback", async () 
   assert.equal(alternate.invokeCount(), 1);
 });
 
+test("AUTO-13B2 a failed concrete model can be excluded from a bounded recovery", async () => {
+  const source = fixtureAdapter({
+    defaultModelId: "primary/model",
+    id: "source",
+    models: [
+      model({ id: "primary/model", reasoningTier: "high" }),
+      model({ id: "alternate/model", reasoningTier: "medium" })
+    ]
+  });
+  const result = await router(source.adapter).resolve(
+    request({ mode: "GROWTH" }),
+    preferences({ excludedModelIds: ["PRIMARY/MODEL"], preferredModelId: "primary/model" })
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.decision.primary.modelId, "alternate/model");
+});
+
+test("AUTO-13B3 Growth prefers a distinct concrete fallback over a variable meta-route", async () => {
+  const source = fixtureAdapter({
+    defaultModelId: null,
+    id: "openrouter",
+    models: [
+      model({ id: "nvidia/reliable:free", reasoningTier: "high" }),
+      model({ id: "minimax/alternate:free", reasoningTier: "medium" }),
+      model({ automaticFallback: true, id: "openrouter/free", reasoningTier: "medium" })
+    ]
+  });
+  const result = await router(source.adapter).resolve(
+    request({ mode: "GROWTH" }),
+    preferences({ scopeId: "growth-concrete-fallback" })
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.decision.primary.modelId, "nvidia/reliable:free");
+    assert.equal(result.decision.fallback?.modelId, "minimax/alternate:free");
+  }
+});
+
 test("AUTO-13C required research evidence gets one bounded meta-router retry", async () => {
   let attempt = 0;
   const automatic = fixtureAdapter({

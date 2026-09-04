@@ -60,6 +60,7 @@ export type AutoRoutingPreferences = {
     adapterId: string;
     modelId: string;
   } | null;
+  excludedModelIds?: string[];
   preferredModelId?: string | null;
   privacy: IntelligenceRoutingPrivacy;
   runtimeProfile?: EdgeRuntimeProfile;
@@ -348,6 +349,7 @@ export class AutoIntelligenceRouter {
     const effectivePrivacy = request.privacy?.dataLocality === "local-only" ? "local-only" : preferences.privacy;
     const resolvedTaskTier = taskTier(request, preferences.taskTier);
     const explicit = preferences.explicitOverride ?? null;
+    const excludedModelIds = new Set((preferences.excludedModelIds ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean));
     const adapters = this.registry.list().filter((adapter) => {
       if (effectivePrivacy === "local-only" && !isLocal(adapter)) return false;
       if (explicit && adapter.id.toLowerCase() !== explicit.adapterId.toLowerCase()) return false;
@@ -377,6 +379,7 @@ export class AutoIntelligenceRouter {
       if (!["ready", "degraded"].includes(source.health.status)) continue;
       for (const model of source.models) {
         if (model.availability === "unavailable") continue;
+        if (excludedModelIds.has(model.modelId.toLowerCase())) continue;
         if (automaticAskPreference && model.rawProviderMetadata?.pricingClass !== "free") continue;
         if (explicit && model.modelId.toLowerCase() !== explicit.modelId.toLowerCase()) continue;
         const failedCapability = request.requiredCapabilities.find(
@@ -568,7 +571,7 @@ export class AutoIntelligenceRouter {
       fallbackCandidates.push(primary);
     }
     const primaryUsesMetaRoute = Boolean(primary.model.rawProviderMetadata?.automaticFallback);
-    const preferConcreteFallback = automaticAskPreference && !primaryUsesMetaRoute;
+    const preferConcreteFallback = request.mode === "GROWTH" || (automaticAskPreference && !primaryUsesMetaRoute);
     fallbackCandidates.sort((left, right) =>
       (preferConcreteFallback
         ? Number(Boolean(left.model.rawProviderMetadata?.automaticFallback)) - Number(Boolean(right.model.rawProviderMetadata?.automaticFallback))

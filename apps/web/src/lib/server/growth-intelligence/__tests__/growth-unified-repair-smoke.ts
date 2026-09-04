@@ -41,8 +41,22 @@ for (const [name, first] of [["syntax", response("{bad")], ["schema", response('
     assert.deepEqual(result.data, valid); assert.equal(requests.length, 2);
     assert.match(JSON.stringify(requests[1].messages), /Canadian clinics/);
     assert.equal(requests[1].responseFormat, "text");
+    if (name === "truncation") {
+      assert.equal(requests[0].generation?.maxOutputTokens, 2_500);
+      assert.equal(requests[1].generation?.maxOutputTokens, 3_100);
+      assert.doesNotMatch(JSON.stringify(requests[1].messages), /invalidCandidate/);
+    }
   });
 }
+test("truncated output is not echoed into the bounded repair request", async () => {
+  const requests: IntelligenceRequest[] = [];
+  const exclusions: Array<string[] | undefined> = [];
+  const result = await inferGrowthObject({ instruction: "Return a plan", data: { request: "dense public page" }, validate,
+    infer: async (request, options) => { requests.push(request); exclusions.push(options?.excludedModelIds); return requests.length === 1 ? response("x".repeat(20_000), "length") : response(JSON.stringify(valid)); } });
+  assert.deepEqual(result.data, valid);
+  assert.ok(JSON.stringify(requests[1].messages).length < 1_000);
+  assert.deepEqual(exclusions[1], ["fixture"]);
+});
 test("unrepairable schema stops after two calls", async () => { let calls = 0; await assert.rejects(() => inferGrowthObject({ instruction: "plan", data: {}, validate, infer: async () => { calls++; return response('{}'); } }), /bounded repair/); assert.equal(calls, 2); });
 test("transport/auth/policy errors do not enter semantic retry loop", async () => {
   for (const code of ["GROWTH_AUTHENTICATION", "GROWTH_MALFORMED_PROVIDER_RESPONSE", "GROWTH_SAFETY_REJECTION"]) {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { findHassaliModel } from "@/lib/model-registry";
 import { resolveAskFallbackProviders } from "@/lib/server/ai/provider-router";
 import {
+  createCurrentOpenRouterAdapter,
   createCurrentIntelligenceRegistry,
   normalizeRegisteredModel
 } from "../current-provider-adapter";
@@ -484,6 +485,31 @@ test("the current provider path invokes through the normalized registry", async 
   assert.equal(descriptor.providerId, "openrouter");
   assert.equal(descriptor.publisherId, "tencent");
   assert.equal(descriptor.pricing.source, "unknown");
+});
+
+test("the environment-managed free-cloud adapter exposes only verified free routes", async () => {
+  const adapter = createCurrentOpenRouterAdapter({ getApiKey: () => "current-test-key" });
+  const models = await adapter.models?.();
+  assert(models?.length);
+  assert(models.every((entry) => entry.rawProviderMetadata?.pricingClass === "free"));
+  assert(models.every((entry) => entry.rawProviderMetadata?.availability === "verified"));
+  assert(models.some((entry) => entry.modelId === "openrouter/free"));
+  assert(!models.some((entry) => entry.modelId === "anthropic/claude-next"));
+});
+
+test("empty OpenAI-compatible responses retain the concrete served model", async () => {
+  const adapter = compatibleAdapter({
+    fetchImpl: async () => jsonResponse(successPayload({
+      choices: [{ finish_reason: "stop", message: { content: "" } }],
+      model: "free/concrete-empty"
+    }))
+  });
+  const result = await adapter.invoke(request({ requestedModel: "openrouter/free" }));
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.failure.internal?.code, "PROVIDER_TEXT_EMPTY");
+    assert.equal(result.failure.model, "free/concrete-empty");
+  }
 });
 
 test("ASK and proposal entry points no longer parse provider HTTP shapes", async () => {

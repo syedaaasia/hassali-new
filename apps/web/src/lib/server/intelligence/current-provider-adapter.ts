@@ -113,7 +113,12 @@ export function createCurrentOpenRouterAdapter(options?: {
     executionLocality: executionLocalityForComputeSource("free-cloud"),
     defaultModelId: process.env.HASSALI_DEFAULT_MODEL ?? hassaliDefaultModelId,
     configuredModels: async () => hassaliModelRegistry
-      .filter((model) => model.executionProviderId === "openrouter" && !model.isTestOnly)
+      .filter((model) =>
+        model.executionProviderId === "openrouter" &&
+        model.pricingClass === "free" &&
+        model.availability === "verified" &&
+        !model.isTestOnly
+      )
       .map(normalizeRegisteredModel),
     extraRequestBody: (request) => request.features?.webResearch
       ? {

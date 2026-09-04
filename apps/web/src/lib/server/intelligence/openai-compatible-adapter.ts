@@ -691,7 +691,7 @@ export function createOpenAICompatibleAdapter(config: OpenAICompatibleAdapterCon
       const content = responseText(payload);
       const toolCalls = responseToolCalls(payload);
       if (!content && !toolCalls.length) {
-        return { ok: false, failure: providerFailure({ category: "malformed-provider-response", code: "PROVIDER_TEXT_EMPTY", model: request.requestedModel, providerId: config.providerId }) };
+        return { ok: false, failure: providerFailure({ category: "malformed-provider-response", code: "PROVIDER_TEXT_EMPTY", model: payload.model?.trim() || request.requestedModel, providerId: config.providerId }) };
       }
       const model = payload.model?.trim() || request.requestedModel || "unknown";
       return {

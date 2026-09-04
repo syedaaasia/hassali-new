@@ -430,6 +430,7 @@ export async function createAvailableIntelligenceRegistryForUser(userId: string,
 
 async function routingPreferences(input: {
   allowFallback?: boolean;
+  excludedModelIds?: string[];
   explicitOverride?: AutoRoutingPreferences["explicitOverride"];
   preferredModelId?: string | null;
   taskTier?: AutoRoutingPreferences["taskTier"];
@@ -441,6 +442,7 @@ async function routingPreferences(input: {
       allowFallback: input.allowFallback,
       budget: { policy: defaultIntelligenceBudgetPolicy, usage: { byokCostMicros: 0, managedCostMicros: 0, managedUnknownCostRequests: 0 } },
       explicitOverride: input.explicitOverride,
+      excludedModelIds: input.excludedModelIds,
       preferredModelId: input.preferredModelId,
       privacy: "allow-cloud",
       scopeId: "environment-default",
@@ -461,6 +463,7 @@ async function routingPreferences(input: {
       }
     },
     explicitOverride: input.explicitOverride,
+    excludedModelIds: input.excludedModelIds,
     preferredModelId: input.preferredModelId,
     privacy: preferences.privacy,
     scopeId: input.userId,
@@ -471,6 +474,7 @@ async function routingPreferences(input: {
 
 export async function invokeAutoIntelligence(input: {
   allowFallback?: boolean;
+  excludedModelIds?: string[];
   explicitOverride?: AutoRoutingPreferences["explicitOverride"];
   fetchImpl?: IntelligenceFetch;
   preferredModelId?: string | null;
