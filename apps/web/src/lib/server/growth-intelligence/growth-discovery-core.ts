@@ -9,6 +9,15 @@ const key = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const listFields = ["titles", "adjacentTitles", "excludedTitles", "seniority", "organizationTypes", "industries", "geographies", "buyingSignals", "exclusions"] as const;
 type ListField = typeof listFields[number];
 
+export function validSearchPlanShape(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const plan = record(value);
+  return listFields.every(field => plan[field] === undefined || (Array.isArray(plan[field]) && plan[field].every(item => typeof item === "string")))
+    && ["companyCriteria", "reasoning"].every(field => plan[field] === undefined || typeof plan[field] === "string")
+    && (plan.limit === undefined || (typeof plan.limit === "number" && Number.isFinite(plan.limit)))
+    && (plan.verifiedContactsOnly === undefined || typeof plan.verifiedContactsOnly === "boolean");
+}
+
 export function normalizeSearchPlan(value: unknown): GrowthSearchPlan {
   const v = record(value), result = emptyGrowthPlan();
   for (const field of listFields) result[field] = list(v[field]);
@@ -25,13 +34,17 @@ export function mutateSearchPlan(previous: GrowthSearchPlan, operations: unknown
   const next = structuredClone(previous);
   for (const item of operations) {
     const op = record(item), field = String(op.field);
-    if (field === "limit" && op.op === "set" && typeof op.value === "number") next.limit = op.value;
+    if (field === "limit" && op.op === "set" && typeof op.value === "number" && Number.isFinite(op.value)) next.limit = op.value;
     else if (field === "verifiedContactsOnly" && op.op === "set" && typeof op.value === "boolean") next.verifiedContactsOnly = op.value;
     else if (field === "companyCriteria" && op.op === "set" && typeof op.value === "string") next.companyCriteria = text(op.value, 1200);
     else if (listFields.includes(field as ListField)) {
+      if (!Array.isArray(op.values) || !op.values.every(v => typeof v === "string") || (op.op !== "set" && !op.values.length)) throw new Error("GROWTH_INVALID_MUTATION");
       const f = field as ListField, values = list(op.values);
       if (op.op === "add") next[f] = [...next[f], ...values];
-      else if (op.op === "remove") next[f] = next[f].filter((x) => !values.some((y) => key(x) === key(y)));
+      else if (op.op === "remove") {
+        next[f] = next[f].filter((x) => !values.some((y) => key(x) === key(y)));
+        if (f === "titles" || f === "adjacentTitles") next.excludedTitles.push(...values);
+      }
       else if (op.op === "set") next[f] = values;
       else throw new Error("GROWTH_INVALID_MUTATION");
     } else throw new Error("GROWTH_INVALID_MUTATION");
