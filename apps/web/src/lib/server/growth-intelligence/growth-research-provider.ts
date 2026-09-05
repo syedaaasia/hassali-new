@@ -1,4 +1,4 @@
-import { runBoundedWebResearch, sanitizeResearchQuery, type ResearchProvider } from "@/lib/server/ai/ask-research-engine";
+import { sanitizeResearchQuery, type ResearchProvider } from "@/lib/server/ai/ask-research-engine";
 import type { GrowthSearchPlan } from "@/lib/growth-discovery";
 import { GrowthDiscoveryError } from "./growth-errors";
 import { record } from "./growth-state-validation";
@@ -13,11 +13,18 @@ export function createGrowthSearchProvider(apiKey: string | undefined, fetchImpl
       const sanitized = sanitizeResearchQuery(query);
       if (sanitized.blocked) throw new GrowthDiscoveryError("GROWTH_SEARCH_QUERY_BLOCKED", "This search cannot be sent to a public source safely.");
       const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000);
-      const response = await fetchImpl("https://api.tavily.com/search", {
-        method: "POST", redirect: "error", signal,
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ query: sanitized.query, max_results: Math.min(5, Math.max(1, options.maxResults)), search_depth: "basic", include_answer: false, include_raw_content: false })
-      });
+      let response: Response;
+      try {
+        response = await fetchImpl("https://api.tavily.com/search", {
+          method: "POST", redirect: "error", signal,
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ query: sanitized.query, max_results: Math.min(5, Math.max(1, options.maxResults)), search_depth: "basic", include_answer: false, include_raw_content: false })
+        });
+      } catch {
+        const cancelled = options.signal?.aborted;
+        throw new GrowthDiscoveryError(cancelled ? "GROWTH_CANCELLED" : signal.aborted ? "GROWTH_SEARCH_TIMEOUT" : "GROWTH_SEARCH_NETWORK",
+          cancelled ? "Growth search was cancelled." : signal.aborted ? "The public company search source timed out. Your criteria were saved; no companies were invented." : "The public company search source could not be reached. Your criteria were saved; no companies were invented.");
+      }
       if (!response.ok) {
         await response.body?.cancel();
         const code = response.status === 401 || response.status === 403 ? "AUTHENTICATION" : response.status === 429 ? "RATE_LIMIT" : "UNAVAILABLE";
@@ -45,19 +52,40 @@ export function createGrowthSearchProvider(apiKey: string | undefined, fetchImpl
 
 export function growthSearchQueries(plan: GrowthSearchPlan) {
   const organizations = plan.organizationTypes.length ? plan.organizationTypes : [plan.companyCriteria];
+  // Find organizations first. Intent signals belong to fit verification, not
+  // search terms that redirect a company search toward the seller's products.
   return organizations.slice(0, 3).map(organization => sanitizeResearchQuery([
-    organization, plan.geographies.join(" OR "), plan.industries.slice(0, 2).join(" "), plan.buyingSignals.slice(0, 2).join(" "), "official website"
+    organization, plan.geographies.join(" OR "), plan.industries.slice(0, 2).join(" "), "official website"
   ].filter(Boolean).join(" "))).filter(value => !value.blocked).map(value => value.query);
 }
 
-export async function researchGrowthCandidates(plan: GrowthSearchPlan, provider: ResearchProvider, signal?: AbortSignal,
-  options: Pick<Parameters<typeof runBoundedWebResearch>[0], "fetchImpl" | "resolver"> = {}) {
+export async function researchGrowthCandidates(plan: GrowthSearchPlan, provider: ResearchProvider, signal?: AbortSignal) {
   const queries = growthSearchQueries(plan);
-  const result = await runBoundedWebResearch({ ...options, provider, signal, prompt: queries.join(" "),
-    decision: { mode: "WEB_RESEARCH", policy: "search-web", querySensitivity: "sanitized", reasonCodes: ["EXPLICIT_WEB_REQUEST"], researchRequired: true, sanitizedQueries: queries, sourcePreference: [], utilityRoute: "none" }
-  });
+  const batches: string[][] = [];
+  let failure: unknown;
+  for (const query of queries) {
+    if (signal?.aborted) throw new GrowthDiscoveryError("GROWTH_CANCELLED", "Growth search was cancelled.");
+    try {
+      const results = await provider.search(query, { maxResults: 5, signal });
+      batches.push(results.slice(0, 5).map(result => result.url));
+    } catch (error) { failure = error; }
+  }
   if (signal?.aborted) throw new GrowthDiscoveryError("GROWTH_CANCELLED", "Growth search was cancelled.");
-  // The shared engine may retain snippets after retrieval failure. These are only
-  // candidate URLs; discovery MUST fetch each original page again before acceptance.
-  return [...new Set(result.sources.map(source => source.url).filter((url): url is string => !!url))].slice(0, 8);
+  if (!batches.length && failure) throw failure;
+  // Balance organization queries rather than applying article/research ranking.
+  // URLs and snippets are leads only: discoverCompanies owns SSRF-safe original
+  // retrieval and evidence validation before any company is accepted.
+  const candidates: string[] = [], hosts = new Set<string>();
+  for (let rank = 0; rank < 5 && candidates.length < 8; rank++) {
+    for (const batch of batches) {
+      try {
+        const url = new URL(batch[rank]);
+        const host = url.hostname.replace(/^www\./, "");
+        if (!/^https?:$/.test(url.protocol) || url.username || url.password || hosts.has(host)) continue;
+        hosts.add(host); candidates.push(url.href);
+        if (candidates.length === 8) break;
+      } catch { /* Invalid candidate URLs are not eligible for retrieval. */ }
+    }
+  }
+  return candidates;
 }

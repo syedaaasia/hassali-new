@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { emptyGrowthDiscovery } from "@/lib/growth-discovery";
 import type { IntelligenceRequest, IntelligenceResponse } from "@/lib/server/intelligence/intelligence-contract";
-import { clearResearchPageCache, type ResearchProvider } from "@/lib/server/ai/ask-research-engine";
+import { type ResearchProvider } from "@/lib/server/ai/ask-research-engine";
 import { growthStorageFailure, GrowthDiscoveryError } from "../growth-errors";
 import { inferGrowthObject, parseGrowthObject } from "../growth-structured-output";
 import { createGrowthSearchProvider, growthSearchQueries, researchGrowthCandidates } from "../growth-research-provider";
@@ -94,11 +94,63 @@ test("search errors never return provider body or credentials", async () => {
 });
 test("search response limit enforced", async () => { const provider = createGrowthSearchProvider("fixture", async () => new Response("x".repeat(250001)))!; await assert.rejects(() => provider.search("clinics", { maxResults: 5 }), { code: "GROWTH_SEARCH_INVALID_RESPONSE" }); });
 test("queries are bounded and retain structured business geography", () => { const queries = growthSearchQueries({ ...plan, organizationTypes: Array(20).fill("clinics") }); assert.equal(queries.length, 3); assert.ok(queries.every(q => q.includes("Canada"))); });
-test("shared research pipeline performs search and original retrieval", async () => {
-  clearResearchPageCache(); let searches = 0, reads = 0;
+
+test("company queries separate buyer signals from organization identity", () => {
+  for (const [organization, signal] of [["creative agencies", "searching laptop specifications"], ["clinics", "buying appointment software"], ["architects", "comparing printer prices"], ["hotels", "ordering cleaning supplies"]]) {
+    const queries = growthSearchQueries({ ...plan, organizationTypes: [organization], buyingSignals: [signal] });
+    assert.ok(queries.every(query => query.includes(organization) && !query.includes(signal)));
+  }
+});
+
+test("search network and cancellation failures are typed without leaking causes", async () => {
+  const provider = createGrowthSearchProvider("private-fixture", async () => { throw new TypeError("private-fixture transport failure"); })!;
+  await assert.rejects(() => provider.search("clinics", { maxResults: 5 }), error => error instanceof GrowthDiscoveryError && error.code === "GROWTH_SEARCH_NETWORK" && !error.message.includes("private-fixture"));
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(() => provider.search("clinics", { maxResults: 5, signal: controller.signal }), { code: "GROWTH_CANCELLED" });
+});
+test("provider-neutral candidate search defers evidence to original-page verification", async () => {
+  let searches = 0;
   const provider: ResearchProvider = { id: "fixture", search: async () => { searches++; return [{ title: "Clinic", url: "https://clinic.example/about" }]; } };
-  const urls = await researchGrowthCandidates(plan, provider, undefined, { resolver: async () => ["93.184.216.34"], fetchImpl: async () => { reads++; return new Response(`<html><body>${"Clinic offers appointments in Canada. ".repeat(30)}</body></html>`, { headers: { "content-type": "text/html" } }); } });
-  assert.equal(searches, 1); assert.equal(reads, 1); assert.deepEqual(urls, ["https://clinic.example/about"]);
+  const urls = await researchGrowthCandidates(plan, provider);
+  assert.equal(searches, 1); assert.deepEqual(urls, ["https://clinic.example/about"]);
+});
+
+test("candidate budget balances queries and deduplicates company domains", async () => {
+  let calls = 0;
+  const provider: ResearchProvider = { id: "fixture", search: async () => {
+    const group = ++calls;
+    return Array.from({ length: 5 }, (_, rank) => ({ title: "Candidate", url: `https://company-${group}-${rank}.example/about` }));
+  } };
+  const urls = await researchGrowthCandidates({ ...plan, organizationTypes: ["clinics", "hospitals", "labs", "ignored"] }, provider);
+  assert.equal(calls, 3); assert.equal(urls.length, 8);
+  assert.deepEqual(urls.slice(0, 3), [1, 2, 3].map(group => `https://company-${group}-0.example/about`));
+  const duplicate: ResearchProvider = { id: "fixture", search: async () => [{ title: "One", url: "https://company.example/about" }, { title: "Two", url: "https://www.company.example/services" }] };
+  assert.equal((await researchGrowthCandidates(plan, duplicate)).length, 1);
+});
+
+test("candidate search retains successful query results and bounds total failures", async () => {
+  let calls = 0;
+  const network = new GrowthDiscoveryError("GROWTH_SEARCH_NETWORK", "Source unreachable");
+  const mixed: ResearchProvider = { id: "fixture", search: async () => {
+    if (++calls === 1) throw network;
+    return [{ title: "Clinic", url: "https://clinic.example/" }];
+  } };
+  const multiple = { ...plan, organizationTypes: ["clinics", "hospitals", "labs"] };
+  assert.deepEqual(await researchGrowthCandidates(multiple, mixed), ["https://clinic.example/"]);
+  assert.equal(calls, 3);
+  calls = 0;
+  const failed: ResearchProvider = { id: "fixture", search: async () => { calls++; throw network; } };
+  await assert.rejects(() => researchGrowthCandidates(multiple, failed), { code: "GROWTH_SEARCH_NETWORK" });
+  assert.equal(calls, 3);
+});
+
+test("candidate URLs cannot carry embedded credentials or executable schemes", async () => {
+  const provider: ResearchProvider = { id: "fixture", search: async () => [
+    { title: "Private", url: "https://user:fake-secret@company.example/" },
+    { title: "Script", url: "javascript:alert(1)" },
+    { title: "Company", url: "https://company.example/" }
+  ] };
+  assert.deepEqual(await researchGrowthCandidates(plan, provider), ["https://company.example/"]);
 });
 test("snippet-only candidates cannot become companies", async () => {
   let calls = 0;

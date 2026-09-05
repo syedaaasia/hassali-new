@@ -184,6 +184,10 @@ export async function runGrowthDiscovery(input: {
       Object.assign(state, await provider.discoverCompanies(state.plan, deps, input.signal));
     } catch (error) {
       if (input.signal?.aborted) throw error;
+      console.warn("growth_discovery_failed", {
+        code: error instanceof GrowthDiscoveryError ? error.code : "GROWTH_DISCOVERY_INTERNAL",
+        searchConfigured: Boolean(deps.search)
+      });
       state.companies = []; state.people = [];
       state.discovery = { status: "unavailable", checked: 0, rejected: 0, searchedAt: new Date().toISOString(), message: error instanceof GrowthDiscoveryError ? error.message : "Public discovery is unavailable right now. Your search criteria were saved; no unverified companies were added." };
     }
