@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { emptyGrowthDiscovery, emptyGrowthPlan, type GrowthAudienceSegment, type GrowthDiscoveryState, type GrowthOutreachDraft, type GrowthProspectCompany, type GrowthSearchPlan, type GrowthSourceEvidence } from "@/lib/growth-discovery";
 import { record } from "./growth-state-validation";
+import { validGrowthJob } from "@/lib/growth-discovery-job";
 
 export const text = (v: unknown, max = 600) => typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "";
 export const list = (v: unknown, max = 20) => Array.isArray(v) ? [...new Set(v.map((x) => text(x, 120)).filter(Boolean))].slice(0, max) : [];
@@ -12,6 +13,8 @@ type ListField = typeof listFields[number];
 export function validSearchPlanShape(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const plan = record(value);
+  if (Array.isArray(plan.titles) && Array.isArray(plan.organizationTypes)
+    && plan.titles.some(title => typeof title === "string" && (plan.organizationTypes as unknown[]).some(org => typeof org === "string" && key(org) === key(title)))) return false;
   return listFields.every(field => plan[field] === undefined || (Array.isArray(plan[field]) && plan[field].every(item => typeof item === "string")))
     && ["companyCriteria", "reasoning"].every(field => plan[field] === undefined || typeof plan[field] === "string")
     && (plan.limit === undefined || (typeof plan.limit === "number" && Number.isFinite(plan.limit)))
@@ -24,9 +27,20 @@ export function normalizeSearchPlan(value: unknown): GrowthSearchPlan {
   result.titles = result.titles.filter((t) => !result.excludedTitles.some((e) => key(e) === key(t)));
   result.adjacentTitles = result.adjacentTitles.filter((t) => ![...result.titles, ...result.excludedTitles].some((e) => key(e) === key(t)));
   result.companyCriteria = text(v.companyCriteria, 1200); result.reasoning = text(v.reasoning, 1000);
-  result.limit = typeof v.limit === "number" && Number.isFinite(v.limit) ? Math.max(1, Math.min(50, Math.floor(v.limit))) : 10;
+  result.limit = typeof v.limit === "number" && Number.isFinite(v.limit) ? Math.max(1, Math.min(500, Math.floor(v.limit))) : 100;
   result.verifiedContactsOnly = v.verifiedContactsOnly === true;
   return result;
+}
+
+export function enforceOrganizationAuthority(plan: GrowthSearchPlan, value: unknown, prompt: string): GrowthSearchPlan {
+  const authority = record(value);
+  if (typeof authority.exclusive !== "boolean") throw new Error("GROWTH_ORGANIZATION_AUTHORITY_REQUIRED");
+  if (!authority.exclusive) return plan;
+  const quote = text(authority.quote, 2000), values = list(authority.values);
+  if (!quote || !text(prompt, 4000).toLowerCase().includes(quote.toLowerCase()) || !/\b(only|just|exclusively|nothing except)\b/i.test(quote)
+    || !values.length || values.some(v => !quote.toLowerCase().includes(v.toLowerCase()))) throw new Error("GROWTH_ORGANIZATION_AUTHORITY_UNGROUNDED");
+  // Search specialties may expand candidate retrieval, never the acceptance set.
+  return { ...plan, organizationTypes: values };
 }
 
 export function mutateSearchPlan(previous: GrowthSearchPlan, operations: unknown): GrowthSearchPlan {
@@ -68,10 +82,10 @@ export function readDiscoveryState(value: unknown): GrowthDiscoveryState {
   const str = (x: unknown) => typeof x === "string";
   const nullable = (x: unknown) => x === null || str(x);
   const strings = (x: unknown) => Array.isArray(x) && x.length <= 50 && x.every(str);
-  const array = (x: unknown, validate: (item: unknown) => boolean, limit = 50) => Array.isArray(x) && x.length <= limit && x.every(validate);
+  const array = (x: unknown, validate: (item: unknown) => boolean, limit = 500) => Array.isArray(x) && x.length <= limit && x.every(validate);
   const evidence = (x: unknown) => array(x, (item) => { const e = record(item); return [e.url, e.quote, e.field, e.checkedAt].every(str) && /^https?:\/\//.test(String(e.url)); }, 20);
   const validBusiness = v.business === null || (() => { const b = record(v.business); return [b.name, b.offer, b.description, b.valueProposition].every(str) && nullable(b.geography) && nullable(b.website) && evidence(b.evidence) && ["inferred", "user_provided", "website_handoff"].includes(String(b.status)); })();
-  const validPlan = v.plan === null || (() => { const p = record(v.plan); return listFields.every((f) => strings(p[f])) && str(p.companyCriteria) && str(p.reasoning) && typeof p.limit === "number" && p.limit >= 1 && p.limit <= 50 && typeof p.verifiedContactsOnly === "boolean"; })();
+  const validPlan = v.plan === null || (() => { const p = record(v.plan); return listFields.every((f) => strings(p[f])) && str(p.companyCriteria) && str(p.reasoning) && typeof p.limit === "number" && p.limit >= 1 && p.limit <= 500 && typeof p.verifiedContactsOnly === "boolean"; })();
   const d = record(v.discovery);
   if (v.version !== 1 || typeof v.revision !== "string" || !validBusiness || !validPlan
     || !array(v.companies, (item) => { const c = record(item); return [c.id, c.name, c.website, c.domain, c.segment, c.lastVerifiedAt, c.recommendedAngle].every(str) && /^https?:\/\//.test(String(c.website)) && nullable(c.location) && nullable(c.organizationType) && strings(c.targetRoles) && strings(c.fitReasons) && evidence(c.evidence) && typeof c.fitScore === "number" && c.fitScore >= 0 && c.fitScore <= 100; })
@@ -80,7 +94,9 @@ export function readDiscoveryState(value: unknown): GrowthDiscoveryState {
     || !array(v.messages, (item) => { const m = record(item); return ["user", "assistant"].includes(String(m.role)) && str(m.text); }, 20)
     || !array(v.drafts, (item) => { const draft = record(item); return [draft.companyId, draft.subject, draft.body, draft.recommendedAngle].every(str) && evidence(draft.personalizationEvidence) && draft.status === "draft"; })
     || !["not_started", "complete", "partial", "unavailable"].includes(String(d.status)) || !str(d.message) || !nullable(d.searchedAt) || typeof d.checked !== "number" || typeof d.rejected !== "number") return emptyGrowthDiscovery();
-  return value as GrowthDiscoveryState;
+  const state = { ...value as GrowthDiscoveryState };
+  if (state.job && !validGrowthJob(state.job)) delete state.job;
+  return state;
 }
 
 export type RetrievedGrowthPage = { url: string; title?: string; content: string; retrievedAt: string };

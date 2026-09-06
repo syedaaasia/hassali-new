@@ -3,6 +3,7 @@ import { emptyGrowthDiscovery, growthProspectsCsv, type GrowthSearchPlan } from 
 import { draftOutreach, groundedEvidence, mutateSearchPlan, normalizeAudiences, normalizeProspect, normalizeSearchPlan, readDiscoveryState } from "../growth-discovery-core";
 import { publicWebDiscovery, runGrowthDiscovery, type GrowthDiscoveryDependencies, type ProspectDiscoveryProvider } from "../growth-discovery-service";
 import type { IntelligenceRequest, IntelligenceResponse } from "@/lib/server/intelligence/intelligence-contract";
+import { GrowthDiscoveryError } from "../growth-errors";
 
 const cases: Array<[string, () => void | Promise<void>]> = [];
 const test = (name: string, run: () => void | Promise<void>) => cases.push([name, run]);
@@ -30,7 +31,7 @@ test("state mutation composes independent additions and exclusions", () => {
   assert.equal(next.geographies.length, 4); assert.equal(next.excludedTitles.length, 2); assert.equal(next.organizationTypes.length, 3); assert.equal(plan.geographies.length, 2);
 });
 test("only organization filter replaces list", () => assert.deepEqual(mutateSearchPlan(plan, [{ field: "organizationTypes", op: "set", values: ["hospitality groups"] }]).organizationTypes, ["hospitality groups"]));
-test("top-N bounded", () => assert.equal(mutateSearchPlan(plan, [{ field: "limit", op: "set", value: 50000 }]).limit, 50));
+test("commercial top-N bounded at 500", () => assert.equal(mutateSearchPlan(plan, [{ field: "limit", op: "set", value: 50000 }]).limit, 500));
 test("unknown mutation fields fail closed", () => assert.throws(() => mutateSearchPlan(plan, [{ field: "ownerId", op: "set", value: "attacker" }])));
 test("invalid mutation operation fails", () => assert.throws(() => mutateSearchPlan(plan, [{ field: "titles", op: "execute", values: [] }])));
 test("generic non-art organization mutation", () => assert.deepEqual(mutateSearchPlan(normalizeSearchPlan({ organizationTypes: ["dental clinics"] }), [{ field: "organizationTypes", op: "add", values: ["veterinary clinics"] }]).organizationTypes, ["dental clinics", "veterinary clinics"]));
@@ -53,6 +54,16 @@ test("live company path requires research citations and original-page evidence",
 test("uncited model URL not fetched", async () => { const f = fake([response({ companies: [{ url: "https://uncited.test" }] }, [page.url])]); f.deps.retrieve = async () => { throw new Error("must not fetch"); }; const result = await publicWebDiscovery.discoverCompanies(plan, f.deps); assert.equal(result.discovery.checked, 0); });
 test("no-source research cannot claim success", async () => { const f = fake([response({ companies: [{ url: page.url }] })]); await assert.rejects(() => publicWebDiscovery.discoverCompanies(plan, f.deps), /no source references/); });
 test("unreadable original page never becomes prospect", async () => { const f = fake([response({ companies: [{ url: page.url }] }, [page.url])]); f.deps.retrieve = async () => { throw new Error("network"); }; assert.equal((await publicWebDiscovery.discoverCompanies(plan, f.deps)).companies.length, 0); });
+test("provider failure for one candidate preserves its verified batch neighbor", async () => {
+  const deps: GrowthDiscoveryDependencies = { search: async () => ["https://good.test/", "https://failed.test/"], retrieve: async url => ({ ...page, url }), infer: async request => {
+    const payload = JSON.parse(request.messages[0].parts.map(p => p.type === "text" ? p.text : "").join(""));
+    if (payload.input.page.url.includes("failed.test")) throw new GrowthDiscoveryError("GROWTH_RATE_LIMIT", "Unavailable");
+    return response(candidate);
+  } };
+  const result = await publicWebDiscovery.discoverCompanies(plan, deps);
+  assert.equal(result.companies.length, 1); assert.equal(result.companies[0].domain, "good.test");
+  assert.equal(result.discovery.failureCode, "GROWTH_RATE_LIMIT"); assert.deepEqual(result.discovery.retryUrls, ["https://failed.test/"]);
+});
 test("new search production service carries normalized plan to discovery", async () => { const f = fake([response({ plan })]); let observed: GrowthSearchPlan | null = null; const provider = { ...stubProvider, discoverCompanies: async (p: GrowthSearchPlan) => { observed = p; return stubProvider.discoverCompanies(p, f.deps); } }; const result = await runGrowthDiscovery({ previous: emptyGrowthDiscovery(), truth: null, action: "search", prompt: "Find senior art buyers" }, f.deps, provider); assert.deepEqual(observed, plan); assert.equal(result.companies.length, 1); assert.notEqual(result.revision, ""); });
 test("refinement recalculates results from new search state", async () => { const f = fake([response({ operations: [{ field: "geographies", op: "add", values: ["Germany", "Netherlands"] }] })]); const previous = { ...emptyGrowthDiscovery(), plan, companies: [company] }; let called = false; const provider = { ...stubProvider, discoverCompanies: async (p: GrowthSearchPlan) => { called = true; assert.ok(p.geographies.includes("Netherlands")); return { ...(await stubProvider.discoverCompanies(p, f.deps)), companies: [] }; } }; const result = await runGrowthDiscovery({ previous, truth: null, action: "refine", prompt: "Add Germany and Netherlands" }, f.deps, provider); assert.ok(called); assert.equal(result.companies.length, 0); assert.equal(previous.companies.length, 1); });
 test("discovery failure preserves structured criteria without stale results", async () => { const f = fake([response({ plan })]); const broken = { ...stubProvider, discoverCompanies: async () => { throw new Error("unavailable"); } }; const result = await runGrowthDiscovery({ previous: emptyGrowthDiscovery(), truth: null, action: "search", prompt: "Find companies" }, f.deps, broken); assert.deepEqual(result.plan, plan); assert.equal(result.discovery.status, "unavailable"); assert.equal(result.companies.length, 0); });
@@ -61,7 +72,7 @@ test("business URL analysis stages grounded facts before audiences", async () =>
   response({ business: { name: "Example Advisory", offer: "art sourcing", description: quote, evidence: [{ field: "offer", quote }] } }),
   response({ audiences: [{ name: "Collectors", problem: "Acquisition support", whyTheyBuy: "Independent expertise", buyerRoles: ["Collector"] }] })
 ]); const result = await runGrowthDiscovery({ previous: emptyGrowthDiscovery(), truth: null, action: "analyze", prompt: page.url }, f.deps); assert.equal(result.business?.website, page.url); assert.equal(result.business?.evidence[0].quote, quote); assert.equal(result.audiences.length, 1); assert.equal(f.requests.length, 2); assert.equal(f.requests[0].generation?.maxOutputTokens, 1_400); assert.equal(f.requests[1].generation?.maxOutputTokens, 1_800); });
-test("outreach selection ignores IDs outside current project pool", async () => { const previous = { ...emptyGrowthDiscovery(), business, companies: [company] }; const result = await runGrowthDiscovery({ previous, truth: null, action: "outreach", prompt: "Draft", selectedIds: [company.id, "another-project-company"] }, fake([]).deps); assert.equal(result.drafts.length, 1); });
+test("outreach selection ignores IDs outside current project pool", async () => { const previous = { ...emptyGrowthDiscovery(), business, companies: [company] }; const result = await runGrowthDiscovery({ previous, truth: null, action: "outreach", prompt: "Draft", selectedIds: [company.id, "another-project-company"] }, fake([response({subject:"Collection fit",body:quote,angle:"Art sourcing",evidenceIds:["e0"]}), response({grounded:true,individual:true,unsupportedClaims:[],supportedEvidenceIds:["e0"]})]).deps); assert.equal(result.drafts.length, 1); });
 
 test("malformed persisted discovery cannot crash the UI", () => assert.deepEqual(readDiscoveryState({ ...emptyGrowthDiscovery(), companies: [{}] }), emptyGrowthDiscovery()));
 test("valid persisted discovery round-trips", () => { const state = { ...emptyGrowthDiscovery(), business, plan, companies: [company] }; assert.deepEqual(readDiscoveryState(JSON.parse(JSON.stringify(state))), state); });

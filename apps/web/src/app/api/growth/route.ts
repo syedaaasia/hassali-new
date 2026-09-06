@@ -6,7 +6,8 @@ import { prepareGrowthState } from "@/lib/server/growth-intelligence/growth-rout
 import { persistedGrowthTruth } from "@/lib/server/growth-intelligence/growth-state-validation";
 import { record } from "@/lib/server/growth-intelligence/growth-state-validation";
 import { readDiscoveryState } from "@/lib/server/growth-intelligence/growth-discovery-core";
-import { GrowthDiscoveryError, liveGrowthDependencies, runGrowthDiscovery } from "@/lib/server/growth-intelligence/growth-discovery-service";
+import { GrowthDiscoveryError, liveGrowthDependencies, publicWebDiscovery, runGrowthDiscovery } from "@/lib/server/growth-intelligence/growth-discovery-service";
+import { processGrowthJob, type GrowthJobAction } from "@/lib/server/growth-intelligence/growth-job-request";
 import { growthProspectsCsv } from "@/lib/growth-discovery";
 import { growthStorageFailure } from "@/lib/server/growth-intelligence/growth-errors";
 import { boundedJsonFailure, productionRequestLimits, readBoundedJson } from "@/lib/server/production-hardening/request-guard";
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
   const state = await getOwnedGrowthProjectState({ externalUserId: userId, projectId });
   if (new URL(request.url).searchParams.get("format") === "csv") {
     const discovery = readDiscoveryState(record(state?.state).discovery);
-    const ids = new URL(request.url).searchParams.get("ids")?.split(",").filter(Boolean).slice(0, 50);
+    const ids = new URL(request.url).searchParams.get("ids")?.split(",").filter(Boolean).slice(0, 500);
     return new Response(growthProspectsCsv(discovery, ids), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="hassali-growth-prospects.csv"', "Cache-Control": "private, no-store" } });
   }
   return Response.json({ state: state?.state ? { ...record(state.state), discovery: readDiscoveryState(record(state.state).discovery) } : null, updatedAt: state?.updatedAt ?? null });
@@ -41,12 +42,31 @@ export async function POST(request: Request) {
   const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim().slice(0, 4_000) : "";
   const action = typeof body.action === "string" ? body.action : "strategy";
-  if (!projectId || (!prompt && !["outreach", "audience"].includes(action))) return Response.json({ error: "projectId and prompt are required" }, { status: 400 });
-  if (!["strategy", "analyze", "search", "refine", "audience", "outreach"].includes(action)) return Response.json({ error: "Unknown Growth action" }, { status: 400 });
+  const jobAction = ["advance", "pause", "resume", "cancel"].includes(action);
+  if (!projectId || (!prompt && !jobAction && !["outreach", "audience"].includes(action))) return Response.json({ error: "projectId and prompt are required" }, { status: 400 });
+  if (!jobAction && !["strategy", "analyze", "search", "refine", "audience", "outreach"].includes(action)) return Response.json({ error: "Unknown Growth action" }, { status: 400 });
+  if (body.target !== undefined && (typeof body.target !== "number" || !Number.isInteger(body.target) || body.target < 1 || body.target > 500)) return Response.json({ error: "Target must be an integer from 1 to 500." }, { status: 400 });
   let stage = "load";
   try {
     if (!await ownsGrowthProject({ externalUserId: userId, projectId })) return Response.json({ error: "Project not found", code: "GROWTH_OWNERSHIP_DENIED" }, { status: 404 });
     const existing = await getOwnedGrowthProjectState({ externalUserId: userId, projectId });
+    if (jobAction) {
+      stage = "prepare";
+      let expectedUpdatedAt = existing?.updatedAt ? new Date(existing.updatedAt).toISOString() : null;
+      const discovery = await processGrowthJob({ previous: readDiscoveryState(record(existing?.state).discovery), action: action as GrowthJobAction,
+        jobId: typeof body.jobId === "string" ? body.jobId : "", revision: body.revision,
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(90000)]),
+        save: async next => {
+          stage = "persist";
+          const saved = await upsertOwnedGrowthProjectState({ externalUserId: userId, projectId, state: { ...record(existing?.state), discovery: next }, expectedUpdatedAt });
+          stage = "prepare";
+          if (!saved) return false;
+          expectedUpdatedAt = new Date(saved.updatedAt).toISOString();
+          return true;
+        }
+      }, liveGrowthDependencies(userId), publicWebDiscovery);
+      return Response.json({ state: { ...record(existing?.state), discovery } });
+    }
     const existingTruth = persistedGrowthTruth(existing?.state);
     if (record(record(existing?.state).project).businessTruth && !existingTruth) console.info("growth_state_recovered", { code: "GROWTH_STALE_BUSINESS_TRUTH" });
     stage = "business-context";
@@ -59,8 +79,9 @@ export async function POST(request: Request) {
       project: { ...record(record(existing?.state).project), ownerId: userId, projectId, businessTruth: enrichedTruth },
       discovery: await runGrowthDiscovery({ previous: previousDiscovery, truth: enrichedTruth,
         action: action as "analyze" | "search" | "refine" | "audience" | "outreach", prompt,
+        checkpointDiscovery: true, target: typeof body.target === "number" ? body.target : undefined,
         audienceId: typeof body.audienceId === "string" ? body.audienceId : undefined,
-        selectedIds: Array.isArray(body.selectedIds) ? body.selectedIds.filter((x): x is string => typeof x === "string").slice(0, 50) : [],
+        selectedIds: Array.isArray(body.selectedIds) ? body.selectedIds.filter((x): x is string => typeof x === "string").slice(0, 500) : [],
         signal: AbortSignal.any([request.signal, AbortSignal.timeout(180000)])
       }, liveGrowthDependencies(userId))
     };

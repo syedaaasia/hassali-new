@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import { emptyGrowthDiscovery, growthProspectsCsv, type GrowthProspectCompany } from "@/lib/growth-discovery";
+import type { IntelligenceResponse } from "@/lib/server/intelligence/intelligence-contract";
+import type { GrowthDiscoveryDependencies } from "../growth-discovery-service";
+import { personalizeCompany, outreachSimilarity } from "../growth-personalization";
+
+const company: GrowthProspectCompany = { id: "fixture", name: "Fixture Studio", website: "https://fixture.test/", domain: "fixture.test", location: null, organizationType: "studio", segment: "studios", fitScore: 60, fitReasons: ["Public services fit"], evidence: [{ url: "https://fixture.test/", quote: "We design accessible spaces for community groups.", field: "offering", checkedAt: "2026-09-06" }], lastVerifiedAt: "2026-09-06", targetRoles: [], recommendedAngle: "Community services" };
+const state = { ...emptyGrowthDiscovery(), companies: [company], business: { name: "Seller", offer: "Website design", description: "", valueProposition: "Clear presentation", geography: null, website: null, evidence: [], status: "user_provided" as const } };
+const draft = { subject: "Community project presentation", body: `${company.evidence[0].quote}\n\nCould a clearer project gallery help explain that work?`, angle: "Accessible projects", evidenceIds: ["e0"] };
+const approved = { grounded: true, individual: true, unsupportedClaims: [], supportedEvidenceIds: ["e0"] };
+function fake(values: unknown[]) {
+  let calls = 0;
+  const deps: GrowthDiscoveryDependencies = { retrieve: async () => { throw new Error("not used"); }, infer: async () => {
+    calls++; assert.ok(values.length, "unexpected inference");
+    return { content: [{ type: "text", text: JSON.stringify(values.shift()) }], citations: [], toolCalls: [], model: "fixture", providerId: "fixture", computeSource: "free-cloud", finishReason: "stop", usage: { cost: { amount: null, currency: null, source: "unknown" }, inputTokens: null, outputTokens: null, totalTokens: null, latencyMs: 0, model: "fixture", providerId: "fixture" } } as IntelligenceResponse;
+  } };
+  return { deps, calls: () => calls };
+}
+const cases: Array<[string, () => unknown | Promise<unknown>]> = [];
+const test = (name: string, run: () => unknown | Promise<unknown>) => cases.push([name, run]);
+test("grounded draft records evidence lineage and review", async () => { const f = fake([draft, approved]); const d = await personalizeCompany(company, state, f.deps); assert.equal(d.provenance?.quality, "passed"); assert.deepEqual(d.provenance?.evidenceIds, ["e0"]); assert.equal(f.calls(), 2); assert.ok(d.body.includes("\n\n")); });
+test("faithful paraphrase passes with evidence linkage, without copying a quote", async () => { const f = fake([{ ...draft, body: "Your accessible community-space work could benefit from clear project documentation online. Would a project gallery be useful?" }, approved]); const d = await personalizeCompany(company, state, f.deps); assert.equal(f.calls(), 2); assert.equal(d.provenance?.repairs, 0); assert.ok(!d.body.includes(company.evidence[0].quote)); });
+test("unlinked evidence never produces a draft even when reviewer says grounded", async () => { const review = { ...approved, supportedEvidenceIds: [] }; const f = fake([draft, review, draft, review]); await assert.rejects(() => personalizeCompany(company, state, f.deps), /evidence-grounding/); assert.equal(f.calls(), 4); assert.equal(state.drafts.length, 0); });
+test("unsupported claim review forces bounded repair", async () => { const f = fake([draft, { ...approved, grounded: false, unsupportedClaims: ["Invented customer"] }, draft, approved]); const d = await personalizeCompany(company, state, f.deps); assert.equal(d.provenance?.repairs, 1); assert.equal(f.calls(), 4); });
+test("review rejection twice fails without deleting prior drafts", async () => { const failed = { ...approved, grounded: false, unsupportedClaims: ["Unsupported claim"] }; const f = fake([draft, failed, draft, failed]); const existing = { companyId: "other", subject: "Saved", body: "Saved text", recommendedAngle: "Existing", personalizationEvidence: [], status: "draft" as const }; const previous = { ...state, drafts: [existing] }; await assert.rejects(() => personalizeCompany(company, previous, f.deps), /evidence-grounding/); assert.deepEqual(previous.drafts, [existing]); assert.equal(f.calls(), 4); });
+test("identical message skeletons rejected even with a different company id", async () => { const good = await personalizeCompany(company, state, fake([draft, approved]).deps); const f = fake([draft, draft]); await assert.rejects(() => personalizeCompany(company, { ...state, drafts: [{ ...good, companyId: "other" }] }, f.deps), /batch-individuality/); assert.equal(f.calls(), 2); });
+test("distinct observed topics do not fail solely for consistent seller identity", () => { const a = { companyId: "a", subject: "Gallery navigation", body: "Your gallery catalog invites visitors to explore sculpture. Would clearer collection navigation be useful?", recommendedAngle: "gallery", personalizationEvidence: [], status: "draft" as const }; const b = { ...a, companyId: "b", subject: "Project documentation", body: "How do community stakeholders currently find accessibility specifications? A concise resource page might simplify that review." }; assert.ok(outreachSimilarity(a, b) < 0.55); });
+test("cancelled personalization makes zero provider calls", async () => { const f = fake([]); const controller = new AbortController(); controller.abort(); await assert.rejects(() => personalizeCompany(company, state, f.deps, controller.signal)); assert.equal(f.calls(), 0); });
+test("CSV includes actual draft text, safely quoted and formula-neutralized", async () => { const d = await personalizeCompany(company, state, fake([draft, approved]).deps); const csv = growthProspectsCsv({ ...state, drafts: [{ ...d, subject: "=malicious" }] }, [company.id]); assert.match(csv, /Outreach subject/); assert.ok(csv.includes("'=malicious")); assert.ok(csv.includes(d.body)); });
+for (const [name, run] of cases) { await run(); console.log(`PASS ${name}`); }
+console.log(`Growth personalization: ${cases.length}/${cases.length} PASS (deterministic provider fixtures)`);

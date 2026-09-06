@@ -6,7 +6,7 @@ import { useWorkspaceStore } from "@/lib/workspace-store";
 import styles from "./growth-panel.module.css";
 
 type View = "Business" | "Audiences" | "Companies" | "People" | "Outreach";
-type Action = "analyze" | "search" | "refine" | "audience" | "outreach";
+type Action = "analyze" | "search" | "refine" | "audience" | "outreach" | "pause" | "resume" | "cancel";
 type GrowthPayload = { error?: string; state?: { discovery?: GrowthDiscoveryState } };
 const inputValue = (event: { currentTarget: unknown }) => (event.currentTarget as { value: string }).value;
 const inputChecked = (event: { currentTarget: unknown }) => (event.currentTarget as { checked: boolean }).checked;
@@ -26,6 +26,7 @@ export function GrowthPanel() {
   const [detail, setDetail] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState("fit");
+  const [target, setTarget] = useState(100);
   const active = useRef<AbortController | null>(null);
   const currentProject = useRef(projectId);
   currentProject.current = projectId;
@@ -38,23 +39,41 @@ export function GrowthPanel() {
   useEffect(() => {
     active.current?.abort();
     const controller = new AbortController(); active.current = controller;
-    setState(emptyGrowthDiscovery()); setSelected([]); setDetail(null); setError(null); setLoading(false); setHydrating(true); setPrompt(""); setBusinessInput(""); setView("Business");
+    setState(emptyGrowthDiscovery()); setSelected([]); setDetail(null); setError(null); setLoading(false); setHydrating(true); setPrompt(""); setBusinessInput(""); setView("Business"); setTarget(100);
     if (projectId) void load(projectId, controller).catch((e: unknown) => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "Project unavailable"); }).finally(() => { if (!controller.signal.aborted) setHydrating(false); });
     else setHydrating(false);
     return () => controller.abort();
   }, [projectId]);
+  useEffect(() => {
+    if (!projectId || loading || hydrating || error || !state.job || !["queued", "running"].includes(state.job.status)) return;
+    const controller = new AbortController(), id = projectId;
+    void (async () => {
+      try {
+        const response = await fetch("/api/growth", { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: id, action: "advance", jobId: state.job!.id, revision: state.revision }) });
+        const payload = await response.json() as GrowthPayload;
+        if (!response.ok || !payload.state?.discovery) throw new Error(payload.error ?? "Discovery paused. Reload to check saved progress.");
+        if (!controller.signal.aborted && currentProject.current === id) setState(payload.state.discovery);
+      } catch (cause) { if (!controller.signal.aborted && currentProject.current === id) setError(cause instanceof Error ? cause.message : "Discovery interrupted; progress is saved."); }
+    })();
+    return () => controller.abort();
+  }, [projectId, state.job, state.revision, loading, hydrating, error]);
   const submit = async (action: Action, value = prompt, extras: { audienceId?: string; selectedIds?: string[] } = {}) => {
     if (!projectId || loading || hydrating) return;
     const id = projectId, controller = new AbortController(); active.current?.abort(); active.current = controller;
     setLoading(true); setError(null);
     try {
-      const response = await fetch("/api/growth", { signal: controller.signal, body: JSON.stringify({ projectId: id, action, prompt: value, revision: state.revision, ...extras }), headers: { "Content-Type": "application/json" }, method: "POST" });
+      let revision = state.revision;
+      const batches = action === "outreach" ? (extras.selectedIds ?? []).map(companyId => ({ selectedIds: [companyId] })) : [extras];
+      for (const batch of batches) {
+      const response = await fetch("/api/growth", { signal: controller.signal, body: JSON.stringify({ projectId: id, action, prompt: value, revision, jobId: state.job?.id, ...(action === "audience" || action === "search" ? { target } : {}), ...batch }), headers: { "Content-Type": "application/json" }, method: "POST" });
       const payload = await response.json() as GrowthPayload;
       if (!response.ok || !payload.state?.discovery) throw new Error(payload.error ?? "Growth could not complete this action.");
       if (controller.signal.aborted || currentProject.current !== id) return;
       setState(payload.state.discovery); setPrompt(""); setDetail(null);
+      revision = payload.state.discovery.revision;
       if (action !== "outreach") setSelected([]);
       setView(action === "analyze" ? "Audiences" : action === "outreach" ? "Outreach" : "Companies");
+      }
     } catch (e) { if (!controller.signal.aborted && currentProject.current === id) setError(e instanceof Error ? e.message : "Growth is unavailable."); }
     finally { if (!controller.signal.aborted && currentProject.current === id) setLoading(false); }
   };
@@ -73,6 +92,8 @@ export function GrowthPanel() {
     <div className={styles.layout}><main className={styles.main}>
       <nav className={styles.tabs} aria-label="Growth views">{(["Business", "Audiences", "Companies", "People", "Outreach"] as View[]).map((name) => <button key={name} aria-current={view === name ? "page" : undefined} onClick={() => setView(name)}>{name}{name === "Companies" && state.companies.length ? <span>{state.companies.length}</span> : null}</button>)}</nav>
       <div className={styles.content}>
+        {projectId && !hydrating && <div className={styles.toolbar}><label htmlFor="growth-target">Company target</label><input id="growth-target" type="number" min={1} max={500} step={1} value={target} onChange={e => setTarget(Math.min(500, Math.max(1, Number(inputValue(e)) || 1)))}/></div>}
+        {state.job && <div className={styles.notice} role="status"><strong>{state.companies.length} / {state.job.target} verified</strong><p>{state.job.status} · {state.job.funnel.queries} searches · {state.job.funnel.candidates} candidates · {state.job.cursor} checked</p>{state.job.reason && <p>{state.job.reason}</p>}<div className={styles.actions}>{["queued", "running"].includes(state.job.status) && <button disabled={loading} onClick={() => void submit("pause", "Pause discovery")}>Pause discovery</button>}{state.job.status === "paused" && <button disabled={loading} onClick={() => void submit("resume", "Resume discovery")}>Resume discovery</button>}{!["complete", "exhausted", "cancelled"].includes(state.job.status) && <button disabled={loading} onClick={() => void submit("cancel", "Cancel discovery")}>Cancel discovery</button>}</div></div>}
         {!projectId ? <div className={styles.empty}><h2>Select a project</h2><p>Growth discovery belongs to your selected project.</p></div> : hydrating ? <p role="status">Loading Growth...</p> : <>
           {view === "Business" && <><div className={styles.sectionHeading}><h2>{state.business?.name ?? "Grow your business"}</h2>{state.business && <span className={styles.badge}>{state.business.status.replace(/_/g, " ")}</span>}</div>
             {state.business && <div className={styles.business}><p>{state.business.description}</p><dl><dt>Offer</dt><dd>{state.business.offer}</dd><dt>Value proposition</dt><dd>{state.business.valueProposition || "Not established"}</dd><dt>Market</dt><dd>{state.business.geography ?? "Not established"}</dd></dl>{state.business.evidence.map((e, i) => <blockquote key={i}><p>{e.quote}</p><a href={e.url} target="_blank" rel="noreferrer">Business source</a></blockquote>)}<button className={styles.primary} onClick={() => setView("Audiences")}>Compare audiences</button></div>}

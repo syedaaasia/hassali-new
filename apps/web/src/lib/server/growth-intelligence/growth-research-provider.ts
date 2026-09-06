@@ -1,5 +1,5 @@
 import { sanitizeResearchQuery, type ResearchProvider } from "@/lib/server/ai/ask-research-engine";
-import type { GrowthSearchPlan } from "@/lib/growth-discovery";
+import type { GrowthFunnel, GrowthSearchPlan } from "@/lib/growth-discovery";
 import { GrowthDiscoveryError } from "./growth-errors";
 import { record } from "./growth-state-validation";
 import { text } from "./growth-discovery-core";
@@ -18,7 +18,7 @@ export function createGrowthSearchProvider(apiKey: string | undefined, fetchImpl
         response = await fetchImpl("https://api.tavily.com/search", {
           method: "POST", redirect: "error", signal,
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ query: sanitized.query, max_results: Math.min(5, Math.max(1, options.maxResults)), search_depth: "basic", include_answer: false, include_raw_content: false })
+          body: JSON.stringify({ query: sanitized.query, max_results: Math.min(20, Math.max(1, options.maxResults)), search_depth: "basic", include_answer: false, include_raw_content: false })
         });
       } catch {
         const cancelled = options.signal?.aborted;
@@ -39,7 +39,7 @@ export function createGrowthSearchProvider(apiKey: string | undefined, fetchImpl
         for (const chunk of chunks) { buffer.set(chunk, offset); offset += chunk.length; }
         const payload = record(JSON.parse(new TextDecoder().decode(buffer)));
         if (!Array.isArray(payload.results)) throw new Error("schema");
-        return payload.results.slice(0, 5).flatMap(value => {
+        return payload.results.slice(0, Math.min(20, Math.max(1, options.maxResults))).flatMap(value => {
           const result = record(value), url = text(result.url, 1500), title = text(result.title, 250);
           return /^https?:\/\//.test(url) && title ? [{ url, title, snippet: text(result.content, 2000) }] : [];
         });
@@ -59,23 +59,36 @@ export function growthSearchQueries(plan: GrowthSearchPlan) {
   ].filter(Boolean).join(" "))).filter(value => !value.blocked).map(value => value.query);
 }
 
-export async function researchGrowthCandidates(plan: GrowthSearchPlan, provider: ResearchProvider, signal?: AbortSignal) {
+export async function researchGrowthCandidates(plan: GrowthSearchPlan, provider: ResearchProvider, signal?: AbortSignal, funnel?: GrowthFunnel) {
   const queries = growthSearchQueries(plan);
   const batches: string[][] = [];
   let failure: unknown;
   for (const query of queries) {
     if (signal?.aborted) throw new GrowthDiscoveryError("GROWTH_CANCELLED", "Growth search was cancelled.");
     try {
+      if (funnel) funnel.queries++;
       const results = await provider.search(query, { maxResults: 5, signal });
+      if (funnel) { funnel.resultsPerQuery.push(results.length); funnel.searchResults += results.length; }
       batches.push(results.slice(0, 5).map(result => result.url));
-    } catch (error) { failure = error; }
+    } catch (error) {
+      failure = error;
+      if (funnel) { funnel.resultsPerQuery.push(0); const code = error instanceof GrowthDiscoveryError ? error.code : "SEARCH_FAILED"; funnel.rejections[code] = (funnel.rejections[code] ?? 0) + 1; }
+    }
   }
   if (signal?.aborted) throw new GrowthDiscoveryError("GROWTH_CANCELLED", "Growth search was cancelled.");
-  if (!batches.length && failure) throw failure;
+  if (!batches.length && failure) { if (funnel) console.info("growth_discovery_funnel", funnel); throw failure; }
   // Balance organization queries rather than applying article/research ranking.
   // URLs and snippets are leads only: discoverCompanies owns SSRF-safe original
   // retrieval and evidence validation before any company is accepted.
   const candidates: string[] = [], hosts = new Set<string>();
+  if (funnel) {
+    const allHosts = new Set<string>(); let valid = 0;
+    for (const raw of batches.flat()) {
+      try { const url = new URL(raw); if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw new Error("invalid"); valid++; allHosts.add(url.hostname.replace(/^www\./, "")); }
+      catch { funnel.preRetrievalRejected++; }
+    }
+    funnel.uniqueDomains = allHosts.size; funnel.duplicateDomains = valid - allHosts.size;
+  }
   for (let rank = 0; rank < 5 && candidates.length < 8; rank++) {
     for (const batch of batches) {
       try {
@@ -87,5 +100,6 @@ export async function researchGrowthCandidates(plan: GrowthSearchPlan, provider:
       } catch { /* Invalid candidate URLs are not eligible for retrieval. */ }
     }
   }
+  if (funnel) { funnel.rounds++; funnel.candidates = candidates.length; }
   return candidates;
 }

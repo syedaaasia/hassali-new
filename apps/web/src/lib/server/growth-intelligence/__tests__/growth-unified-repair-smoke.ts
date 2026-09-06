@@ -81,7 +81,7 @@ test("missing search configuration makes no network call", () => assert.equal(cr
 test("configured search uses fixed endpoint and bounded sanitized input", async () => {
   const provider = createGrowthSearchProvider("fixture-key", async (url, init) => {
     assert.equal(url, "https://api.tavily.com/search"); assert.equal(init?.redirect, "error");
-    const body = JSON.parse(String(init?.body)); assert.equal(body.max_results, 5); assert.doesNotMatch(body.query, /PRIVATE_SENTINEL/);
+    const body = JSON.parse(String(init?.body)); assert.equal(body.max_results, 20); assert.doesNotMatch(body.query, /PRIVATE_SENTINEL/);
     return Response.json({ results: [{ title: "Clinic", url: "https://clinic.example/about", content: "Public business information" }] });
   })!;
   assert.equal((await provider.search("clinics token=PRIVATE_SENTINEL", { maxResults: 500 })).length, 1);
