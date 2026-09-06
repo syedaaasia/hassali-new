@@ -100,6 +100,16 @@ export function readDiscoveryState(value: unknown): GrowthDiscoveryState {
 }
 
 export type RetrievedGrowthPage = { url: string; title?: string; content: string; retrievedAt: string };
+export function growthSourceRejection(url: string, pageKind?: unknown): string | null {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    // Hosted social/directory profiles are search leads, not prospect-owned sites.
+    const platforms = ["linkedin.com", "facebook.com", "instagram.com", "x.com", "twitter.com", "crunchbase.com", "yelp.com", "clutch.co", "goodfirms.co"];
+    if (platforms.some(platform => host === platform || host.endsWith(`.${platform}`))) return "THIRD_PARTY_PROFILE";
+    if (pageKind !== undefined && pageKind !== "company") return pageKind === "directory" ? "DIRECTORY_ONLY" : pageKind === "article" ? "ARTICLE_ONLY" : "NOT_COMPANY";
+    return null;
+  } catch { return "INVALID_SOURCE_URL"; }
+}
 const normalized = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 export function groundedEvidence(value: unknown, page: RetrievedGrowthPage): GrowthSourceEvidence[] {
   if (!Array.isArray(value)) return [];
@@ -112,6 +122,7 @@ export function groundedEvidence(value: unknown, page: RetrievedGrowthPage): Gro
 
 export function normalizeProspect(value: unknown, page: RetrievedGrowthPage, plan: GrowthSearchPlan): GrowthProspectCompany | null {
   const v = record(value), name = text(v.name, 140), evidence = groundedEvidence(v.evidence, page);
+  if (growthSourceRejection(page.url, v.pageKind)) return null;
   if (!name || !normalized(`${page.title ?? ""} ${page.content}`).includes(normalized(name)) || !evidence.length) return null;
   const supported = (field: string, raw: unknown) => {
     const s = text(raw, 150);

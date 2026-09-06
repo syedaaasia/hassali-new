@@ -40,6 +40,24 @@ test("incomplete audiences are rejected", () => assert.equal(normalizeAudiences(
 test("real source quote required", () => assert.equal(groundedEvidence([{ field: "claim", quote: "Invented quote that never appeared" }], page).length, 0));
 test("company must appear in original source", () => assert.equal(normalizeProspect({ ...candidate, name: "Invented Company" }, page, plan), null));
 test("directory is not a company", () => assert.equal(normalizeProspect({ ...candidate, isCompany: false }, page, plan), null));
+test("hosted profiles cannot become original sites despite a positive model verdict", () => {
+  for (const url of ["https://uk.linkedin.com/company/working-title-films-limited", "https://www.facebook.com/example", "https://clutch.co/profile/example"]) {
+    assert.equal(normalizeProspect({ ...candidate, pageKind: "company" }, { ...page, url }, plan), null);
+  }
+  assert.ok(normalizeProspect({ ...candidate, pageKind: "company" }, { ...page, url: "https://linkedin.com.example-advisory.test/about" }, plan));
+});
+test("contradictory directory classification never passes company normalization", () => {
+  for (const pageKind of ["directory", "article", "other"]) assert.equal(normalizeProspect({ ...candidate, pageKind }, page, plan), null);
+});
+test("production discovery records profile rejection and only retains an unverified search lead", async () => {
+  const f = fake([response({ ...candidate, pageKind: "company" })]);
+  f.deps.search = async () => ["https://uk.linkedin.com/company/example"];
+  f.deps.retrieve = async url => ({ ...page, url });
+  const result = await publicWebDiscovery.discoverCompanies(plan, f.deps);
+  assert.equal(result.companies.length, 0);
+  assert.equal(result.discovery.funnel?.rejections.THIRD_PARTY_PROFILE, 1);
+  assert.deepEqual(result.discovery.seedQueries, ["Example Advisory official website"]);
+});
 test("explicit excluded candidate rejected", () => assert.equal(normalizeProspect({ ...candidate, excluded: true }, page, plan), null));
 test("unknown fit criterion cannot become verified fit", () => assert.equal(normalizeProspect({ ...candidate, matches: [{ field: "buyingSignals", criterion: "billion dollar budget", quote }] }, page, plan), null));
 test("unsupported location is unknown", () => assert.equal(normalizeProspect({ ...candidate, location: "New York" }, page, plan)?.location, null));

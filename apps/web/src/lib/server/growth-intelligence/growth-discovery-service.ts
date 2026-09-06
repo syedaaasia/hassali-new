@@ -4,7 +4,7 @@ import { invokeAutoIntelligence } from "@/lib/server/intelligence/intelligence-s
 import type { IntelligenceRequest, IntelligenceResponse } from "@/lib/server/intelligence/intelligence-contract";
 import type { GrowthBusinessTruth } from "./growth-types";
 import { record } from "./growth-state-validation";
-import { enforceOrganizationAuthority, groundedEvidence, mutateSearchPlan, normalizeAudiences, normalizeProspect, normalizeSearchPlan, text, validSearchPlanShape, type RetrievedGrowthPage } from "./growth-discovery-core";
+import { enforceOrganizationAuthority, groundedEvidence, growthSourceRejection, mutateSearchPlan, normalizeAudiences, normalizeProspect, normalizeSearchPlan, text, validSearchPlanShape, type RetrievedGrowthPage } from "./growth-discovery-core";
 import { GrowthDiscoveryError } from "./growth-errors";
 import { inferGrowthObject } from "./growth-structured-output";
 import { createGrowthSearchProvider, researchGrowthCandidates } from "./growth-research-provider";
@@ -109,6 +109,11 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
             'Verify this is the company\'s own website, not a directory/list/article. Return {isCompany:boolean,excluded:boolean,pageKind:"company|directory|article|other",name,location,organizationType,evidence:[{field:"location|organizationType|offering",quote}],matches:[{field:"organizationTypes|industries|geographies|buyingSignals|titles|seniority",criterion,quote}],companySeeds:[{name,quote}]}. Every quote must be verbatim from page text. Only match criteria actually supported by text, including geographic region containment. Set excluded true when an exclusion applies. Do not assume a role/person exists. Do not emit contact fields. Name must appear in page text. location/organizationType must appear verbatim in a corresponding evidence quote. For a directory or article only, up to 4 companySeeds may name actual organizations explicitly mentioned in the text, with verbatim supporting quotes. They are unverified search leads, never accepted companies. Otherwise companySeeds is empty.',
             { plan, page }, signal, false, value => typeof value.isCompany === "boolean" && typeof value.excluded === "boolean" && Array.isArray(value.evidence) && Array.isArray(value.matches));
           const prospect = normalizeProspect(result.data, page, plan);
+          const sourceRejection = growthSourceRejection(page.url, result.data.pageKind);
+          if (sourceRejection === "THIRD_PARTY_PROFILE") {
+            const name = text(result.data.name, 120);
+            if (name.length >= 3 && page.content.toLowerCase().includes(name.toLowerCase())) seedQueries.push(`${name} official website`);
+          }
           if (result.data.isCompany === false && ["directory", "article"].includes(String(result.data.pageKind)) && Array.isArray(result.data.companySeeds)) {
             for (const raw of result.data.companySeeds.slice(0, 4)) {
               const seed = record(raw), name = text(seed.name, 120), quote = text(seed.quote, 600);
@@ -119,7 +124,7 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
           // Unknown geography or organization fit must not pass a restrictive search.
           if (prospect && (!plan.geographies.length || prospect.evidence.some((e) => e.field === "geographies"))
             && (!plan.organizationTypes.length || prospect.evidence.some((e) => e.field === "organizationTypes"))) { funnel.audienceMatches++; funnel.evidenceValid++; return prospect; }
-          reject(result.data.isCompany !== true ? result.data.pageKind === "directory" ? "DIRECTORY_ONLY" : result.data.pageKind === "article" ? "ARTICLE_ONLY" : "NOT_COMPANY" : result.data.excluded === true ? "EXCLUDED" : !prospect ? "INSUFFICIENT_EVIDENCE" : !prospect.evidence.some(e => e.field === "geographies") && plan.geographies.length ? "WRONG_GEOGRAPHY" : "WRONG_COMPANY_TYPE");
+          reject(sourceRejection ?? (result.data.isCompany !== true ? "NOT_COMPANY" : result.data.excluded === true ? "EXCLUDED" : !prospect ? "INSUFFICIENT_EVIDENCE" : !prospect.evidence.some(e => e.field === "geographies") && plan.geographies.length ? "WRONG_GEOGRAPHY" : "WRONG_COMPANY_TYPE"));
           return null;
         } catch (error) {
           if (signal?.aborted) throw error;
