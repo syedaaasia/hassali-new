@@ -95,6 +95,48 @@ test("outreach selection ignores IDs outside current project pool", async () => 
 test("malformed persisted discovery cannot crash the UI", () => assert.deepEqual(readDiscoveryState({ ...emptyGrowthDiscovery(), companies: [{}] }), emptyGrowthDiscovery()));
 test("valid persisted discovery round-trips", () => { const state = { ...emptyGrowthDiscovery(), business, plan, companies: [company] }; assert.deepEqual(readDiscoveryState(JSON.parse(JSON.stringify(state))), state); });
 test("stored unsafe company URL rejected", () => assert.deepEqual(readDiscoveryState({ ...emptyGrowthDiscovery(), companies: [{ ...company, website: "javascript:alert(1)" }] }), emptyGrowthDiscovery()));
+test("ungrounded positive company claim uses the existing bounded evidence repair", async () => {
+  const broken = { ...candidate, matches: candidate.matches.map(m => m.field === "geographies" ? { ...m, quote: "Example Advisory operates in Germany according to an invented quotation." } : m) };
+  const f = fake([response(broken), response(candidate)]);
+  f.deps.search = async () => [page.url];
+  const result = await publicWebDiscovery.discoverCompanies(plan, f.deps);
+  assert.equal(result.companies.length, 1); assert.equal(f.requests.length, 2);
+  assert.ok(result.companies[0].evidence.every(e => page.content.includes(e.quote)));
+});
+test("too-short category proof is repaired without lowering grounding threshold", async () => {
+  const broken = { ...candidate, matches: candidate.matches.map(m => m.field === "organizationTypes" ? { ...m, quote: "art" } : m) };
+  const f = fake([response(broken), response(candidate)]); f.deps.search = async () => [page.url];
+  assert.equal((await publicWebDiscovery.discoverCompanies(plan, f.deps)).companies.length, 1);
+  assert.equal(f.requests.length, 2);
+});
+test("persistent fabricated evidence never accepts or enters an unbounded repair loop", async () => {
+  const broken = { ...candidate, evidence: [{ field: "organizationType", quote: "This claim is not present in the original page." }] };
+  const f = fake([response(broken), response(broken)]); f.deps.search = async () => [page.url];
+  const result = await publicWebDiscovery.discoverCompanies(plan, f.deps);
+  assert.equal(result.companies.length, 0); assert.equal(f.requests.length, 2);
+  assert.equal(result.discovery.failureCode, undefined);
+  assert.equal(result.discovery.funnel?.rejections.INVALID_COMPANY_EVIDENCE, 1);
+});
+test("honestly missing company geography is not repaired into assumed evidence", async () => {
+  const f = fake([response({ ...candidate, matches: candidate.matches.filter(m => m.field !== "geographies") })]);
+  f.deps.search = async () => [page.url];
+  const result = await publicWebDiscovery.discoverCompanies(plan, f.deps);
+  assert.equal(result.companies.length, 0); assert.equal(f.requests.length, 1);
+  assert.equal(result.discovery.funnel?.rejections.WRONG_GEOGRAPHY, 1);
+});
+test("honestly missing category is not repaired into assumed audience fit", async () => {
+  const f = fake([response({ ...candidate, matches: candidate.matches.filter(m => m.field !== "organizationTypes") })]);
+  f.deps.search = async () => [page.url];
+  const result = await publicWebDiscovery.discoverCompanies(plan, f.deps);
+  assert.equal(result.companies.length, 0); assert.equal(f.requests.length, 1);
+  assert.equal(result.discovery.funnel?.rejections.WRONG_COMPANY_TYPE, 1);
+});
+test("company acceptance does not require role or buying-intent evidence", async () => {
+  const f = fake([response({ ...candidate, matches: candidate.matches.filter(m => m.field !== "buyingSignals") })]);
+  f.deps.search = async () => [page.url];
+  const result = await publicWebDiscovery.discoverCompanies(plan, f.deps);
+  assert.equal(result.companies.length, 1); assert.deepEqual(result.companies[0].targetRoles, plan.titles);
+});
 let passed = 0;
 for (const [name, run] of cases) { await run(); passed++; console.log(`PASS ${name}`); }
 console.log(`Growth discovery: ${passed}/${cases.length} PASS`);

@@ -120,6 +120,22 @@ export function groundedEvidence(value: unknown, page: RetrievedGrowthPage): Gro
   });
 }
 
+export function validCompanyEvidence(value: Record<string, unknown>, page: RetrievedGrowthPage, plan: GrowthSearchPlan): boolean {
+  if (value.isCompany !== true || value.excluded === true || growthSourceRejection(page.url, value.pageKind)) return true;
+  const name = text(value.name, 140);
+  if (!name || !normalized(`${page.title ?? ""} ${page.content}`).includes(normalized(name))) return false;
+  // Repair positive claims that cannot survive grounding, not honest absence of
+  // evidence. The normalizer still enforces acceptance after the bounded repair.
+  if (!Array.isArray(value.evidence) || !Array.isArray(value.matches)) return false;
+  if (value.evidence.length > 8 || value.evidence.some(e => groundedEvidence([e], page).length !== 1)) return false;
+  return value.matches.length <= 8 && value.matches.every(item => {
+    const m = record(item), field = String(m.field), criterion = text(m.criterion, 120);
+    return listFields.includes(field as ListField) && !["adjacentTitles", "excludedTitles", "exclusions"].includes(field)
+      && plan[field as ListField].some(x => key(x) === key(criterion))
+      && groundedEvidence([{ field, quote: m.quote }], page).length === 1;
+  });
+}
+
 export function normalizeProspect(value: unknown, page: RetrievedGrowthPage, plan: GrowthSearchPlan): GrowthProspectCompany | null {
   const v = record(value), name = text(v.name, 140), evidence = groundedEvidence(v.evidence, page);
   if (growthSourceRejection(page.url, v.pageKind)) return null;

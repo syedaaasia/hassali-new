@@ -4,7 +4,7 @@ import { invokeAutoIntelligence } from "@/lib/server/intelligence/intelligence-s
 import type { IntelligenceRequest, IntelligenceResponse } from "@/lib/server/intelligence/intelligence-contract";
 import type { GrowthBusinessTruth } from "./growth-types";
 import { record } from "./growth-state-validation";
-import { enforceOrganizationAuthority, groundedEvidence, growthSourceRejection, mutateSearchPlan, normalizeAudiences, normalizeProspect, normalizeSearchPlan, text, validSearchPlanShape, type RetrievedGrowthPage } from "./growth-discovery-core";
+import { enforceOrganizationAuthority, groundedEvidence, growthSourceRejection, mutateSearchPlan, normalizeAudiences, normalizeProspect, normalizeSearchPlan, text, validCompanyEvidence, validSearchPlanShape, type RetrievedGrowthPage } from "./growth-discovery-core";
 import { GrowthDiscoveryError } from "./growth-errors";
 import { inferGrowthObject } from "./growth-structured-output";
 import { createGrowthSearchProvider, researchGrowthCandidates } from "./growth-research-provider";
@@ -102,12 +102,17 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
       if (signal?.aborted) throw new GrowthDiscoveryError("GROWTH_CANCELLED", "Growth search was cancelled.");
       const batch = await Promise.all(urls.slice(index, index + 2).map(async (url) => {
         let stage = "fetch";
+        let evidenceRejected = false;
         try {
           const page = await deps.retrieve(url, signal);
           funnel.fetched++; stage = "verify";
           const result = await inferJson(deps,
             'Verify this is the company\'s own website, not a directory/list/article. Return {isCompany:boolean,excluded:boolean,pageKind:"company|directory|article|other",name,location,organizationType,evidence:[{field:"location|organizationType|offering",quote}],matches:[{field:"organizationTypes|industries|geographies|buyingSignals|titles|seniority",criterion,quote}],companySeeds:[{name,quote}]}. Every quote must be verbatim from page text. Only match criteria actually supported by text, including geographic region containment. Set excluded true when an exclusion applies. Do not assume a role/person exists. Do not emit contact fields. Name must appear in page text. location/organizationType must appear verbatim in a corresponding evidence quote. For a directory or article only, up to 4 companySeeds may name actual organizations explicitly mentioned in the text, with verbatim supporting quotes. They are unverified search leads, never accepted companies. Otherwise companySeeds is empty.',
-            { plan, page }, signal, false, value => typeof value.isCompany === "boolean" && typeof value.excluded === "boolean" && Array.isArray(value.evidence) && Array.isArray(value.matches));
+            { plan, page, evidenceContract: "Each claimed quote must be a complete verbatim substring of at least 12 characters from the supplied page, without invented ellipses. Each match criterion must exactly identify a supplied plan criterion; semantic subcategories may support parent categories. Omit unsupported claims rather than inventing evidence. Buyer-role hypotheses are not mandatory company evidence." }, signal, false, value => {
+              const shapeValid = typeof value.isCompany === "boolean" && typeof value.excluded === "boolean" && Array.isArray(value.evidence) && Array.isArray(value.matches);
+              evidenceRejected = shapeValid && !validCompanyEvidence(value, page, plan);
+              return shapeValid && !evidenceRejected;
+            });
           const prospect = normalizeProspect(result.data, page, plan);
           const sourceRejection = growthSourceRejection(page.url, result.data.pageKind);
           if (sourceRejection === "THIRD_PARTY_PROFILE") {
@@ -130,6 +135,7 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
           if (signal?.aborted) throw error;
           if (stage === "verify") {
             const code = error instanceof GrowthDiscoveryError ? error.code : "GROWTH_VERIFICATION_FAILED";
+            if (evidenceRejected && code === "GROWTH_SCHEMA_MISMATCH") { reject("INVALID_COMPANY_EVIDENCE"); return null; }
             failureCode ??= code; reject(code);
             if (!/SAFETY|AUTHENTICATION|AUTHORIZATION/.test(code)) retryUrls.push(url);
           } else { funnel.fetchFailures++; reject("FETCH_FAILED"); }
