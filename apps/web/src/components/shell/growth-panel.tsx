@@ -94,6 +94,18 @@ export function GrowthPanel() {
       <div className={styles.content}>
         {projectId && !hydrating && <div className={styles.toolbar}><label htmlFor="growth-target">Company target</label><input id="growth-target" type="number" min={1} max={500} step={1} value={target} onChange={e => setTarget(Math.min(500, Math.max(1, Number(inputValue(e)) || 1)))}/></div>}
         {state.job && <div className={styles.notice} role="status"><strong>{state.companies.length} / {state.job.target} verified</strong><p>{state.job.status} · {state.job.funnel.queries} searches · {state.job.funnel.candidates} candidates · {state.job.cursor} checked</p>{state.job.reason && <p>{state.job.reason}</p>}<div className={styles.actions}>{["queued", "running"].includes(state.job.status) && <button disabled={loading} onClick={() => void submit("pause", "Pause discovery")}>Pause discovery</button>}{state.job.status === "paused" && <button disabled={loading} onClick={() => void submit("resume", "Resume discovery")}>Resume discovery</button>}{!["complete", "exhausted", "cancelled"].includes(state.job.status) && <button disabled={loading} onClick={() => void submit("cancel", "Cancel discovery")}>Cancel discovery</button>}</div></div>}
+        {state.job && <details><summary>Discovery diagnostics</summary><dl>
+          <dt>Target</dt><dd>{state.job.target}</dd>
+          <dt>Search rounds / queries</dt><dd>{state.job.funnel.rounds} / {state.job.funnel.queries}</dd>
+          <dt>Search results / unique domains</dt><dd>{state.job.funnel.searchResults} / {state.job.funnel.uniqueDomains}</dd>
+          <dt>Duplicate domains skipped</dt><dd>{state.job.funnel.duplicateDomains}</dd>
+          <dt>Candidates / checked attempts</dt><dd>{state.job.funnel.candidates} / {state.job.cursor}</dd>
+          <dt>Pages retrieved / fetch failures</dt><dd>{state.job.funnel.fetched} / {state.job.funnel.fetchFailures}</dd>
+          <dt>Model-recognized companies</dt><dd>{state.job.funnel.recognized}</dd>
+          <dt>Audience matches / evidence-valid</dt><dd>{state.job.funnel.audienceMatches} / {state.job.funnel.evidenceValid}</dd>
+          <dt>Accepted companies</dt><dd>{state.job.funnel.accepted}</dd>
+          <dt>Active processing seconds</dt><dd>{Math.round(state.job.activeMs / 1000)}</dd>
+        </dl><h3>Rejection and interruption counts</h3>{Object.keys(state.job.funnel.rejections).length ? <ul>{Object.entries(state.job.funnel.rejections).map(([reason, count]) => <li key={reason}>{reason}: {count}</li>)}</ul> : <p>None recorded</p>}</details>}
         {!projectId ? <div className={styles.empty}><h2>Select a project</h2><p>Growth discovery belongs to your selected project.</p></div> : hydrating ? <p role="status">Loading Growth...</p> : <>
           {view === "Business" && <><div className={styles.sectionHeading}><h2>{state.business?.name ?? "Grow your business"}</h2>{state.business && <span className={styles.badge}>{state.business.status.replace(/_/g, " ")}</span>}</div>
             {state.business && <div className={styles.business}><p>{state.business.description}</p><dl><dt>Offer</dt><dd>{state.business.offer}</dd><dt>Value proposition</dt><dd>{state.business.valueProposition || "Not established"}</dd><dt>Market</dt><dd>{state.business.geography ?? "Not established"}</dd></dl>{state.business.evidence.map((e, i) => <blockquote key={i}><p>{e.quote}</p><a href={e.url} target="_blank" rel="noreferrer">Business source</a></blockquote>)}<button className={styles.primary} onClick={() => setView("Audiences")}>Compare audiences</button></div>}
