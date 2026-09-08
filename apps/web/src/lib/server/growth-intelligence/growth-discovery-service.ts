@@ -10,6 +10,7 @@ import { inferGrowthObject } from "./growth-structured-output";
 import { createGrowthSearchProvider, researchGrowthCandidates } from "./growth-research-provider";
 import { createDiscoveryJob, discoveryProfile } from "./growth-job-engine";
 import { personalizeCompany } from "./growth-personalization";
+import { applyExplicitSize, audiencePlanFields, sizeRejection } from "./growth-audience-constraints";
 
 export { GrowthDiscoveryError } from "./growth-errors";
 export type GrowthDiscoveryDependencies = {
@@ -107,6 +108,7 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
           const page = await deps.retrieve(url, signal);
           funnel.fetched++; stage = "verify";
           const result = await inferJson(deps,
+            "Current plan fields override the audienceContext snapshot when refinements differ. companySize.status inferred is a preference, not an exclusion; confirmed is a required constraint. If the page explicitly describes this company's employee count or size, add evidence with field companySize and a verbatim quote. Do not use a client, project, event attendance, office count, or a team subset as total company size. Do not infer employee counts. Absent size evidence remains unknown. " +
             'Verify this is the company\'s own website, not a directory/list/article. Return {isCompany:boolean,excluded:boolean,pageKind:"company|directory|article|other",name,location,organizationType,evidence:[{field:"location|organizationType|offering",quote}],matches:[{field:"organizationTypes|industries|geographies|buyingSignals|titles|seniority",criterion,quote}],companySeeds:[{name,quote}]}. Every quote must be verbatim from page text. Only match criteria actually supported by text, including geographic region containment. Set excluded true when an exclusion applies. Do not assume a role/person exists. Do not emit contact fields. Name must appear in page text. location/organizationType must appear verbatim in a corresponding evidence quote. For a directory or article only, up to 4 companySeeds may name actual organizations explicitly mentioned in the text, with verbatim supporting quotes. They are unverified search leads, never accepted companies. Otherwise companySeeds is empty.',
             { plan, page, evidenceContract: "Each claimed quote must be a complete verbatim substring of at least 12 characters from the supplied page, without invented ellipses. Each match criterion must exactly identify a supplied plan criterion; semantic subcategories may support parent categories. Omit unsupported claims rather than inventing evidence. Buyer-role hypotheses are not mandatory company evidence." }, signal, false, value => {
               const shapeValid = typeof value.isCompany === "boolean" && typeof value.excluded === "boolean" && Array.isArray(value.evidence) && Array.isArray(value.matches);
@@ -127,8 +129,17 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
           }
           if (result.data.isCompany === true) funnel.recognized++;
           // Unknown geography or organization fit must not pass a restrictive search.
-          if (prospect && (!plan.geographies.length || prospect.evidence.some((e) => e.field === "geographies"))
-            && (!plan.organizationTypes.length || prospect.evidence.some((e) => e.field === "organizationTypes"))) { funnel.audienceMatches++; funnel.evidenceValid++; return prospect; }
+          const geographyMatch = !!prospect && (!plan.geographies.length || prospect.evidence.some(e => e.field === "geographies"));
+          const typeMatch = !!prospect && (!plan.organizationTypes.length || prospect.evidence.some(e => e.field === "organizationTypes"));
+          funnel.geographyMatches = (funnel.geographyMatches ?? 0) + Number(geographyMatch);
+          funnel.companyTypeMatches = (funnel.companyTypeMatches ?? 0) + Number(typeMatch);
+          if (prospect?.companySize) {
+            funnel.sizeMatches = (funnel.sizeMatches ?? 0) + Number(prospect.companySize.match === "match");
+            funnel.sizeUnverified = (funnel.sizeUnverified ?? 0) + Number(prospect.companySize.match === "unverified");
+          }
+          const sizeFailure = sizeRejection(prospect?.companySize);
+          if (prospect && geographyMatch && typeMatch && !sizeFailure) { funnel.audienceMatches++; funnel.evidenceValid++; return prospect; }
+          if (prospect && geographyMatch && typeMatch && sizeFailure) { reject(sizeFailure); return null; }
           reject(sourceRejection ?? (result.data.isCompany !== true ? "NOT_COMPANY" : result.data.excluded === true ? "EXCLUDED" : !prospect ? "INSUFFICIENT_EVIDENCE" : !prospect.evidence.some(e => e.field === "geographies") && plan.geographies.length ? "WRONG_GEOGRAPHY" : "WRONG_COMPANY_TYPE"));
           return null;
         } catch (error) {
@@ -202,7 +213,7 @@ export async function runGrowthDiscovery(input: {
     if (input.action === "audience") {
       const a = state.audiences.find((x) => x.id === input.audienceId);
       if (!a) throw new GrowthDiscoveryError("GROWTH_AUDIENCE_MISSING", "This audience is no longer available.");
-      state.plan = normalizeSearchPlan({ titles: a.buyerRoles, organizationTypes: a.organizationTypes, geographies: a.geography, buyingSignals: a.buyingSignals, exclusions: a.exclusions, companyCriteria: a.problem, reasoning: a.whyTheyBuy });
+      state.plan = normalizeSearchPlan(audiencePlanFields(a));
     } else if (input.action === "refine" && state.plan) {
       const result = await inferJson(deps,
         `Translate this user refinement into explicit structured operations. Return {operations:[{field,op:"add|remove|set",values:string[] OR value:number|boolean|string}],reasoning:string}. List fields: titles,adjacentTitles,excludedTitles,seniority,organizationTypes,industries,geographies,buyingSignals,exclusions. Scalar fields: limit,verifiedContactsOnly,companyCriteria. Preserve unchanged fields by emitting no operation. Removal of a title must also add it to excludedTitles. Exclude organizations via exclusions. "Only" replaces the appropriate list. Requested geographies are additive unless replacement/removal is requested. Never silently broaden roles.`, { previousPlan: state.plan, request: input.prompt }, input.signal, false, value => {
@@ -220,12 +231,13 @@ export async function runGrowthDiscovery(input: {
           if (input.checkpointDiscovery) enforceOrganizationAuthority(plan, value.organizationAuthority, input.prompt);
           return !!(plan.organizationTypes.length || plan.titles.length || plan.companyCriteria);
         });
-      state.plan = normalizeSearchPlan(result.data.plan);
+      state.plan = normalizeSearchPlan({ ...record(result.data.plan), audienceContext: undefined, companySize: undefined });
       if (input.checkpointDiscovery) state.plan = enforceOrganizationAuthority(state.plan, result.data.organizationAuthority, input.prompt);
       const audiences = normalizeAudiences(result.data.audiences);
       if (audiences.length) state.audiences = audiences;
     }
     if (!state.plan || !(state.plan.organizationTypes.length || state.plan.titles.length || state.plan.companyCriteria)) throw new GrowthDiscoveryError("GROWTH_SEARCH_INCOMPLETE", "Describe the companies or buyers you want to reach.");
+    if (input.action !== "audience") state.plan = applyExplicitSize(state.plan, input.prompt);
     if (input.checkpointDiscovery) {
       if (input.target !== undefined) state.plan.limit = Math.min(500, Math.max(1, Math.floor(input.target)));
       if (state.plan.verifiedContactsOnly) throw new GrowthDiscoveryError("GROWTH_CONTACTS_UNAVAILABLE", "No contact-verification source is connected. Company discovery cannot satisfy a verified-contact requirement.");

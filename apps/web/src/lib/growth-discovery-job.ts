@@ -1,9 +1,12 @@
-import type { GrowthFunnel } from "./growth-discovery";
+import type { GrowthAudienceSegment, GrowthFunnel, GrowthSizeConstraint } from "./growth-discovery";
+import { validAudienceContext, validSizeConstraint } from "./server/growth-intelligence/growth-audience-constraints";
 
 export type GrowthDiscoveryProfile = {
   categories: Array<{ term: string; parent: string }>;
   geographies: string[];
   fitSignals: string[];
+  audienceContext?: GrowthAudienceSegment;
+  companySize?: GrowthSizeConstraint;
 };
 export type GrowthCandidate = { url: string; attempts: number };
 export type GrowthJobWork = { kind: "search"; query: string } | { kind: "verify"; candidates: GrowthCandidate[] };
@@ -31,6 +34,8 @@ export function validGrowthJob(value: unknown): value is GrowthDiscoveryJob {
     && !!j.profile && Array.isArray(j.profile.categories) && j.profile.categories.length <= 24 && j.profile.categories.every(c => str(c.term) && str(c.parent))
     && Array.isArray(j.profile.geographies) && j.profile.geographies.length <= 20 && j.profile.geographies.every(str)
     && Array.isArray(j.profile.fitSignals) && j.profile.fitSignals.length <= 20 && j.profile.fitSignals.every(str)
+    && (j.profile.audienceContext === undefined || validAudienceContext(j.profile.audienceContext))
+    && (j.profile.companySize === undefined || validSizeConstraint(j.profile.companySize))
     && Array.isArray(j.queries) && j.queries.length <= 150 && j.queries.every(q => str(q.text) && num(q.round) && q.round <= 3)
     && num(j.queryIndex) && j.queryIndex <= j.queries.length && Array.isArray(j.candidates) && j.candidates.length <= 4000 && j.candidates.every(candidate)
     && num(j.cursor) && j.cursor <= j.candidates.length && Array.isArray(j.domains) && j.domains.length <= 4000 && j.domains.every(str)

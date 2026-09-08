@@ -1,18 +1,26 @@
 import type { GrowthDiscoveryJob } from "./growth-discovery-job";
+import type { GrowthAssertion } from "./server/ai/website-growth-handoff";
+
+export type GrowthCompanySize = { label: string; minEmployees: number | null; maxEmployees: number | null };
+export type GrowthSizeConstraint = GrowthAssertion<GrowthCompanySize> & { sourceText: string; source: "audience" | "user" };
+export type GrowthSizeResult = { match: "match" | "mismatch" | "unverified"; value: GrowthCompanySize | null; constraintStatus: GrowthSizeConstraint["status"]; evidence: GrowthSourceEvidence[] };
 
 export type GrowthFunnel = {
   target: number; rounds: number; queries: number; resultsPerQuery: number[];
   searchResults: number; uniqueDomains: number; duplicateDomains: number;
   candidates: number; preRetrievalRejected: number; fetched: number; fetchFailures: number;
   recognized: number; audienceMatches: number; evidenceValid: number; accepted: number;
+  companyTypeMatches?: number; geographyMatches?: number; sizeMatches?: number; sizeUnverified?: number;
   rejections: Record<string, number>;
 };
-export const emptyGrowthFunnel = (target: number): GrowthFunnel => ({ target, rounds: 0, queries: 0, resultsPerQuery: [], searchResults: 0, uniqueDomains: 0, duplicateDomains: 0, candidates: 0, preRetrievalRejected: 0, fetched: 0, fetchFailures: 0, recognized: 0, audienceMatches: 0, evidenceValid: 0, accepted: 0, rejections: {} });
+export const emptyGrowthFunnel = (target: number): GrowthFunnel => ({ target, rounds: 0, queries: 0, resultsPerQuery: [], searchResults: 0, uniqueDomains: 0, duplicateDomains: 0, candidates: 0, preRetrievalRejected: 0, fetched: 0, fetchFailures: 0, recognized: 0, audienceMatches: 0, evidenceValid: 0, accepted: 0, companyTypeMatches: 0, geographyMatches: 0, sizeMatches: 0, sizeUnverified: 0, rejections: {} });
 export type GrowthSearchPlan = {
   titles: string[]; adjacentTitles: string[]; excludedTitles: string[];
   seniority: string[]; organizationTypes: string[]; industries: string[];
   geographies: string[]; buyingSignals: string[]; exclusions: string[];
   companyCriteria: string; reasoning: string; limit: number; verifiedContactsOnly: boolean;
+  audienceContext?: GrowthAudienceSegment;
+  companySize?: GrowthSizeConstraint;
 };
 export type GrowthAudienceSegment = {
   id: string; name: string; problem: string; whyTheyBuy: string;
@@ -25,6 +33,7 @@ export type GrowthProspectCompany = {
   organizationType: string | null; segment: string; fitScore: number;
   fitReasons: string[]; evidence: GrowthSourceEvidence[]; lastVerifiedAt: string;
   targetRoles: string[]; recommendedAngle: string;
+  companySize?: GrowthSizeResult;
 };
 export type GrowthProspectPerson = {
   id: string; companyId: string; name: string; role: string; profileUrl: string | null;

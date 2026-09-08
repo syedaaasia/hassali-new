@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { emptyGrowthDiscovery, emptyGrowthPlan, type GrowthAudienceSegment, type GrowthDiscoveryState, type GrowthOutreachDraft, type GrowthProspectCompany, type GrowthSearchPlan, type GrowthSourceEvidence } from "@/lib/growth-discovery";
 import { record } from "./growth-state-validation";
 import { validGrowthJob } from "@/lib/growth-discovery-job";
+import { companySizeResult, validAudienceContext, validSizeConstraint, validSizeResult } from "./growth-audience-constraints";
 
 export const text = (v: unknown, max = 600) => typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "";
 export const list = (v: unknown, max = 20) => Array.isArray(v) ? [...new Set(v.map((x) => text(x, 120)).filter(Boolean))].slice(0, max) : [];
@@ -29,6 +30,14 @@ export function normalizeSearchPlan(value: unknown): GrowthSearchPlan {
   result.companyCriteria = text(v.companyCriteria, 1200); result.reasoning = text(v.reasoning, 1000);
   result.limit = typeof v.limit === "number" && Number.isFinite(v.limit) ? Math.max(1, Math.min(500, Math.floor(v.limit))) : 100;
   result.verifiedContactsOnly = v.verifiedContactsOnly === true;
+  if (v.audienceContext !== undefined) {
+    if (!validAudienceContext(v.audienceContext)) throw new Error("GROWTH_DISCOVERY_INVALID_AUDIENCE_CONTEXT");
+    result.audienceContext = structuredClone(v.audienceContext);
+  }
+  if (v.companySize !== undefined) {
+    if (!validSizeConstraint(v.companySize)) throw new Error("GROWTH_DISCOVERY_INVALID_SIZE_CONSTRAINT");
+    result.companySize = structuredClone(v.companySize);
+  }
   return result;
 }
 
@@ -85,7 +94,7 @@ export function readDiscoveryState(value: unknown): GrowthDiscoveryState {
   const array = (x: unknown, validate: (item: unknown) => boolean, limit = 500) => Array.isArray(x) && x.length <= limit && x.every(validate);
   const evidence = (x: unknown) => array(x, (item) => { const e = record(item); return [e.url, e.quote, e.field, e.checkedAt].every(str) && /^https?:\/\//.test(String(e.url)); }, 20);
   const validBusiness = v.business === null || (() => { const b = record(v.business); return [b.name, b.offer, b.description, b.valueProposition].every(str) && nullable(b.geography) && nullable(b.website) && evidence(b.evidence) && ["inferred", "user_provided", "website_handoff"].includes(String(b.status)); })();
-  const validPlan = v.plan === null || (() => { const p = record(v.plan); return listFields.every((f) => strings(p[f])) && str(p.companyCriteria) && str(p.reasoning) && typeof p.limit === "number" && p.limit >= 1 && p.limit <= 500 && typeof p.verifiedContactsOnly === "boolean"; })();
+  const validPlan = v.plan === null || (() => { const p = record(v.plan); return listFields.every((f) => strings(p[f])) && str(p.companyCriteria) && str(p.reasoning) && typeof p.limit === "number" && p.limit >= 1 && p.limit <= 500 && typeof p.verifiedContactsOnly === "boolean" && (p.audienceContext === undefined || validAudienceContext(p.audienceContext)) && (p.companySize === undefined || validSizeConstraint(p.companySize)); })();
   const d = record(v.discovery);
   if (v.version !== 1 || typeof v.revision !== "string" || !validBusiness || !validPlan
     || !array(v.companies, (item) => { const c = record(item); return [c.id, c.name, c.website, c.domain, c.segment, c.lastVerifiedAt, c.recommendedAngle].every(str) && /^https?:\/\//.test(String(c.website)) && nullable(c.location) && nullable(c.organizationType) && strings(c.targetRoles) && strings(c.fitReasons) && evidence(c.evidence) && typeof c.fitScore === "number" && c.fitScore >= 0 && c.fitScore <= 100; })
@@ -95,6 +104,7 @@ export function readDiscoveryState(value: unknown): GrowthDiscoveryState {
     || !array(v.drafts, (item) => { const draft = record(item); return [draft.companyId, draft.subject, draft.body, draft.recommendedAngle].every(str) && evidence(draft.personalizationEvidence) && draft.status === "draft"; })
     || !["not_started", "complete", "partial", "unavailable"].includes(String(d.status)) || !str(d.message) || !nullable(d.searchedAt) || typeof d.checked !== "number" || typeof d.rejected !== "number") return emptyGrowthDiscovery();
   const state = { ...value as GrowthDiscoveryState };
+  if (state.companies.some(c => c.companySize !== undefined && !validSizeResult(c.companySize))) return emptyGrowthDiscovery();
   if (state.job && !validGrowthJob(state.job)) delete state.job;
   return state;
 }
@@ -156,7 +166,8 @@ export function normalizeProspect(value: unknown, page: RetrievedGrowthPage, pla
   // Coarse evidence coverage, not a probability of purchase.
   const fitScore = Math.min(90, 30 + fields.size * 15);
   const location = supported("location", v.location), organizationType = supported("organizationType", v.organizationType);
-  return { id: id(new URL(page.url).hostname.replace(/^www\./, "")), name, website: page.url, domain: new URL(page.url).hostname.replace(/^www\./, ""), location, organizationType, segment: plan.organizationTypes.join(" / ") || plan.companyCriteria, fitScore, fitReasons: matches.map((m) => `${m.criterion}: ${m.quote}`), evidence, lastVerifiedAt: page.retrievedAt, targetRoles: plan.titles, recommendedAngle: matches[0].quote };
+  const companySize = companySizeResult(plan, evidence);
+  return { id: id(new URL(page.url).hostname.replace(/^www\./, "")), name, website: page.url, domain: new URL(page.url).hostname.replace(/^www\./, ""), location, organizationType, segment: plan.organizationTypes.join(" / ") || plan.companyCriteria, fitScore: fitScore + (companySize?.match === "match" ? 5 : 0), fitReasons: matches.map((m) => `${m.criterion}: ${m.quote}`), evidence, lastVerifiedAt: page.retrievedAt, targetRoles: plan.titles, recommendedAngle: matches[0].quote, ...(companySize ? { companySize } : {}) };
 }
 
 export function draftOutreach(company: GrowthProspectCompany, business: GrowthDiscoveryState["business"]): GrowthOutreachDraft {
