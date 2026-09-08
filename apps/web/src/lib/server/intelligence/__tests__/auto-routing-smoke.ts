@@ -349,6 +349,21 @@ test("AUTO-13B3 Growth prefers a distinct concrete fallback over a variable meta
   }
 });
 
+test("AUTO-13B4 unavailable concrete models never consume Growth fallback", async () => {
+  const retired = { ...model({ id: "retired/structured:free", reasoningTier: "high" }), availability: "unavailable" as const };
+  const source = fixtureAdapter({
+    defaultModelId: "primary/model",
+    id: "openrouter",
+    models: [model({ id: "primary/model" }), retired, model({ id: "eligible/alternate:free" })]
+  });
+  const result = await router(source.adapter).resolve(request({ mode: "GROWTH" }), preferences());
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.decision.primary.modelId, "primary/model");
+    assert.equal(result.decision.fallback?.modelId, "eligible/alternate:free");
+  }
+});
+
 test("AUTO-13C required research evidence gets one bounded meta-router retry", async () => {
   let attempt = 0;
   const automatic = fixtureAdapter({
