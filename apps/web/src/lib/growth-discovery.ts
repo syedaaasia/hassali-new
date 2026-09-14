@@ -47,7 +47,8 @@ export type GrowthOutreachDraft = {
 };
 export type GrowthDiscoveryState = {
   version: 1; revision: string;
-  business: { name: string; description: string; offer: string; valueProposition: string; geography: string | null; website: string | null; evidence: GrowthSourceEvidence[]; status: "inferred" | "user_provided" | "website_handoff" } | null;
+  business: { name: string; description: string; offer: string; valueProposition: string; geography: string | null; website: string | null; evidence: GrowthSourceEvidence[]; status: "inferred" | "user_provided" | "website_handoff" | "source_only" } | null;
+  analysis?: { status: "not_requested" | "provider_blocked" | "incomplete" | "complete"; failureCode?: string };
   audiences: GrowthAudienceSegment[]; plan: GrowthSearchPlan | null;
   companies: GrowthProspectCompany[]; people: GrowthProspectPerson[];
   drafts: GrowthOutreachDraft[];
