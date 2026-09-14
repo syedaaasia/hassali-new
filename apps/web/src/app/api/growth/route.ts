@@ -8,7 +8,7 @@ import { record } from "@/lib/server/growth-intelligence/growth-state-validation
 import { readDiscoveryState } from "@/lib/server/growth-intelligence/growth-discovery-core";
 import { GrowthDiscoveryError, liveGrowthDependencies, publicWebDiscovery, runGrowthDiscovery } from "@/lib/server/growth-intelligence/growth-discovery-service";
 import { processGrowthJob, type GrowthJobAction } from "@/lib/server/growth-intelligence/growth-job-request";
-import { growthProspectsCsv } from "@/lib/growth-discovery";
+import { growthCandidatesCsv, growthProspectsCsv } from "@/lib/growth-discovery";
 import { growthStorageFailure } from "@/lib/server/growth-intelligence/growth-errors";
 import { boundedJsonFailure, productionRequestLimits, readBoundedJson } from "@/lib/server/production-hardening/request-guard";
 
@@ -23,7 +23,8 @@ export async function GET(request: Request) {
   if (new URL(request.url).searchParams.get("format") === "csv") {
     const discovery = readDiscoveryState(record(state?.state).discovery);
     const ids = new URL(request.url).searchParams.get("ids")?.split(",").filter(Boolean).slice(0, 500);
-    return new Response(growthProspectsCsv(discovery, ids), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="hassali-growth-prospects.csv"', "Cache-Control": "private, no-store" } });
+    const candidates = new URL(request.url).searchParams.get("pool") === "candidates";
+    return new Response(candidates ? growthCandidatesCsv(discovery) : growthProspectsCsv(discovery, ids), { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="hassali-growth-${candidates ? "candidates" : "prospects"}.csv"`, "Cache-Control": "private, no-store" } });
   }
   return Response.json({ state: state?.state ? { ...record(state.state), discovery: readDiscoveryState(record(state.state).discovery) } : null, updatedAt: state?.updatedAt ?? null });
   } catch (error) {
@@ -42,9 +43,9 @@ export async function POST(request: Request) {
   const projectId = typeof body?.projectId === "string" ? body.projectId.trim() : "";
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim().slice(0, 4_000) : "";
   const action = typeof body.action === "string" ? body.action : "strategy";
-  const jobAction = ["advance", "pause", "resume", "cancel"].includes(action);
+  const jobAction = ["advance", "pause", "resume", "cancel", "qualify"].includes(action);
   if (!projectId || (!prompt && !jobAction && !["outreach", "audience"].includes(action))) return Response.json({ error: "projectId and prompt are required" }, { status: 400 });
-  if (!jobAction && !["strategy", "capture", "analyze", "search", "refine", "audience", "outreach"].includes(action)) return Response.json({ error: "Unknown Growth action" }, { status: 400 });
+  if (!jobAction && !["strategy", "discover", "capture", "analyze", "search", "refine", "audience", "outreach"].includes(action)) return Response.json({ error: "Unknown Growth action" }, { status: 400 });
   if (body.target !== undefined && (typeof body.target !== "number" || !Number.isInteger(body.target) || body.target < 1 || body.target > 500)) return Response.json({ error: "Target must be an integer from 1 to 500." }, { status: 400 });
   let stage = "load";
   try {
@@ -78,7 +79,8 @@ export async function POST(request: Request) {
       ...record(existing?.state),
       project: { ...record(record(existing?.state).project), ownerId: userId, projectId, businessTruth: enrichedTruth },
       discovery: await runGrowthDiscovery({ previous: previousDiscovery, truth: enrichedTruth,
-        action: action as "capture" | "analyze" | "search" | "refine" | "audience" | "outreach", prompt,
+        action: action as "discover" | "capture" | "analyze" | "search" | "refine" | "audience" | "outreach", prompt,
+        seed: typeof record(body.seed).category === "string" && typeof record(body.seed).location === "string" ? { category: String(record(body.seed).category), location: String(record(body.seed).location) } : undefined,
         checkpointDiscovery: true, target: typeof body.target === "number" ? body.target : undefined,
         audienceId: typeof body.audienceId === "string" ? body.audienceId : undefined,
         selectedIds: Array.isArray(body.selectedIds) ? body.selectedIds.filter((x): x is string => typeof x === "string").slice(0, 500) : [],

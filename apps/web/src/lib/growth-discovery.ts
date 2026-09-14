@@ -54,7 +54,7 @@ export type GrowthDiscoveryState = {
   drafts: GrowthOutreachDraft[];
   job?: GrowthDiscoveryJob;
   messages: Array<{ role: "user" | "assistant"; text: string }>;
-  discovery: { status: "not_started" | "complete" | "partial" | "unavailable"; checked: number; rejected: number; message: string; searchedAt: string | null; funnel?: GrowthFunnel; seedQueries?: string[]; failureCode?: string; retryUrls?: string[] };
+  discovery: { status: "not_started" | "complete" | "partial" | "unavailable"; checked: number; rejected: number; message: string; searchedAt: string | null; funnel?: GrowthFunnel; seedQueries?: string[]; failureCode?: string; retryUrls?: string[]; rejectedUrls?: string[] };
 };
 export const emptyGrowthPlan = (): GrowthSearchPlan => ({ titles: [], adjacentTitles: [], excludedTitles: [], seniority: [], organizationTypes: [], industries: [], geographies: [], buyingSignals: [], exclusions: [], companyCriteria: "", reasoning: "", limit: 10, verifiedContactsOnly: false });
 export const emptyGrowthDiscovery = (): GrowthDiscoveryState => ({ version: 1, revision: "", business: null, audiences: [], plan: null, companies: [], people: [], drafts: [], messages: [], discovery: { status: "not_started", checked: 0, rejected: 0, message: "", searchedAt: null } });
@@ -62,6 +62,12 @@ export const emptyGrowthDiscovery = (): GrowthDiscoveryState => ({ version: 1, r
 function csvCell(value: string) {
   const safe = /^[\s]*[=+@-]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
+}
+export function growthCandidatesCsv(state: GrowthDiscoveryState) {
+  const candidates = [...new Map((state.job?.candidates ?? []).map(c => [c.url, c])).values()];
+  const header = ["Source URL", "Website", "Domain", "Page title", "Discovery source", "Discovered at", "Evidence state", "Qualification", "Evidence URLs", "Evidence quotes", "Checked at"];
+  const rows = candidates.map(c => [c.url, c.canonicalUrl ?? "", new URL(c.canonicalUrl ?? c.url).hostname, c.title ?? "", c.source ?? "public-web-search", c.discoveredAt ?? "", c.evidence?.length ? "evidence_captured" : "discovered", c.qualification ?? "unverified", c.evidence?.map(e => e.url).join("; ") ?? "", c.evidence?.map(e => e.quote).join("; ") ?? "", c.evidence?.[0]?.checkedAt ?? ""]);
+  return "\uFEFF" + [header, ...rows].map(row => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }
 export function growthProspectsCsv(state: GrowthDiscoveryState, selectedIds?: string[]) {
   const selected = selectedIds ? new Set(selectedIds) : null;

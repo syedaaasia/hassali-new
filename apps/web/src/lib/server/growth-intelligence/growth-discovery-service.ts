@@ -96,6 +96,7 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
     const companies: GrowthDiscoveryState["companies"] = [];
     const seedQueries: string[] = [];
     const retryUrls: string[] = [];
+    const rejectedUrls: string[] = [];
     let failureCode: string | undefined;
     funnel.candidates = urls.length;
     let rejected = 0;
@@ -140,7 +141,8 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
           }
           const sizeFailure = sizeRejection(prospect?.companySize);
           if (prospect && geographyMatch && typeMatch && !sizeFailure) { funnel.audienceMatches++; funnel.evidenceValid++; return prospect; }
-          if (prospect && geographyMatch && typeMatch && sizeFailure) { reject(sizeFailure); return null; }
+          if (prospect && geographyMatch && typeMatch && sizeFailure) { rejectedUrls.push(url); reject(sizeFailure); return null; }
+          rejectedUrls.push(url);
           reject(sourceRejection ?? (result.data.isCompany !== true ? "NOT_COMPANY" : result.data.excluded === true ? "EXCLUDED" : !prospect ? "INSUFFICIENT_EVIDENCE" : !prospect.evidence.some(e => e.field === "geographies") && plan.geographies.length ? "WRONG_GEOGRAPHY" : "WRONG_COMPANY_TYPE"));
           return null;
         } catch (error) {
@@ -163,21 +165,31 @@ export const publicWebDiscovery: ProspectDiscoveryProvider = {
     companies.sort((a, b) => b.fitScore - a.fitScore || a.name.localeCompare(b.name));
     funnel.accepted = companies.length;
     console.info("growth_discovery_funnel", funnel);
-    return { companies, people: [], discovery: { funnel, ...(failureCode ? { failureCode, retryUrls } : {}), seedQueries: [...new Set(seedQueries)].slice(0, 8), status: companies.length ? (rejected || plan.limit > companies.length ? "partial" : "complete") : "unavailable", checked: urls.length, rejected, searchedAt,
+    return { companies, people: [], discovery: { funnel, ...(rejectedUrls.length ? { rejectedUrls } : {}), ...(failureCode ? { failureCode, retryUrls } : {}), seedQueries: [...new Set(seedQueries)].slice(0, 8), status: companies.length ? (rejected || plan.limit > companies.length ? "partial" : "complete") : "unavailable", checked: urls.length, rejected, searchedAt,
       message: companies.length ? `${companies.length} companies supported by public website evidence. Checked ${urls.length} candidates. People and contact details are not verified. Fit measures evidence coverage, not buying probability.` : "No candidates could be confirmed against this search from readable original pages. Try a broader audience or geography." } };
   }
 };
 
 export async function runGrowthDiscovery(input: {
   previous: GrowthDiscoveryState; truth: GrowthBusinessTruth | null;
-  action: "capture" | "analyze" | "search" | "refine" | "audience" | "outreach";
+  action: "discover" | "capture" | "analyze" | "search" | "refine" | "audience" | "outreach";
+  seed?: { category: string; location: string };
   prompt: string; audienceId?: string; selectedIds?: string[]; signal?: AbortSignal; checkpointDiscovery?: boolean; target?: number;
 }, deps: GrowthDiscoveryDependencies, provider: ProspectDiscoveryProvider = publicWebDiscovery): Promise<GrowthDiscoveryState> {
   const state = structuredClone(input.previous);
   if (!state.business && input.truth) state.business = fromWebsite(input.truth);
   if (input.signal?.aborted) throw new GrowthDiscoveryError("GROWTH_CANCELLED", "Growth request was cancelled.");
   let message = "";
-  if (input.action === "analyze" || input.action === "capture") {
+  if (input.action === "discover") {
+    const category = input.seed?.category.trim(), location = input.seed?.location.trim();
+    if (!category || !location || category.length > 150 || location.length > 150) throw new GrowthDiscoveryError("GROWTH_SEARCH_INCOMPLETE", "Enter a business type and location, each under 150 characters.");
+    state.plan = normalizeSearchPlan({ organizationTypes: [category], geographies: [location], limit: 10, reasoning: "Explicit user search criteria; audience fit has not been inferred." });
+    state.job = createDiscoveryJob(state.plan, { categories: [{ term: category, parent: category }], geographies: [location], fitSignals: [] });
+    state.job.captureOnly = true; state.job.queries = state.job.queries.slice(0, 1); state.job.limits.candidates = 10;
+    state.companies = []; state.people = []; state.drafts = [];
+    state.discovery = { status: "not_started", checked: 0, rejected: 0, searchedAt: null, message: "Public candidate search queued. Qualification has not run.", funnel: state.job.funnel };
+    message = state.discovery.message;
+  } else if (input.action === "analyze" || input.action === "capture") {
     const url = growthBusinessUrl(input.prompt);
     if (input.action === "capture" && !url) throw new GrowthDiscoveryError("GROWTH_URL_REQUIRED", "Enter a public https:// website URL to read its source. Business descriptions require analysis.");
     const page = url ? await deps.retrieve(url, input.signal) : null;

@@ -6,7 +6,7 @@ import { useWorkspaceStore } from "@/lib/workspace-store";
 import styles from "./growth-panel.module.css";
 
 type View = "Business" | "Audiences" | "Companies" | "People" | "Outreach";
-type Action = "capture" | "analyze" | "search" | "refine" | "audience" | "outreach" | "pause" | "resume" | "cancel";
+type Action = "discover" | "qualify" | "capture" | "analyze" | "search" | "refine" | "audience" | "outreach" | "pause" | "resume" | "cancel";
 type GrowthPayload = { error?: string; state?: { discovery?: GrowthDiscoveryState } };
 const inputValue = (event: { currentTarget: unknown }) => (event.currentTarget as { value: string }).value;
 const inputChecked = (event: { currentTarget: unknown }) => (event.currentTarget as { checked: boolean }).checked;
@@ -18,6 +18,8 @@ export function GrowthPanel() {
   const [state, setState] = useState<GrowthDiscoveryState>(emptyGrowthDiscovery);
   const [prompt, setPrompt] = useState("");
   const [businessInput, setBusinessInput] = useState("");
+  const [category, setCategory] = useState("");
+  const [location, setLocation] = useState("");
   const [view, setView] = useState<View>("Business");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,6 +40,7 @@ export function GrowthPanel() {
   };
   useEffect(() => {
     active.current?.abort();
+    setCategory(""); setLocation("");
     const controller = new AbortController(); active.current = controller;
     setState(emptyGrowthDiscovery()); setSelected([]); setDetail(null); setError(null); setLoading(false); setHydrating(true); setPrompt(""); setBusinessInput(""); setView("Business"); setTarget(100);
     if (projectId) void load(projectId, controller).catch((e: unknown) => { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "Project unavailable"); }).finally(() => { if (!controller.signal.aborted) setHydrating(false); });
@@ -65,7 +68,7 @@ export function GrowthPanel() {
       let revision = state.revision;
       const batches = action === "outreach" ? (extras.selectedIds ?? []).map(companyId => ({ selectedIds: [companyId] })) : [extras];
       for (const batch of batches) {
-      const response = await fetch("/api/growth", { signal: controller.signal, body: JSON.stringify({ projectId: id, action, prompt: value, revision, jobId: state.job?.id, ...(action === "audience" || action === "search" ? { target } : {}), ...batch }), headers: { "Content-Type": "application/json" }, method: "POST" });
+      const response = await fetch("/api/growth", { signal: controller.signal, body: JSON.stringify({ projectId: id, action, prompt: value, revision, jobId: state.job?.id, ...(action === "discover" ? { seed: { category, location } } : {}), ...(action === "audience" || action === "search" ? { target } : {}), ...batch }), headers: { "Content-Type": "application/json" }, method: "POST" });
       const payload = await response.json() as GrowthPayload;
       if (!response.ok || !payload.state?.discovery) throw new Error(payload.error ?? "Growth could not complete this action.");
       if (controller.signal.aborted || currentProject.current !== id) return;
@@ -86,14 +89,16 @@ export function GrowthPanel() {
   };
   const companies = state.companies.filter((c) => `${c.name} ${c.location ?? ""} ${c.organizationType ?? ""}`.toLowerCase().includes(filter.toLowerCase())).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name) : b.fitScore - a.fitScore);
   const chosen = state.companies.find((c) => c.id === detail);
+  const candidates = [...new Map((state.job?.candidates ?? []).map(c => [c.url, c])).values()];
   const exportUrl = projectId ? `/api/growth?projectId=${encodeURIComponent(projectId)}&format=csv${selected.length ? `&ids=${encodeURIComponent(selected.join(","))}` : ""}` : "";
   return <section className={styles.root} data-growth-runtime aria-label="Growth workspace">
     <header className={styles.header}><div><span className={styles.eyebrow}>CUSTOMER DISCOVERY</span><h1>Growth <span>{projectName ?? "No project selected"}</span></h1></div><div className={styles.actions}><button onClick={() => void reload()} disabled={loading || hydrating}>Reload</button><button onClick={() => setArea("chat")}>Back to chat</button></div></header>
     <div className={styles.layout}><main className={styles.main}>
       <nav className={styles.tabs} aria-label="Growth views">{(["Business", "Audiences", "Companies", "People", "Outreach"] as View[]).map((name) => <button key={name} aria-current={view === name ? "page" : undefined} onClick={() => setView(name)}>{name}{name === "Companies" && state.companies.length ? <span>{state.companies.length}</span> : null}</button>)}</nav>
       <div className={styles.content}>
+        {projectId && !hydrating && <form className={styles.businessForm} onSubmit={e => { e.preventDefault(); void submit("discover", `${category} in ${location}`); }}><label htmlFor="growth-category">Target businesses</label><input id="growth-category" maxLength={150} value={category} onChange={e => setCategory(inputValue(e))}/><label htmlFor="growth-location">Location</label><input id="growth-location" maxLength={150} value={location} onChange={e => setLocation(inputValue(e))}/><button type="submit" disabled={loading || !!state.job && ["queued", "running"].includes(state.job.status) || !category.trim() || !location.trim()}>Find up to 10 candidates</button></form>}
         {projectId && !hydrating && <div className={styles.toolbar}><label htmlFor="growth-target">Company target</label><input id="growth-target" type="number" min={1} max={500} step={1} value={target} onChange={e => setTarget(Math.min(500, Math.max(1, Number(inputValue(e)) || 1)))}/></div>}
-        {state.job && <div className={styles.notice} role="status"><strong>{state.companies.length} / {state.job.target} verified</strong><p>{state.job.status} · {state.job.funnel.queries} searches · {state.job.funnel.candidates} candidates · {state.job.cursor} checked</p>{state.job.reason && <p>{state.job.reason}</p>}<div className={styles.actions}>{["queued", "running"].includes(state.job.status) && <button disabled={loading} onClick={() => void submit("pause", "Pause discovery")}>Pause discovery</button>}{state.job.status === "paused" && <button disabled={loading} onClick={() => void submit("resume", "Resume discovery")}>Resume discovery</button>}{!["complete", "exhausted", "cancelled"].includes(state.job.status) && <button disabled={loading} onClick={() => void submit("cancel", "Cancel discovery")}>Cancel discovery</button>}</div></div>}
+        {state.job && <div className={styles.notice} role="status"><strong>{state.job.captureOnly ? `${candidates.length} discovered - qualification not run` : `${state.companies.length} / ${state.job.target} verified`}</strong><p>{state.job.status} · {state.job.funnel.queries} searches · {state.job.funnel.candidates} candidates · {state.job.cursor} checked</p>{state.job.reason && <p>{state.job.reason}</p>}<div className={styles.actions}>{["queued", "running"].includes(state.job.status) && <button disabled={loading} onClick={() => void submit("pause", "Pause discovery")}>Pause discovery</button>}{state.job.status === "paused" && <button disabled={loading} onClick={() => void submit("resume", "Resume discovery")}>Resume discovery</button>}{["complete", "paused", "exhausted"].includes(state.job.status) && candidates.some(c => !c.qualification || c.qualification === "unverified") && <button disabled={loading} onClick={() => void submit("qualify", "Qualify saved candidates with model")}>Qualify with model</button>}{!["complete", "exhausted", "cancelled"].includes(state.job.status) && <button disabled={loading} onClick={() => void submit("cancel", "Cancel discovery")}>Cancel discovery</button>}</div></div>}
         {state.job && <details><summary>Discovery diagnostics</summary><dl>
           <dt>Target</dt><dd>{state.job.target}</dd>
           <dt>Search rounds / queries</dt><dd>{state.job.funnel.rounds} / {state.job.funnel.queries}</dd>
@@ -117,6 +122,7 @@ export function GrowthPanel() {
           </>}
           {view === "Audiences" && <><div className={styles.sectionHeading}><h2>Who is most likely to buy?</h2><span className={styles.muted}>Audience hypotheses</span></div><div className={styles.audiences}>{state.audiences.map((a) => <article key={a.id}><h3>{a.name}</h3><p>{a.problem}</p><p>{a.whyTheyBuy}</p><dl><dt>Buyer roles</dt><dd>{a.buyerRoles.join(", ") || "Not established"}</dd><dt>Organizations</dt><dd>{a.organizationTypes.join(", ")}</dd><dt>Markets</dt><dd>{a.geography.join(", ") || "Any supported geography"}</dd><dt>Buying signals</dt><dd>{a.buyingSignals.join("; ")}</dd></dl><button className={styles.primary} disabled={loading} onClick={() => void submit("audience", `Find customers: ${a.name}`, { audienceId: a.id })}>Find customers</button></article>)}</div>{!state.audiences.length && <div className={styles.empty}><h3>No audiences yet</h3><button onClick={() => setView("Business")}>Analyze your business</button></div>}</>}
           {view === "Companies" && <><div className={styles.sectionHeading}><h2>Companies <span className={styles.muted}>{companies.length}</span></h2><span className={styles.badge}>{state.discovery.status.replace(/_/g, " ")}</span></div>
+            {candidates.length > 0 && <section aria-label="Discovered candidates"><div className={styles.sectionHeading}><h3>Discovered candidates ({candidates.length})</h3><a className={styles.download} download href={`${exportUrl}&pool=candidates`}>Export candidates CSV</a></div><p>Search results, not qualified buyers. Page titles are source labels, not verified company identities.</p>{candidates.map(c => <article key={c.url} className={styles.evidence}><h4>{c.title || new URL(c.url).hostname}</h4><a href={c.url} target="_blank" rel="noreferrer">{c.url}</a><p>{c.evidence?.length ? "Evidence captured" : "Discovered"} · {c.qualification ?? "unverified"}</p>{c.failureCode && <p>Source capture or qualification unavailable. Candidate retained.</p>}{c.evidence?.filter(e => e.field !== "page_title").map((e, i) => <blockquote key={i}><p>{e.quote}</p><a href={e.url} target="_blank" rel="noreferrer">Source</a><p>Checked {e.checkedAt}</p></blockquote>)}</article>)}</section>}
             {state.plan && <SearchCriteria plan={state.plan}/>}
             {state.discovery.message && <p className={styles.notice} role="status">{state.discovery.message}</p>}
             <div className={styles.toolbar}><input aria-label="Filter companies" placeholder="Filter company or location" value={filter} onChange={(e) => setFilter(inputValue(e))}/><select aria-label="Sort companies" value={sort} onChange={(e) => setSort(inputValue(e))}><option value="fit">Strongest evidence</option><option value="name">Company name</option></select><button disabled={!selected.length || loading || !state.business?.offer} onClick={() => void submit("outreach", "Draft outreach for selected companies", { selectedIds: selected })}>Draft outreach ({selected.length})</button>{state.companies.length > 0 && <a className={styles.download} href={exportUrl} download>Export {selected.length ? `selected (${selected.length})` : "all"} CSV</a>}</div>

@@ -15,6 +15,11 @@ export function growthBusinessUrl(input: string): string | null {
 
 // These are source excerpts, not inferred offers, customer types or verified claims.
 export function capturedGrowthBusiness(page: RetrievedGrowthPage): NonNullable<GrowthDiscoveryState["business"]> {
+  // Some public sites return a challenge or denial page with HTTP 200.
+  const opening = `${page.title ?? ""}\n${page.content.slice(0, 2000)}`;
+  if (/your (?:ip address|access)[\s\S]{0,100}(?:denied|blocked)|verify (?:that )?you are (?:a )?human|checking your browser|^\s*(?:access denied|just a moment|attention required)/i.test(opening)) {
+    throw new GrowthDiscoveryError("GROWTH_SOURCE_BLOCKED", "The source denied automated access. Candidate retained without page evidence.");
+  }
   const lines = page.content.split(/\n+/).map(line => line.trim());
   // Prefer paragraph-sized text over menus; retain verbatim evidence, not a summary.
   const paragraphs = lines.filter(line => line.length >= 120);

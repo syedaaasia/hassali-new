@@ -1,4 +1,4 @@
-import type { GrowthAudienceSegment, GrowthFunnel, GrowthSizeConstraint } from "./growth-discovery";
+import type { GrowthAudienceSegment, GrowthFunnel, GrowthSizeConstraint, GrowthSourceEvidence } from "./growth-discovery";
 import { validAudienceContext, validSizeConstraint } from "./server/growth-intelligence/growth-audience-constraints";
 
 export type GrowthDiscoveryProfile = {
@@ -8,10 +8,11 @@ export type GrowthDiscoveryProfile = {
   audienceContext?: GrowthAudienceSegment;
   companySize?: GrowthSizeConstraint;
 };
-export type GrowthCandidate = { url: string; attempts: number };
+export type GrowthCandidate = { url: string; attempts: number; source?: string; discoveredAt?: string; title?: string; canonicalUrl?: string; evidence?: GrowthSourceEvidence[]; qualification?: "unverified" | "verified" | "rejected"; failureCode?: string };
 export type GrowthJobWork = { kind: "search"; query: string } | { kind: "verify"; candidates: GrowthCandidate[] };
 export type GrowthDiscoveryJob = {
   version: 1; id: string;
+  captureOnly?: boolean;
   status: "queued" | "running" | "paused" | "complete" | "exhausted" | "cancelled";
   reason: string | null; createdAt: string; updatedAt: string;
   target: number; profile: GrowthDiscoveryProfile;
@@ -28,8 +29,14 @@ export function validGrowthJob(value: unknown): value is GrowthDiscoveryJob {
   const j = value as GrowthDiscoveryJob;
   const str = (v: unknown): v is string => typeof v === "string" && v.length <= 2000;
   const num = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-  const candidate = (v: GrowthCandidate) => !!v && str(v.url) && /^https?:\/\//.test(v.url) && num(v.attempts) && v.attempts <= 2;
+  const publicUrl = (v: unknown) => { try { const u = new URL(String(v)); return /^https?:$/.test(u.protocol) && !u.username && !u.password; } catch { return false; } };
+  const candidate = (v: GrowthCandidate) => !!v && str(v.url) && publicUrl(v.url) && num(v.attempts) && v.attempts <= 2
+    && [v.source, v.discoveredAt, v.title, v.failureCode].every(x => x === undefined || str(x))
+    && (v.canonicalUrl === undefined || publicUrl(v.canonicalUrl))
+    && (v.qualification === undefined || ["unverified", "verified", "rejected"].includes(v.qualification))
+    && (v.evidence === undefined || Array.isArray(v.evidence) && v.evidence.length <= 5 && v.evidence.every(e => str(e.quote) && str(e.field) && str(e.checkedAt) && publicUrl(e.url)));
   return j.version === 1 && str(j.id) && ["queued", "running", "paused", "complete", "exhausted", "cancelled"].includes(j.status)
+    && (j.captureOnly === undefined || typeof j.captureOnly === "boolean")
     && (j.reason === null || str(j.reason)) && str(j.createdAt) && str(j.updatedAt) && num(j.target) && j.target >= 1 && j.target <= 500
     && !!j.profile && Array.isArray(j.profile.categories) && j.profile.categories.length <= 24 && j.profile.categories.every(c => str(c.term) && str(c.parent))
     && Array.isArray(j.profile.geographies) && j.profile.geographies.length <= 20 && j.profile.geographies.every(str)

@@ -5,6 +5,7 @@ import type { GrowthDiscoveryDependencies, ProspectDiscoveryProvider } from "./g
 import { record } from "./growth-state-validation";
 import { text } from "./growth-discovery-core";
 import { GrowthDiscoveryError } from "./growth-errors";
+import { capturedGrowthBusiness } from "./growth-business-source";
 
 export async function discoveryProfile(plan: GrowthSearchPlan, deps: GrowthDiscoveryDependencies, signal?: AbortSignal): Promise<GrowthDiscoveryProfile> {
   const parents = plan.organizationTypes.length ? plan.organizationTypes : [plan.companyCriteria];
@@ -52,7 +53,8 @@ export function claimDiscoveryWork(previous: GrowthDiscoveryState, now = Date.no
     state.revision = crypto.randomUUID(); return state;
   }
   let work: GrowthJobWork | null = null;
-  if (state.companies.length >= job.target) job.status = "complete";
+  if (job.captureOnly && job.queryIndex >= job.queries.length && job.cursor >= job.candidates.length) job.status = "complete";
+  else if (state.companies.length >= job.target) job.status = "complete";
   else if (job.activeMs >= job.limits.activeMs || job.pageRequests + 2 > job.limits.pageFetches) {
     job.status = "exhausted"; job.reason = "The configured time or page budget was reached.";
   } else if (job.cursor < job.candidates.length) {
@@ -72,9 +74,18 @@ export function claimDiscoveryWork(previous: GrowthDiscoveryState, now = Date.no
   return state;
 }
 
-export function controlDiscoveryJob(previous: GrowthDiscoveryState, action: "pause" | "resume" | "cancel") {
+export function controlDiscoveryJob(previous: GrowthDiscoveryState, action: "pause" | "resume" | "cancel" | "qualify") {
   const state = structuredClone(previous), job = state.job;
   if (!job) throw new GrowthDiscoveryError("GROWTH_JOB_MISSING", "There is no saved discovery job.");
+  if (action === "qualify") {
+    if (!["complete", "paused", "exhausted"].includes(job.status) || job.lease) throw new GrowthDiscoveryError("GROWTH_JOB_BUSY", "Finish or pause evidence capture before qualification.");
+    job.captureOnly = false; job.queryIndex = job.queries.length;
+    const unique = [...new Map(job.candidates.map(c => [c.url, c])).values()];
+    const resolved = unique.filter(c => c.qualification === "verified" || c.qualification === "rejected");
+    job.candidates = [...resolved, ...unique.filter(c => !resolved.includes(c)).map(c => ({ ...c, attempts: 0 }))];
+    job.cursor = resolved.length;
+    job.status = "queued"; job.reason = null; state.revision = crypto.randomUUID(); return state;
+  }
   if (action === "resume" && ["complete", "exhausted", "cancelled"].includes(job.status)) throw new GrowthDiscoveryError("GROWTH_JOB_FINISHED", "This job has finished. Start a new search to change its scope.");
   if (action === "resume" && job.lease) throw new GrowthDiscoveryError("GROWTH_JOB_BUSY", "Wait for the active batch to finish before resuming.");
   job.status = action === "cancel" ? "cancelled" : action === "pause" ? "paused" : "queued";
@@ -100,13 +111,34 @@ export async function executeDiscoveryWork(claimed: GrowthDiscoveryState, deps: 
           if (!/^https?:$/.test(url.protocol) || url.username || url.password) throw new Error("invalid");
           if (domains.has(domain)) { job.funnel.duplicateDomains++; continue; }
           if (job.candidates.length >= job.limits.candidates) break;
-          domains.add(domain); job.candidates.push({ url: url.href, attempts: 0 });
+          domains.add(domain); job.candidates.push({ url: url.href, attempts: 0, source: "public-web-search", discoveredAt: new Date().toISOString(), qualification: "unverified" });
         } catch { job.funnel.preRetrievalRejected++; }
       }
       job.domains = [...domains]; job.funnel.uniqueDomains = domains.size; job.funnel.candidates = job.candidates.length;
+    } else if (job.captureOnly) {
+      for (const candidate of work.candidates) {
+        signal?.throwIfAborted();
+        const saved = job.candidates.find(c => c.url === candidate.url)!;
+        try {
+          const page = await deps.retrieve(candidate.url, signal);
+          const source = capturedGrowthBusiness(page);
+          Object.assign(saved, { title: page.title?.slice(0, 250), canonicalUrl: page.url, evidence: source.evidence, qualification: "unverified" });
+          delete saved.failureCode; job.funnel.fetched++;
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          saved.failureCode = error instanceof GrowthDiscoveryError ? error.code : "GROWTH_SOURCE_UNAVAILABLE";
+          job.funnel.fetchFailures++;
+        }
+      }
     } else {
       const results = [];
-      const result = await verifier.discoverCompanies(state.plan, { ...deps, search: async () => work.candidates.map(c => c.url) }, signal);
+      const retrieve: GrowthDiscoveryDependencies["retrieve"] = async (url, signal) => {
+        const page = await deps.retrieve(url, signal);
+        const candidate = job.candidates.find(c => c.url === url);
+        if (candidate) Object.assign(candidate, { title: page.title?.slice(0, 250), canonicalUrl: page.url, evidence: capturedGrowthBusiness(page).evidence, qualification: "unverified" });
+        return page;
+      };
+      const result = await verifier.discoverCompanies(state.plan, { ...deps, retrieve, search: async () => work.candidates.map(c => c.url) }, signal);
       results.push(result);
       const roots = work.candidates.flatMap(c => {
         const url = new URL(c.url), domain = url.hostname.replace(/^www\./, "");
@@ -116,7 +148,7 @@ export async function executeDiscoveryWork(claimed: GrowthDiscoveryState, deps: 
       for (const result of results) {
       if (result.discovery.failureCode) {
         job.status = "paused"; job.reason = "Company verification was interrupted. Verified results are saved; resume when the provider is available.";
-        for (const c of work.candidates) if (c.attempts < 2 && result.discovery.retryUrls?.some(url => url === c.url || new URL(url).origin === new URL(c.url).origin) && job.candidates.length < job.limits.candidates) job.candidates.push(c);
+        for (const c of work.candidates) if (c.attempts < 2 && result.discovery.retryUrls?.some(url => url === c.url || new URL(url).origin === new URL(c.url).origin) && job.candidates.length < job.limits.candidates) job.candidates.push({ ...c, ...job.candidates.find(saved => saved.url === c.url), attempts: c.attempts });
       }
       const seeds = (result.discovery.seedQueries ?? []).filter(q => !job.queries.some(existing => existing.text === q)).slice(0, Math.max(0, job.limits.queries - job.queries.length));
       job.queries.splice(job.queryIndex, 0, ...seeds.map(text => ({ text, round: Math.max(1, job.funnel.rounds) })));
@@ -128,10 +160,16 @@ export async function executeDiscoveryWork(claimed: GrowthDiscoveryState, deps: 
       }
       for (const company of result.companies) if (!state.companies.some(c => c.domain === company.domain)) state.companies.push(company);
       }
+      for (const candidate of job.candidates.filter(c => work.candidates.some(w => w.url === c.url))) {
+        const matched = state.companies.some(c => c.domain === new URL(candidate.canonicalUrl ?? candidate.url).hostname.replace(/^www\./, ""));
+        const rejected = results.some(r => r.discovery.rejectedUrls?.some(url => url === candidate.url || url === candidate.canonicalUrl));
+        candidate.qualification = matched ? "verified" : !results.some(r => r.discovery.failureCode) && rejected ? "rejected" : "unverified";
+        if (result.discovery.failureCode) candidate.failureCode = result.discovery.failureCode;
+      }
       state.companies.sort((a, b) => b.fitScore - a.fitScore || a.name.localeCompare(b.name));
       state.companies = state.companies.slice(0, job.target);
     }
-    job.status = state.companies.length >= job.target ? "complete" : job.status === "paused" ? "paused" : "queued";
+    job.status = (job.captureOnly ? job.queryIndex >= job.queries.length && job.cursor >= job.candidates.length : state.companies.length >= job.target) ? "complete" : job.status === "paused" ? "paused" : "queued";
   } catch (error) {
     const code = signal?.aborted ? "GROWTH_BATCH_INTERRUPTED" : error instanceof GrowthDiscoveryError ? error.code : "GROWTH_BATCH_FAILED";
     job.funnel.rejections[code] = (job.funnel.rejections[code] ?? 0) + 1;
@@ -142,6 +180,10 @@ export async function executeDiscoveryWork(claimed: GrowthDiscoveryState, deps: 
   job.activeMs += Math.max(0, Date.now() - started); job.lease = null; job.updatedAt = new Date().toISOString(); job.funnel.accepted = state.companies.length;
   state.discovery = { status: job.status === "complete" ? "complete" : state.companies.length ? "partial" : job.status === "queued" ? "not_started" : "unavailable", checked: job.cursor, rejected: Math.max(0, job.cursor - state.companies.length), searchedAt: job.updatedAt, funnel: job.funnel,
     message: `${state.companies.length} of ${job.target} requested companies verified from original pages. ${job.status === "complete" ? "Target reached. People and contacts remain unverified." : job.reason ?? "Discovery continues in checkpointed batches while this project is open."}` };
+  if (job.captureOnly) {
+    state.discovery.rejected = 0;
+    state.discovery.message = `${job.candidates.length} search candidates discovered; ${job.candidates.filter(c => c.evidence?.length).length} with website evidence. Unverified: company identity and audience fit require qualification. No people or contacts inferred.`;
+  }
   state.revision = crypto.randomUUID();
   console.info("growth_discovery_funnel", { jobId: job.id, status: job.status, ...job.funnel });
   return state;

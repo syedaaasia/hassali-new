@@ -3,7 +3,7 @@ import { claimDiscoveryWork, controlDiscoveryJob, executeDiscoveryWork } from ".
 import type { GrowthDiscoveryDependencies, ProspectDiscoveryProvider } from "./growth-discovery-service";
 import { GrowthDiscoveryError } from "./growth-errors";
 
-export type GrowthJobAction = "advance" | "pause" | "resume" | "cancel";
+export type GrowthJobAction = "advance" | "pause" | "resume" | "cancel" | "qualify";
 export async function processGrowthJob(input: {
   previous: GrowthDiscoveryState; action: GrowthJobAction; jobId: string; revision: unknown; signal?: AbortSignal;
   // The route binds this CAS closure to the authenticated owner/project and
