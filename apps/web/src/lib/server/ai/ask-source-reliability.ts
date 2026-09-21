@@ -83,6 +83,8 @@ export type AskResearchSource = {
 
 export type GroundedClaim = {
   claim: string;
+  evidenceRelationship?: "SUPPORTED" | "CONTRADICTED" | "UNKNOWN";
+  contradictingSourceIds?: string[];
   freshnessSatisfied: boolean;
   isInference: boolean;
   supportingSourceIds: string[];
@@ -467,6 +469,43 @@ function overlapStrength(claim: string, source: AskResearchSource) {
   return overlap / claimWords.size;
 }
 
+function proposition(value: string) {
+  const text = value.toLowerCase().replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\b(?:doesn't|don't|didn't|isn't|aren't|wasn't|weren't|cannot|can't|won't)\b/g, "not")
+    .replace(/^(?:the\s+)?(?:report|source|document)\s+(?:says|states|reports)\s+(?:that\s+)?/, "")
+    .replace(/\s+according to\s+(?:the\s+)?(?:current\s+)?(?:release\s+)?(?:report|source|document)\.?$/, "");
+  const negative = /\b(?:not|never|no|without|neither)\b/.test(text);
+  const uncertain = /\b(?:may|might|could|possibly|perhaps|reportedly|allegedly|if|unless)\b/.test(text);
+  const tokens = (text.match(/[a-z0-9]+(?:[.-][a-z0-9]+)*/g) ?? [])
+    .filter((token) => !/^(?:a|an|the|is|are|was|were|be|been|does|do|did|not|never|no|without|neither|that|it|on|of)$/.test(token))
+    .map((token) => token.replace(/^(supports|supported)$/, "support").replace(/^(requires|required)$/, "require"));
+  return { negative, tokens, uncertain };
+}
+
+export function classifyAskClaimEvidence(claim: string, content: string): "SUPPORTED" | "CONTRADICTED" | "UNKNOWN" {
+  const clauses = claim.split(/,\s+(?=(?:published|released|updated|effective)\b)/i);
+  if (clauses.length > 1) {
+    const relations = clauses.map((clause) => classifyAskClaimEvidence(clause, content));
+    return relations.includes("CONTRADICTED") ? "CONTRADICTED" : relations.every((relation) => relation === "SUPPORTED") ? "SUPPORTED" : "UNKNOWN";
+  }
+  const target = proposition(claim);
+  if (!target.tokens.length) return "UNKNOWN";
+  // Retrieval relevance is not entailment. Only aligned propositions establish
+  // support here; unfamiliar paraphrases remain unknown rather than verified.
+  const passages = content.slice(0, 40_000).split(/(?<=[!?])\s+|(?<=[.])\s+(?=[A-Z])|\n+/).filter(Boolean);
+  let supported = false;
+  for (const passage of passages) {
+    const evidence = proposition(passage);
+    const targetText = target.tokens.join(" ");
+    const evidenceText = evidence.tokens.join(" ");
+    const aligned = ` ${evidenceText} `.includes(` ${targetText} `);
+    if (!aligned) continue;
+    if (target.negative !== evidence.negative) return "CONTRADICTED";
+    if (!evidence.uncertain || target.uncertain) supported = true;
+  }
+  return supported ? "SUPPORTED" : "UNKNOWN";
+}
+
 function currentClaims(answer: string, decision: AskFreshnessDecision) {
   if (decision.sourceRequirement === "none_required") return [];
   const evidenceAnswer = decision.freshnessClass === "private_file_source" && answer.includes("Key points:")
@@ -632,6 +671,14 @@ function qualifiedEvidenceAnswer(input: {
   time: AskNormalizedTimeContext;
 }) {
   if (input.outcome === "SOURCE_CONFLICT") {
+    const contradictionIds = new Set(input.groundedClaims.flatMap((claim) => claim.contradictingSourceIds ?? []));
+    if (contradictionIds.size) {
+      const relevant = input.sources.filter((source) => contradictionIds.has(source.id));
+      return sourceList([
+        "The retrieved evidence contradicts the proposed answer, so I cannot present that answer as verified. Retained source excerpts:",
+        ...relevant.slice(0, 3).map((source) => `- ${source.title}: ${source.content.slice(0, 700)}`)
+      ].join("\n\n"), relevant);
+    }
     return conflictingEvidenceAnswer(input.sources, input.decision, input.time, input.safeAnswer);
   }
 
@@ -676,6 +723,12 @@ function qualifiedEvidenceAnswer(input: {
     ].join("\n"), input.sources);
   }
 
+  if (input.sources.length && input.outcome === "PARTIALLY_VERIFIED") {
+    return sourceList([
+      "I retrieved source material, but it does not establish the proposed answer. These are source excerpts, not a verified conclusion:",
+      ...input.sources.slice(0, 3).map((source) => `- ${source.title}: ${source.content.slice(0, 700)}`)
+    ].join("\n\n"), input.sources);
+  }
   return createAskResearchFailureAnswer({
     decision: input.decision,
     outcome: input.outcome,
@@ -717,7 +770,7 @@ export function verifyAskSourceReliability(input: {
   const officialSourceCount = sources.filter((source) => source.isOfficial).length;
   const freshSources = sources.filter((source) => sourceRecencySatisfied(source, input.decision, input.time));
   const freshOfficialSourceCount = freshSources.filter((source) => source.isOfficial).length;
-  const sourceConflict = conflictingClaimGroups(sources).hasConflict;
+  let sourceConflict = conflictingClaimGroups(sources).hasConflict;
   const knownUrls = new Set(sources.map((source) => normalizedUrl(source.url)).filter(Boolean));
   const unknownMarkdown = markdownCitations(input.answer)
     .filter((citation) => !knownUrls.has(normalizedUrl(citation.url)))
@@ -749,21 +802,28 @@ export function verifyAskSourceReliability(input: {
   else if (evidenceRequired && !directQuoteIntegrity) outcome = "PARTIALLY_VERIFIED";
 
   const groundedClaims = currentClaims(input.answer, input.decision).map((claim): GroundedClaim => {
+    const relationships = sources.map((source) => ({ source, relationship: classifyAskClaimEvidence(claim, source.content) }));
+    const contradictions = relationships.filter((candidate) => candidate.relationship === "CONTRADICTED");
     const supports = sources
+      .filter((source) => relationships.some((candidate) => candidate.source === source && candidate.relationship === "SUPPORTED"))
       .map((source) => ({ source, strength: overlapStrength(claim, source) }))
-      .filter((candidate) => candidate.strength >= 0.18)
       .sort((left, right) => right.strength - left.strength);
-    const best = supports[0]?.strength ?? 0;
     const labelledInference = /\b(?:I infer|inference|likely|suggests|appears)\b/i.test(claim);
     return {
       claim,
+      evidenceRelationship: contradictions.length ? "CONTRADICTED" : supports.length ? "SUPPORTED" : "UNKNOWN",
+      contradictingSourceIds: contradictions.map((candidate) => candidate.source.id),
       freshnessSatisfied: supports.some((candidate) => freshSources.includes(candidate.source)),
       isInference: labelledInference,
-      supportingSourceIds: supports.slice(0, 3).map((candidate) => candidate.source.id),
-      supportStrength: best >= 0.45 ? "direct" : best >= 0.18 ? "partial" : "inference",
+      supportingSourceIds: contradictions.length ? [] : supports.slice(0, 3).map((candidate) => candidate.source.id),
+      supportStrength: !contradictions.length && supports.length ? "direct" : "inference",
       verificationStatus: outcome
     };
   });
+  if (groundedClaims.some((claim) => claim.evidenceRelationship === "CONTRADICTED")) {
+    sourceConflict = true;
+    outcome = "SOURCE_CONFLICT";
+  }
   const unsupportedClaimCount = groundedClaims.filter((claim) => claim.supportingSourceIds.length === 0).length +
     unknownCitations.length +
     (evidenceRequired && !directQuoteIntegrity ? quotes.length : 0);

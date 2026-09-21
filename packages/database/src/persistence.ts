@@ -1866,7 +1866,7 @@ export async function loadOwnedChatProposalApprovalState(
 }
 
 export async function loadChatHistory(
-  input: { limit?: number; projectId: string; sessionId?: string | null; userId: string },
+  input: { limit?: number; projectId: string; sessionId?: string | null; userId: string; window?: "earliest" | "latest"; summaryEligibleOnly?: boolean },
   db: Db = getDatabaseClient()
 ) {
   const session = await getOrCreateChatSession(
@@ -1881,12 +1881,20 @@ export async function loadChatHistory(
   const messages = await db
     .select()
     .from(chatMessages)
-    .where(eq(chatMessages.sessionId, session.id))
-    .orderBy(asc(chatMessages.createdAt))
+    .where(and(
+      eq(chatMessages.sessionId, session.id),
+      input.summaryEligibleOnly ? sql`${chatMessages.role} in ('user', 'assistant')
+        and length(btrim(${chatMessages.content})) > 0
+        and btrim(${chatMessages.content}) !~* '^(I couldn''t complete that answer reliably right now|Answer capacity is busy right now|I couldn''t reach an answer service right now)'` : undefined
+    ))
+    .orderBy(
+      input.window === "latest" ? desc(chatMessages.createdAt) : asc(chatMessages.createdAt),
+      input.window === "latest" ? desc(chatMessages.id) : asc(chatMessages.id)
+    )
     .limit(input.limit ?? 80);
 
   return {
-    messages,
+    messages: input.window === "latest" ? messages.reverse() : messages,
     session
   };
 }

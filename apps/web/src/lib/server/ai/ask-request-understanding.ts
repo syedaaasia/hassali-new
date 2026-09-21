@@ -1,3 +1,6 @@
+import { analyzeAskTurnSemantics } from "../../ask-turn-semantics";
+import { compileAskCalculations } from "./ask-epistemic-foundation";
+
 export type AskMemoryRequirement = "irrelevant" | "required" | "useful";
 
 export type AskTaskType =
@@ -19,6 +22,9 @@ export type AskMethod =
   | "model_reasoning";
 
 export type AskRequestUnderstanding = {
+  calculations?: ReturnType<typeof compileAskCalculations>;
+  workPlan?: ("calculate" | "retrieve" | "read_evidence" | "recall" | "reason" | "ground" | "validate")[];
+  assessment?: { difficulty: "bounded" | "normal" | "compound"; risk: "ordinary" | "high_consequence" };
   conversationContext: "recent_required" | "useful" | "current_turn_only";
   evidenceAuthority: "irrelevant" | "required";
   freshnessRequirement: "retrieval_required" | "timeless";
@@ -49,8 +55,7 @@ function isMemoryMutation(prompt: string) {
 
 function isContextualFollowUp(prompt: string, messages: ConversationMessage[]) {
   if (!messages.some((message) => message.role === "assistant" && message.content.trim())) return false;
-  return /^(?:why|what about|and|also|then|so)\b/i.test(prompt) ||
-    /\b(?:you (?:said|mentioned|recommended)|your (?:answer|example)|the (?:first|second|third|last|previous) (?:point|advantage|option|step)|that (?:point|answer|example|idea)|it|those|them)\b/i.test(prompt);
+  return ["prior_context", "operation_transfer"].includes(analyzeAskTurnSemantics(prompt).dependency);
 }
 
 function explicitlyUsesEvidence(prompt: string) {
@@ -91,7 +96,9 @@ export function understandAskRequest(input: {
     : memoryMutation || /\b(?:for me|based on my preferences?|personalized?)\b/i.test(prompt)
       ? "useful"
       : "irrelevant";
-  const resolvedTaskType = taskType(prompt, {
+  const calculations = compileAskCalculations(prompt);
+  const resolvedTaskType = calculations.length && !/\b(?:explain|compare|recommend|why|better|tradeoffs?)\b/i.test(prompt)
+    ? "calculation" : taskType(prompt, {
     followUp,
     freshnessRequired: input.freshnessRequired,
     personalRecall
@@ -110,6 +117,20 @@ export function understandAskRequest(input: {
             : "model_reasoning";
 
   return {
+    calculations,
+    workPlan: [
+      ...(evidenceAuthority === "required" ? ["read_evidence" as const] : []),
+      ...(input.freshnessRequired ? ["retrieve" as const] : []),
+      ...(personalRecall ? ["recall" as const] : []),
+      ...(calculations.length ? ["calculate" as const] : []),
+      ...(resolvedTaskType !== "calculation" || /\b(?:explain|compare|recommend|why|better)\b/i.test(prompt) ? ["reason" as const] : []),
+      ...(input.freshnessRequired || evidenceAuthority === "required" ? ["ground" as const] : []),
+      "validate"
+    ],
+    assessment: {
+      difficulty: /\b(?:compare|tradeoffs?|recommend|explain)\b/i.test(prompt) && calculations.length || /\b(?:compare|tradeoffs?|recommend)\b/i.test(prompt) ? "compound" : calculations.length && resolvedTaskType === "calculation" ? "bounded" : "normal",
+      risk: /\b(?:medical|diagnos(?:is|e)|dosage|legal|tax|invest(?:ment|ing)|emergency)\b/i.test(prompt) ? "high_consequence" : "ordinary"
+    },
     conversationContext: followUp
       ? "recent_required"
       : input.messages.some((message) => message.role === "assistant" && message.content.trim())

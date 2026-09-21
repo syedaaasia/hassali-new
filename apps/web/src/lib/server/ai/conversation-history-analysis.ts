@@ -89,19 +89,23 @@ function visibleConversationMessages(input: {
 }) {
   const prompt = input.prompt.trim();
   let messages = input.transcript.messages
-    .slice(0, maximumVisibleMessages)
     .filter((message) => message.role !== "system")
+    .filter((message) => message.content.trim() && !isGenericFailure(message.content));
+  const last = messages.at(-1);
+  if (last?.role === "user" && last.content.trim() === prompt) messages = messages.slice(0, -1);
+  // Range selection precedes reduction; otherwise "last N" becomes the tail
+  // of an old window rather than the actual end of the conversation.
+  if (input.intent.requestedMessageCount) messages = messages.slice(-input.intent.requestedMessageCount);
+  else if (messages.length > maximumVisibleMessages) {
+    messages = [...messages.slice(0, maximumVisibleMessages / 2), ...messages.slice(-maximumVisibleMessages / 2)];
+  }
+  return messages
     .map((message) => ({
       ...message,
       attachmentLabels: message.attachmentLabels?.filter(Boolean).slice(0, 8),
       content: message.content.trim().slice(0, maximumMessageCharacters)
     }))
-    .filter((message) => message.content && !isGenericFailure(message.content));
-
-  const last = messages.at(-1);
-  if (last?.role === "user" && last.content === prompt) messages = messages.slice(0, -1);
-  if (input.intent.requestedMessageCount) messages = messages.slice(-input.intent.requestedMessageCount);
-  return messages;
+    .filter((message) => message.content);
 }
 
 function chunkMessages(messages: ConversationHistoryMessage[]) {
@@ -215,7 +219,8 @@ export function prepareConversationSummary(input: {
     content: redactWorkspaceSecrets(message.content).redacted
   }));
   const chunks = chunkMessages(messages);
-  const deterministic = deterministicSummary({ intent, messages, transcript: input.transcript });
+  const transcriptTruncated = input.transcript.truncated || (!intent.requestedMessageCount && input.transcript.messages.length > maximumVisibleMessages);
+  const deterministic = deterministicSummary({ intent, messages, transcript: { ...input.transcript, truncated: transcriptTruncated } });
   const modelContext = messages.length === 0
     ? "No earlier visible conversation turns were available."
     : chunks.length === 1
@@ -228,6 +233,6 @@ export function prepareConversationSummary(input: {
     messageCount: messages.length,
     modelContext,
     source: input.transcript.source,
-    transcriptTruncated: input.transcript.truncated
+    transcriptTruncated
   };
 }

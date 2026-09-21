@@ -50,6 +50,72 @@ function dayOffsetAnswer(prompt: string) {
   return `${offset} days before ${weekdays[anchor]} is ${weekdays[yesterday]}. If that was yesterday, today is ${weekdays[today]}.`;
 }
 
+export function evaluateAskArithmetic(expression: string): number | null {
+  if (expression.length > 512) return null;
+  const normalized = expression.trim().toLowerCase()
+    .replace(/multiplied by|times|×/g, "*")
+    .replace(/divided by|÷/g, "/").replace(/plus/g, "+").replace(/minus/g, "-")
+    .replace(/%\s+of\s+/g, "% * ");
+  const tokens = normalized.match(/(?:\d+(?:\.\d+)?|\.\d+)|[()+*/%\-]/g) ?? [];
+  if (!tokens.length || tokens.length > 128 || tokens.join("") !== normalized.replace(/\s/g, "")) return null;
+  let cursor = 0;
+  const bounded = (value: number) => {
+    if (!Number.isFinite(value) || Math.abs(value) > 1e12) throw new Error("arithmetic bound");
+    return value;
+  };
+  // Fixed grammar, bounded tokens/depth, and complete consumption; never execute input.
+  const primary = (depth: number): number => {
+    if (depth > 16) throw new Error("arithmetic depth");
+    const token = tokens[cursor++];
+    let value: number;
+    if (token === "+" || token === "-") value = (token === "-" ? -1 : 1) * primary(depth + 1);
+    else if (token === "(") {
+      value = sum(depth + 1);
+      if (tokens[cursor++] !== ")") throw new Error("unclosed expression");
+    } else if (token && /^(?:\d+(?:\.\d+)?|\.\d+)$/.test(token)) value = bounded(Number(token));
+    else throw new Error("expected number");
+    if (tokens[cursor] === "%") { cursor++; value /= 100; }
+    return bounded(value);
+  };
+  const product = (depth: number): number => {
+    let value = primary(depth);
+    while (tokens[cursor] === "*" || tokens[cursor] === "/") {
+      const operation = tokens[cursor++];
+      const right = primary(depth);
+      if (operation === "/" && right === 0) throw new Error("division by zero");
+      value = bounded(operation === "*" ? value * right : value / right);
+    }
+    return value;
+  };
+  const sum = (depth: number): number => {
+    let value = product(depth);
+    while (tokens[cursor] === "+" || tokens[cursor] === "-") {
+      const operation = tokens[cursor++];
+      const right = product(depth);
+      value = bounded(operation === "+" ? value + right : value - right);
+    }
+    return value;
+  };
+  try {
+    const value = sum(0);
+    return cursor === tokens.length ? value : null;
+  } catch { return null; }
+}
+
+export function compileAskCalculations(prompt: string) {
+  const calculations: { expression: string; result: number }[] = [];
+  const pure = prompt.trim().replace(/^(?:please\s+)?(?:what(?:'s| is)|calculate|compute|solve|evaluate)\s+/i, "").replace(/[?.!]+$/, "").trim();
+  const pureResult = evaluateAskArithmetic(pure);
+  if (pureResult !== null) return [{ expression: pure, result: pureResult }];
+  for (const match of prompt.slice(0, 16_000).matchAll(/(?:\(?-?\d+(?:\.\d+)?\)?)(?:\s*[+*\u00d7/\u00f7-]\s*\(?-?\d+(?:\.\d+)?\)?)+/g)) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(match[0]) || /[\w./-]/.test(prompt[match.index - 1] ?? "") || /[\w/]/.test(prompt[match.index + match[0].length] ?? "")) continue;
+    const result = evaluateAskArithmetic(match[0]);
+    if (result !== null) calculations.push({ expression: match[0].trim(), result });
+    if (calculations.length === 4) break;
+  }
+  return calculations;
+}
+
 function boundedArithmeticAnswer(prompt: string) {
   const clockStart = prompt.match(
     /\b(?:at|departs?|leaves?|starts?)\s+(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)?\b/i
@@ -123,17 +189,14 @@ function boundedArithmeticAnswer(prompt: string) {
     if (result !== null) return `${formatResult(result)} ${equalGroups[4]!.toLowerCase()} altogether.`;
   }
 
-  const direct = prompt.match(/\b(?:what(?:'s| is)|calculate|compute|solve)?\s*(-?\d+(?:\.\d+)?)\s*(\+|-|\*|×|\/|÷|plus|minus|times|multiplied by|divided by)\s*(-?\d+(?:\.\d+)?)\b/i);
-  if (direct) {
-    const operationText = direct[2]!.toLowerCase();
-    const operation: "+" | "-" | "*" | "/" = /^(?:\+|plus)$/.test(operationText)
-      ? "+"
-      : /^(?:-|minus)$/.test(operationText)
-        ? "-"
-        : /^(?:\*|×|times|multiplied by)$/.test(operationText)
-          ? "*"
-          : "/";
-    const result = safeResult(Number(direct[1]), Number(direct[3]), operation);
+  const expression = prompt.trim().replace(/^(?:please\s+)?(?:what(?:'s| is)|calculate|compute|solve|evaluate)\s+/i, "")
+    .replace(/[?.!]+$/, "").trim();
+  const direct = evaluateAskArithmetic(expression);
+  if (direct !== null) return `${formatResult(direct)}.`;
+
+  const discount = prompt.match(/^(?:if\s+)?(?:a\s+\w+\s+(?:gives|offers)\s+)?(\d+(?:\.\d+)?)%\s+off\s+(?:a\s+)?[$\u00a3\u20ac]?(\d+(?:\.\d+)?)\s*(?:item|purchase|price)?[,;]?\s*(?:what(?:'s| is)\s+)?(?:the\s+)?(?:final|discounted)\s+price\??$/i);
+  if (discount && Number(discount[1]) <= 100) {
+    const result = safeResult(Number(discount[2]), 1 - Number(discount[1]) / 100, "*");
     if (result !== null) return `${formatResult(result)}.`;
   }
 

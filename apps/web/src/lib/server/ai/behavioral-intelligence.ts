@@ -1377,6 +1377,13 @@ function topicAligned(answer: string, topic: string, requiredEntities: string[])
   return matches >= Math.min(2, tokens.length);
 }
 
+export function validateHardAnswerConstraints(answer: string, contract: AnswerContract) {
+  return [
+    ...contract.explicitConstraints.filter((constraint) => negativeConstraintViolated(answer, constraint)),
+    ...validateExclusiveSetConstraints(answer, contract.exclusiveSetConstraints).map((violation) => `exclusive set ${violation}`)
+  ];
+}
+
 export function validateAnswerAgainstContract(
   answer: string,
   contract: AnswerContract
@@ -1437,11 +1444,7 @@ export function validateAnswerAgainstContract(
     );
       })
     : [];
-  const violatedConstraints = contract.explicitConstraints.filter((constraint) =>
-    negativeConstraintViolated(answer, constraint)
-  );
-  violatedConstraints.push(...validateExclusiveSetConstraints(answer, contract.exclusiveSetConstraints)
-    .map((violation) => `exclusive set ${violation}`));
+  const violatedConstraints = validateHardAnswerConstraints(answer, contract);
 
   if (!answer.trim()) issues.push("Answer is empty.");
   if (/\b(?:kernel classified|analysis request|kept code from generating|relevant objective for ask mode)\b/i.test(answer)) {

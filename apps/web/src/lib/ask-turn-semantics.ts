@@ -158,8 +158,9 @@ function hasArtifactBoundReference(prompt: string) {
 function hasSameTurnAntecedent(prompt: string) {
   const reference = prompt.search(/\b(?:it|this|that|these|those|them|there|the (?:alternative|comparison|option|reverse case))\b/i);
   if (reference <= 0) return false;
+  if (/^there\b/i.test(prompt.slice(reference)) && !hasDeicticReference(prompt)) return false;
   const prefix = prompt.slice(0, reference);
-  if (!/[,:;—-]|\b(?:and then|because|given that)\b/i.test(prefix)) return false;
+  if (!/[,:;—-]|[.!?]\s|\b(?:and then|because|given that)\b/i.test(prefix)) return false;
   const contentWords = prefix
     .toLowerCase()
     .match(/[a-z][\w.-]*/g)
@@ -215,6 +216,8 @@ function hasExplicitLocalSubject(prompt: string) {
 function dependencyFor(prompt: string): AskTurnDependency {
   const text = normalized(prompt);
   if (!text) return "independent";
+  if (/\b(?:we (?:just |previously )?(?:discussed|covered)|you (?:said|mentioned|recommended)|your (?:answer|example))\b/i.test(text) &&
+      !/\b(?:ignore|forget|disregard|instead|new topic)\b/i.test(text)) return "prior_context";
   if (hasSameTurnAntecedent(text)) return "local_reference";
   const relativeClauseThat = /\b(?!(?:apply|argue|assume|believe|claim|conclude|do|repeat|say|suppose|think|use)\b)[a-z][\w-]*\s+that\s+(?!(?:for|on|to|with)\b)[a-z][\w-]*\b/i.test(text);
   const transferableReference = /\b(?:it|same|equivalent|likewise|similarly)\b/i.test(text) ||

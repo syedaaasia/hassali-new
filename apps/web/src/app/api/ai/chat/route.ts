@@ -13,11 +13,9 @@ import {
   upsertOwnedProjectNotes,
   type AiMode as PersistedAiMode
 } from "@hassali/database";
-import {
-  formatGitHubCodeContext,
-  getGitHubAccessToken,
-  listGitHubRepositoryPaths
-} from "@/lib/server/github/github-integration";
+import { getGitHubAccessToken } from "@/lib/server/github/github-integration";
+import { createRemoteRepository } from "@/lib/server/repository-intelligence/remote-repository-providers";
+import { compileRemoteRepository, RepositoryAccessError } from "@/lib/server/repository-intelligence/remote-repository";
 import { applyProjectNoteAction, buildDeterministicAskSummary, parseProjectNoteAction } from "@/lib/project-notes-intelligence";
 import { auth } from "@clerk/nextjs/server";
 import {
@@ -6223,6 +6221,7 @@ export async function POST(request: Request) {
     modelSelectionPolicy?: unknown;
     productMode?: unknown;
     projectId?: unknown;
+    repositoryUrl?: unknown;
     projectDesignNotes?: unknown;
     projectNotes?: unknown;
     researchPolicy?: unknown;
@@ -6800,16 +6799,24 @@ export async function POST(request: Request) {
   const conversationScope = persistence?.sessionId
     ? `session-${persistence.sessionId.replace(/[^a-z0-9]/gi, "").slice(-10)}`
     : "request-context";
-  if (productMode === "ASK" && classifyConversationHistoryIntent(askReasoningPrompt) && persistence) {
+  const conversationHistoryIntent = productMode === "ASK" ? classifyConversationHistoryIntent(askReasoningPrompt) : null;
+  if (conversationHistoryIntent && persistence) {
     try {
-      const historyLimit = 1_001;
+      const requestedCount = conversationHistoryIntent.requestedMessageCount;
+      const historyLimit = requestedCount ? requestedCount + 1 : 501;
       const history = await loadChatHistory({
         limit: historyLimit,
         projectId: persistence.projectId,
         sessionId: persistence.sessionId,
-        userId: persistence.userId
+        userId: persistence.userId,
+        summaryEligibleOnly: true,
+        window: "latest"
       });
-      const persistedMessages = history.messages.slice(0, historyLimit - 1).flatMap((message) =>
+      const beginning = !requestedCount && history.messages.length >= historyLimit
+        ? await loadChatHistory({ limit: 500, projectId: persistence.projectId, sessionId: persistence.sessionId, userId: persistence.userId, summaryEligibleOnly: true })
+        : null;
+      const orderedHistory = [...new Map([...(beginning?.messages ?? []), ...history.messages].map((message) => [message.id, message])).values()];
+      const persistedMessages = orderedHistory.flatMap((message) =>
         message.role === "user" || message.role === "assistant"
           ? [{
               attachmentLabels: persistedAttachmentLabels(message.metadata),
@@ -6826,7 +6833,7 @@ export async function POST(request: Request) {
         authoritative: true,
         messages: persistedMessages,
         source: "owned_persistence",
-        truncated: history.messages.length >= historyLimit
+        truncated: !requestedCount && orderedHistory.length > 1_000
       };
     } catch (error) {
       console.warn("owned conversation transcript unavailable", {
@@ -6920,6 +6927,30 @@ export async function POST(request: Request) {
           }
         })
       : null;
+  let remoteRepositorySourceAvailable = false;
+  const remoteRepositoryContext = (productMode === "CODE" || productMode === "ASK") && persistence
+    ? await (async () => {
+        try {
+          const selectedUrl = typeof body.repositoryUrl === "string" ? body.repositoryUrl.trim() : "";
+          if (selectedUrl.length > 1000) throw new RepositoryAccessError("INVALID_URL", "Repository URL is too long.");
+          const repository = selectedUrl ? null : await getOwnedGithubProjectConnection({
+            externalUserId: persistence.externalUserId,
+            projectId: persistence.projectId
+          });
+          if (!selectedUrl && !repository) return null;
+          const token = !selectedUrl && repository ? await getGitHubAccessToken(persistence.externalUserId) : null;
+          if (!selectedUrl && repository?.private && !token) throw new RepositoryAccessError("ACCESS_REQUIRED", "Reconnect GitHub to read the selected private repository.");
+          const source = createRemoteRepository(selectedUrl || `https://github.com/${repository!.repositoryOwner}/${repository!.repositoryName}`, {
+            signal: taskSignal, githubToken: token ?? undefined, allowPrivateGitHub: !selectedUrl && Boolean(token)
+          });
+          const evidence = await compileRemoteRepository(source, effectiveUserPrompt, taskSignal);
+          remoteRepositorySourceAvailable = true;
+          return evidence.context;
+        } catch (error) {
+          return `Repository evidence unavailable: ${error instanceof RepositoryAccessError ? `${error.code}: ${error.message}` : "Project repository access could not be verified."} Do not claim source inspection succeeded.`;
+        }
+      })()
+    : null;
   if (productMode !== "ASK" && nonMutatingFinalAction) {
     let specialistPersistence = persistence;
     const expertAnswer = await runAskBrain({
@@ -6932,6 +6963,8 @@ export async function POST(request: Request) {
       evidenceGraph: multimodalVerification.graph,
       evidenceVerificationState: multimodalVerification.state,
       intelligenceContext: [intelligencePreflight.providerContext, sharedMemoryProviderContext, projectNotesContext].filter(Boolean).join("\n\n"),
+      repositoryContext: remoteRepositoryContext ?? undefined,
+      repositoryEvidenceAvailable: remoteRepositorySourceAvailable,
       messages: relevantMessages,
       model,
       modelSelectionPolicy,
@@ -7098,35 +7131,6 @@ export async function POST(request: Request) {
         }
       })()
     : [];
-  const githubCodeContext = productMode === "CODE" && persistence
-    ? await (async () => {
-        try {
-          const repository = await getOwnedGithubProjectConnection({
-            externalUserId: persistence.externalUserId,
-            projectId: persistence.projectId
-          });
-          if (!repository) return null;
-          const token = await getGitHubAccessToken(persistence.externalUserId);
-          if (!token) return null;
-          const source = await listGitHubRepositoryPaths({
-            branch: repository.defaultBranch,
-            owner: repository.repositoryOwner,
-            repository: repository.repositoryName,
-            signal: taskSignal,
-            token
-          });
-          return formatGitHubCodeContext({
-            branch: repository.defaultBranch,
-            head: source.head,
-            paths: source.paths,
-            repository: `${repository.repositoryOwner}/${repository.repositoryName}`,
-            truncated: source.truncated
-          });
-        } catch {
-          return null;
-        }
-      })()
-    : null;
   const adaptiveCodePlan = productMode === "CODE"
     ? buildAdaptiveCodePlan({
         approvalPolicy,
@@ -7170,7 +7174,7 @@ export async function POST(request: Request) {
           contextPriority.authoritativeIntentFamily,
           decomposition.taskKind,
           ...translatedIntent.requestedFeatures,
-          ...(githubCodeContext ? [githubCodeContext] : [])
+          ...(remoteRepositoryContext ? [remoteRepositoryContext] : [])
         ]
       })
     : null;
@@ -7887,6 +7891,8 @@ export async function POST(request: Request) {
       evidenceVerificationState: multimodalVerification.state,
       freshnessDecision: askFreshnessDecision,
       intelligenceContext: askIntelligenceContext,
+      repositoryContext: remoteRepositoryContext ?? undefined,
+      repositoryEvidenceAvailable: remoteRepositorySourceAvailable,
       messages,
       model,
       modelSelectionPolicy,
@@ -8030,6 +8036,8 @@ export async function POST(request: Request) {
       evidenceVerificationState: multimodalVerification.state,
       freshnessDecision: askFreshnessDecision,
       intelligenceContext: askIntelligenceContext,
+      repositoryContext: remoteRepositoryContext ?? undefined,
+      repositoryEvidenceAvailable: remoteRepositorySourceAvailable,
       messages,
       model,
       modelSelectionPolicy,

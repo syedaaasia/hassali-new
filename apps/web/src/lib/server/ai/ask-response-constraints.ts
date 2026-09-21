@@ -158,7 +158,16 @@ function currentConstraints(prompt: string): Omit<AskResponseConstraints, "sourc
     ?? positiveInteger(prompt.match(new RegExp("\\b(?:answer|respond)(?:\\s+(?:my\\s+)?next\\s+(?:question\\s+)?)?(?:in|using)\\s+(?:only\\s+)?" + countPattern + "\\s+words?\\b", "i"))?.[1])
     ?? positiveInteger(prompt.match(new RegExp("\\band\\s+(?:exactly\\s+)?" + countPattern + "\\s+words?\\b", "i"))?.[1]);
   const maxWords = totalWordLimit(prompt, perItem);
-  const listMatch = prompt.match(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+(?:(numbered|ordered|bulleted)\\s+)?(bullet(?:\\s+points?)?s?|items?|lines?|points?|steps?)\\b", "i"));
+  const listMatch = Array.from(prompt.matchAll(new RegExp("\\b(?:exactly\\s+)?" + countPattern + "\\s+(?:(numbered|ordered|bulleted)\\s+)?(bullet(?:\\s+points?)?s?|items?|lines?|points?|steps?)\\b", "gi")))
+    .find((match) => {
+      const before = prompt.slice(0, match.index);
+      // Quantities in the problem (prices, inventory, distances) are not output
+      // instructions. A list count needs an output verb, format cue, or bare directive.
+      if (/[$\u00a3\u20ac]\s*$/.test(before)) return false;
+      const clause = before.split(/[.!?;\n]/).at(-1)!.trim();
+      return !clause || /\b(?:give|list|return|write|provide|use|answer|respond|format|summari[sz]e)\b[^.!?;]{0,80}$/i.test(clause) ||
+        /\b(?:in|as|with)\s+(?:exactly\s+)?$/i.test(clause);
+    });
   const bulletCount = positiveInteger(listMatch?.[1]);
   const listStyle = /^(?:numbered|ordered)$/i.test(listMatch?.[2] ?? "") || /^(?:steps?|numbered items?)$/i.test(listMatch?.[3] ?? "")
     ? "numbered" as const
